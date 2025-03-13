@@ -1,0 +1,27 @@
+# Copyright (c) 2023 Graphcore Ltd. All rights reserved.
+
+[package]
+name = "steam-spotter"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "TUI based viewer for trace files created by the steam_track trace system"
+documentation.workspace = true
+homepage.workspace = true
+readme.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+capnp.workspace = true
+clap.workspace = true
+crossterm = "0.27.0"
+itertools.workspace = true
+log.workspace = true
+regex.workspace = true
+steam-track = { path = "../steam-track" }
+tui = { package = "ratatui", version = "0.23.0" }

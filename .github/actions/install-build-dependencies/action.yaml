@@ -1,0 +1,22 @@
+# Copyright (c) 2025 Graphcore Ltd. All rights reserved.
+
+name: "Install build dependencies"
+description: "Install all dependencies required to build the repo source"
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/.crates.toml
+          ~/.cargo/.crates2.json
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+        key: ${{ runner.os }}-cargo-build-deps-${{ hashFiles('./.github/actions/install-build-dependencies/**') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-build-deps-
+    - name: Run install.sh
+      run: ./.github/actions/install-build-dependencies/install.sh
+      shell: bash

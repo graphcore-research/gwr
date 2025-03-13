@@ -1,0 +1,9 @@
+# Copyright (c) 2020 Graphcore Ltd. All rights reserved.
+
+target/
+traces/
+flamegraph*
+**/.DS_Store
+*.profraw
+*.profdata
+node_modules/

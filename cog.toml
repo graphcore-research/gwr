@@ -1,0 +1,9 @@
+# Copyright (c) 2025 Graphcore Ltd. All rights reserved.
+
+[commit_types]
+# Add additional supported scopes
+infra = { changelog_title = "Infrastructure" }
+misc = { changelog_title = "Miscellaneous Tasks" }
+# Disable built-in scopes
+build = {}
+ci = {}

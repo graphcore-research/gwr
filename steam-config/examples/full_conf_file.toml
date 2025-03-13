@@ -1,0 +1,6 @@
+# Copyright (c) 2025 Graphcore Ltd. All rights reserved.
+
+a = "bee"
+b = true
+c = 42
+d = "bar"

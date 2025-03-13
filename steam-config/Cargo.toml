@@ -1,0 +1,33 @@
+# Copyright (c) 2024 Graphcore Ltd. All rights reserved.
+
+[package]
+name = "steam-config"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2.workspace = true
+quote.workspace = true
+regex.workspace = true
+syn = { version = "2.0.90", features = ["derive", "extra-traits", "full"] }
+
+[dev-dependencies]
+clap.workspace = true
+escargot = "0.5.13"
+figment.workspace = true
+serde.workspace = true
+trybuild.workspace = true

@@ -1,0 +1,12 @@
+// Copyright (c) 2025 Graphcore Ltd. All rights reserved.
+{
+    "cSpell.words": [
+        "clippy",
+        "mdbook",
+        "Perfetto",
+        "Perfetto's"
+    ],
+    "rust-analyzer.rustfmt.extraArgs": [
+        "+nightly"
+    ]
+}

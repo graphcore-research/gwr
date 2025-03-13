@@ -1,0 +1,43 @@
+# Copyright (c) 2025 Graphcore Ltd. All rights reserved.
+
+[changelog]
+header = """
+<!-- Copyright (c) 2025 Graphcore Ltd. All rights reserved. -->
+
+# Changelog
+
+All notable changes for each release of this package will be documented in this file.
+"""
+commit_parsers = [
+    { message = "^feat", group = "Features" },
+    { message = "^fix", group = "Bug Fixes" },
+    { message = "^doc", group = "Documentation" },
+    { message = "^perf", group = "Performance" },
+    { message = "^refactor", group = "Refactor" },
+    { message = "^style", group = "Styling" },
+    { message = "^test", group = "Testing" },
+    { message = "^infra", group = "Infrastructure" },
+    { message = "^misc", group = "Miscellaneous Tasks" },
+    { body = ".*security", group = "Security" },
+    { message = "^chore", skip = true },
+]
+
+[[package]]
+name = "check-copyright"
+publish = false
+
+[[package]]
+name = "flaky-component"
+publish = false
+
+[[package]]
+name = "flaky-with-delay"
+publish = false
+
+[[package]]
+name = "scrambler"
+publish = false
+
+[[package]]
+name = "steam-developer-guide"
+publish = false
