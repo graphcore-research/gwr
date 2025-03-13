@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - *(flaky-component,flaky-with-delay,scrambler)* Examples are stable
+- *(git-cliff-wrapper)* Hook behaviour is stable
 - *(repo)* Prepare for open source release
 
 
