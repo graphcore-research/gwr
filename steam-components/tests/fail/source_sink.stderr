@@ -1,0 +1,7 @@
+error[E0599]: no method named `port_invalid_rx` found for struct `steam_components::sinks::Sink` in the current scope
+  --> tests/fail/source_sink.rs:13:5
+   |
+13 |     connect_port!(source, tx => sink, invalid_rx);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `Sink<_>`
+   |
+   = note: this error originates in the macro `connect_port` (in Nightly builds, run with -Z macro-backtrace for more info)

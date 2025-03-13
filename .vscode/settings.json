@@ -1,0 +1,10 @@
+{
+    "cSpell.words": [
+        "mdbook",
+        "Perfetto",
+        "Perfetto's"
+    ],
+    "rust-analyzer.rustfmt.extraArgs": [
+        "+nightly"
+    ]
+}

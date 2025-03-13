@@ -1,0 +1,22 @@
+[workspace]
+changelog_config = "cliff.toml"
+
+[[package]]
+name = "git-cliff-wrapper"
+publish = false
+
+[[package]]
+name = "flaky-component"
+publish = false
+
+[[package]]
+name = "flaky-with-delay"
+publish = false
+
+[[package]]
+name = "scrambler"
+publish = false
+
+[[package]]
+name = "steam-developer-guide"
+publish = false

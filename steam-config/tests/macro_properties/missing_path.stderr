@@ -1,0 +1,19 @@
+error: unexpected end of input, expected string literal
+ --> tests/macro_properties/missing_path.rs:5:1
+  |
+5 | #[multi_source_config(conf_file =)]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `multi_source_config` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0412]: cannot find type `Config` in this scope
+  --> tests/macro_properties/missing_path.rs:13:18
+   |
+13 | impl Default for Config {
+   |                  ^^^^^^ not found in this scope
+
+error[E0601]: `main` function not found in crate `$CRATE`
+  --> tests/macro_properties/missing_path.rs:19:2
+   |
+19 | }
+   |  ^ consider adding a `main` function to `$DIR/tests/macro_properties/missing_path.rs`

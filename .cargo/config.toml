@@ -1,0 +1,13 @@
+[registries]
+# The private kellnr instance used for publishing the packages within this repo.
+kellnr = { index = "sparse+https://crates.eng.graphcore.ai/api/v1/crates/" }
+# The private kellnr instance used as a proxy cache for dependencies hosted on crates.io.
+kellnr-cratesio = { index = "sparse+https://crates.eng.graphcore.ai/api/v1/cratesio/" }
+
+[registry]
+# Set the default registry used when publishing.
+default = "kellnr"
+
+[source.crates-io]
+# Use the private kellnr instance as a proxy cache for crates.io.
+replace-with = "kellnr-cratesio"

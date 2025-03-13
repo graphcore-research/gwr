@@ -1,0 +1,17 @@
+error: unsupported property
+ --> tests/macro_properties/unsupported.rs:5:23
+  |
+5 | #[multi_source_config(path = "foo.toml")]
+  |                       ^^^^
+
+error[E0412]: cannot find type `Config` in this scope
+  --> tests/macro_properties/unsupported.rs:13:18
+   |
+13 | impl Default for Config {
+   |                  ^^^^^^ not found in this scope
+
+error[E0601]: `main` function not found in crate `$CRATE`
+  --> tests/macro_properties/unsupported.rs:19:2
+   |
+19 | }
+   |  ^ consider adding a `main` function to `$DIR/tests/macro_properties/unsupported.rs`
