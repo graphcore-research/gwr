@@ -1,0 +1,25 @@
+# Copyright (c) 2023 Graphcore Ltd. All rights reserved.
+
+[package]
+name = "flaky-component"
+version = "1.0.0"
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Example component which randomly drops data being passed through it"
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap.workspace = true
+rand.workspace = true
+steam-components = { path = "../../steam-components" }
+steam-engine = { path = "../../steam-engine" }
+steam-model-builder = { path = "../../steam-model-builder" }
+steam-track = { path = "../../steam-track" }

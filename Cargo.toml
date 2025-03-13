@@ -1,0 +1,61 @@
+# Copyright (c) 2023 Graphcore Ltd. All rights reserved.
+
+[workspace]
+resolver = "2"
+members = [
+    "check-copyright",
+    "examples/flaky-component",
+    "examples/flaky-with-delay",
+    "examples/scrambler",
+    "steam-components",
+    "steam-config",
+    "steam-developer-guide",
+    "steam-doc-builder",
+    "steam-docpp",
+    "steam-engine",
+    "steam-model-builder",
+    "steam-models",
+    "steam-perfetto-sys",
+    "steam-protocols",
+    "steam-resources",
+    "steam-spotter",
+    "steam-track"
+]
+
+[workspace.package]
+authors = ["The Silicon Architecture team"]
+edition = "2024"
+rust-version = "1.85"
+description = "The Simulation Technology for Evaluation and Architecture Modelling (STEAM) workspace"
+documentation = "https://graphcore-research.github.io/steam"
+readme = "README.md"
+homepage = "https://github.com/graphcore-research/steam"
+repository = "https://github.com/graphcore-research/steam"
+license = "MIT"
+license-file = "LICENSE"
+publish = ["kellnr"]
+
+[workspace.dependencies]
+approx = "0.5.1"
+async-std = { version = "1.12.0", features = ["attributes"] }
+capnp = "0.20.3"
+capnpc = "0.20.1"
+clap = { version = "4.4.6", features = ["derive"] }
+criterion = "0.5.1"
+event-listener = "3.0.0"
+figment = { version = "0.10.19", features = ["env", "toml"] }
+futures = "0.3.28"
+itertools = "0.11.0"
+log = { version = "0.4.20", features = ["std", "serde"] }
+num = "0.4.1"
+num-derive = "0.4.1"
+num-traits = "0.2"
+paste = "1.0.14"
+proc-macro2 = "1.0.69"
+quote = "1.0.33"
+rand = "0.8.5"
+regex = "1.9.6"
+serde = { version = "1.0.188", features = ["derive"] }
+syn = { version = "1.0.41", features = ["parsing", "full", "extra-traits"] }
+tempfile = "3.19.0"
+trybuild = "1.0.103"

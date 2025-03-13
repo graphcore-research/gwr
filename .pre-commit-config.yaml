@@ -1,0 +1,90 @@
+# Copyright (c) 2025 Graphcore Ltd. All rights reserved.
+
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+  - repo: local
+    hooks:
+      - id: check-copyright
+        name: check copyright
+        description: check copyright notice is valid
+        language: system
+        entry: cargo run --bin check-copyright
+        require_serial: true
+        exclude: |
+          (?x)(
+            ^.git/.*|
+            ^Cargo.lock|
+            .*\.stderr$
+          )
+      - id: prettier-markdown
+        name: prettier markdown
+        description: check formatting of Markdown files
+        language: system
+        types: [markdown]
+        entry: prettier --write
+      - id: prettier-yaml
+        name: prettier yaml
+        description: check formatting of YAML files
+        language: system
+        types: [yaml]
+        entry: prettier --write
+      - id: cargo-deny
+        name: cargo deny
+        description: check Rust dependencies licenses and for vulnerabilities
+        language: system
+        types: [rust]
+        entry: cargo deny check
+        pass_filenames: false
+        stages: [pre-commit, pre-merge-commit, pre-push, manual]
+      - id: cargo-nightly-fmt
+        name: cargo +nightly fmt
+        description: format files with "cargo fmt" from the nightly toolchain
+        language: system
+        types: [rust]
+        entry: cargo +nightly fmt
+        args: [--]
+        stages: [pre-commit, pre-merge-commit, pre-push, manual]
+      - id: cargo-check
+        name: cargo check
+        description: check for package errors with cargo check
+        language: system
+        types: [rust]
+        entry: cargo check
+        pass_filenames: false
+        stages: [pre-commit, pre-merge-commit, pre-push, manual]
+      - id: cargo-clippy
+        name: cargo clippy
+        description: lint Rust source code
+        language: system
+        types: [rust]
+        entry: cargo clippy
+        pass_filenames: false
+        stages: [pre-commit, pre-merge-commit, pre-push, manual]
+      - id: cargo-semver-checks
+        name: cargo semver-checks
+        description: lint crate API changes for semver violations
+        language: system
+        types: [rust]
+        entry: cargo semver-checks
+        args: [--baseline-rev, HEAD]
+        pass_filenames: false
+        stages: [pre-commit, pre-merge-commit, pre-push, manual]
+      - id: cog-verify
+        name: cog verify
+        description: check commit message is in Conventional Commit form
+        language: system
+        entry: cog verify --file
+        stages: [commit-msg]
+default_install_hook_types:
+  [pre-commit, pre-merge-commit, commit-msg, post-commit, pre-push]

@@ -1,0 +1,38 @@
+# Copyright (c) 2023 Graphcore Ltd. All rights reserved.
+
+[book]
+title = "STEAM Developer Guide"
+authors = ["Silicon Architecture Team"]
+description = "The Simulation Technology for Evaluation and Architecture Modelling (STEAM) developer guide"
+src = "md_src"
+language = "en"
+
+[rust]
+edition = "2021"
+
+[preprocessor.cmdrun]
+
+[preprocessor.keeper]
+command = "mdbook-keeper"
+manifest_dir = "../"
+is_workspace = true
+externs = [
+    "steam_components",
+    "steam_engine",
+    "steam_model_builder",
+    "steam_resources",
+    "steam_track",
+]
+
+[output.html]
+smart-punctuation = true
+additional-css = ["theme/custom.css"]
+
+[output.html.playground]
+editable = false
+
+[output.html.search]
+use-boolean-and = true
+
+[output.linkcheck]
+traverse-parent-directories = false
