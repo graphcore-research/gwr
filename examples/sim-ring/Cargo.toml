@@ -2,7 +2,7 @@
 
 [package]
 name = "sim-ring"
-version = "2.0.0"
+version = "3.0.0"
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -26,4 +26,4 @@ steam-components = { path = "../../steam-components" }
 steam-engine = { path = "../../steam-engine" }
 steam-models = { path = "../../steam-models" }
 steam-model-builder = { path = "../../steam-model-builder" }
-steam-track = { path = "../../steam-track" }
+steam-track = { path = "../../steam-track", features = ["perfetto"] }

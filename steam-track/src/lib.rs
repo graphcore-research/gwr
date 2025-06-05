@@ -14,6 +14,8 @@
 //!
 //!   - a textual output based on the [log](https://docs.rs/log) crate.
 //!   - a packed binary output based on [Cap'n Proto](https://capnproto.org/).
+//!   - a packed binary output based output based on [Perfetto TrackEvents](https://perfetto.dev/docs/instrumentation/track-events)
+//!     Protobufs (only avaliable with the `perfetto` feature enabled).
 
 // Enable warnings for missing documentation
 #![warn(missing_docs)]
@@ -25,6 +27,9 @@ pub use log;
 
 pub mod entity;
 pub mod id;
+
+#[cfg(feature = "perfetto")]
+pub mod perfetto_trace_builder;
 
 /// Include the trackers.
 pub mod tracker;
