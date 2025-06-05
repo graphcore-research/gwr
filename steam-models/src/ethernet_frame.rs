@@ -10,8 +10,6 @@ use steam_engine::{
 };
 use steam_track::{Tag, create_tag, entity::Entity, tag::Tagged};
 
-pub const MAX_PAYLOAD_BYTES: usize = 128;
-
 pub const PREAMBLE_BYTES: usize = 7;
 pub const SFD_BYTES: usize = 1;
 pub const DEST_MAC_BYTES: usize = 6;
@@ -102,5 +100,29 @@ impl Routable for EthernetFrame {
 
     fn req_type(&self) -> ReqType {
         ReqType::Control
+    }
+}
+
+/// Allow Box of any SimObject type to be used
+impl SimObject for Box<EthernetFrame> {}
+
+impl TotalBytes for Box<EthernetFrame> {
+    fn total_bytes(&self) -> usize {
+        self.as_ref().total_bytes()
+    }
+}
+
+impl Tagged for Box<EthernetFrame> {
+    fn tag(&self) -> steam_track::Tag {
+        self.as_ref().tag()
+    }
+}
+
+impl Routable for Box<EthernetFrame> {
+    fn dest(&self) -> u64 {
+        self.as_ref().dest()
+    }
+    fn req_type(&self) -> ReqType {
+        self.as_ref().req_type()
     }
 }
