@@ -134,7 +134,7 @@ required build dependencies can be installed by running:
 ## Developing STEAM Packages
 
 For developers of the STEAM packages both `stable` and `nightly` Rust toolchains
-are required, as well external tools such as [cargo-deny],
+are required, as well external tools such as [cargo-deny], [cargo-about]
 [cargo-semver-checks], [Cocogitto], [pre-commit], [Prettier], and [Release-plz].
 All of the required development dependencies can be installed by running:
 
@@ -204,6 +204,8 @@ During the commit process a number of different hooks will be invoked by
   semantic versioning using [cargo-semver-checks].
 - All dependencies will be checked for vulnerabilities and compatible licensing
   using [cargo-deny].
+- The licenses of all dependencies will collated and included in the
+  [licenses.html] file using [cargo-about].
 - Source files will be formatted using `rustfmt`, [Prettier], and built in tools
   from the [pre-commit-hooks] library.
 - Rust source will be linted using [clippy].
@@ -237,6 +239,7 @@ updated package, and automatically publishes the updated packages using
 `cargo publish` and as Github releases.
 
 [Cap'n Proto]: https://capnproto.org
+[cargo-about]: https://github.com/EmbarkStudios/cargo-about
 [cargo-deny]: https://github.com/EmbarkStudios/cargo-deny
 [cargo-semver-checks]: https://github.com/obi1kenobi/cargo-semver-checks
 [clippy]: https://doc.rust-lang.org/clippy
@@ -248,6 +251,8 @@ updated package, and automatically publishes the updated packages using
 [Release-plz]: https://release-plz.dev
 
 <!-- ANCHOR_END: package_developers -->
+
+[licenses.html]: https://graphcore-research.github.io/steam/licenses.html
 
 <!-- ANCHOR: dev_docs -->
 
