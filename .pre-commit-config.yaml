@@ -69,8 +69,7 @@ repos:
         description: format files with "cargo fmt" from the nightly toolchain
         language: system
         types: [rust]
-        entry: cargo +nightly fmt
-        args: [--]
+        entry: cargo +nightly fmt --
         stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: cargo-check
         name: cargo check
@@ -85,8 +84,7 @@ repos:
         description: lint Rust source code
         language: system
         types: [rust]
-        entry: cargo clippy
-        args: [--, -Dwarnings]
+        entry: cargo clippy -- -Dwarnings
         pass_filenames: false
         stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: cargo-semver-checks
@@ -94,8 +92,7 @@ repos:
         description: lint crate API changes for semver violations
         language: system
         types_or: [rust, toml]
-        entry: cargo semver-checks
-        args: [--baseline-rev, HEAD]
+        entry: cargo semver-checks --baseline-rev HEAD
         pass_filenames: false
         stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: cog-verify
