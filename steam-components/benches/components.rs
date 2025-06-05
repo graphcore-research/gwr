@@ -15,6 +15,7 @@ use steam_engine::spawn_simulation;
 use steam_track::tracker::dev_null_tracker;
 
 fn create_engine() -> Engine {
+    // Create an engine without the tracker system opening files for logging
     let tracker = dev_null_tracker();
     Engine::new(&tracker)
 }

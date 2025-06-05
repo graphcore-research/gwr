@@ -1561,6 +1561,7 @@ name = "steam-models"
 version = "0.1.0"
 dependencies = [
  "async-std",
+ "criterion",
  "futures",
  "paste",
  "steam-components",
