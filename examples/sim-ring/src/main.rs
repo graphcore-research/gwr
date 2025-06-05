@@ -115,6 +115,24 @@ struct Cli {
     #[arg(long, default_value = "trace.bin")]
     binary_file: String,
 
+    /// Enable logging to Perfetto file used by `steam-spotter`.
+    #[arg(long, default_value = "false")]
+    perfetto: bool,
+
+    /// Level of Perfetto trace events to record.
+    #[arg(long, default_value = "Trace")]
+    perfetto_level: log::Level,
+
+    /// Set a regular expression for which entites should have Perfetto output
+    /// level set to `--perfetto-level`. Others will have level set to
+    /// `Error`.
+    #[arg(long, default_value = "")]
+    perfetto_filter_regex: String,
+
+    /// The filename Perfetto trace output is written to.
+    #[arg(long, default_value = "trace.pftrace")]
+    perfetto_file: String,
+
     /// Show a progress bar for the received frame count (updated at the rate
     /// defined by `progress_ticks`). NOTE: with the progress bar enabled
     /// the simulation will not finish if it deadlocks.
@@ -202,6 +220,10 @@ fn main() -> Result<(), SimError> {
         args.binary_level,
         &args.binary_filter_regex,
         &args.binary_file,
+        args.perfetto,
+        args.perfetto_level,
+        &args.perfetto_filter_regex,
+        &args.perfetto_file,
     )
     .unwrap();
 

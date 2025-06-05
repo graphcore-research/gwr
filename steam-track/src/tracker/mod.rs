@@ -8,6 +8,9 @@ pub mod capnp;
 pub mod dev_null;
 /// Include the in-memory tracker.
 pub mod in_memory;
+#[cfg(feature = "perfetto")]
+/// Include the Perfetto tracker.
+pub mod perfetto;
 /// Include the text-based tracker.
 pub mod text;
 /// Include the types required for tracker.
@@ -93,7 +96,8 @@ pub fn dev_null_tracker() -> Tracker {
 /// enable states.
 ///
 /// This is shared by the [`Text`](crate::tracker::text) and
-/// [`Capnp`](crate::tracker::capnp)-based trackers.
+/// [`Capnp`](crate::tracker::capnp)-based trackers, as well as the
+/// [`Perfetto`](crate::tracker::perfetto) tracker.
 ///
 /// This manager is also used to allocate unique [`Id`] values.
 pub struct EntityManager {
