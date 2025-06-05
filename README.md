@@ -150,6 +150,21 @@ cd steam
 pre-commit install
 ```
 
+### Branching the Repo
+
+Changes to STEAM packages are developed on branches separate to `main` (the
+default) branch of the repo, and then incorporated when complete via a pull
+request. Long running or collaborative development will likely benefit from
+having the branch pushed to the `origin` well in advance of when a pull request
+may be opened, and doing so will cause the CI workflows to be run on every
+commit.
+
+For short lived branches pushed only at the point of opening a pull request the
+branch naming prefix `pr/` should be used, for example, `pr/new-example-app`.
+Branches named with this prefix will still cause the pull request specific CI
+workflow to run, but will avoid the push specific CI workflow from running until
+the point they are merged.
+
 ### Committing a Change
 
 All commits made to the STEAM repo must follow the [Conventional Commits] 1.0.0
