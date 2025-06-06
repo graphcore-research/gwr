@@ -28,17 +28,24 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      CACHED_BUILD_PATHS: |
+        target/
+        steam-developer-guide/doctest_cache/
+        steam-developer-guide/rustdoc_cache/
 
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/install-build-dependencies
-      - uses: actions/cache@v4
+
+      - name: Generate cached build key
+        run: echo "CACHED_BUILD_KEY=${{ runner.os }}-cargo-steam-${{ hashFiles('**/Cargo.lock') }}" >> $GITHUB_ENV
+
+      - name: Restore cached build files
+        uses: actions/cache/restore@v4
         with:
-          path: |
-            target/
-            steam-developer-guide/doctest_cache/
-            steam-developer-guide/rustdoc_cache/
-          key: ${{ runner.os }}-cargo-steam-${{ hashFiles('**/Cargo.lock') }}
+          path: ${{ env.CACHED_BUILD_PATHS }}
+          key: ${{ env.CACHED_BUILD_KEY }}
 
       - name: Build
         run: cargo build --all-features --verbose
@@ -48,3 +55,10 @@ jobs:
 
       - name: Run benchmarks
         run: cargo bench --all-features --verbose
+
+      - name: Save build files to cache
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CACHED_BUILD_PATHS }}
+          key: ${{ env.CACHED_BUILD_KEY }}
