@@ -1,0 +1,27 @@
+# Copyright (c) 2025 Graphcore Ltd. All rights reserved.
+
+name: Cached semver check access
+description: The semantic version check build directory paths and key to be used when caching
+
+outputs:
+  paths:
+    description: The cached build paths
+    value: ${{ steps.get_paths.outputs.cached_build_paths }}
+
+  key:
+    description: The generated cached build key
+    value: ${{ steps.generate_key.outputs.cached_build_key }}
+
+runs:
+  using: composite
+  steps:
+    - id: get_paths
+      run: |
+          echo 'cached_build_paths<<EOF' >> $GITHUB_OUTPUT
+          echo 'target/semver-checks'>> $GITHUB_OUTPUT
+          echo 'EOF' >> $GITHUB_OUTPUT
+      shell: bash
+
+    - id: generate_key
+      run: echo "cached_build_key=${{ runner.os }}-cargo-steam-semver-${{ hashFiles('**/Cargo.lock') }}" >> $GITHUB_OUTPUT
+      shell: bash
