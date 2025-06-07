@@ -23,29 +23,53 @@ jobs:
       - name: Lint with pre-commit
         run: pre-commit run --all-files
 
+  check_semantic_versioning:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/install-build-dependencies
+      - uses: ./.github/actions/install-dev-dependencies
+
+      - name: Get cache access variables
+        id: cache_vars
+        uses: ./.github/actions/cached-semver-access
+
+      - name: Restore cached build files
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.cache_vars.outputs.paths }}
+          key: ${{ steps.cache_vars.outputs.key }}
+
+      - name: Run cargo semver-checks
+        run: pre-commit run --hook-stage manual --all-files cargo-semver-checks
+
+      - name: Save build files to cache
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.cache_vars.outputs.paths }}
+          key: ${{ steps.cache_vars.outputs.key }}
+
   build_and_test:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    env:
-      CACHED_BUILD_PATHS: |
-        target/
-        steam-developer-guide/doctest_cache/
-        steam-developer-guide/rustdoc_cache/
 
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/install-build-dependencies
 
-      - name: Generate cached build key
-        run: echo "CACHED_BUILD_KEY=${{ runner.os }}-cargo-steam-${{ hashFiles('**/Cargo.lock') }}" >> $GITHUB_ENV
+      - name: Get cache access variables
+        id: cache_vars
+        uses: ./.github/actions/cached-build-access
 
       - name: Restore cached build files
         uses: actions/cache/restore@v4
         with:
-          path: ${{ env.CACHED_BUILD_PATHS }}
-          key: ${{ env.CACHED_BUILD_KEY }}
+          path: ${{ steps.cache_vars.outputs.paths }}
+          key: ${{ steps.cache_vars.outputs.key }}
 
       - name: Build
         run: cargo build --all-features --verbose
@@ -60,5 +84,5 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: actions/cache/save@v4
         with:
-          path: ${{ env.CACHED_BUILD_PATHS }}
-          key: ${{ env.CACHED_BUILD_KEY }}
+          path: ${{ steps.cache_vars.outputs.paths }}
+          key: ${{ steps.cache_vars.outputs.key }}
