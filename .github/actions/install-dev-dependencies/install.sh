@@ -21,4 +21,5 @@ npm install --no-save prettier
 rustup update
 rustup toolchain install --profile default nightly
 
-cargo install cargo-about cargo-deny cargo-semver-checks cocogitto release-plz
+cargo install --locked cargo-about cargo-deny cargo-semver-checks release-plz
+cargo install --locked --bin cog cocogitto
