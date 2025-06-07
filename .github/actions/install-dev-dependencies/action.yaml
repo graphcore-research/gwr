@@ -1,9 +1,10 @@
 # Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
-name: "Install dev dependencies"
-description: "Install all dependencies required when developing the repo source"
+name: Install dev dependencies
+description: Install all dependencies required when developing the repo source
+
 runs:
-  using: "composite"
+  using: composite
   steps:
     - uses: actions/setup-node@v4
     - uses: actions/cache@v4
@@ -19,6 +20,7 @@ runs:
         restore-keys: |
           ${{ runner.os }}-cargo-dev-deps-
           ${{ runner.os }}-cargo-build-deps-
+
     - name: Run install.sh
       run: ./.github/actions/install-dev-dependencies/install.sh
       shell: bash
