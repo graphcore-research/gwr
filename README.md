@@ -1,7 +1,7 @@
 <!-- Copyright (c) 2023 Graphcore Ltd. All rights reserved. -->
 
 [![CI](https://github.com/graphcore-research/steam/actions/workflows/ci.yaml/badge.svg)](https://github.com/graphcore-research/steam/actions/workflows/ci.yaml)
-[![Online documentation](https://github.com/graphcore-research/steam/actions/workflows/online_documentation.yaml/badge.svg)](https://github.com/graphcore-research/steam/actions/workflows/online_documentation.yaml)
+[![Online documentation](https://github.com/graphcore-research/steam/actions/workflows/online-documentation.yaml/badge.svg)](https://github.com/graphcore-research/steam/actions/workflows/online-documentation.yaml)
 
 [Developer guide](https://graphcore-research.github.io/steam) |
 [API documentation](https://graphcore-research.github.io/steam/rustdoc/steam_engine/index.html)

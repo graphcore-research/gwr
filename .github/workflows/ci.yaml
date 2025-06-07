@@ -23,7 +23,7 @@ jobs:
       - name: Lint with pre-commit
         run: pre-commit run --all-files
 
-  check_semantic_versioning:
+  check-semantic-versioning:
     runs-on: macos-latest
 
     steps:
@@ -32,14 +32,14 @@ jobs:
       - uses: ./.github/actions/install-dev-dependencies
 
       - name: Get cache access variables
-        id: cache_vars
+        id: cache-vars
         uses: ./.github/actions/cached-semver-access
 
       - name: Restore cached build files
         uses: actions/cache/restore@v4
         with:
-          path: ${{ steps.cache_vars.outputs.paths }}
-          key: ${{ steps.cache_vars.outputs.key }}
+          path: ${{ steps.cache-vars.outputs.paths }}
+          key: ${{ steps.cache-vars.outputs.key }}
 
       - name: Run cargo semver-checks
         run: pre-commit run --hook-stage manual --all-files cargo-semver-checks
@@ -48,10 +48,10 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: actions/cache/save@v4
         with:
-          path: ${{ steps.cache_vars.outputs.paths }}
-          key: ${{ steps.cache_vars.outputs.key }}
+          path: ${{ steps.cache-vars.outputs.paths }}
+          key: ${{ steps.cache-vars.outputs.key }}
 
-  build_and_test:
+  build-and-test:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -62,14 +62,14 @@ jobs:
       - uses: ./.github/actions/install-build-dependencies
 
       - name: Get cache access variables
-        id: cache_vars
+        id: cache-vars
         uses: ./.github/actions/cached-build-access
 
       - name: Restore cached build files
         uses: actions/cache/restore@v4
         with:
-          path: ${{ steps.cache_vars.outputs.paths }}
-          key: ${{ steps.cache_vars.outputs.key }}
+          path: ${{ steps.cache-vars.outputs.paths }}
+          key: ${{ steps.cache-vars.outputs.key }}
 
       - name: Build
         run: cargo build --all-features --verbose
@@ -84,5 +84,5 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: actions/cache/save@v4
         with:
-          path: ${{ steps.cache_vars.outputs.paths }}
-          key: ${{ steps.cache_vars.outputs.key }}
+          path: ${{ steps.cache-vars.outputs.paths }}
+          key: ${{ steps.cache-vars.outputs.key }}
