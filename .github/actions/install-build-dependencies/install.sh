@@ -19,4 +19,4 @@ fi
 rustup update
 rustup toolchain install --profile default stable
 
-cargo install cargo-expand mdbook mdbook-cmdrun mdbook-keeper mdbook-linkcheck
+cargo install --locked cargo-expand mdbook mdbook-cmdrun mdbook-keeper mdbook-linkcheck
