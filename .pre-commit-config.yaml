@@ -94,7 +94,7 @@ repos:
         types_or: [rust, toml]
         entry: cargo semver-checks --baseline-rev HEAD
         pass_filenames: false
-        stages: [pre-commit, pre-merge-commit, pre-push, manual]
+        stages: [manual]
       - id: cog-verify
         name: cog verify
         description: check commit message is in Conventional Commit form

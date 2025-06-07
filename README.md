@@ -202,6 +202,12 @@ During the commit process a number of different hooks will be invoked by
   that it adheres to the [Conventional Commits] specification.
 - All packages within the workspace will be checked for adherence to proper
   semantic versioning using [cargo-semver-checks].
+  - As this can be a time consuming set of checks to run, by default, they are
+    only performed by the [CI system].
+  - The checks can be run locally with:
+    ```bash
+    pre-commit run --hook-stage manual --all-files cargo-semver-checks
+    ```
 - All dependencies will be checked for vulnerabilities and compatible licensing
   using [cargo-deny].
 - The licenses of all dependencies will collated and included in the
@@ -242,6 +248,8 @@ updated package, and automatically publishes the updated packages using
 [cargo-about]: https://github.com/EmbarkStudios/cargo-about
 [cargo-deny]: https://github.com/EmbarkStudios/cargo-deny
 [cargo-semver-checks]: https://github.com/obi1kenobi/cargo-semver-checks
+[CI system]:
+  https://github.com/graphcore-research/steam/actions/workflows/ci.yaml
 [clippy]: https://doc.rust-lang.org/clippy
 [Cocogitto]: https://docs.cocogitto.io
 [Conventional Commits]: https://www.conventionalcommits.org/en/v1.0.0/
