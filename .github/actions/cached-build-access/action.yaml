@@ -6,24 +6,24 @@ description: The build directory paths and key to be used when caching
 outputs:
   paths:
     description: The cached build paths
-    value: ${{ steps.get_paths.outputs.cached_build_paths }}
+    value: ${{ steps.get-paths.outputs.cached-build-paths }}
 
   key:
     description: The generated cached build key
-    value: ${{ steps.generate_key.outputs.cached_build_key }}
+    value: ${{ steps.generate-key.outputs.cached-build-key }}
 
 runs:
   using: composite
   steps:
-    - id: get_paths
+    - id: get-paths
       run: |
-          echo 'cached_build_paths<<EOF' >> $GITHUB_OUTPUT
+          echo 'cached-build-paths<<EOF' >> $GITHUB_OUTPUT
           echo 'target/'>> $GITHUB_OUTPUT
           echo 'steam-developer-guide/doctest_cache/'>> $GITHUB_OUTPUT
           echo 'steam-developer-guide/rustdoc_cache/'>> $GITHUB_OUTPUT
           echo 'EOF' >> $GITHUB_OUTPUT
       shell: bash
 
-    - id: generate_key
-      run: echo "cached_build_key=${{ runner.os }}-cargo-steam-${{ hashFiles('**/Cargo.lock') }}" >> $GITHUB_OUTPUT
+    - id: generate-key
+      run: echo "cached-build-key=${{ runner.os }}-cargo-steam-${{ hashFiles('**/Cargo.lock') }}" >> $GITHUB_OUTPUT
       shell: bash
