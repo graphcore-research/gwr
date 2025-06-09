@@ -2,6 +2,7 @@
 
 //! Ensure that all version of each macro can be used
 
+use std::fmt::Display;
 use std::sync::Arc;
 
 use steam_track::entity::{Entity, toplevel};
@@ -84,45 +85,6 @@ fn enter_exit_basics() {
     test_helpers::check_and_clear(&test_tracker, &["40: destroyed"]);
 }
 
-#[test]
-fn disable_enable() {
-    let (test_tracker, tracker) = test_init!(1001);
-
-    let top = toplevel(&tracker, "top");
-    test_helpers::check_and_clear(&test_tracker, &["0: created 1001, top, 0, 0 bytes"]);
-
-    trace!(top ; "I should be seen");
-    test_helpers::check_and_clear(&test_tracker, &["1001:TRACE: I should be seen"]);
-
-    info!(top ; "I should be seen");
-    test_helpers::check_and_clear(&test_tracker, &["1001:INFO: I should be seen"]);
-
-    warn!(top ; "I should be seen");
-    test_helpers::check_and_clear(&test_tracker, &["1001:WARN: I should be seen"]);
-
-    error!(top ; "I should be seen");
-    test_helpers::check_and_clear(&test_tracker, &["1001:ERROR: I should be seen"]);
-
-    top.set_log_level(log::Level::Error);
-
-    trace!(top ; "I should not be seen");
-    test_helpers::check_and_clear(&test_tracker, &[]);
-
-    info!(top ; "I should not be seen");
-    test_helpers::check_and_clear(&test_tracker, &[]);
-
-    warn!(top ; "I should not be seen");
-    test_helpers::check_and_clear(&test_tracker, &[]);
-
-    error!(top ; "I should be seen");
-    test_helpers::check_and_clear(&test_tracker, &["1001:ERROR: I should be seen"]);
-
-    top.set_log_level(log::Level::Trace);
-
-    drop(top);
-    test_helpers::check_and_clear(&test_tracker, &["1001: destroyed"]);
-}
-
 #[derive(Debug)]
 struct Packet {
     pub tag: Tag,
@@ -132,6 +94,12 @@ impl Packet {
     fn new(entity: &Arc<Entity>) -> Self {
         let tag = create_and_track_tag!(entity);
         Self { tag }
+    }
+}
+
+impl Display for Packet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Packet {{ tag: {} }}", self.tag)
     }
 }
 

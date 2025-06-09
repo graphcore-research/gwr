@@ -9,7 +9,7 @@ use crate::{SharedWriter, Tag, Writer};
 
 /// A simple text logger to output messages to a Writer.
 pub struct TextTracker {
-    entity_manager: Arc<EntityManager>,
+    entity_manager: EntityManager,
 
     /// Writer to which all _log_ events will be written.
     writer: SharedWriter,
@@ -17,7 +17,7 @@ pub struct TextTracker {
 
 impl TextTracker {
     /// Create a new [`TextTracker`] with an [`EntityManager`].
-    pub fn new(entity_manager: Arc<EntityManager>, writer: Writer) -> Self {
+    pub fn new(entity_manager: EntityManager, writer: Writer) -> Self {
         Self {
             entity_manager,
             writer: Arc::new(Mutex::new(writer)),
@@ -31,11 +31,12 @@ impl Track for TextTracker {
         self.entity_manager.unique_tag()
     }
 
-    fn get_entity_enables(&self, entity_name: &str) -> (bool, log::Level) {
-        (
-            self.entity_manager.trace_enabled_for(entity_name),
-            self.entity_manager.log_level_for(entity_name),
-        )
+    fn is_entity_enabled(&self, tag: Tag, level: log::Level) -> bool {
+        self.entity_manager.is_enabled(tag, level)
+    }
+
+    fn add_entity(&self, tag: Tag, entity_name: &str) {
+        self.entity_manager.add_entity(tag, entity_name);
     }
 
     fn enter(&self, tag: Tag, object: Tag) {
@@ -90,5 +91,9 @@ impl Track for TextTracker {
             .unwrap()
             .write_all(format!("{}: set time to {:.1}ns\n", set_by, time_ns).as_bytes())
             .unwrap();
+    }
+
+    fn shutdown(&self) {
+        self.writer.lock().unwrap().flush().unwrap();
     }
 }

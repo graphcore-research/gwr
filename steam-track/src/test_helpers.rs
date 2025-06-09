@@ -47,8 +47,12 @@ impl Track for TestTracker {
         Tag(tag)
     }
 
-    fn get_entity_enables(&self, _entity_name: &str) -> (bool, log::Level) {
-        (true, log::Level::Trace)
+    fn is_entity_enabled(&self, _tag: Tag, _level: log::Level) -> bool {
+        true
+    }
+
+    fn add_entity(&self, _tag: Tag, _entity_name: &str) {
+        // Do nothing
     }
 
     fn enter(&self, tag: Tag, item: Tag) {
@@ -76,6 +80,10 @@ impl Track for TestTracker {
 
     fn time(&self, set_by: Tag, time_ns: f64) {
         self.add_event(format!("{}: set time {:.1}ns", set_by, time_ns));
+    }
+
+    fn shutdown(&self) {
+        // Do nothing
     }
 }
 

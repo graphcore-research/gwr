@@ -98,7 +98,15 @@ impl Engine {
 /// concepts to have to consider at once.
 impl Default for Engine {
     fn default() -> Self {
-        let tracker = stdout_tracker();
+        let tracker = stdout_tracker(log::Level::Info);
         Self::new(&tracker)
+    }
+}
+
+impl Drop for Engine {
+    fn drop(&mut self) {
+        // The tracker can be using a buffered writer and so it needs to be shut down
+        // cleanly to ensure that it is flushed properly.
+        self.tracker.shutdown();
     }
 }
