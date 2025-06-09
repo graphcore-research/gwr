@@ -616,6 +616,7 @@ pub fn multi_source_config(attr: TokenStream, item: TokenStream) -> TokenStream 
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::process::Command;
 
     fn get_workspace_dir() -> PathBuf {
         let package_dir = std::env::current_dir().unwrap();
@@ -625,11 +626,14 @@ mod tests {
     #[test]
     fn defaults_with_no_conf_file() {
         let run = String::from_utf8(
-            escargot::CargoBuild::new()
-                .example("no_conf_file")
-                .run()
-                .unwrap()
-                .command()
+            Command::new("cargo")
+                .args([
+                    "run",
+                    "--package",
+                    "steam-config",
+                    "--example",
+                    "no_conf_file",
+                ])
                 .current_dir(get_workspace_dir())
                 .output()
                 .unwrap()
@@ -659,13 +663,17 @@ mod tests {
     #[test]
     fn defaults_and_cli_with_no_conf_file() {
         let run = String::from_utf8(
-            escargot::CargoBuild::new()
-                .example("no_conf_file")
-                .run()
-                .unwrap()
-                .command()
-                .current_dir(get_workspace_dir())
+            Command::new("cargo")
+                .args([
+                    "run",
+                    "--package",
+                    "steam-config",
+                    "--example",
+                    "no_conf_file",
+                ])
+                .arg("--")
                 .args(["--a", "bar"])
+                .current_dir(get_workspace_dir())
                 .output()
                 .unwrap()
                 .stdout,
@@ -694,13 +702,16 @@ mod tests {
     #[test]
     fn defaults_and_env_vars_with_no_conf_file() {
         let run = String::from_utf8(
-            escargot::CargoBuild::new()
-                .example("no_conf_file")
-                .run()
-                .unwrap()
-                .command()
-                .current_dir(get_workspace_dir())
+            Command::new("cargo")
+                .args([
+                    "run",
+                    "--package",
+                    "steam-config",
+                    "--example",
+                    "no_conf_file",
+                ])
                 .env("STEAM_B", "true")
+                .current_dir(get_workspace_dir())
                 .output()
                 .unwrap()
                 .stdout,
@@ -729,14 +740,18 @@ mod tests {
     #[test]
     fn defaults_and_cli_and_env_vars_with_no_conf_file() {
         let run = String::from_utf8(
-            escargot::CargoBuild::new()
-                .example("no_conf_file")
-                .run()
-                .unwrap()
-                .command()
-                .current_dir(get_workspace_dir())
+            Command::new("cargo")
+                .args([
+                    "run",
+                    "--package",
+                    "steam-config",
+                    "--example",
+                    "no_conf_file",
+                ])
+                .arg("--")
                 .args(["--a", "bar"])
                 .env("STEAM_B", "true")
+                .current_dir(get_workspace_dir())
                 .output()
                 .unwrap()
                 .stdout,
@@ -765,11 +780,14 @@ mod tests {
     #[test]
     fn defaults_and_partial_conf_file() {
         let run = String::from_utf8(
-            escargot::CargoBuild::new()
-                .example("partial_conf_file")
-                .run()
-                .unwrap()
-                .command()
+            Command::new("cargo")
+                .args([
+                    "run",
+                    "--package",
+                    "steam-config",
+                    "--example",
+                    "partial_conf_file",
+                ])
                 .current_dir(get_workspace_dir())
                 .output()
                 .unwrap()
@@ -799,13 +817,17 @@ mod tests {
     #[test]
     fn defaults_and_cli_and_partial_conf_file() {
         let run = String::from_utf8(
-            escargot::CargoBuild::new()
-                .example("partial_conf_file")
-                .run()
-                .unwrap()
-                .command()
-                .current_dir(get_workspace_dir())
+            Command::new("cargo")
+                .args([
+                    "run",
+                    "--package",
+                    "steam-config",
+                    "--example",
+                    "partial_conf_file",
+                ])
+                .arg("--")
                 .args(["--a", "bar"])
+                .current_dir(get_workspace_dir())
                 .output()
                 .unwrap()
                 .stdout,
@@ -834,13 +856,16 @@ mod tests {
     #[test]
     fn defaults_and_env_vars_and_partial_conf_file() {
         let run = String::from_utf8(
-            escargot::CargoBuild::new()
-                .example("partial_conf_file")
-                .run()
-                .unwrap()
-                .command()
-                .current_dir(get_workspace_dir())
+            Command::new("cargo")
+                .args([
+                    "run",
+                    "--package",
+                    "steam-config",
+                    "--example",
+                    "partial_conf_file",
+                ])
                 .env("STEAM_B", "true")
+                .current_dir(get_workspace_dir())
                 .output()
                 .unwrap()
                 .stdout,
@@ -869,14 +894,18 @@ mod tests {
     #[test]
     fn defaults_and_cli_and_env_vars_and_partial_conf_file() {
         let run = String::from_utf8(
-            escargot::CargoBuild::new()
-                .example("partial_conf_file")
-                .run()
-                .unwrap()
-                .command()
-                .current_dir(get_workspace_dir())
+            Command::new("cargo")
+                .args([
+                    "run",
+                    "--package",
+                    "steam-config",
+                    "--example",
+                    "partial_conf_file",
+                ])
+                .arg("--")
                 .args(["--a", "bar"])
                 .env("STEAM_B", "true")
+                .current_dir(get_workspace_dir())
                 .output()
                 .unwrap()
                 .stdout,
@@ -905,11 +934,14 @@ mod tests {
     #[test]
     fn defaults_and_full_conf_file() {
         let run = String::from_utf8(
-            escargot::CargoBuild::new()
-                .example("full_conf_file")
-                .run()
-                .unwrap()
-                .command()
+            Command::new("cargo")
+                .args([
+                    "run",
+                    "--package",
+                    "steam-config",
+                    "--example",
+                    "full_conf_file",
+                ])
                 .current_dir(get_workspace_dir())
                 .output()
                 .unwrap()
@@ -939,13 +971,17 @@ mod tests {
     #[test]
     fn defaults_and_cli_and_full_conf_file() {
         let run = String::from_utf8(
-            escargot::CargoBuild::new()
-                .example("full_conf_file")
-                .run()
-                .unwrap()
-                .command()
-                .current_dir(get_workspace_dir())
+            Command::new("cargo")
+                .args([
+                    "run",
+                    "--package",
+                    "steam-config",
+                    "--example",
+                    "full_conf_file",
+                ])
+                .arg("--")
                 .args(["--a", "bar"])
+                .current_dir(get_workspace_dir())
                 .output()
                 .unwrap()
                 .stdout,
@@ -974,13 +1010,16 @@ mod tests {
     #[test]
     fn defaults_and_env_vars_and_full_conf_file() {
         let run = String::from_utf8(
-            escargot::CargoBuild::new()
-                .example("full_conf_file")
-                .run()
-                .unwrap()
-                .command()
-                .current_dir(get_workspace_dir())
+            Command::new("cargo")
+                .args([
+                    "run",
+                    "--package",
+                    "steam-config",
+                    "--example",
+                    "full_conf_file",
+                ])
                 .env("STEAM_C", "64")
+                .current_dir(get_workspace_dir())
                 .output()
                 .unwrap()
                 .stdout,
@@ -1009,14 +1048,18 @@ mod tests {
     #[test]
     fn defaults_and_cli_and_env_vars_and_full_conf_file() {
         let run = String::from_utf8(
-            escargot::CargoBuild::new()
-                .example("full_conf_file")
-                .run()
-                .unwrap()
-                .command()
-                .current_dir(get_workspace_dir())
+            Command::new("cargo")
+                .args([
+                    "run",
+                    "--package",
+                    "steam-config",
+                    "--example",
+                    "full_conf_file",
+                ])
+                .arg("--")
                 .args(["--a", "fee"])
                 .env("STEAM_C", "64")
+                .current_dir(get_workspace_dir())
                 .output()
                 .unwrap()
                 .stdout,
@@ -1045,14 +1088,18 @@ mod tests {
     #[test]
     fn defaults_and_cli_and_env_vars_and_conf_file_priority() {
         let run = String::from_utf8(
-            escargot::CargoBuild::new()
-                .example("partial_conf_file")
-                .run()
-                .unwrap()
-                .command()
-                .current_dir(get_workspace_dir())
+            Command::new("cargo")
+                .args([
+                    "run",
+                    "--package",
+                    "steam-config",
+                    "--example",
+                    "partial_conf_file",
+                ])
+                .arg("--")
                 .args(["--c", "96"])
                 .env("STEAM_C", "64")
+                .current_dir(get_workspace_dir())
                 .output()
                 .unwrap()
                 .stdout,
@@ -1081,11 +1128,14 @@ mod tests {
     #[test]
     fn defaults_and_alternative_conf_file() {
         let run = String::from_utf8(
-            escargot::CargoBuild::new()
-                .example("alt_conf_file")
-                .run()
-                .unwrap()
-                .command()
+            Command::new("cargo")
+                .args([
+                    "run",
+                    "--package",
+                    "steam-config",
+                    "--example",
+                    "alt_conf_file",
+                ])
                 .current_dir(get_workspace_dir())
                 .output()
                 .unwrap()
@@ -1115,11 +1165,14 @@ mod tests {
     #[test]
     fn defaults_and_missing_alternative_conf_file() {
         let run = String::from_utf8(
-            escargot::CargoBuild::new()
-                .example("alt_conf_file_missing")
-                .run()
-                .unwrap()
-                .command()
+            Command::new("cargo")
+                .args([
+                    "run",
+                    "--package",
+                    "steam-config",
+                    "--example",
+                    "alt_conf_file_missing",
+                ])
                 .current_dir(get_workspace_dir())
                 .output()
                 .unwrap()
@@ -1149,16 +1202,20 @@ mod tests {
     #[test]
     fn defaults_and_alternative_and_extra_conf_files() {
         let run = String::from_utf8(
-            escargot::CargoBuild::new()
-                .example("alt_and_runtime_conf_files")
-                .run()
-                .unwrap()
-                .command()
-                .current_dir(get_workspace_dir())
+            Command::new("cargo")
+                .args([
+                    "run",
+                    "--package",
+                    "steam-config",
+                    "--example",
+                    "alt_and_runtime_conf_files",
+                ])
+                .arg("--")
                 .args([
                     "--conf-file",
                     "steam-config/examples/runtime_conf_file.toml",
                 ])
+                .current_dir(get_workspace_dir())
                 .output()
                 .unwrap()
                 .stdout,
@@ -1190,12 +1247,15 @@ mod tests {
     #[test]
     fn defaults_and_cli_and_env_vars_and_alt_and_extra_conf_files_priority() {
         let run = String::from_utf8(
-            escargot::CargoBuild::new()
-                .example("alt_and_runtime_conf_files")
-                .run()
-                .unwrap()
-                .command()
-                .current_dir(get_workspace_dir())
+            Command::new("cargo")
+                .args([
+                    "run",
+                    "--package",
+                    "steam-config",
+                    "--example",
+                    "alt_and_runtime_conf_files",
+                ])
+                .arg("--")
                 .args([
                     "--c",
                     "96",
@@ -1203,6 +1263,7 @@ mod tests {
                     "steam-config/examples/runtime_conf_file.toml",
                 ])
                 .env("STEAM_C", "64")
+                .current_dir(get_workspace_dir())
                 .output()
                 .unwrap()
                 .stdout,

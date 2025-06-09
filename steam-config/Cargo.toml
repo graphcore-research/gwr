@@ -27,7 +27,6 @@ syn = { version = "2.0.90", features = ["derive", "extra-traits", "full"] }
 
 [dev-dependencies]
 clap.workspace = true
-escargot = "0.5.13"
 figment.workspace = true
 serde.workspace = true
 trybuild.workspace = true
