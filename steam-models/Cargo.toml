@@ -24,6 +24,7 @@ harness = false
 async-std.workspace = true
 futures.workspace = true
 paste.workspace = true
+log.workspace = true
 steam-components = { path = "../steam-components" }
 steam-model-builder = { path = "../steam-model-builder" }
 steam-engine = { path = "../steam-engine" }

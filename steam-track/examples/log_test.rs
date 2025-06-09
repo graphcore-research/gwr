@@ -36,7 +36,7 @@ use std::thread;
 use steam_config::multi_source_config;
 use steam_track::entity::{Entity, toplevel};
 use steam_track::tracker::{CapnProtoTracker, EntityManager, TextTracker, Tracker};
-use steam_track::{TraceState, Writer, create_and_track_tag, debug, info, trace};
+use steam_track::{Writer, create_and_track_tag, debug, info, trace};
 
 /// Command-line arguments.
 #[multi_source_config]
@@ -104,14 +104,8 @@ fn main() -> io::Result<()> {
     let config = Config::parse_all_sources();
 
     let tracker: Tracker;
-    let log_level = steam_track::str_to_level(&config.log_level.unwrap());
-    let trace_enabled = if config.enable_trace.unwrap() {
-        TraceState::Enabled
-    } else {
-        TraceState::Disabled
-    };
+    let default_entity_level = steam_track::str_to_level(&config.log_level.unwrap());
 
-    let entity_manger = Arc::new(EntityManager::new(trace_enabled, log_level));
     if config.log_file.as_ref().unwrap().is_empty() {
         // Use a Capnp tracker
         let bin_writer: Writer = if config.server.as_ref().unwrap().is_empty() {
@@ -123,7 +117,8 @@ fn main() -> io::Result<()> {
                 TcpStream::connect(config.server.unwrap()).unwrap(),
             ))
         };
-        tracker = Arc::new(CapnProtoTracker::new(entity_manger.clone(), bin_writer));
+        let entity_manger = EntityManager::new(default_entity_level);
+        tracker = Arc::new(CapnProtoTracker::new(entity_manger, bin_writer));
     } else {
         // Use a textual output
         let txt_writer: Writer = if config.log_file.as_ref().unwrap() == "-" {
@@ -131,7 +126,8 @@ fn main() -> io::Result<()> {
         } else {
             Box::new(fs::File::create(config.log_file.unwrap())?)
         };
-        tracker = Arc::new(TextTracker::new(entity_manger.clone(), txt_writer));
+        let entity_manger = EntityManager::new(default_entity_level);
+        tracker = Arc::new(TextTracker::new(entity_manger, txt_writer));
     }
 
     let top = toplevel(&tracker, "top");

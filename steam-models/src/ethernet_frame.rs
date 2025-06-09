@@ -8,7 +8,7 @@ use steam_engine::{
     traits::{Routable, SimObject, TotalBytes},
     types::ReqType,
 };
-use steam_track::{Tag, create_tag, entity::Entity, tag::Tagged};
+use steam_track::{Tag, create, create_tag, entity::Entity, tag::Tagged};
 
 pub const PREAMBLE_BYTES: usize = 7;
 pub const SFD_BYTES: usize = 1;
@@ -40,14 +40,16 @@ pub struct EthernetFrame {
 }
 
 impl EthernetFrame {
-    pub fn new(create_by: &Arc<Entity>, payload_size_bytes: usize) -> Self {
-        Self {
-            created_by: create_by.clone(),
-            tag: create_tag!(create_by),
+    pub fn new(created_by: &Arc<Entity>, payload_size_bytes: usize) -> Self {
+        let frame = Self {
+            created_by: created_by.clone(),
+            tag: create_tag!(created_by),
             dst_mac: [0; DEST_MAC_BYTES],
             src_mac: [0; DEST_MAC_BYTES],
             payload_size_bytes,
-        }
+        };
+        create!(created_by ; frame, frame.total_bytes(), frame.req_type() as i8);
+        frame
     }
 
     pub fn set_dest(mut self, dst_mac: [u8; DEST_MAC_BYTES]) -> Self {

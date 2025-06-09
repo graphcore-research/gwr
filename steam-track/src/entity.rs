@@ -6,7 +6,6 @@
 //! hierarchy of simulation entities. They contain a name and a unique tag
 //! for tracing.
 
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::fmt;
 use std::sync::Arc;
 
@@ -30,12 +29,6 @@ pub struct Entity {
     /// Unique simulation identifier used for bin/log messages.
     pub tag: Tag,
 
-    /// Determines the level of logging messages emitted for this entity.
-    log_level: AtomicUsize,
-
-    /// Determines whether trace events are enabled for this entity.
-    trace_enabled: AtomicBool,
-
     /// [`Tracker`] used to handle trace/log events.
     pub tracker: Tracker,
 }
@@ -50,42 +43,19 @@ impl Entity {
         full_name.push_str(name);
 
         let tracker = parent.tracker.clone();
-        let (trace_enabled, log_level) = tracker.get_entity_enables(&full_name);
+        let tag = tracker.unique_tag();
+        tracker.add_entity(tag, &full_name);
 
         let entity = Self {
             name: String::from(name),
             parent: Some(parent.clone()),
-            tag: parent.tracker.unique_tag(),
-            log_level: AtomicUsize::new(log_level as usize),
-            trace_enabled: AtomicBool::new(trace_enabled),
+            tag,
             tracker,
         };
 
         create!(entity);
 
         entity
-    }
-
-    /// Update the level at which log messages should be emitted by this entity
-    pub fn set_log_level(&self, level: log::Level) {
-        self.log_level.store(level as usize, Ordering::SeqCst);
-    }
-
-    /// Update the level at which binary trace messages should be emitted by
-    /// this entity.
-    pub fn set_trace_enabled(&self, enabled: bool) {
-        self.trace_enabled.store(enabled, Ordering::SeqCst);
-    }
-
-    /// Returns the level at which log messages should be emitted by this
-    /// entity.
-    pub fn log_level(&self) -> log::Level {
-        unsafe { std::mem::transmute(self.log_level.load(Ordering::Relaxed)) }
-    }
-
-    /// Returns the whether tracing is enabled or not for this entity.
-    pub fn trace_enabled(&self) -> bool {
-        self.trace_enabled.load(Ordering::Relaxed)
     }
 
     /// Returns the full hierarchical name of this entity
@@ -132,13 +102,12 @@ impl fmt::Display for Entity {
 /// Create the top-level entity. This should be the only entity without a
 /// parent.
 pub fn toplevel(tracker: &Tracker, name: &str) -> Arc<Entity> {
-    let (trace_enable, log_level) = tracker.get_entity_enables(name);
+    let tag = tracker.unique_tag();
+    tracker.add_entity(tag, name);
     let top = Arc::new(Entity {
         parent: None,
         name: String::from(name),
-        tag: tracker.unique_tag(),
-        log_level: AtomicUsize::new(log_level as usize),
-        trace_enabled: AtomicBool::new(trace_enable),
+        tag,
         tracker: tracker.clone(),
     });
     create!(top);

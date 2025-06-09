@@ -36,16 +36,6 @@ pub use tracker::{Track, Tracker};
 pub type Writer = Box<dyn std::io::Write + Send>;
 type SharedWriter = Arc<Mutex<Writer>>;
 
-/// Represents whether trace events are enabled or not.
-#[derive(PartialEq)]
-pub enum TraceState {
-    /// Trace events are disabled.
-    Disabled,
-
-    /// Trace events are enabled.
-    Enabled,
-}
-
 /// Take the command-line string and convert it to a Level
 pub fn str_to_level(lvl: &str) -> log::Level {
     match log::Level::from_str(lvl) {
@@ -75,7 +65,10 @@ pub const ROOT: Tag = tag::Tag(1);
 #[macro_export]
 macro_rules! enter {
     ($entity:expr ; $enter_tag:expr) => {
-        if $entity.trace_enabled() {
+        if $entity
+            .tracker
+            .is_entity_enabled($entity.tag, log::Level::Trace)
+        {
             $entity.tracker.enter($entity.tag, $enter_tag);
         }
     };
@@ -86,7 +79,10 @@ macro_rules! enter {
 #[macro_export]
 macro_rules! exit {
     ($entity:expr ; $exit_tag:expr) => {
-        if $entity.trace_enabled() {
+        if $entity
+            .tracker
+            .is_entity_enabled($entity.tag, log::Level::Trace)
+        {
             $entity.tracker.exit($entity.tag, $exit_tag);
         }
     };
@@ -114,7 +110,10 @@ macro_rules! create_tag {
 macro_rules! create_and_track_tag {
     ($entity:expr) => {{
         let tag = $entity.tracker.unique_tag();
-        if $entity.trace_enabled() {
+        if $entity
+            .tracker
+            .is_entity_enabled($entity.tag, log::Level::Trace)
+        {
             $entity.tracker.create($entity.tag, tag, 0, 0, "tag");
         }
         tag
@@ -130,7 +129,10 @@ macro_rules! create_and_track_tag {
 #[macro_export]
 macro_rules! destroy_tag {
     ($entity:expr ; $tag:expr) => {{
-        if $entity.trace_enabled() {
+        if $entity
+            .tracker
+            .is_entity_enabled($entity.tag, log::Level::Trace)
+        {
             $entity.tracker.destroy($entity.tag, $tag);
         }
     }};
@@ -140,7 +142,10 @@ macro_rules! destroy_tag {
 #[macro_export]
 macro_rules! create {
     ($entity:expr) => {{
-        if $entity.trace_enabled() {
+        if $entity
+            .tracker
+            .is_entity_enabled($entity.tag, log::Level::Trace)
+        {
             let parent_tag = match &$entity.parent {
                 Some(parent) => parent.tag,
                 None => $crate::NO_ID,
@@ -151,20 +156,17 @@ macro_rules! create {
         }
     }};
     ($entity:expr ; $created:expr, $num_bytes:expr, $req_type:expr) => {{
-        if $entity.trace_enabled() {
-            if log::Level::Trace <= $entity.log_level() {
-                $entity.tracker.create(
-                    $entity.tag,
-                    $created.tag,
-                    $num_bytes,
-                    $req_type,
-                    format!("{:?}", $created).as_str(),
-                );
-            } else {
-                $entity
-                    .tracker
-                    .create($entity.tag, $created.tag, $num_bytes, $req_type, "");
-            }
+        if $entity
+            .tracker
+            .is_entity_enabled($entity.tag, log::Level::Trace)
+        {
+            $entity.tracker.create(
+                $entity.tag,
+                $created.tag,
+                $num_bytes,
+                $req_type,
+                format!("{}", $created).as_str(),
+            );
         }
     }};
 }
@@ -173,7 +175,10 @@ macro_rules! create {
 #[macro_export]
 macro_rules! destroy {
     ($entity:expr) => {{
-        if $entity.trace_enabled() {
+        if $entity
+            .tracker
+            .is_entity_enabled($entity.tag, log::Level::Trace)
+        {
             match &$entity.parent {
                 Some(parent) => $entity.tracker.destroy($entity.tag, parent.tag),
                 None => $entity.tracker.destroy($entity.tag, $crate::NO_ID),
@@ -186,7 +191,10 @@ macro_rules! destroy {
 #[macro_export]
 macro_rules! set_time {
     ($entity:expr ; $time_ns:expr) => {{
-        if $entity.trace_enabled() {
+        if $entity
+            .tracker
+            .is_entity_enabled($entity.tag, log::Level::Trace)
+        {
             $entity.tracker.time($entity.tag, $time_ns);
         }
     }};
@@ -201,7 +209,7 @@ macro_rules! set_time {
 #[macro_export]
 macro_rules! log_base {
     ($entity:expr ; $lvl:expr, $($arg:tt)+) => (
-        if $lvl <= $entity.log_level() {
+        if $entity.tracker.is_entity_enabled($entity.tag, $lvl) {
             $entity.tracker.log($entity.tag, $lvl, format_args!($($arg)+));
         }
     );
