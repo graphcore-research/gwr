@@ -9,21 +9,21 @@ pub use paste::paste;
 /// [InPort](steam_engine::port::InPort)
 macro_rules! connect_port {
     ($from:expr, $from_type:ident => $to:expr, $to_type:ident) => {
-        steam_track::info!($from.entity ; "Connect {}.{} => {}.{}", $from, stringify!($from_type), $to, stringify!($to_type));
+        steam_track::debug!($from.entity ; "Connect {}.{} => {}.{}", $from, stringify!($from_type), $to, stringify!($to_type));
         $crate::connect::paste! {
             $from.[< connect_port_ $from_type >]($to.[< port_ $to_type >]());
         }
     };
     ($from:expr, $from_type:ident, $from_index:expr => $to:expr, $to_type:ident) => {
         let from_index: usize = $from_index;
-        steam_track::info!($from.entity ; "Connect {}.{}[{}] => {}.{}", $from, stringify!($from_type), from_index, $to, stringify!($to_type));
+        steam_track::debug!($from.entity ; "Connect {}.{}[{}] => {}.{}", $from, stringify!($from_type), from_index, $to, stringify!($to_type));
         $crate::connect::paste! {
             $from.[< connect_port_ $from_type _i >](from_index, $to.[< port_ $to_type >]());
         }
     };
     ($from:expr, $from_type:ident => $to:expr, $to_type:ident, $to_index:expr) => {
         let to_index: usize = $to_index;
-        steam_track::info!($from.entity ; "Connect {}.{} => {}.{}[{}]", $from, stringify!($from_type), $to, stringify!($to_type), to_index);
+        steam_track::debug!($from.entity ; "Connect {}.{} => {}.{}[{}]", $from, stringify!($from_type), $to, stringify!($to_type), to_index);
         $crate::connect::paste! {
             $from.[< connect_port_ $from_type >]($to.[< port_ $to_type _i >](to_index));
         }
@@ -31,7 +31,7 @@ macro_rules! connect_port {
     ($from:expr, $from_type:ident, $from_index:expr => $to:expr, $to_type:ident, $to_index:expr) => {
         let from_index: usize = $from_index;
         let to_index: usize = $to_index;
-        steam_track::info!($from.entity ; "Connect {}.{}[{}] => {}.{}[{}]", $from, stringify!($from_type), from_index, $to, stringify!($to_type), to_index);
+        steam_track::debug!($from.entity ; "Connect {}.{}[{}] => {}.{}[{}]", $from, stringify!($from_type), from_index, $to, stringify!($to_type), to_index);
         $crate::connect::paste! {
             $from.[< connect_port_ $from_type _i >](from_index, $to.[< port_ $to_type _i >](to_index));
         }

@@ -295,11 +295,12 @@ impl Track for InMemoryTracker {
         self.entity_manager.unique_tag()
     }
 
-    fn get_entity_enables(&self, entity_name: &str) -> (bool, log::Level) {
-        (
-            self.entity_manager.trace_enabled_for(entity_name),
-            self.entity_manager.log_level_for(entity_name),
-        )
+    fn is_entity_enabled(&self, tag: Tag, level: log::Level) -> bool {
+        self.entity_manager.is_enabled(tag, level)
+    }
+
+    fn add_entity(&self, tag: Tag, entity_name: &str) {
+        self.entity_manager.add_entity(tag, entity_name);
     }
 
     fn enter(&self, tag: Tag, object: Tag) {
@@ -348,5 +349,9 @@ impl Track for InMemoryTracker {
 
     fn time(&self, _set_by: Tag, time_ns: f64) {
         self.entity_manager.set_time(time_ns);
+    }
+
+    fn shutdown(&self) {
+        // Do nothing
     }
 }

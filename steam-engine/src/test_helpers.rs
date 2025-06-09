@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use steam_track::tracker::{CapnProtoTracker, EntityManager};
-use steam_track::{TraceState, Tracker, Writer};
+use steam_track::{Tracker, Writer};
 
 use crate::engine::Engine;
 
@@ -26,10 +26,9 @@ pub fn create_tracker(full_filepath: &str) -> Tracker {
         fs::File::create(format!("{FOLDER}/{filename_only}.bin")).unwrap(),
     ));
 
-    let default_trace_enabled = TraceState::Enabled;
     let default_log_level = log::Level::Trace;
-    let entity_manger = Arc::new(EntityManager::new(default_trace_enabled, default_log_level));
-    let tracker: Tracker = Arc::new(CapnProtoTracker::new(entity_manger.clone(), bin_writer));
+    let entity_manger = EntityManager::new(default_log_level);
+    let tracker: Tracker = Arc::new(CapnProtoTracker::new(entity_manger, bin_writer));
     tracker
 }
 

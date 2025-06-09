@@ -16,6 +16,7 @@ pub mod types;
 /// Include the multi-tracker.
 pub mod multi_tracker;
 
+use std::collections::HashMap;
 use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -26,16 +27,19 @@ pub use in_memory::InMemoryTracker;
 use regex::Regex;
 pub use text::TextTracker;
 
-use crate::{ROOT, Tag, TraceState};
+use crate::{ROOT, Tag};
 
 /// This is the interface that is supported by all [`Tracker`]s.
 pub trait Track {
     /// Allocate a new global tag
     fn unique_tag(&self) -> Tag;
 
-    /// Determine whether tracing is enabled and what the log level is for an
-    /// entity.
-    fn get_entity_enables(&self, entity_name: &str) -> (bool, log::Level);
+    /// Determine whether tracking is enabled, and at what level for an
+    /// entity looked up by its tag.
+    fn is_entity_enabled(&self, tag: Tag, level: log::Level) -> bool;
+
+    /// Record an entity being created.
+    fn add_entity(&self, tag: Tag, entity_name: &str);
 
     /// Track when an object with the given tag arrives.
     fn enter(&self, enter_into: Tag, enter_obj: Tag);
@@ -54,17 +58,20 @@ pub trait Track {
 
     /// Advance the time to the time specified in `ns`.
     fn time(&self, set_by: Tag, time_ns: f64);
+
+    /// Perform any pre-exit shutdown/cleanup
+    fn shutdown(&self);
 }
 
 /// The type of a [`Tracker`] that is shared across entities.
 pub type Tracker = Arc<dyn Track + Send + Sync>;
 
 /// Create a [`Tracker`] that prints all track events to `stdout`.
-pub fn stdout_tracker() -> Tracker {
-    let entity_manger = Arc::new(EntityManager::new(TraceState::Enabled, log::Level::Warn));
+pub fn stdout_tracker(level: log::Level) -> Tracker {
+    let entity_manger = EntityManager::new(level);
     let stdout_writer = Box::new(std::io::BufWriter::new(io::stdout()));
-    let tracer: Tracker = Arc::new(TextTracker::new(entity_manger.clone(), stdout_writer));
-    tracer
+    let tracker: Tracker = Arc::new(TextTracker::new(entity_manger, stdout_writer));
+    tracker
 }
 
 /// Create a [`Tracker`] that suppresses all track events.
@@ -81,36 +88,32 @@ pub fn dev_null_tracker() -> Tracker {
 ///
 /// This manager is also used to allocate unique [`Tag`] values.
 pub struct EntityManager {
-    /// Level of _log_ events to output.
-    default_trace_enabled: bool,
-
-    /// Level of _log_ events to output.
-    default_log_level: log::Level,
-
-    /// List of regular expressions mapping entity names to trace
-    /// enable/disable.
-    regex_to_trace_enabled: Vec<(Regex, bool)>,
+    /// Level of tracking events to output.
+    default_entity_level: log::Level,
 
     /// List of regular expressions mapping entity names to log levels.
-    regex_to_log_level: Vec<(Regex, log::Level)>,
+    regex_to_entity_level: Vec<(Regex, log::Level)>,
 
     /// Used to assign unique tags.
     unique_tag: AtomicU64,
 
     /// Keep track of the current time.
     current_time: Mutex<f64>,
+
+    /// Keep track of entites that have trace enable/log levels different to the
+    /// default
+    entity_lookup: Mutex<HashMap<Tag, log::Level>>,
 }
 
 impl EntityManager {
     /// Constructor with [`TraceState`] and [`log::Level`]
-    pub fn new(default_trace_enabled: TraceState, default_log_level: log::Level) -> Self {
+    pub fn new(default_entity_level: log::Level) -> Self {
         Self {
-            default_trace_enabled: default_trace_enabled == TraceState::Enabled,
-            default_log_level,
-            regex_to_trace_enabled: Vec::new(),
-            regex_to_log_level: Vec::new(),
+            default_entity_level,
+            regex_to_entity_level: Vec::new(),
             unique_tag: AtomicU64::new(ROOT.0 + 1),
             current_time: Mutex::new(0.0),
+            entity_lookup: Mutex::new(HashMap::new()),
         }
     }
 
@@ -119,57 +122,49 @@ impl EntityManager {
         Tag(tag)
     }
 
-    fn trace_enabled_for(&self, entity_name: &str) -> bool {
-        for (regex, enabled) in self.regex_to_trace_enabled.iter() {
-            if regex.is_match(entity_name) {
-                return *enabled;
-            }
+    fn is_enabled(&self, tag: Tag, level: log::Level) -> bool {
+        match self.entity_lookup.lock().unwrap().get(&tag) {
+            None => level <= self.default_entity_level,
+            Some(entity_level) => level <= *entity_level,
         }
-        self.default_trace_enabled
+    }
+
+    fn add_entity(&self, tag: Tag, entity_name: &str) {
+        let entity_level = self.log_level_for(entity_name);
+        if entity_level != self.default_entity_level
+            && self
+                .entity_lookup
+                .lock()
+                .unwrap()
+                .insert(tag, entity_level)
+                .is_some()
+        {
+            panic!("Entity tag {} already seen ({})", tag, entity_name);
+        }
     }
 
     fn log_level_for(&self, entity_name: &str) -> log::Level {
-        for (regex, level) in self.regex_to_log_level.iter() {
+        for (regex, level) in self.regex_to_entity_level.iter() {
             if regex.is_match(entity_name) {
                 return *level;
             }
         }
-        self.default_log_level
+        self.default_entity_level
     }
 
-    /// Add a log filter regular expression.
+    /// Add a filter regular expression to set matching entites to a given
+    /// level.
     ///
     /// # Example
     ///
     /// ```rust
-    /// use steam_track::TraceState;
     /// use steam_track::tracker::EntityManager;
-    /// let mut manager = EntityManager::new(TraceState::Disabled, log::Level::Warn);
-    /// manager.add_log_filter(".*arb.*", log::Level::Trace);
+    /// let mut manager = EntityManager::new(log::Level::Warn);
+    /// manager.add_entity_level_filter(".*arb.*", log::Level::Trace);
     /// ```
-    pub fn add_log_filter(&mut self, regex_str: &str, level: crate::log::Level) {
+    pub fn add_entity_level_filter(&mut self, regex_str: &str, level: crate::log::Level) {
         match Regex::new(regex_str) {
-            Ok(regex) => self.regex_to_log_level.push((regex, level)),
-            Err(e) => panic!("Failed to parse regex {regex_str}:\n{}\n", e),
-        };
-    }
-
-    /// Add a filter regular expression for enabling/disabling trace for
-    /// matching entities.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use steam_track::TraceState;
-    /// use steam_track::tracker::EntityManager;
-    /// let mut manager = EntityManager::new(TraceState::Disabled, log::Level::Warn);
-    /// manager.add_trace_filter(".*arb.*", TraceState::Enabled);
-    /// ```
-    pub fn add_trace_filter(&mut self, regex_str: &str, enabled: TraceState) {
-        match Regex::new(regex_str) {
-            Ok(regex) => self
-                .regex_to_trace_enabled
-                .push((regex, enabled == TraceState::Enabled)),
+            Ok(regex) => self.regex_to_entity_level.push((regex, level)),
             Err(e) => panic!("Failed to parse regex {regex_str}:\n{}\n", e),
         };
     }
@@ -187,86 +182,82 @@ impl EntityManager {
 
 #[cfg(test)]
 mod tests {
+    use log::Level;
+
     use super::*;
 
     fn entity_paths() -> Vec<&'static str> {
-        vec!["top", "top::rho", "top::rho::tn0", "top::rho::tn1"]
+        vec!["top", "top::dev", "top::dev::node0", "top::dev::node1"]
     }
 
     #[test]
     fn no_filters() {
-        let manager = EntityManager::new(TraceState::Disabled, log::Level::Error);
+        let manager = EntityManager::new(Level::Error);
 
         for p in entity_paths() {
-            assert!(!manager.trace_enabled_for(p));
-            assert_eq!(manager.log_level_for(p), log::Level::Error);
+            assert_eq!(manager.log_level_for(p), Level::Error);
         }
     }
 
     #[test]
-    fn filter_trace_rho_enable() {
-        let mut manager = EntityManager::new(TraceState::Disabled, log::Level::Error);
-        manager.add_trace_filter(r".*rho.*", TraceState::Enabled);
+    fn filter_dev_trace() {
+        let mut manager = EntityManager::new(Level::Error);
+        manager.add_entity_level_filter(r".*dev.*", Level::Trace);
 
-        let expected_enables = [false, true, true, true];
+        let expected_levels = [Level::Error, Level::Trace, Level::Trace, Level::Trace];
 
         for (i, p) in entity_paths().iter().enumerate() {
-            assert_eq!(manager.trace_enabled_for(p), expected_enables[i]);
+            assert_eq!(manager.log_level_for(p), expected_levels[i]);
         }
     }
 
     #[test]
-    fn filter_trace_tn0_enable() {
-        let mut manager = EntityManager::new(TraceState::Disabled, log::Level::Error);
-        manager.add_trace_filter(r".*tn0", TraceState::Enabled);
+    fn filter_node0_error() {
+        let mut manager = EntityManager::new(Level::Warn);
+        manager.add_entity_level_filter(r".*node0", Level::Error);
 
-        let expected_enables = [false, false, true, false];
+        let expected_levels = [Level::Warn, Level::Warn, Level::Error, Level::Warn];
 
         for (i, p) in entity_paths().iter().enumerate() {
-            assert_eq!(manager.trace_enabled_for(p), expected_enables[i]);
+            assert_eq!(manager.log_level_for(p), expected_levels[i]);
         }
     }
 
     #[test]
-    fn filter_trace_tn0_disable() {
-        let mut manager = EntityManager::new(TraceState::Enabled, log::Level::Error);
-        manager.add_trace_filter(r".*tn0", TraceState::Disabled);
+    fn filter_node0_warn() {
+        let mut manager = EntityManager::new(Level::Error);
+        manager.add_entity_level_filter(r".*node0", Level::Warn);
 
-        let expected_enables = [true, true, false, true];
+        let expected_levels = [Level::Error, Level::Error, Level::Warn, Level::Error];
 
         for (i, p) in entity_paths().iter().enumerate() {
-            assert_eq!(manager.trace_enabled_for(p), expected_enables[i]);
+            assert_eq!(manager.log_level_for(p), expected_levels[i]);
         }
     }
 
     #[test]
-    fn filter_trace_rho_and_tn0_disable() {
-        let mut manager = EntityManager::new(TraceState::Enabled, log::Level::Error);
+    fn filter_dev_and_node0_info() {
+        let mut manager = EntityManager::new(Level::Error);
         // The first pattern seen should be highest priority
-        manager.add_trace_filter(r".*tn0", TraceState::Enabled);
-        manager.add_trace_filter(r".*rho.*", TraceState::Disabled);
+        manager.add_entity_level_filter(r".*node0", Level::Warn);
+        manager.add_entity_level_filter(r".*dev.*", Level::Info);
 
-        let expected_enables = [true, false, true, false];
+        let expected_levels = [Level::Error, Level::Info, Level::Warn, Level::Info];
 
         for (i, p) in entity_paths().iter().enumerate() {
-            assert_eq!(manager.trace_enabled_for(p), expected_enables[i]);
+            assert_eq!(manager.log_level_for(p), expected_levels[i]);
         }
     }
 
     #[test]
-    fn filter_log_rho_and_tn0_disable() {
-        let mut manager = EntityManager::new(TraceState::Enabled, log::Level::Error);
+    fn filter_log_dev_and_node0_info() {
+        let mut manager = EntityManager::new(Level::Error);
         // The first pattern seen should be highest priority
-        manager.add_log_filter(r".*tn0", log::Level::Info);
-        manager.add_log_filter(r".*rho.*", log::Level::Trace);
-        manager.add_log_filter(r"top.*", log::Level::Warn);
+        manager.add_entity_level_filter(r".*node0", Level::Info);
+        manager.add_entity_level_filter(r".*dev.*", Level::Trace);
+        manager.add_entity_level_filter(r"top.*", Level::Warn);
 
-        let expected_levels = [
-            log::Level::Warn,
-            log::Level::Trace,
-            log::Level::Info,
-            log::Level::Trace,
-        ];
+        let expected_levels = [Level::Warn, Level::Trace, Level::Info, Level::Trace];
 
         for (i, p) in entity_paths().iter().enumerate() {
             assert_eq!(manager.log_level_for(p), expected_levels[i]);
@@ -275,7 +266,7 @@ mod tests {
 
     #[test]
     fn tags() {
-        let manager = EntityManager::new(TraceState::Disabled, log::Level::Error);
+        let manager = EntityManager::new(Level::Error);
         for i in 0..10 {
             assert_eq!(manager.unique_tag(), Tag(i + ROOT.0 + 1));
         }

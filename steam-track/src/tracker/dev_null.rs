@@ -15,15 +15,17 @@ impl Track for DevNullTracker {
         Tag(0)
     }
 
-    fn get_entity_enables(&self, _entity_name: &str) -> (bool, log::Level) {
-        (false, log::Level::Error)
+    fn is_entity_enabled(&self, _tag: Tag, _level: log::Level) -> bool {
+        false
     }
+    fn add_entity(&self, _tag: Tag, _entity_name: &str) {}
     fn enter(&self, _tag: Tag, _obj: Tag) {}
     fn exit(&self, _tag: Tag, _obj: Tag) {}
     fn create(&self, _tag: Tag, _obj: Tag, _num_bytes: usize, _req_type: i8, _name: &str) {}
     fn destroy(&self, _tag: Tag, _obj: Tag) {}
     fn log(&self, _tag: Tag, _level: log::Level, _msg: std::fmt::Arguments) {}
     fn time(&self, _set_by: Tag, _time_ns: f64) {}
+    fn shutdown(&self) {}
 }
 
 /// Take the command-line string and convert it to a Level
