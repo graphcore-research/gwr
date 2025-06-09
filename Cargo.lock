@@ -528,18 +528,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "escargot"
-version = "0.5.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83f351750780493fc33fa0ce8ba3c7d61f9736cfa3b3bb9ee2342643ffe40211"
-dependencies = [
- "log",
- "once_cell",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "event-listener"
 version = "2.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1480,7 +1468,6 @@ name = "steam-config"
 version = "0.1.0"
 dependencies = [
  "clap",
- "escargot",
  "figment",
  "proc-macro2",
  "quote",
