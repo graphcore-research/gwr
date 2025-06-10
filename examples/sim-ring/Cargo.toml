@@ -1,0 +1,27 @@
+# Copyright (c) 2025 Graphcore Ltd. All rights reserved.
+
+[package]
+name = "sim-ring"
+version = "1.0.0"
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Example simulation of a ring of nodes"
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap.workspace = true
+log.workspace = true
+indicatif = "0.17.11"
+steam-components = { path = "../../steam-components" }
+steam-engine = { path = "../../steam-engine" }
+steam-models = { path = "../../steam-models" }
+steam-model-builder = { path = "../../steam-model-builder" }
+steam-track = { path = "../../steam-track" }
