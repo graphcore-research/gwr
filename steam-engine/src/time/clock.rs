@@ -90,12 +90,22 @@ pub struct Clock {
     pub shared_state: Rc<ClockState>,
 }
 
+pub struct TaskWaker {
+    /// The Waker to use to make a task active again.
+    pub waker: Waker,
+
+    /// When a task is scheduled in the future it may be a background task
+    /// that will simply run forever in which case it will set `can_exit` to
+    /// true.
+    pub can_exit: bool,
+}
+
 /// Shared state between futures using a Clock and the Clock itself.
 pub struct ClockState {
     now: RefCell<ClockTick>,
 
     /// Queue of futures waiting for the right time.
-    pub waiting: RefCell<Vec<Vec<Waker>>>,
+    pub waiting: RefCell<Vec<Vec<TaskWaker>>>,
 
     /// Queue of times at which those futures are to be woken. This is kept
     /// sorted by time so that the first entry is the next to be woken.
@@ -106,24 +116,36 @@ pub struct ClockState {
 }
 
 impl ClockState {
-    fn schedule(&self, schedule_time: ClockTick, cx: &mut Context<'_>) {
+    fn schedule(&self, schedule_time: ClockTick, cx: &mut Context<'_>, can_exit: bool) {
         let mut waiting_times = self.waiting_times.borrow_mut();
         let mut waiting = self.waiting.borrow_mut();
         if let Some(index) = waiting_times.iter().position(|&x| x == schedule_time) {
             // Time already exists, add this task
-            waiting[index].push(cx.waker().clone());
+            waiting[index].push(TaskWaker {
+                waker: cx.waker().clone(),
+                can_exit,
+            });
         } else {
             // Time not found, insert at the correct location
             match waiting_times.iter().position(|x| *x < schedule_time) {
                 Some(index) => {
                     // Insert at an arbitrary index
                     waiting_times.insert(index, schedule_time);
-                    waiting.insert(index, vec![cx.waker().clone()]);
+                    waiting.insert(
+                        index,
+                        vec![TaskWaker {
+                            waker: cx.waker().clone(),
+                            can_exit,
+                        }],
+                    );
                 }
                 None => {
                     // Insert at the head
                     waiting_times.push(schedule_time);
-                    waiting.push(vec![cx.waker().clone()]);
+                    waiting.push(vec![TaskWaker {
+                        waker: cx.waker().clone(),
+                        can_exit,
+                    }]);
                 }
             };
         }
@@ -189,7 +211,7 @@ impl Clock {
         clock_time.tick as f64 / self.freq_mhz * 1000.0
     }
 
-    /// Returns a [ClockDelay] future which can be `await`ed to delay the
+    /// Returns a [ClockDelay] future which must be `await`ed to delay the
     /// specified number of ticks.
     pub fn wait_ticks(&self, ticks: u64) -> ClockDelay {
         let mut until = self.tick_now();
@@ -198,6 +220,23 @@ impl Clock {
             shared_state: self.shared_state.clone(),
             until,
             state: ClockDelayState::Pending,
+            can_exit: false,
+        }
+    }
+
+    /// Returns a [ClockDelay] future which must be `await`ed to delay the
+    /// specified number of ticks. However, if the remainder of the simulation
+    /// completes then this future is allowed to not complete. This allows the
+    /// user to create tasks that can run continuously as long as the rest of
+    /// the simulation continues to run.
+    pub fn wait_ticks_or_exit(&self, ticks: u64) -> ClockDelay {
+        let mut until = self.tick_now();
+        until.tick += ticks;
+        ClockDelay {
+            shared_state: self.shared_state.clone(),
+            until,
+            state: ClockDelayState::Pending,
+            can_exit: true,
         }
     }
 
@@ -209,6 +248,7 @@ impl Clock {
             shared_state: self.shared_state.clone(),
             until,
             state: ClockDelayState::Pending,
+            can_exit: false,
         }
     }
 
@@ -220,6 +260,7 @@ impl Clock {
             shared_state: self.shared_state.clone(),
             until,
             state: ClockDelayState::Pending,
+            can_exit: false,
         }
     }
 
@@ -285,6 +326,7 @@ pub struct ClockDelay {
     shared_state: Rc<ClockState>,
     until: ClockTick,
     state: ClockDelayState,
+    can_exit: bool,
 }
 
 impl Future for ClockDelay {
@@ -292,9 +334,7 @@ impl Future for ClockDelay {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.state {
             ClockDelayState::Pending => {
-                {
-                    self.shared_state.schedule(self.until, cx);
-                }
+                self.shared_state.schedule(self.until, cx, self.can_exit);
                 self.state = ClockDelayState::Running;
                 Poll::Pending
             }
