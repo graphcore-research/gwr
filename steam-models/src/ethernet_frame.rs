@@ -26,6 +26,17 @@ pub fn mac_to_u64(mac: &[u8; DEST_MAC_BYTES]) -> u64 {
         | (mac[0] as u64)
 }
 
+pub fn u64_to_mac(value: u64) -> [u8; DEST_MAC_BYTES] {
+    let mut mac = [0_u8; DEST_MAC_BYTES];
+    mac[0] = (value & 0xff) as u8;
+    mac[1] = ((value >> 8) & 0xff) as u8;
+    mac[2] = ((value >> (8 * 2)) & 0xff) as u8;
+    mac[3] = ((value >> (8 * 3)) & 0xff) as u8;
+    mac[4] = ((value >> (8 * 4)) & 0xff) as u8;
+    mac[5] = ((value >> (8 * 5)) & 0xff) as u8;
+    mac
+}
+
 #[derive(Clone, Debug)]
 pub struct EthernetFrame {
     created_by: Arc<Entity>,

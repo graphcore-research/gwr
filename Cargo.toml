@@ -7,6 +7,7 @@ members = [
     "examples/flaky-component",
     "examples/flaky-with-delay",
     "examples/scrambler",
+    "examples/sim-ring",
     "steam-components",
     "steam-config",
     "steam-developer-guide",

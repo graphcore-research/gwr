@@ -48,15 +48,15 @@ pub const RING_INDEX: usize = 0;
 pub const IO_INDEX: usize = 1;
 
 pub struct RingConfig {
-    rx_buffer_bytes: usize,
-    tx_buffer_bytes: usize,
+    rx_buffer_entries: usize,
+    tx_buffer_entries: usize,
 }
 
 impl RingConfig {
-    pub fn new(rx_buffer_bytes: usize, tx_buffer_bytes: usize) -> Self {
+    pub fn new(rx_buffer_entries: usize, tx_buffer_entries: usize) -> Self {
         Self {
-            rx_buffer_bytes,
-            tx_buffer_bytes,
+            rx_buffer_entries,
+            tx_buffer_entries,
         }
     }
 }
@@ -86,11 +86,11 @@ where
         policy: Box<dyn Arbitrate<T>>,
     ) -> Self {
         let rx_buffer_limiter = Limiter::new(entity, "limit_rx", write_limiter.clone());
-        let rx_buffer = Store::new(entity, "rx_buf", spawner.clone(), config.rx_buffer_bytes);
+        let rx_buffer = Store::new(entity, "rx_buf", spawner.clone(), config.rx_buffer_entries);
         connect_port!(rx_buffer_limiter, tx => rx_buffer, rx);
 
         let tx_buffer_limiter = Limiter::new(entity, "limit_tx", write_limiter);
-        let tx_buffer = Store::new(entity, "tx_buf", spawner.clone(), config.tx_buffer_bytes);
+        let tx_buffer = Store::new(entity, "tx_buf", spawner.clone(), config.tx_buffer_entries);
         connect_port!(tx_buffer_limiter, tx => tx_buffer, rx);
 
         let router = Router::new(entity, "router", 2, route_fn);
