@@ -618,12 +618,15 @@ mod tests {
     use std::path::PathBuf;
     use std::process::Command;
 
+    use serial_test::serial;
+
     fn get_workspace_dir() -> PathBuf {
         let package_dir = std::env::current_dir().unwrap();
         package_dir.parent().unwrap().to_path_buf()
     }
 
     #[test]
+    #[serial(no_conf_file)]
     fn defaults_with_no_conf_file() {
         let run = String::from_utf8(
             Command::new("cargo")
@@ -661,6 +664,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(no_conf_file)]
     fn defaults_and_cli_with_no_conf_file() {
         let run = String::from_utf8(
             Command::new("cargo")
@@ -700,6 +704,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(no_conf_file)]
     fn defaults_and_env_vars_with_no_conf_file() {
         let run = String::from_utf8(
             Command::new("cargo")
@@ -738,6 +743,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(no_conf_file)]
     fn defaults_and_cli_and_env_vars_with_no_conf_file() {
         let run = String::from_utf8(
             Command::new("cargo")
@@ -778,6 +784,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(partial_conf_file)]
     fn defaults_and_partial_conf_file() {
         let run = String::from_utf8(
             Command::new("cargo")
@@ -815,6 +822,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(partial_conf_file)]
     fn defaults_and_cli_and_partial_conf_file() {
         let run = String::from_utf8(
             Command::new("cargo")
@@ -854,6 +862,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(partial_conf_file)]
     fn defaults_and_env_vars_and_partial_conf_file() {
         let run = String::from_utf8(
             Command::new("cargo")
@@ -892,6 +901,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(partial_conf_file)]
     fn defaults_and_cli_and_env_vars_and_partial_conf_file() {
         let run = String::from_utf8(
             Command::new("cargo")
@@ -932,6 +942,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(full_conf_file)]
     fn defaults_and_full_conf_file() {
         let run = String::from_utf8(
             Command::new("cargo")
@@ -969,6 +980,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(full_conf_file)]
     fn defaults_and_cli_and_full_conf_file() {
         let run = String::from_utf8(
             Command::new("cargo")
@@ -1008,6 +1020,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(full_conf_file)]
     fn defaults_and_env_vars_and_full_conf_file() {
         let run = String::from_utf8(
             Command::new("cargo")
@@ -1046,6 +1059,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(full_conf_file)]
     fn defaults_and_cli_and_env_vars_and_full_conf_file() {
         let run = String::from_utf8(
             Command::new("cargo")
@@ -1086,6 +1100,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(partial_conf_file)]
     fn defaults_and_cli_and_env_vars_and_conf_file_priority() {
         let run = String::from_utf8(
             Command::new("cargo")
@@ -1126,6 +1141,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(alt_conf_file)]
     fn defaults_and_alternative_conf_file() {
         let run = String::from_utf8(
             Command::new("cargo")
@@ -1163,6 +1179,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(alt_conf_file_missing)]
     fn defaults_and_missing_alternative_conf_file() {
         let run = String::from_utf8(
             Command::new("cargo")
@@ -1200,6 +1217,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(alt_and_runtime_conf_files)]
     fn defaults_and_alternative_and_extra_conf_files() {
         let run = String::from_utf8(
             Command::new("cargo")
@@ -1245,6 +1263,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(alt_and_runtime_conf_files)]
     fn defaults_and_cli_and_env_vars_and_alt_and_extra_conf_files_priority() {
         let run = String::from_utf8(
             Command::new("cargo")

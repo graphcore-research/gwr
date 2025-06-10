@@ -29,4 +29,5 @@ syn = { version = "2.0.90", features = ["derive", "extra-traits", "full"] }
 clap.workspace = true
 figment.workspace = true
 serde.workspace = true
+serial_test.workspace = true
 trybuild.workspace = true
