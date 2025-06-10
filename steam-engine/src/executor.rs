@@ -101,13 +101,6 @@ pub struct Executor {
 }
 
 impl Executor {
-    pub fn spawn(&self, future: impl Future<Output = SimResult> + 'static) {
-        self.state
-            .new_tasks
-            .borrow_mut()
-            .push(Rc::new(Task::new(future, self.state.clone())));
-    }
-
     pub fn run(&self, finished: Rc<AtomicBool>) -> SimResult {
         loop {
             self.step(&finished)?;
@@ -116,10 +109,14 @@ impl Executor {
             }
 
             if self.state.new_tasks.borrow().is_empty() {
+                if self.state.time.borrow().can_exit() {
+                    break;
+                }
+
                 if let Some(wakers) = self.state.time.borrow_mut().advance_time() {
                     // No events left, advance time
-                    for waker in wakers.into_iter() {
-                        waker.wake();
+                    for task_waker in wakers.into_iter() {
+                        task_waker.waker.wake();
                     }
                 } else {
                     break;

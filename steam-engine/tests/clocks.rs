@@ -56,3 +56,35 @@ fn dual_clock() {
         *all_values.borrow()
     );
 }
+
+// Ensure that a task that calls `wait_ticks_or_exit` doesn't stop a simulation
+// from terminating.
+#[test]
+fn wait_ticks_or_exit() {
+    let mut engine = start_test("clocks");
+
+    {
+        let clk = engine.default_clock();
+        engine.spawn(async move {
+            for _ in 0..5 {
+                clk.wait_ticks(1).await;
+            }
+            Ok(())
+        });
+    }
+
+    {
+        let clk = engine.default_clock();
+        engine.spawn(async move {
+            for _ in 0..50 {
+                clk.wait_ticks_or_exit(10).await;
+            }
+            Ok(())
+        });
+    }
+
+    engine.run().unwrap();
+
+    // Simulation should have finished when the first loop completed
+    assert_eq!(engine.time_now_ns(), 5.0);
+}
