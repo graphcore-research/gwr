@@ -48,7 +48,7 @@ impl Engine {
         let finished = Rc::new(AtomicBool::new(false));
         {
             let finished = finished.clone();
-            self.executor.spawn(async move {
+            self.spawner.spawn(async move {
                 event.listen().await;
                 finished.store(true, Release);
                 Ok(())
@@ -63,7 +63,7 @@ impl Engine {
     }
 
     pub fn spawn(&self, future: impl Future<Output = SimResult> + 'static) {
-        self.executor.spawn(future);
+        self.spawner.spawn(future);
     }
 
     pub fn default_clock(&mut self) -> Clock {

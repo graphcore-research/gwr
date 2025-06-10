@@ -5,12 +5,12 @@
 //! Time is made up of a cycle count and a phase.
 
 use std::sync::Arc;
-use std::task::Waker;
 
 use steam_track::entity::Entity;
 use steam_track::set_time;
 
 use super::clock::Clock;
+use crate::time::clock::TaskWaker;
 
 /// The overall owner of time within a simulation.
 ///
@@ -49,7 +49,7 @@ impl SimTime {
     }
 
     /// Choose the clock with the next time and return the associated Waker.
-    pub fn advance_time(&mut self) -> Option<Vec<Waker>> {
+    pub fn advance_time(&mut self) -> Option<Vec<TaskWaker>> {
         if let Some(next_clock) = self.clocks.iter().min_by(|a, b| a.cmp(b)) {
             if let Some(clock_time) = next_clock.shared_state.waiting_times.borrow_mut().pop() {
                 let next_ns = next_clock.to_ns(&clock_time);
@@ -77,6 +77,21 @@ impl SimTime {
 
     pub fn time_now_ns(&self) -> f64 {
         self.current_ns
+    }
+
+    /// The simulation can exit if all scheduled tasks can exit.
+    pub fn can_exit(&self) -> bool {
+        for clock in self.clocks.iter() {
+            for waiting in clock.shared_state.waiting.borrow().iter() {
+                for task_waker in waiting.iter() {
+                    if !task_waker.can_exit {
+                        // Found one task that must be completed
+                        return false;
+                    }
+                }
+            }
+        }
+        true
     }
 }
 
