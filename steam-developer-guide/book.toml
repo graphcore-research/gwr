@@ -7,9 +7,6 @@ description = "The Simulation Technology for Evaluation and Architecture Modelli
 src = "md_src"
 language = "en"
 
-[rust]
-edition = "2024"
-
 [preprocessor.cmdrun]
 
 [preprocessor.keeper]
