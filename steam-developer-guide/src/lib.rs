@@ -36,6 +36,10 @@ mod tests {
             strip_str(str::from_utf8(&mdbook_output.stderr).expect("Failed to get command output"));
 
         assert!(
+            !stdout.contains("(Panicked)"),
+            "Error emitted during mdBook build:\n{stdout}"
+        );
+        assert!(
             !stdout.contains("[ERROR]"),
             "Error emitted during mdBook build:\n{stdout}"
         );
