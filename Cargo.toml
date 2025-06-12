@@ -34,6 +34,8 @@ homepage = "https://github.com/graphcore-research/steam"
 repository = "https://github.com/graphcore-research/steam"
 license = "MIT"
 license-file = "LICENSE"
+keywords = ["steam"]
+categories = ["asynchronous", "simulation"]
 publish = ["kellnr"]
 
 [workspace.dependencies]

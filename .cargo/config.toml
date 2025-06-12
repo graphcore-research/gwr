@@ -1,4 +1,4 @@
 # Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
 [alias]
-clippy-strict = "clippy"
+clippy-strict = "clippy -- -W clippy::cargo -A clippy::multiple-crate-versions"
