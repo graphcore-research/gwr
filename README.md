@@ -179,18 +179,20 @@ When writing a commmit message in this form:
   array also details the sections each type will be included in within the
   changelog.
 - The `optional scope` should be used to detail the name of the updated package.
+  For example:
+  ```text
+  fix(steam-developer-guide): check for panic when running mdBook tests
+  ```
   - If the change applied to multiple, but not all packages, the names should be
     comma seperated. For example:
     ```text
     feat(steam-track,steam-spotter): capnp binary file support
     ```
-  - If the change applies to all Rust packages the scope should be
-    `all packages`. For example:
+  - If the change applies to all Rust packages, infrastructure, CI, or general
+    configuration the scope can be omitted. For example:
     ```text
-    doc(all packages): add example use for all public APIs
+    docs: add example use for all public APIs
     ```
-  - If the change applies to infrastructure, CI, or general configuration but
-    not specifically the Rust source the scope can be omitted. For example:
     ```text
     infra: set default pre-commit hooks to install
     ```
