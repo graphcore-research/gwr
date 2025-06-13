@@ -55,8 +55,8 @@ where
 {
     fn new(entity: &Arc<Entity>, num_egress: usize, router: Box<dyn Route<T>>) -> Self {
         let mut tx = Vec::with_capacity(num_egress);
-        for _ in 0..num_egress {
-            tx.push(OutPort::new(entity, "tx"));
+        for i in 0..num_egress {
+            tx.push(OutPort::new(entity, format!("tx{i}").as_str()));
         }
         Self {
             rx: RefCell::new(Some(InPort::new(entity, "rx"))),

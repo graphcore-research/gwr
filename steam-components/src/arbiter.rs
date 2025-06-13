@@ -268,7 +268,7 @@ where
     fn new(entity: &Arc<Entity>, num_rx: usize, policy: Box<dyn Arbitrate<T>>) -> Self {
         let shared_state = Rc::new(ArbiterSharedState::new(num_rx));
         let rx = (0..num_rx)
-            .map(|_| Some(InPort::new(entity, "rx")))
+            .map(|i| Some(InPort::new(entity, format!("rx{i}").as_str())))
             .collect();
         Self {
             rx: RefCell::new(rx),
