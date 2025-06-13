@@ -37,9 +37,10 @@ impl<T> ScramblerState<T>
 where
     T: SimObject,
 {
-    pub fn new(entity: Arc<Entity>, spawner: Spawner, scramble: bool) -> Self {
-        let buffer_a = Store::new(&entity, "buffer_a", spawner.clone(), 1);
-        let buffer_b = Store::new(&entity, "buffer_b", spawner, 1);
+    #[must_use]
+    pub fn new(entity: &Arc<Entity>, spawner: Spawner, scramble: bool) -> Self {
+        let buffer_a = Store::new(entity, "buffer_a", spawner.clone(), 1);
+        let buffer_b = Store::new(entity, "buffer_b", spawner, 1);
         Self {
             scramble,
             buffer_a: RefCell::new(Some(buffer_a)),
@@ -62,13 +63,14 @@ impl<T> Scrambler<T>
 where
     T: SimObject,
 {
+    #[must_use]
     pub fn new(parent: &Arc<Entity>, name: &str, spawner: Spawner, scramble: bool) -> Self {
         let entity = Arc::new(Entity::new(parent, name));
 
         Self {
             entity: entity.clone(),
             spawner: spawner.clone(),
-            state: Rc::new(ScramblerState::new(entity, spawner, scramble)),
+            state: Rc::new(ScramblerState::new(&entity, spawner, scramble)),
         }
     }
 
@@ -88,10 +90,12 @@ where
         }
     }
 
+    #[must_use]
     pub fn port_rx_a(&self) -> Rc<PortState<T>> {
         port_rx!(self.state.buffer_a, port_rx)
     }
 
+    #[must_use]
     pub fn port_rx_b(&self) -> Rc<PortState<T>> {
         port_rx!(self.state.buffer_b, port_rx)
     }

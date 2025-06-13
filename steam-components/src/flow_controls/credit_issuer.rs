@@ -60,6 +60,7 @@ impl<T> CreditIssuer<T>
 where
     T: SimObject,
 {
+    #[must_use]
     pub fn new(parent: &Arc<Entity>) -> Self {
         let entity = Arc::new(Entity::new(parent, "credit_issue"));
         let state = Rc::new(CreditIssuerState::new(&entity));
@@ -70,6 +71,7 @@ where
         connect_tx!(self.state.tx, connect ; port_state);
     }
 
+    #[must_use]
     pub fn port_rx(&self) -> Rc<PortState<T>> {
         port_rx!(self.state.rx, state)
     }

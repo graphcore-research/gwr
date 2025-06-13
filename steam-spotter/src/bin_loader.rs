@@ -170,7 +170,7 @@ pub fn start_background_load(
     let file = match File::open(bin_file_path) {
         Ok(file) => file,
         Err(e) => {
-            println!("Error: {}", e);
+            println!("Error: {e}");
             return;
         }
     };

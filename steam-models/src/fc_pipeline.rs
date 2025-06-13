@@ -53,30 +53,30 @@ where
     T: SimObject,
 {
     fn new(
-        entity: Arc<Entity>,
+        entity: &Arc<Entity>,
         clock: Clock,
         spawner: Spawner,
         buffer_size: usize,
         data_delay_ticks: usize,
         credit_delay_ticks: usize,
     ) -> Self {
-        let credit_limiter = CreditLimiter::new(&entity, spawner.clone(), buffer_size);
+        let credit_limiter = CreditLimiter::new(entity, spawner.clone(), buffer_size);
 
         let data_delay = Delay::new(
-            &entity,
+            entity,
             "pipe",
             clock.clone(),
             spawner.clone(),
             data_delay_ticks,
         );
 
-        let buffer = Store::new(&entity, "buf", spawner.clone(), buffer_size);
+        let buffer = Store::new(entity, "buf", spawner.clone(), buffer_size);
 
         connect_port!(credit_limiter, tx => data_delay, rx);
         connect_port!(data_delay, tx => buffer, rx);
 
-        let credit_issuer = CreditIssuer::new(&entity);
-        let credit_delay = Delay::new(&entity, "credit_pipe", clock, spawner, credit_delay_ticks);
+        let credit_issuer = CreditIssuer::new(entity);
+        let credit_delay = Delay::new(entity, "credit_pipe", clock, spawner, credit_delay_ticks);
 
         connect_port!(buffer, tx => credit_issuer, rx);
         connect_port!(credit_issuer, credit_tx => credit_delay, rx);
@@ -106,6 +106,7 @@ impl<T> FcPipeline<T>
 where
     T: SimObject,
 {
+    #[must_use]
     pub fn new(
         parent: &Arc<Entity>,
         name: &str,
@@ -120,7 +121,7 @@ where
             entity: entity.clone(),
             spawner: spawner.clone(),
             state: Rc::new(FcPipelineState::new(
-                entity,
+                &entity,
                 clock,
                 spawner,
                 buffer_size,
@@ -152,6 +153,7 @@ where
         connect_tx!(self.state.credit_issuer, connect_port_tx ; port_state);
     }
 
+    #[must_use]
     pub fn port_rx(&self) -> Rc<PortState<T>> {
         port_rx!(self.state.credit_limiter, port_rx)
     }

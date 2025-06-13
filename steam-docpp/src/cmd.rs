@@ -12,7 +12,7 @@ use syn::LitStr;
 pub fn process(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let command_descriptor = syn::parse_macro_input!(input as CommandDescriptor);
     handle_error(|| {
-        let mut output = "".to_owned();
+        let mut output = String::new();
 
         let commands = command_descriptor.cmd.trim().split(';');
         for command in commands {

@@ -21,6 +21,7 @@ pub struct AllOfState<T> {
 }
 
 impl<T> AllOfState<T> {
+    #[must_use]
     pub fn new(all_of: Vec<Eventable<T>>) -> Self {
         Self {
             all_of: RefCell::new(all_of),
@@ -33,6 +34,7 @@ pub struct AllOf<T> {
 }
 
 impl<T> AllOf<T> {
+    #[must_use]
     pub fn new(all_of: Vec<Eventable<T>>) -> Self {
         Self {
             state: Rc::new(AllOfState::new(all_of)),
@@ -113,7 +115,7 @@ where
 
 async fn all_of<T: Default>(events: Vec<Box<dyn Event<T>>>) {
     let mut futures = FuturesUnordered::new();
-    for e in events.iter() {
+    for e in &events {
         futures.push(e.listen());
     }
 

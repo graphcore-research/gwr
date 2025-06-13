@@ -26,14 +26,16 @@ impl Parse for CommandDescriptor {
     }
 }
 
+#[must_use]
 pub fn env_doc_builder() -> bool {
     env::var("STEAM_DOC_BUILDER").is_ok()
 }
 
-pub fn unprocessed(input: proc_macro2::TokenStream, prefix: &str) -> proc_macro2::TokenStream {
+#[must_use]
+pub fn unprocessed(input: &proc_macro2::TokenStream, prefix: &str) -> proc_macro2::TokenStream {
     handle_error(|| {
         Ok(LitStr::new(
-            format!("#[doc = {}({})", prefix, input).as_str(),
+            format!("#[doc = {prefix}({input})").as_str(),
             Span::call_site(),
         )
         .into_token_stream())

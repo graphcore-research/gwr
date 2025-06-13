@@ -196,6 +196,7 @@ where
     /// Basic store constructor
     ///
     /// **Panics** if `capacity` is 0.
+    #[must_use]
     pub fn new(parent: &Arc<Entity>, name: &str, spawner: Spawner, capacity: usize) -> Self {
         assert_ne!(capacity, 0, "Unsupported Store with 0 capacity");
         let entity = Arc::new(Entity::new(parent, name));
@@ -211,19 +212,23 @@ where
         connect_tx!(self.state.tx, connect ; port_state);
     }
 
+    #[must_use]
     pub fn port_rx(&self) -> Rc<PortState<T>> {
         port_rx!(self.state.rx, state)
     }
 
+    #[must_use]
     pub fn fill_level(&self) -> usize {
         self.state.data.borrow().len()
     }
 
+    #[must_use]
     pub fn set_panic_on_overflow(self) -> Self {
         *self.state.panic_on_overflow.borrow_mut() = true;
         self
     }
 
+    #[must_use]
     pub fn get_level_change_event(&self) -> Repeated<usize> {
         self.state.level_change.clone()
     }

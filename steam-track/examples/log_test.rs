@@ -73,9 +73,9 @@ impl Default for Config {
         Self {
             log_level: Some("warn".to_string()),
             enable_trace: Some(Default::default()),
-            log_file: Some("".to_string()),
-            trace_file: Some("".to_string()),
-            server: Some("".to_string()),
+            log_file: Some(String::new()),
+            trace_file: Some(String::new()),
+            server: Some(String::new()),
         }
     }
 }
@@ -103,10 +103,9 @@ fn load(
 fn main() -> io::Result<()> {
     let config = Config::parse_all_sources();
 
-    let tracker: Tracker;
     let default_entity_level = steam_track::str_to_level(&config.log_level.unwrap());
 
-    if config.log_file.as_ref().unwrap().is_empty() {
+    let tracker: Tracker = if config.log_file.as_ref().unwrap().is_empty() {
         // Use a Capnp tracker
         let bin_writer: Writer = if config.server.as_ref().unwrap().is_empty() {
             Box::new(BufWriter::new(fs::File::create(
@@ -118,7 +117,7 @@ fn main() -> io::Result<()> {
             ))
         };
         let entity_manger = EntityManager::new(default_entity_level);
-        tracker = Arc::new(CapnProtoTracker::new(entity_manger, bin_writer));
+        Arc::new(CapnProtoTracker::new(entity_manger, bin_writer))
     } else {
         // Use a textual output
         let txt_writer: Writer = if config.log_file.as_ref().unwrap() == "-" {
@@ -127,8 +126,8 @@ fn main() -> io::Result<()> {
             Box::new(fs::File::create(config.log_file.unwrap())?)
         };
         let entity_manger = EntityManager::new(default_entity_level);
-        tracker = Arc::new(TextTracker::new(entity_manger, txt_writer));
-    }
+        Arc::new(TextTracker::new(entity_manger, txt_writer))
+    };
 
     let top = toplevel(&tracker, "top");
 

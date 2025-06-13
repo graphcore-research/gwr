@@ -91,8 +91,8 @@ impl Filter {
             tag_to_name: Some(HashMap::with_capacity(INITIAL_SIZE)),
             tag_to_name_updates: Vec::new(),
 
-            filter: "".to_owned(),
-            search: "".to_owned(),
+            filter: String::new(),
+            search: String::new(),
             search_cursor_pos: 0,
             use_regex: true,
         }
@@ -187,7 +187,7 @@ impl Filter {
             if let Ok(tag) = tag_str.parse() {
                 filter_tag = Some(tag);
 
-                let to_remove = format!("tag={}", tag_str);
+                let to_remove = format!("tag={tag_str}");
                 search = search.replace(to_remove.as_str(), "");
             }
         }

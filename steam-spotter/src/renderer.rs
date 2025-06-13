@@ -90,7 +90,7 @@ impl Renderer {
                     Some(name) => tmp.push_str(name),
                     None => tmp.push_str(UNKNOWN),
                 },
-            };
+            }
         }
 
         tmp.as_str()
@@ -108,7 +108,7 @@ impl Renderer {
                     Some(name) => tmp.push_str(name),
                     None => tmp.push_str(UNKNOWN),
                 },
-            };
+            }
         }
 
         tmp.as_str()
@@ -144,7 +144,7 @@ impl Renderer {
     pub fn render_line(&self, line_index: usize) -> String {
         let event_line = self.line_from_index(line_index);
         if event_line.is_none() {
-            return "".to_owned();
+            return String::new();
         }
 
         let event_line = event_line.unwrap();
@@ -159,10 +159,7 @@ impl Renderer {
             } => {
                 let name = self.name_tag(tag, &mut name_tmp);
                 let packet = self.packet_tag(entered, &mut pkt_tmp);
-                (
-                    format!("{}: <= {} ({})", name, packet, fullness).to_owned(),
-                    time,
-                )
+                (format!("{name}: <= {packet} ({fullness})").to_owned(), time)
             }
 
             EventLine::Exit {
@@ -173,10 +170,7 @@ impl Renderer {
             } => {
                 let name = self.name_tag(tag, &mut name_tmp);
                 let packet = self.packet_tag(exited, &mut pkt_tmp);
-                (
-                    format!("{}: => {} ({})", name, packet, fullness).to_owned(),
-                    time,
-                )
+                (format!("{name}: => {packet} ({fullness})").to_owned(), time)
             }
 
             EventLine::Log {
@@ -186,17 +180,17 @@ impl Renderer {
                 time,
             } => {
                 let name = self.name_tag(tag, &mut name_tmp);
-                (format!("{}: {}", name, msg).to_owned(), time)
+                (format!("{name}: {msg}").to_owned(), time)
             }
 
             EventLine::Create { tag, time } => {
                 let name = self.name_tag(tag, &mut name_tmp);
-                (format!("{}: created", name).to_owned(), time)
+                (format!("{name}: created").to_owned(), time)
             }
         };
 
         if self.print_times {
-            line.push_str(format!(" @{:.1}ns", time).as_str());
+            line.push_str(format!(" @{time:.1}ns").as_str());
         }
 
         line

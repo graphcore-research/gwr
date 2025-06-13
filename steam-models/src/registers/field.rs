@@ -12,6 +12,7 @@ pub struct Field {
 }
 
 impl Field {
+    #[must_use]
     pub fn new(num_bits: usize, offset: usize, reset_value: u64) -> Self {
         Self {
             offset,
@@ -20,11 +21,13 @@ impl Field {
         }
     }
 
+    #[must_use]
     pub fn last_bit(&self) -> usize {
         self.offset + self.num_bits - 1
     }
 
     /// Update as if written by instructions.
+    #[must_use]
     pub fn apply_write_permissions(&self, value: u64, permissions: &Permission) -> u64 {
         match permissions {
             Permission::ReadOnly
@@ -37,6 +40,7 @@ impl Field {
     }
 
     /// Update as if modified by the hardware.
+    #[must_use]
     pub fn apply_set_permissions(&self, value: u64, permissions: &Permission) -> u64 {
         match permissions {
             Permission::ReadOnly
@@ -52,6 +56,7 @@ impl Field {
 
     /// Update full register value as if this field were being read by
     /// instructions
+    #[must_use]
     pub fn apply_read_permissions(&self, value: u64, permissions: &Permission) -> u64 {
         let mut value = value;
         match permissions {
@@ -66,16 +71,19 @@ impl Field {
     }
 
     /// Access used by hardware.
+    #[must_use]
     pub fn apply_reset_value(&self, value: u64) -> u64 {
         let mask: u64 = (1 << self.num_bits) - 1;
         value & !((mask) << self.offset) | (self.reset_value << self.offset)
     }
 
+    #[must_use]
     pub fn clear(&self, value: u64) -> u64 {
         let mask: u64 = (1 << self.num_bits) - 1;
         value & !((mask) << self.offset)
     }
 
+    #[must_use]
     pub fn value(&self, value: u64) -> u64 {
         let mask: u64 = (1 << self.num_bits) - 1;
         (value >> self.offset) & mask

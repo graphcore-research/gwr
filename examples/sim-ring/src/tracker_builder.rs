@@ -47,6 +47,7 @@ fn build_binary_tracker(level: log::Level, filter_regex: &str, trace_file: &str)
 }
 
 /// Set up stdout/binary trackers according the the command-line arguments
+#[must_use]
 pub fn setup_trackers(
     enable_stdout: bool,
     stdout_level: log::Level,

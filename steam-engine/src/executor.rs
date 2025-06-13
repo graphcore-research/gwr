@@ -101,9 +101,9 @@ pub struct Executor {
 }
 
 impl Executor {
-    pub fn run(&self, finished: Rc<AtomicBool>) -> SimResult {
+    pub fn run(&self, finished: &Rc<AtomicBool>) -> SimResult {
         loop {
-            self.step(&finished)?;
+            self.step(finished)?;
             if finished.load(Acquire) {
                 break;
             }
@@ -158,10 +158,12 @@ impl Executor {
         Ok(())
     }
 
+    #[must_use]
     pub fn get_clock(&self, freq_mhz: f64) -> Clock {
         self.state.time.borrow_mut().get_clock(freq_mhz)
     }
 
+    #[must_use]
     pub fn time_now_ns(&self) -> f64 {
         self.state.time.borrow().time_now_ns()
     }
@@ -182,6 +184,7 @@ impl Spawner {
     }
 }
 
+#[must_use]
 pub fn new_executor_and_spawner(top: &Arc<Entity>) -> (Executor, Spawner) {
     let state = Rc::new(ExecutorState::new(top));
     let entity = Arc::new(Entity::new(top, "executor"));

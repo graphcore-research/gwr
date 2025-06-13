@@ -195,7 +195,7 @@ where
                 visitor.time(tag, time);
             }
             Err(e) => {
-                panic!("failed to parse event ({})", e);
+                panic!("failed to parse event ({e})");
             }
         }
     }

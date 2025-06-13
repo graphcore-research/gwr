@@ -79,6 +79,7 @@ impl<T> Router<T>
 where
     T: SimObject,
 {
+    #[must_use]
     pub fn new(
         parent: &Arc<Entity>,
         name: &str,
@@ -96,9 +97,10 @@ where
                 panic!("{}: no tx port {}", self.entity, i);
             }
             Some(tx) => tx.connect(port_state),
-        };
+        }
     }
 
+    #[must_use]
     pub fn port_rx(&self) -> Rc<PortState<T>> {
         self.state.rx.borrow().as_ref().unwrap().state()
     }

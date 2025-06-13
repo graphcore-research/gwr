@@ -118,7 +118,7 @@ fn spawn_larger_simulation() -> Engine {
     for i in 0..num_sources {
         sources.push(Source::new(
             engine.top(),
-            format!("source{}", i).as_str(),
+            format!("source{i}").as_str(),
             option_box_repeat!(i ; num_puts),
         ));
         connect_port!(sources[i], tx => arbiter, rx, i);

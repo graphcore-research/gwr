@@ -29,6 +29,7 @@ pub struct SimTime {
 }
 
 impl SimTime {
+    #[must_use]
     pub fn new(parent: &Arc<Entity>) -> Self {
         Self {
             entity: Arc::new(Entity::new(parent, "time")),
@@ -38,7 +39,7 @@ impl SimTime {
     }
 
     pub fn get_clock(&mut self, freq_mhz: f64) -> Clock {
-        for clock in self.clocks.iter() {
+        for clock in &self.clocks {
             if clock.freq_mhz() == freq_mhz {
                 return clock.clone();
             }
@@ -75,15 +76,17 @@ impl SimTime {
         self.current_ns = time_ns;
     }
 
+    #[must_use]
     pub fn time_now_ns(&self) -> f64 {
         self.current_ns
     }
 
     /// The simulation can exit if all scheduled tasks can exit.
+    #[must_use]
     pub fn can_exit(&self) -> bool {
-        for clock in self.clocks.iter() {
+        for clock in &self.clocks {
             for waiting in clock.shared_state.waiting.borrow().iter() {
-                for task_waker in waiting.iter() {
+                for task_waker in waiting {
                     if !task_waker.can_exit {
                         // Found one task that must be completed
                         return false;

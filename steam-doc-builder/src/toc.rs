@@ -179,14 +179,15 @@ impl Parse for TocNode {
     }
 }
 
+#[must_use]
 pub fn parse(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
     if env_doc_builder() {
-        return unprocessed(input, "toc");
+        return unprocessed(&input, "toc");
     }
 
     let chapter = syn::parse2::<TocDocument>(input).unwrap();
     handle_error(|| {
-        let mut output = "".to_owned();
+        let mut output = String::new();
         chapter.to_rust_doc(&mut output, 1);
 
         Ok(LitStr::new(output.as_str(), Span::call_site()).into_token_stream())

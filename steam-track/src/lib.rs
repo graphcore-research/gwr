@@ -37,10 +37,11 @@ pub type Writer = Box<dyn std::io::Write + Send>;
 type SharedWriter = Arc<Mutex<Writer>>;
 
 /// Take the command-line string and convert it to a Level
+#[must_use]
 pub fn str_to_level(lvl: &str) -> log::Level {
     match log::Level::from_str(lvl) {
         Ok(level) => level,
-        Err(_) => panic!("Unable to parse level string '{}'", lvl),
+        Err(_) => panic!("Unable to parse level string '{lvl}'"),
     }
 }
 
@@ -269,6 +270,7 @@ macro_rules! error {
 pub mod steam_track_capnp {
     // No need to emit warnings for auto-generated Cap'n Proto code
     #![allow(missing_docs)]
+    #![allow(clippy::pedantic)]
 
     include!(concat!(env!("OUT_DIR"), "/steam_track_capnp.rs"));
 }

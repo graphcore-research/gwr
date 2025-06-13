@@ -10,6 +10,7 @@ use steam_track::{Tracker, Writer};
 
 use crate::engine::Engine;
 
+#[must_use]
 pub fn create_tracker(full_filepath: &str) -> Tracker {
     // Place all trace files in one folder
     const FOLDER: &str = "traces";
@@ -32,6 +33,7 @@ pub fn create_tracker(full_filepath: &str) -> Tracker {
     tracker
 }
 
+#[must_use]
 pub fn start_test(full_filepath: &str) -> Engine {
     Engine::new(&create_tracker(full_filepath))
 }

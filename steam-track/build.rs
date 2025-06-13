@@ -23,7 +23,7 @@ fn watch_tree(root_dir: &Path) {
                 "Failed to access entry '{}'",
                 error.path().unwrap_or_else(|| Path::new("")).display()
             ),
-        };
+        }
     }
 }
 
@@ -33,8 +33,8 @@ fn add_file_triggers() {
 }
 
 fn add_env_triggers() {
-    println!("cargo:rerun-if-env-changed={}", CAPNP_BIN_ENV_VAR);
-    println!("cargo:rerun-if-env-changed={}", CAPNP_INC_DIR_ENV_VAR);
+    println!("cargo:rerun-if-env-changed={CAPNP_BIN_ENV_VAR}");
+    println!("cargo:rerun-if-env-changed={CAPNP_INC_DIR_ENV_VAR}");
 }
 
 fn get_schemas() -> Vec<PathBuf> {
@@ -65,14 +65,12 @@ fn try_default_compiler_env_var() -> String {
         "macos" if std::env::consts::ARCH == "aarch64" => "/opt/homebrew/bin/capnp",
         "macos" if std::env::consts::ARCH == "x86_64" => "/usr/local/homebrew/bin/capnp",
         _ => panic!(
-            "The '{}' environment variable must be set as the path to the Cap'n Proto 'capnp' executable (no default available for this platform)",
-            CAPNP_BIN_ENV_VAR
+            "The '{CAPNP_BIN_ENV_VAR}' environment variable must be set as the path to the Cap'n Proto 'capnp' executable (no default available for this platform)"
         ),
     };
 
     PathBuf::from(default).try_exists().unwrap_or_else(|_| panic!(
-        "The '{}' environment variable must be set as the path to the Cap'n Proto 'capnp' executable (platform default not in use)",
-        CAPNP_BIN_ENV_VAR
+        "The '{CAPNP_BIN_ENV_VAR}' environment variable must be set as the path to the Cap'n Proto 'capnp' executable (platform default not in use)"
     ));
 
     default.to_string()
@@ -88,14 +86,12 @@ fn try_default_include_dir_env_var() -> Option<String> {
         "macos" if std::env::consts::ARCH == "aarch64" => "/opt/homebrew/include/capnp/",
         "macos" if std::env::consts::ARCH == "x86_64" => "/usr/local/homebrew/include/capnp/",
         _ => panic!(
-            "The '{}' environment variable  must be set as the path to the Cap'n Proto include directory (no default available for this platform)",
-            CAPNP_INC_DIR_ENV_VAR
+            "The '{CAPNP_INC_DIR_ENV_VAR}' environment variable  must be set as the path to the Cap'n Proto include directory (no default available for this platform)"
         ),
     };
 
     PathBuf::from(default).try_exists().unwrap_or_else(|_| panic!(
-        "The '{}' environment variable must be set as the path to the Cap'n Proto include directory (platform default not in use)",
-        CAPNP_INC_DIR_ENV_VAR
+        "The '{CAPNP_INC_DIR_ENV_VAR}' environment variable must be set as the path to the Cap'n Proto include directory (platform default not in use)"
     ));
 
     Some(default.to_string())
@@ -114,13 +110,13 @@ fn get_include_dir_env_var() -> Option<PathBuf> {
     Some(inc_dir)
 }
 
-fn compile_schemas(schemas: Vec<PathBuf>) {
+fn compile_schemas(schemas: &[PathBuf]) {
     let mut command = CompilerCommand::new();
     command.capnp_executable(get_compiler_env_var());
     if let Some(inc_dir) = get_include_dir_env_var() {
         command.import_path(inc_dir);
     }
-    for schema in schemas.iter() {
+    for schema in schemas {
         if let Some(path) = schema.parent() {
             command.src_prefix(path);
         }
@@ -137,5 +133,5 @@ fn main() {
     add_env_triggers();
 
     let schemas = get_schemas();
-    compile_schemas(schemas);
+    compile_schemas(&schemas);
 }

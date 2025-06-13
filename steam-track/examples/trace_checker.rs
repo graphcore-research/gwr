@@ -118,7 +118,7 @@ impl Checker {
 
     fn check(&self, tag: Tag) {
         if !self.active_tags.contains_key(&tag) {
-            error!("Location tag {} used when not active", tag);
+            error!("Location tag {tag} used when not active");
         }
     }
 
@@ -127,13 +127,13 @@ impl Checker {
             e.insert(Node::new(created_by, tag));
             self.add_child(created_by, tag);
         } else {
-            error!("Attempting to create existing tag {}", tag);
+            error!("Attempting to create existing tag {tag}");
         }
     }
 
     fn destroy_tag(&mut self, tag: Tag) {
         if tag == steam_track::ROOT || tag == steam_track::NO_ID {
-            error!("Unable to destroy {}", tag);
+            error!("Unable to destroy {tag}");
             return;
         }
 
@@ -141,13 +141,13 @@ impl Checker {
             self.remove_child(node.parent, tag);
 
             if !node.children.is_empty() {
-                info!("attempting to destroy obj {} with active children", tag);
+                info!("attempting to destroy obj {tag} with active children");
                 self.destroyed.insert(tag, node);
             } else {
                 info_debug!(self.info_tags.contains(&tag), "{} destroyed", tag);
             }
         } else {
-            error!("attempting to destroy unknown tag {}", tag);
+            error!("attempting to destroy unknown tag {tag}");
         }
     }
 
@@ -156,7 +156,7 @@ impl Checker {
         if let Some(node) = self.active_tags.get_mut(&parent) {
             node.add_child(child, log_as_info);
         } else {
-            error!("attempting to add {} to unknown parent {}", child, parent);
+            error!("attempting to add {child} to unknown parent {parent}");
         }
     }
 
@@ -171,10 +171,7 @@ impl Checker {
                 self.destroyed.remove(&parent).unwrap();
             }
         } else {
-            error!(
-                "attempting to remove {} from invalid parent {}",
-                child, parent
-            );
+            error!("attempting to remove {child} from invalid parent {parent}");
         }
     }
 
@@ -189,7 +186,7 @@ impl Checker {
             .filter(|&(k, _v)| (*k != steam_track::NO_ID && *k != steam_track::ROOT));
 
         for (k, v) in still_active {
-            warn!("Tag {} still active", k);
+            warn!("Tag {k} still active");
             if !v.children.is_empty() {
                 warn!("  with children {:?}", v.children);
             }
@@ -277,10 +274,7 @@ fn choose_level(lvl: &str) -> LevelFilter {
         Ok(level) => level,
         Err(_) => {
             let default = LevelFilter::Error;
-            println!(
-                "Unable to parse level string '{}', defaulting to {}",
-                lvl, default
-            );
+            println!("Unable to parse level string '{lvl}', defaulting to {default}");
             default
         }
     }

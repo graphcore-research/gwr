@@ -13,7 +13,7 @@ use tempfile::NamedTempFile;
 
 pub fn process(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     if env_doc_builder() {
-        return unprocessed(input.into(), "typst").into();
+        return unprocessed(&input.into(), "typst").into();
     }
 
     let command_descriptor = syn::parse_macro_input!(input as CommandDescriptor);

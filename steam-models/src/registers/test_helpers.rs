@@ -10,6 +10,7 @@ pub struct TestResolver {
 }
 
 impl TestResolver {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             to_resolve: RefCell::new(Vec::new()),

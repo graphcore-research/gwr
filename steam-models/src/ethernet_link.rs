@@ -45,14 +45,14 @@ impl<T> EthernetLinkState<T>
 where
     T: SimObject,
 {
-    fn new(entity: Arc<Entity>, clock: Clock, spawner: Spawner) -> Self {
+    fn new(entity: &Arc<Entity>, clock: Clock, spawner: Spawner) -> Self {
         let limiter = rc_limiter!(clock.clone(), BITS_PER_TICK);
-        let limiter_a = Limiter::new(&entity, "limit_a", limiter.clone());
-        let delay_a = Delay::new(&entity, "a", clock.clone(), spawner.clone(), DELAY_TICKS);
+        let limiter_a = Limiter::new(entity, "limit_a", limiter.clone());
+        let delay_a = Delay::new(entity, "a", clock.clone(), spawner.clone(), DELAY_TICKS);
         connect_port!(limiter_a, tx => delay_a, rx);
 
-        let limiter_b: Limiter<_> = Limiter::new(&entity, "limit_b", limiter.clone());
-        let delay_b = Delay::new(&entity, "b", clock, spawner, DELAY_TICKS);
+        let limiter_b: Limiter<_> = Limiter::new(entity, "limit_b", limiter.clone());
+        let delay_b = Delay::new(entity, "b", clock, spawner, DELAY_TICKS);
         connect_port!(limiter_b, tx => delay_b, rx);
 
         Self {
@@ -78,13 +78,14 @@ impl<T> EthernetLink<T>
 where
     T: SimObject,
 {
+    #[must_use]
     pub fn new(parent: &Arc<Entity>, name: &str, clock: Clock, spawner: Spawner) -> Self {
         let entity = Arc::new(Entity::new(parent, name));
 
         Self {
             entity: entity.clone(),
             spawner: spawner.clone(),
-            state: Rc::new(EthernetLinkState::new(entity, clock, spawner)),
+            state: Rc::new(EthernetLinkState::new(&entity, clock, spawner)),
         }
     }
 
@@ -101,10 +102,12 @@ where
         connect_tx!(self.state.delay_b, connect_port_tx ; port_state);
     }
 
+    #[must_use]
     pub fn port_rx_a(&self) -> Rc<PortState<T>> {
         port_rx!(self.state.limiter_a, port_rx)
     }
 
+    #[must_use]
     pub fn port_rx_b(&self) -> Rc<PortState<T>> {
         port_rx!(self.state.limiter_b, port_rx)
     }

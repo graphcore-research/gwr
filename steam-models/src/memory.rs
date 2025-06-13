@@ -25,6 +25,7 @@ pub struct MemoryConfig {
 }
 
 impl MemoryConfig {
+    #[must_use]
     pub fn new(
         base_address: u64,
         capacity_bytes: u64,
@@ -126,6 +127,7 @@ impl<T> Memory<T>
 where
     T: SimObject + MemoryAccess,
 {
+    #[must_use]
     pub fn new(
         parent: &Arc<Entity>,
         name: &str,
@@ -146,6 +148,7 @@ where
         connect_tx!(self.state.response_delay, connect_port_tx ; port_state);
     }
 
+    #[must_use]
     pub fn port_rx(&self) -> Rc<PortState<T>> {
         port_rx!(self.state.rx, state)
     }
@@ -188,17 +191,19 @@ where
                 ReqType::Control => {
                     todo!("control handling")
                 }
-            };
+            }
 
             let ticks = access_bytes.div_ceil(config.bw_bytes_per_cycle);
             self.state.clock.wait_ticks(ticks).await;
         }
     }
 
+    #[must_use]
     pub fn bytes_written(&self) -> u64 {
         self.state.metrics.borrow().bytes_written
     }
 
+    #[must_use]
     pub fn bytes_read(&self) -> u64 {
         self.state.metrics.borrow().bytes_read
     }

@@ -51,6 +51,7 @@ pub struct DocParser {
 
 impl DocParser {
     /// Create a document parser.
+    #[must_use]
     pub fn new(verbose: bool) -> Self {
         Self {
             verbose,
@@ -68,14 +69,14 @@ impl DocParser {
     /// Returns the top-level module in the file which should be the crate.
     pub fn parse_doc(&mut self, input_file: &str) -> Rc<RefCell<DocNodeCommon>> {
         let mut file =
-            File::open(input_file).unwrap_or_else(|_| panic!("Failed to open {}", input_file));
+            File::open(input_file).unwrap_or_else(|_| panic!("Failed to open {input_file}"));
 
         let mut content = String::new();
         file.read_to_string(&mut content)
-            .unwrap_or_else(|_| panic!("Failed to read {} contents", input_file));
+            .unwrap_or_else(|_| panic!("Failed to read {input_file} contents"));
 
         let ast = syn::parse_file(&content)
-            .unwrap_or_else(|_| panic!("Failed to parse contents of {}", input_file));
+            .unwrap_or_else(|_| panic!("Failed to parse contents of {input_file}"));
 
         let top_path = "crate".to_owned();
         let m = Module::new();
@@ -108,7 +109,7 @@ impl DocParser {
     pub fn write_adoc(&self, out: &mut File, path_to_toc: &str) {
         let doc_node = self.doc_elements.get(path_to_toc);
         if doc_node.is_none() {
-            eprintln!("ERROR: {} not found", path_to_toc);
+            eprintln!("ERROR: {path_to_toc} not found");
             exit(1);
         }
 
@@ -121,7 +122,7 @@ impl DocParser {
             write_section_header(out, &document.title, depth, None);
             doc_node.write(self, out, &mut emitted, depth + 1);
         } else {
-            eprintln!("ERROR: {} does not contain TOC", path_to_toc);
+            eprintln!("ERROR: {path_to_toc} does not contain TOC");
             exit(1);
         }
     }
@@ -143,7 +144,7 @@ impl DocParser {
                         module.borrow().write_doc(self, out, depth);
                     } else {
                         // Reference to this section - just create a link
-                        out.write_all(format!("See <<{}>>\n\n", processed_path).as_bytes())
+                        out.write_all(format!("See <<{processed_path}>>\n\n").as_bytes())
                             .expect("Failed to write");
                     }
                 } else {
@@ -151,7 +152,7 @@ impl DocParser {
                     module.borrow().write(self, out, emitted, depth);
                 }
             }
-            None => eprintln!("WARNING: module {} not found", processed_path),
+            None => eprintln!("WARNING: module {processed_path} not found"),
         }
     }
 
@@ -160,12 +161,13 @@ impl DocParser {
             let before = e.name("before").unwrap().as_str();
             let toc = e.name("toc").unwrap().as_str();
             let after = e.name("after").unwrap().as_str();
-            (toc.to_owned(), format!("{}{}", before, after))
+            (toc.to_owned(), format!("{before}{after}"))
         } else {
-            ("".to_owned(), content)
+            (String::new(), content)
         }
     }
 
+    #[must_use]
     pub fn process_path(&self, path: &str, parent: &DocNodeCommon) -> String {
         if let Some(e) = self.self_regex.captures(path) {
             let parent_path = parent.full_name();
@@ -305,6 +307,7 @@ impl DocParser {
         }
     }
 
+    #[must_use]
     pub fn preprocess_doc(&self, input: &str, depth: usize) -> String {
         self.adoc_pp.preprocess_doc(input, depth)
     }

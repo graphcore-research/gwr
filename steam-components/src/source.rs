@@ -70,12 +70,14 @@ impl<T> Source<T>
 where
     T: SimObject,
 {
+    #[must_use]
     pub fn new(parent: &Arc<Entity>, name: &str, data_generator: Option<DataGenerator<T>>) -> Self {
         let entity = Arc::new(Entity::new(parent, name));
         let state = Rc::new(SourceState::new(&entity, data_generator));
         Self { entity, state }
     }
 
+    #[must_use]
     pub fn entity(&self) -> &Arc<Entity> {
         &self.entity
     }

@@ -109,6 +109,7 @@ where
 {
     /// In this case, the `new()` function creates the component from the
     /// parameters provided.
+    #[must_use]
     pub fn new(parent: &Arc<Entity>, name: &str, drop_ratio: f64, seed: u64) -> Self {
         // The entity needs to be created first because it is shared between the state
         // and the component itself.
@@ -136,6 +137,7 @@ where
     }
 
     /// This provides the `InPort` to which you can connect
+    #[must_use]
     pub fn port_rx(&self) -> Rc<PortState<T>> {
         // The `port_rx!` macro is the most consise way to access the rx port state.
         port_rx!(self.state.rx, state)

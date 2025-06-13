@@ -48,6 +48,7 @@ pub struct Resource {
 }
 
 impl Resource {
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         Self {
             shared_state: Rc::new(RefCell::new(ResourceState {
@@ -72,6 +73,7 @@ impl Resource {
         }
     }
 
+    #[must_use]
     pub fn count(&self) -> usize {
         self.shared_state.borrow().count
     }

@@ -157,7 +157,7 @@ struct Cli {
 }
 
 /// Install an event to terminate the simulation at the clock tick defined.
-fn finish_at(spawner: Spawner, clock: Clock, run_ticks: usize) {
+fn finish_at(spawner: &Spawner, clock: Clock, run_ticks: usize) {
     spawner.spawn(async move {
         clock.wait_ticks(run_ticks as u64).await;
         sim_error!("Finish")
@@ -167,7 +167,7 @@ fn finish_at(spawner: Spawner, clock: Clock, run_ticks: usize) {
 /// Spawn a background task to display regular updates of the total number of
 /// packets received so far.
 fn start_packet_dump(
-    spawner: Spawner,
+    spawner: &Spawner,
     clock: Clock,
     progress_ticks: usize,
     total_expected_packets: usize,
@@ -271,7 +271,7 @@ fn main() -> Result<(), SimRingError> {
         let total_expected_packets = config.num_send_packets * config.ring_size;
         let sinks = sinks.to_owned();
         start_packet_dump(
-            spawner.clone(),
+            &spawner.clone(),
             clock.clone(),
             args.progress_ticks,
             total_expected_packets,
@@ -280,12 +280,12 @@ fn main() -> Result<(), SimRingError> {
     }
 
     if args.finish_tick != 0 {
-        finish_at(spawner, clock.clone(), args.finish_tick);
+        finish_at(&spawner, clock.clone(), args.finish_tick);
     }
 
     run_simulation!(engine);
 
-    for sink in sinks.iter() {
+    for sink in &sinks {
         if sink.num_sunk() != config.num_send_packets {
             error!(top ; "{}/{} packets received", sink.num_sunk(), config.num_send_packets);
             error!(top ; "Deadlock detected at {:.2}ns", clock.time_now_ns());

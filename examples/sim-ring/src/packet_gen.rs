@@ -19,6 +19,7 @@ pub struct PacketGen {
 }
 
 impl PacketGen {
+    #[must_use]
     pub fn new(
         parent: &Arc<Entity>,
         dest: [u8; DEST_MAC_BYTES],
@@ -26,7 +27,7 @@ impl PacketGen {
         num_send_packets: usize,
     ) -> Self {
         Self {
-            entity: Arc::new(Entity::new(parent, format!("gen{:?}", dest).as_str())),
+            entity: Arc::new(Entity::new(parent, format!("gen{dest:?}").as_str())),
             dest,
             payload_bytes,
             num_send_packets,
