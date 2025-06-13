@@ -213,6 +213,7 @@ impl Clock {
 
     /// Returns a [ClockDelay] future which must be `await`ed to delay the
     /// specified number of ticks.
+    #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
     pub fn wait_ticks(&self, ticks: u64) -> ClockDelay {
         let mut until = self.tick_now();
         until.tick += ticks;
@@ -229,6 +230,7 @@ impl Clock {
     /// completes then this future is allowed to not complete. This allows the
     /// user to create tasks that can run continuously as long as the rest of
     /// the simulation continues to run.
+    #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
     pub fn wait_ticks_or_exit(&self, ticks: u64) -> ClockDelay {
         let mut until = self.tick_now();
         until.tick += ticks;
@@ -240,6 +242,7 @@ impl Clock {
         }
     }
 
+    #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
     pub fn next_tick_and_phase(&self, phase: u32) -> ClockDelay {
         let mut until = self.tick_now();
         until.tick += 1;
@@ -252,6 +255,7 @@ impl Clock {
         }
     }
 
+    #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
     pub fn wait_phase(&self, phase: u32) -> ClockDelay {
         let mut until = self.tick_now();
         assert!(phase > until.phase, "Time going backwards");
