@@ -79,12 +79,12 @@ repos:
         entry: cargo check
         pass_filenames: false
         stages: [pre-commit, pre-merge-commit, pre-push, manual]
-      - id: cargo-clippy
-        name: cargo clippy
+      - id: cargo-clippy-strict
+        name: cargo clippy-strict
         description: lint Rust source code
         language: system
         types: [rust]
-        entry: cargo clippy -- -Dwarnings
+        entry: env RUSTFLAGS="-D warnings" cargo clippy-strict
         pass_filenames: false
         stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: cargo-semver-checks
