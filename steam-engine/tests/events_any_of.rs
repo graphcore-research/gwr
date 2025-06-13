@@ -52,7 +52,7 @@ fn multiple_listen() {
     }
 
     engine.spawn(async move {
-        clock.wait_ticks(1);
+        clock.wait_ticks(1).await;
         let res = anyof.listen().await;
         assert_eq!(res, 1);
         assert_eq!(clock.time_now_ns(), 10.0);
