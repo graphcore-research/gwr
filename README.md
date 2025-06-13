@@ -216,7 +216,8 @@ During the commit process a number of different hooks will be invoked by
   [licenses.html] file using [cargo-about].
 - Source files will be formatted using `rustfmt`, [Prettier], and built in tools
   from the [pre-commit-hooks] library.
-- Rust source will be linted using [clippy].
+- Rust source will be linted using [clippy] (via the `cargo clippy-strict`
+  alias).
 - Rust source will be compiled using `cargo check`.
 
 ### Making a Release

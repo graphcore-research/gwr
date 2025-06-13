@@ -74,10 +74,17 @@ cargo +nightly fmt
 ## Helper tools
 
 The `clippy` tool provides some static analysis tools that help to highlight
-redundant or not rust-like code that should be refactored
+redundant or not rust-like code that should be refactored:
 
 ```bash
 cargo clippy
+```
+
+The STEAM workspace provides an alias that runs `clippy` with additional lint
+groups enabled, which is used by the git hooks and CI system:
+
+```bash
+cargo clippy-strict
 ```
 
 ## Expand

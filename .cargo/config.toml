@@ -1,0 +1,4 @@
+# Copyright (c) 2025 Graphcore Ltd. All rights reserved.
+
+[alias]
+clippy-strict = "clippy"
