@@ -78,6 +78,7 @@ where
         self.state.clone()
     }
 
+    #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
     pub fn get(&self) -> PortGet<T> {
         if !*self.connected.borrow() {
             panic!("{} not connected", self);
@@ -90,6 +91,7 @@ where
     }
 
     /// Must be matched with a `finish_get` to allow the OutPort to continue.
+    #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
     pub fn start_get(&self) -> PortStartGet<T> {
         if !*self.connected.borrow() {
             panic!("{} not connected", self);
@@ -147,6 +149,7 @@ where
         }
     }
 
+    #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
     pub fn put(&self, value: T) -> PortPut<T> {
         let state = self
             .state
@@ -160,6 +163,7 @@ where
         }
     }
 
+    #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
     pub fn try_put(&self) -> PortTryPut<T> {
         let state = self
             .state

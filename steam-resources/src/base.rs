@@ -58,12 +58,14 @@ impl Resource {
         }
     }
 
+    #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
     pub fn request(&self) -> ResourceRequest {
         ResourceRequest {
             shared_state: self.shared_state.clone(),
         }
     }
 
+    #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
     pub fn release(&self) -> ResourceRelease {
         ResourceRelease {
             shared_state: self.shared_state.clone(),

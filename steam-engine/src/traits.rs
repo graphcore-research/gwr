@@ -112,6 +112,7 @@ impl SimObject for usize {}
 /// }
 /// ```
 pub trait Event<T> {
+    #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
     fn listen(&self) -> BoxFuture<'static, T>;
 
     /// Allow cloning of Boxed elements of vector for AllOf/AnyOf
