@@ -37,6 +37,7 @@ static JOIN: &str = "::";
 
 impl Entity {
     /// Create a new entity.
+    #[must_use]
     pub fn new(parent: &Arc<Entity>, name: &str) -> Self {
         let mut full_name = parent.full_name();
         full_name.push_str(JOIN);
@@ -59,6 +60,7 @@ impl Entity {
     }
 
     /// Returns the full hierarchical name of this entity
+    #[must_use]
     pub fn full_name(&self) -> String {
         match &self.parent {
             Some(parent) => {

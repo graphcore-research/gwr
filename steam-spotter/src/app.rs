@@ -126,6 +126,7 @@ pub struct App {
 
 impl App {
     /// Constructs a new instance of [`App`].
+    #[must_use]
     pub fn new(log_file_path: Option<String>, bin_file_path: Option<String>) -> Self {
         let (tx, rx) = channel();
         let renderer = Arc::new(Mutex::new(Renderer::new()));
@@ -221,6 +222,7 @@ impl App {
         self.numbers.clear();
     }
 
+    #[must_use]
     pub fn state(&self) -> InputState {
         self.input_state
     }

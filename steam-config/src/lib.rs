@@ -597,7 +597,7 @@ mod multi_source_config;
 /// [TOML]: https://toml.io/en/
 #[proc_macro_attribute]
 pub fn multi_source_config(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let mut alt_conf_file: String = Default::default();
+    let mut alt_conf_file = String::default();
     let attr_parser = syn::meta::parser(|meta| {
         if meta.path.is_ident("conf_file") {
             alt_conf_file = meta.value()?.parse::<LitStr>()?.value();

@@ -102,7 +102,7 @@ impl Track for CapnProtoTracker {
     fn log(&self, tag: Tag, level: log::Level, msg: std::fmt::Arguments) {
         self.write_event(tag, |event| {
             let mut log = event.init_log();
-            let txt = format!("{}", msg);
+            let txt = format!("{msg}");
             log.set_message(&txt);
             log.set_level(to_capnp_log_level(level));
         });

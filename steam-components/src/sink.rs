@@ -52,12 +52,14 @@ impl<T> Sink<T>
 where
     T: SimObject,
 {
+    #[must_use]
     pub fn new(parent: &Arc<Entity>, name: &str) -> Self {
         let entity = Arc::new(Entity::new(parent, name));
         let state = Rc::new(SinkState::new(&entity));
         Self { entity, state }
     }
 
+    #[must_use]
     pub fn port_rx(&self) -> Rc<PortState<T>> {
         port_rx!(self.state.rx, state)
     }
@@ -71,10 +73,12 @@ where
         }
     }
 
+    #[must_use]
     pub fn state(&self) -> Rc<SinkState<T>> {
         self.state.clone()
     }
 
+    #[must_use]
     pub fn num_sunk(&self) -> usize {
         self.state.num_sunk()
     }

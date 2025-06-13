@@ -112,6 +112,7 @@ impl<T> CreditLimiter<T>
 where
     T: SimObject,
 {
+    #[must_use]
     pub fn new(parent: &Arc<Entity>, spawner: Spawner, num_credits: usize) -> Self {
         let entity = Arc::new(Entity::new(parent, "credit"));
         let state = Rc::new(CreditLimiterState::new(&entity, num_credits));
@@ -127,10 +128,12 @@ where
         connect_tx!(self.state.tx, connect ; port_state);
     }
 
+    #[must_use]
     pub fn port_rx(&self) -> Rc<PortState<T>> {
         port_rx!(self.state.rx, state)
     }
 
+    #[must_use]
     pub fn port_credit_rx(&self) -> Rc<PortState<Credit>> {
         port_rx!(self.state.credit_rx, port_rx)
     }

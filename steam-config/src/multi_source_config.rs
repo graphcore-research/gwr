@@ -70,15 +70,13 @@ fn generate_use_statements(
     renamed_serde_deserialize: &Ident,
     renamed_serde_serialize: &Ident,
 ) -> TokenStream {
-    let clap_parser = parse_str::<Path>(&format!("{}::{}", CLAP, CLAP_PARSER)).unwrap();
+    let clap_parser = parse_str::<Path>(&format!("{CLAP}::{CLAP_PARSER}")).unwrap();
     let figment_providers_format = parse_str::<Path>(&format!(
-        "{}::{}::{}",
-        FIGMENT, FIGMENT_PROVIDERS, FIGMENT_PROVIDERS_FORMAT
+        "{FIGMENT}::{FIGMENT_PROVIDERS}::{FIGMENT_PROVIDERS_FORMAT}"
     ))
     .unwrap();
-    let serde_deserialize =
-        parse_str::<Path>(&format!("{}::{}", SERDE, SERDE_DESERIALIZE)).unwrap();
-    let serde_serialize = parse_str::<Path>(&format!("{}::{}", SERDE, SERDE_SERIALIZE)).unwrap();
+    let serde_deserialize = parse_str::<Path>(&format!("{SERDE}::{SERDE_DESERIALIZE}")).unwrap();
+    let serde_serialize = parse_str::<Path>(&format!("{SERDE}::{SERDE_SERIALIZE}")).unwrap();
 
     quote! {
         use #clap_parser as #renamed_clap_parser;
@@ -112,31 +110,30 @@ fn update_struct_attrs(
 
 fn check_derive_attrs(attrs: &[Attribute]) {
     let clap_parser = Ident::new(CLAP_PARSER, Span::call_site());
-    let clap_parser_full = parse_str::<Path>(&format!("{}::{}", CLAP, CLAP_PARSER)).unwrap();
+    let clap_parser_full = parse_str::<Path>(&format!("{CLAP}::{CLAP_PARSER}")).unwrap();
     let serde_deserialize = Ident::new(SERDE_DESERIALIZE, Span::call_site());
     let serde_deserialize_full =
-        parse_str::<Path>(&format!("{}::{}", SERDE, SERDE_DESERIALIZE)).unwrap();
+        parse_str::<Path>(&format!("{SERDE}::{SERDE_DESERIALIZE}")).unwrap();
     let serde_serialize = Ident::new(SERDE_SERIALIZE, Span::call_site());
-    let serde_serialize_full =
-        parse_str::<Path>(&format!("{}::{}", SERDE, SERDE_SERIALIZE)).unwrap();
+    let serde_serialize_full = parse_str::<Path>(&format!("{SERDE}::{SERDE_SERIALIZE}")).unwrap();
 
     let error_msg = "This struct is annotated with #[multi_source_config] so cannot derive";
 
-    for attr in attrs.iter() {
+    for attr in attrs {
         if attr.path().is_ident("derive") {
             let _ = attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident(&clap_parser) {
-                    panic!("{} {}", error_msg, CLAP_PARSER);
+                    panic!("{error_msg} {CLAP_PARSER}");
                 } else if meta.path == clap_parser_full {
-                    panic!("{} {}::{}", error_msg, CLAP, CLAP_PARSER);
+                    panic!("{error_msg} {CLAP}::{CLAP_PARSER}");
                 } else if meta.path.is_ident(&serde_deserialize) {
-                    panic!("{} {}", error_msg, SERDE_DESERIALIZE);
+                    panic!("{error_msg} {SERDE_DESERIALIZE}");
                 } else if meta.path == serde_deserialize_full {
-                    panic!("{} {}::{}", error_msg, SERDE, SERDE_DESERIALIZE);
+                    panic!("{error_msg} {SERDE}::{SERDE_DESERIALIZE}");
                 } else if meta.path.is_ident(&serde_serialize) {
-                    panic!("{} {}", error_msg, SERDE_SERIALIZE);
+                    panic!("{error_msg} {SERDE_SERIALIZE}");
                 } else if meta.path == serde_serialize_full {
-                    panic!("{} {}::{}", error_msg, SERDE, SERDE_SERIALIZE);
+                    panic!("{error_msg} {SERDE}::{SERDE_SERIALIZE}");
                 }
                 Ok(())
             });
@@ -173,7 +170,7 @@ fn replace_doc_comment_with_clap_attr(
 ) -> Vec<Attribute> {
     let mut result = Vec::new();
     let mut help_lines = String::new();
-    for attr in attrs.iter() {
+    for attr in attrs {
         if let Some(exiting_attr) = handle_existing_clap_attr(attr) {
             result.push(exiting_attr);
         } else if let Some(doc_comment) = handle_doc_comment(attr) {
@@ -261,7 +258,7 @@ fn generate_clap_arg_long_help_attr(
         help_lines,
         "$last_word_char_before_newline $first_word_char_after_newline",
     );
-    let help_string = help_text.trim_end_matches("\n").to_string() + "\n\n[default: {:#?}]";
+    let help_string = help_text.trim_end_matches('\n').to_string() + "\n\n[default: {:#?}]";
 
     parse_quote! {
         #[arg(long_help = format!(#help_string, <#struct_type>::default().#field.unwrap()))]
@@ -418,13 +415,13 @@ fn generate_clap_parse_fn(struct_type: &Ident) -> TokenStream {
 
 fn generate_clap_merge_fn(struct_type: &Ident, struct_fields: &Fields) -> TokenStream {
     let mut result = Vec::new();
-    for field in struct_fields.iter() {
+    for field in struct_fields {
         let field = format_ident!("{}", field.ident.clone().unwrap().to_string());
         result.push(quote! {
             if cli.#field.is_some() {
                 config.#field = cli.#field;
             }
-        })
+        });
     }
 
     quote! {
@@ -498,7 +495,7 @@ fn generate_clap_to_existing_config_fn(struct_type: &Ident) -> TokenStream {
 
 fn generate_clap_merge_existing_fn(struct_type: &Ident, struct_fields: &Fields) -> TokenStream {
     let mut result = Vec::new();
-    for field in struct_fields.iter() {
+    for field in struct_fields {
         let field = format_ident!("{}", field.ident.clone().unwrap().to_string());
         result.push(quote! {
             if cli.#field.is_some() {
@@ -506,7 +503,7 @@ fn generate_clap_merge_existing_fn(struct_type: &Ident, struct_fields: &Fields) 
             } else if config.#field != #struct_type::default().#field {
                 self.#field = config.#field;
             }
-        })
+        });
     }
 
     quote! {

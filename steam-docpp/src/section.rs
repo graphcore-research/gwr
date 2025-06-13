@@ -46,7 +46,7 @@ fn parse_kv(input: &ParseStream, items: &mut HashMap<String, String>) -> bool {
     };
     if input.parse::<Eq>().is_err() {
         return false;
-    };
+    }
     let value = match input.parse::<LitStr>() {
         Ok(value) => value.value().to_string(),
         Err(_) => return false,
@@ -60,7 +60,7 @@ fn parse_kv(input: &ParseStream, items: &mut HashMap<String, String>) -> bool {
 pub fn process(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let section_descriptor = syn::parse_macro_input!(input as SectionDescriptor);
     handle_error(|| {
-        let mut output = "".to_owned();
+        let mut output = String::new();
         output.push_str(format!("# {}\n\n", section_descriptor.title).as_str());
         output.push_str(format!("{}\n\n", section_descriptor.text).as_str());
 

@@ -71,6 +71,7 @@ pub mod tests {
     }
 
     impl TestCallbackHandler {
+        #[must_use]
         pub fn new() -> Self {
             Self {
                 written_count: RefCell::new(0),

@@ -36,5 +36,5 @@ impl Default for Config {
 
 fn main() {
     let config = Config::parse_all_sources();
-    println!("{:#?}", config);
+    println!("{config:#?}");
 }

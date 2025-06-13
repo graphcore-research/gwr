@@ -18,7 +18,7 @@ const PATH_SEP: &str = "::";
 
 pub fn write_section_header(out: &mut File, title: &str, depth: usize, reference: Option<&str>) {
     if let Some(reference) = reference {
-        out.write_all(format!("[#{}]\n", reference).as_bytes())
+        out.write_all(format!("[#{reference}]\n").as_bytes())
             .expect("Failed to write");
     }
     out.write_all(format!("{} {}\n\n", "=".repeat(depth), title).as_bytes())
@@ -43,10 +43,11 @@ pub struct DocNodeCommon {
 }
 
 impl DocNodeCommon {
+    #[must_use]
     pub fn new(name: String, parent: Option<Rc<RefCell<DocNodeCommon>>>, node: DocNode) -> Self {
         Self {
             name,
-            doc: "".to_owned(),
+            doc: String::new(),
             toc: None,
             node,
             parent,
@@ -54,6 +55,7 @@ impl DocNodeCommon {
     }
 
     /// Create a new [`DocNodeCommon`] and wrap it in an Rc<RefCell<>>.
+    #[must_use]
     pub fn new_rc(
         name: String,
         parent: Option<Rc<RefCell<DocNodeCommon>>>,
@@ -62,6 +64,7 @@ impl DocNodeCommon {
         Rc::new(RefCell::new(DocNodeCommon::new(name, parent, node)))
     }
 
+    #[must_use]
     pub fn node_type(&self) -> &'static str {
         match self.node {
             DocNode::Module(_) => "Module",
@@ -96,7 +99,7 @@ impl DocNodeCommon {
 
     pub fn write_doc(&self, parser: &DocParser, out: &mut File, depth: usize) {
         let doc = parser.preprocess_doc(self.doc.as_str(), depth);
-        out.write_all(format!("{}\n\n", doc).as_bytes())
+        out.write_all(format!("{doc}\n\n").as_bytes())
             .expect("Failed to write");
     }
 
@@ -136,6 +139,7 @@ impl DocNodeCommon {
         parser.write_doc_node(out, section.path.as_str(), emitted, depth + 1, self);
     }
 
+    #[must_use]
     pub fn full_name(&self) -> String {
         let mut path = Vec::new();
         self.full_path(&mut path);
@@ -146,19 +150,19 @@ impl DocNodeCommon {
         if self.parent.is_some() {
             self.parent.as_ref().unwrap().borrow().full_path(path);
         }
-        path.push(self.name.to_string())
+        path.push(self.name.to_string());
     }
 
     pub fn push_doc_string(&mut self, parser: &mut DocParser, to_append: &str) {
         let to_append = to_append.to_string();
         let (toc_str, to_append) = parser.extract_toc(to_append);
-        self.set_toc(toc_str);
+        self.set_toc(&toc_str);
 
         self.doc.push_str(to_append.as_str());
         self.doc.push('\n');
     }
 
-    fn set_toc(&mut self, toc_str: String) {
+    fn set_toc(&mut self, toc_str: &str) {
         if toc_str.is_empty() {
             return;
         }
@@ -166,7 +170,7 @@ impl DocNodeCommon {
         if self.toc.is_some() {
             panic!("Two `docpp:toc` sections for {}", self.full_name());
         }
-        let ts = TokenStream::from_str(toc_str.as_str()).unwrap();
+        let ts = TokenStream::from_str(toc_str).unwrap();
         let document = syn::parse2::<TocDocument>(ts).unwrap();
         self.toc = Some(document);
     }
@@ -229,6 +233,7 @@ pub struct Module {
 }
 
 impl Module {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             functions: HashMap::new(),
@@ -279,6 +284,7 @@ impl Default for Module {
 pub struct Function;
 
 impl Function {
+    #[must_use]
     pub fn new() -> Self {
         Self {}
     }
@@ -298,6 +304,7 @@ pub struct Struct {
 }
 
 impl Struct {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             fields: HashMap::new(),
@@ -326,6 +333,7 @@ impl Default for Struct {
 pub struct Field;
 
 impl Field {
+    #[must_use]
     pub fn new() -> Self {
         Self {}
     }

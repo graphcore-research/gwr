@@ -62,6 +62,7 @@ impl<T> Limiter<T>
 where
     T: SimObject,
 {
+    #[must_use]
     pub fn new(parent: &Arc<Entity>, name: &str, limiter: Rc<RateLimiter<T>>) -> Self {
         let entity = Arc::new(Entity::new(parent, name));
         let state = Rc::new(LimiterState::new(&entity, limiter));
@@ -72,6 +73,7 @@ where
         connect_tx!(self.state.tx, connect ; port_state);
     }
 
+    #[must_use]
     pub fn port_rx(&self) -> Rc<PortState<T>> {
         port_rx!(self.state.rx, state)
     }

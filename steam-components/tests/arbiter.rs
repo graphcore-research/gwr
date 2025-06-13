@@ -156,7 +156,7 @@ fn input_order() {
             *i = port.get().await;
         }
 
-        check_round_robin(&inputs, store_get);
+        check_round_robin(&inputs, &store_get);
         Ok(())
     });
 
@@ -285,7 +285,7 @@ fn weighted_policy() {
             *i = port.get().await;
         }
 
-        check_round_robin(&inputs, store_get);
+        check_round_robin(&inputs, &store_get);
         Ok(())
     });
 

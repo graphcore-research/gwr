@@ -23,7 +23,7 @@ pub struct ArbiterInputData {
     pub priority: Priority,
 }
 
-pub fn check_round_robin(inputs: &[ArbiterInputData], data: Vec<usize>) {
+pub fn check_round_robin(inputs: &[ArbiterInputData], data: &[usize]) {
     let total_count: usize = inputs.iter().map(|i| i.count).sum();
     assert_eq!(data.len(), total_count);
 
@@ -121,7 +121,7 @@ pub fn priority_policy_test_core(engine: &mut Engine, inputs: &[ArbiterInputData
             *i = port.get().await;
         }
 
-        check_round_robin(&check_inputs, store_get);
+        check_round_robin(&check_inputs, &store_get);
         Ok(())
     });
 

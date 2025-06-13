@@ -48,7 +48,7 @@ fn main() -> Result<(), std::io::Error> {
     let mut config = Config::parse_all_sources();
     let extra_conf_file = config.conf_file.clone().unwrap();
     config.parse_extra_conf_file(&extra_conf_file)?;
-    println!("{:#?}", config);
+    println!("{config:#?}");
 
     Ok(())
 }

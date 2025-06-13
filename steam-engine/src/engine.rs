@@ -40,7 +40,7 @@ impl Engine {
     pub fn run(&mut self) -> SimResult {
         // Pass an atomic bool that will never be set to true
         let finished = Rc::new(AtomicBool::new(false));
-        self.executor.run(finished)
+        self.executor.run(&finished)
     }
 
     pub fn run_until<T: Default + Copy + 'static>(&mut self, event: Eventable<T>) -> SimResult {
@@ -55,9 +55,10 @@ impl Engine {
             });
         }
 
-        self.executor.run(finished)
+        self.executor.run(&finished)
     }
 
+    #[must_use]
     pub fn spawner(&self) -> Spawner {
         self.spawner.clone()
     }
@@ -78,14 +79,17 @@ impl Engine {
         self.executor.get_clock(freq_ghz * 1000.0)
     }
 
+    #[must_use]
     pub fn time_now_ns(&self) -> f64 {
         self.executor.time_now_ns()
     }
 
+    #[must_use]
     pub fn top(&self) -> &Arc<Entity> {
         &self.toplevel
     }
 
+    #[must_use]
     pub fn tracker(&self) -> Tracker {
         self.tracker.clone()
     }

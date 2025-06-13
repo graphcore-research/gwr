@@ -27,6 +27,7 @@ impl TestTracker {
     /// Create a new [`Tracker`](crate::Tracker) for the tests.
     ///
     /// This keeps the track events in memory for checking later.
+    #[must_use]
     pub fn new(initial_tag: u64) -> Self {
         Self {
             events: Mutex::new(Vec::new()),
@@ -35,7 +36,7 @@ impl TestTracker {
     }
 
     fn add_event(&self, event: String) {
-        println!("{}", event);
+        println!("{event}");
         let mut events = self.events.lock().unwrap();
         events.push(event);
     }
@@ -56,30 +57,29 @@ impl Track for TestTracker {
     }
 
     fn enter(&self, tag: Tag, item: Tag) {
-        self.add_event(format!("{}: {} entered", tag, item));
+        self.add_event(format!("{tag}: {item} entered"));
     }
 
     fn exit(&self, tag: Tag, item: Tag) {
-        self.add_event(format!("{}: {} exited", tag, item));
+        self.add_event(format!("{tag}: {item} exited"));
     }
 
     fn create(&self, created_by: Tag, tag: Tag, num_bytes: usize, req_type: i8, name: &str) {
         self.add_event(format!(
-            "{}: created {}, {}, {}, {} bytes",
-            created_by, tag, name, req_type, num_bytes
+            "{created_by}: created {tag}, {name}, {req_type}, {num_bytes} bytes"
         ));
     }
 
     fn destroy(&self, destroyed_by: Tag, tag: Tag) {
-        self.add_event(format!("{}: destroyed {}", destroyed_by, tag));
+        self.add_event(format!("{destroyed_by}: destroyed {tag}"));
     }
 
     fn log(&self, tag: Tag, level: log::Level, msg: std::fmt::Arguments) {
-        self.add_event(format!("{}:{}: {}", tag, level, msg));
+        self.add_event(format!("{tag}:{level}: {msg}"));
     }
 
     fn time(&self, set_by: Tag, time_ns: f64) {
-        self.add_event(format!("{}: set time {:.1}ns", set_by, time_ns));
+        self.add_event(format!("{set_by}: set time {time_ns:.1}ns"));
     }
 
     fn shutdown(&self) {
@@ -170,7 +170,7 @@ pub fn check_and_clear(tracker: &TestTracker, expected: &[&str]) {
         let log_expect = expected[i];
         let re = Regex::new(log_expect).unwrap();
         let actual = &(*log_contents_ref[i]);
-        println!("Checking {}: {:?} matches {:?}", i, log_expect, actual);
+        println!("Checking {i}: {log_expect:?} matches {actual:?}");
         assert!(re.is_match(actual));
     }
 

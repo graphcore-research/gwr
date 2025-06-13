@@ -106,11 +106,11 @@ fn blocked_output() {
     connect_port!(delay, tx => store, rx);
 
     spawn_simulation!(engine; [source, store, delay]);
-    spawn_slow_reader(&engine, clock, store);
+    spawn_slow_reader(&engine, clock, &store);
     run_simulation!(engine);
 }
 
-fn spawn_slow_reader<T>(engine: &Engine, clock: Clock, store: Store<T>)
+fn spawn_slow_reader<T>(engine: &Engine, clock: Clock, store: &Store<T>)
 where
     T: SimObject,
 {
@@ -120,7 +120,7 @@ where
         loop {
             let value = rx.get().await;
             let now = clock.tick_now();
-            println!("Pipeline received {} @{now}", value);
+            println!("Pipeline received {value} @{now}");
             clock.wait_ticks(10).await;
         }
     });

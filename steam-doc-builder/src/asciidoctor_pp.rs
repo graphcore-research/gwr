@@ -9,6 +9,7 @@ pub struct AsciiDoctorPreProcessor {
 }
 
 impl AsciiDoctorPreProcessor {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             link_re: Regex::new(r"\[`(?<text>[^`]+)`\]\((?<link>[^\)]+)\)").unwrap(),
@@ -16,12 +17,13 @@ impl AsciiDoctorPreProcessor {
     }
 
     /// Preprocess the documentation strings for emitting as asciidoctor
+    #[must_use]
     pub fn preprocess_doc(&self, input: &str, depth: usize) -> String {
         let mut output = Vec::new();
         for line in input.lines() {
-            let line = self.strip_leading_space(line.to_string());
-            let line = self.reindent_headings(line, depth);
-            let line = self.process_links(line);
+            let line = Self::strip_leading_space(line.to_string());
+            let line = Self::reindent_headings(line, depth);
+            let line = self.process_links(&line);
             output.push(line);
         }
         output.join("\n")
@@ -34,7 +36,7 @@ impl AsciiDoctorPreProcessor {
     /// maintained, so it needs to be stripped from every line. The
     /// assumption is that one space is removed from any line that has one
     /// or more spaces.
-    fn strip_leading_space(&self, line: String) -> String {
+    fn strip_leading_space(line: String) -> String {
         if line.starts_with(' ') {
             let mut line = line.clone();
             line.remove(0);
@@ -73,7 +75,7 @@ impl AsciiDoctorPreProcessor {
     ///
     /// With more text
     /// ```
-    fn reindent_headings(&self, line: String, depth: usize) -> String {
+    fn reindent_headings(line: String, depth: usize) -> String {
         let heading_depth = line.chars().take_while(|ch| *ch == '=').count();
 
         if heading_depth > 0 {
@@ -94,13 +96,13 @@ impl AsciiDoctorPreProcessor {
     ///
     /// Markdown links should be of the form: [`Visible Text`](link)
     /// Which are replace with adoc versions: <<link, Visible Text>>
-    fn process_links(&self, line: String) -> String {
+    fn process_links(&self, line: &str) -> String {
         let mut line = line.to_owned();
         while let Some(e) = self.link_re.captures(&line) {
             let md_link = e.get(0).unwrap().as_str();
             let text = e.name("text").unwrap().as_str();
             let link = e.name("link").unwrap().as_str();
-            let adoc_link = format!("<<{},{}>>", link, text).to_owned();
+            let adoc_link = format!("<<{link},{text}>>").to_owned();
             line = line.replace(md_link, adoc_link.as_str());
         }
         line

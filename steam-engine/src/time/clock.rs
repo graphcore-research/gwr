@@ -24,16 +24,19 @@ pub struct ClockTick {
 }
 
 impl ClockTick {
+    #[must_use]
     pub fn new() -> Self {
         Self { tick: 0, phase: 0 }
     }
 
     /// Get the current clock tick.
+    #[must_use]
     pub fn tick(&self) -> u64 {
         self.tick
     }
 
     /// Get the current clock phase.
+    #[must_use]
     pub fn phase(&self) -> u32 {
         self.phase
     }
@@ -147,7 +150,7 @@ impl ClockState {
                         can_exit,
                     }]);
                 }
-            };
+            }
         }
     }
 
@@ -168,6 +171,7 @@ impl ClockState {
 
 impl Clock {
     /// Create a new [Clock] at the specified frequency.
+    #[must_use]
     pub fn new(freq_mhz: f64) -> Self {
         let shared_state = Rc::new(ClockState {
             now: RefCell::new(ClockTick { tick: 0, phase: 0 }),
@@ -183,22 +187,26 @@ impl Clock {
     }
 
     /// Returns the clocks frequency in MHz.
+    #[must_use]
     pub fn freq_mhz(&self) -> f64 {
         self.freq_mhz
     }
 
     /// Returns the current [ClockTick].
+    #[must_use]
     pub fn tick_now(&self) -> ClockTick {
         *self.shared_state.now.borrow()
     }
 
     /// Returns the current time in `ns`.
+    #[must_use]
     pub fn time_now_ns(&self) -> f64 {
         let now = *self.shared_state.now.borrow();
         self.to_ns(&now)
     }
 
     /// Returns the time in `ns` of the next event registered with this clock.
+    #[must_use]
     pub fn time_of_next(&self) -> f64 {
         match self.shared_state.waiting_times.borrow().first() {
             Some(clock_time) => self.to_ns(clock_time),
@@ -207,6 +215,7 @@ impl Clock {
     }
 
     /// Convert the given [ClockTick] to a time in `ns` for this clock.
+    #[must_use]
     pub fn to_ns(&self, clock_time: &ClockTick) -> f64 {
         clock_time.tick as f64 / self.freq_mhz * 1000.0
     }

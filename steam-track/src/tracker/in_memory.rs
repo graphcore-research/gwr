@@ -342,7 +342,7 @@ impl Track for InMemoryTracker {
         let time = self.time();
         let log = Event::Log {
             level,
-            text: format!("{}", msg),
+            text: format!("{msg}"),
         };
         self.add_event(EventCommon::new(tag, time, log));
     }

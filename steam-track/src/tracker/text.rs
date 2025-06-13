@@ -43,7 +43,7 @@ impl Track for TextTracker {
         self.writer
             .lock()
             .unwrap()
-            .write_all(format!("{}: enter {}\n", tag, object).as_bytes())
+            .write_all(format!("{tag}: enter {object}\n").as_bytes())
             .unwrap();
     }
 
@@ -51,7 +51,7 @@ impl Track for TextTracker {
         self.writer
             .lock()
             .unwrap()
-            .write_all(format!("{}: exit {}\n", tag, object).as_bytes())
+            .write_all(format!("{tag}: exit {object}\n").as_bytes())
             .unwrap();
     }
 
@@ -60,11 +60,8 @@ impl Track for TextTracker {
             .lock()
             .unwrap()
             .write_all(
-                format!(
-                    "{}: created {}, {}, {}, {} bytes\n",
-                    created_by, tag, name, req_type, num_bytes
-                )
-                .as_bytes(),
+                format!("{created_by}: created {tag}, {name}, {req_type}, {num_bytes} bytes\n")
+                    .as_bytes(),
             )
             .unwrap();
     }
@@ -73,7 +70,7 @@ impl Track for TextTracker {
         self.writer
             .lock()
             .unwrap()
-            .write_all(format!("{}: destroyed {}\n", destroyed_by, tag).as_bytes())
+            .write_all(format!("{destroyed_by}: destroyed {tag}\n").as_bytes())
             .unwrap();
     }
 
@@ -81,7 +78,7 @@ impl Track for TextTracker {
         self.writer
             .lock()
             .unwrap()
-            .write_all(format!("{}:{}: {}\n", tag, level, msg).as_bytes())
+            .write_all(format!("{tag}:{level}: {msg}\n").as_bytes())
             .unwrap();
     }
 
@@ -89,7 +86,7 @@ impl Track for TextTracker {
         self.writer
             .lock()
             .unwrap()
-            .write_all(format!("{}: set time to {:.1}ns\n", set_by, time_ns).as_bytes())
+            .write_all(format!("{set_by}: set time to {time_ns:.1}ns\n").as_bytes())
             .unwrap();
     }
 

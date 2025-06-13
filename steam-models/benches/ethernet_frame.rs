@@ -24,7 +24,7 @@ where
 {
     let (mut engine, sink) = args;
     engine.run().unwrap();
-    assert_eq!(sink.num_sunk(), NUM_FRAMES)
+    assert_eq!(sink.num_sunk(), NUM_FRAMES);
 }
 
 fn setup_frame_simulation() -> (Engine, Sink<EthernetFrame>) {

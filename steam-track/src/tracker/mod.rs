@@ -67,6 +67,7 @@ pub trait Track {
 pub type Tracker = Arc<dyn Track + Send + Sync>;
 
 /// Create a [`Tracker`] that prints all track events to `stdout`.
+#[must_use]
 pub fn stdout_tracker(level: log::Level) -> Tracker {
     let entity_manger = EntityManager::new(level);
     let stdout_writer = Box::new(std::io::BufWriter::new(io::stdout()));
@@ -75,6 +76,7 @@ pub fn stdout_tracker(level: log::Level) -> Tracker {
 }
 
 /// Create a [`Tracker`] that suppresses all track events.
+#[must_use]
 pub fn dev_null_tracker() -> Tracker {
     let tracer: Tracker = Arc::new(DevNullTracker {});
     tracer
@@ -107,6 +109,7 @@ pub struct EntityManager {
 
 impl EntityManager {
     /// Constructor with [`TraceState`] and [`log::Level`]
+    #[must_use]
     pub fn new(default_entity_level: log::Level) -> Self {
         Self {
             default_entity_level,
@@ -139,12 +142,12 @@ impl EntityManager {
                 .insert(tag, entity_level)
                 .is_some()
         {
-            panic!("Entity tag {} already seen ({})", tag, entity_name);
+            panic!("Entity tag {tag} already seen ({entity_name})");
         }
     }
 
     fn log_level_for(&self, entity_name: &str) -> log::Level {
-        for (regex, level) in self.regex_to_entity_level.iter() {
+        for (regex, level) in &self.regex_to_entity_level {
             if regex.is_match(entity_name) {
                 return *level;
             }
@@ -165,8 +168,8 @@ impl EntityManager {
     pub fn add_entity_level_filter(&mut self, regex_str: &str, level: crate::log::Level) {
         match Regex::new(regex_str) {
             Ok(regex) => self.regex_to_entity_level.push((regex, level)),
-            Err(e) => panic!("Failed to parse regex {regex_str}:\n{}\n", e),
-        };
+            Err(e) => panic!("Failed to parse regex {regex_str}:\n{e}\n"),
+        }
     }
 
     fn time(&self) -> f64 {

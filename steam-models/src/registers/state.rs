@@ -79,7 +79,7 @@ macro_rules! build_register_state {
 
     $(#[$($reg_attrs)*])*
     impl [< $reg State >] {
-        pub fn new() -> Self {
+        #[must_use] pub fn new() -> Self {
             let start_bit = 0;
             $(
             let $field = $crate::registers::field::Field::new($num_bits, start_bit, $reset);
@@ -216,7 +216,7 @@ macro_rules! build_register_states {
         }
 
         impl $state_name {
-            pub fn new() -> Self {
+            #[must_use] pub fn new() -> Self {
                 $(
                 let [< $state:lower >] = $crate::array![ std::rc::Rc::new([< $state State >]::new()) ; $num ];
                 )+

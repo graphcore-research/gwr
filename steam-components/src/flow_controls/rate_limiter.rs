@@ -124,6 +124,7 @@ impl<T> RateLimiter<T>
 where
     T: TotalBytes,
 {
+    #[must_use]
     pub fn new(clock: Clock, bits_per_tick: usize) -> Self {
         Self {
             clock,
@@ -147,6 +148,7 @@ where
         self.ticks_from_bits(payload_bits)
     }
 
+    #[must_use]
     pub fn ticks_from_bits(&self, bits: usize) -> usize {
         bits.div_ceil(self.bits_per_tick)
     }

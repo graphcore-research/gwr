@@ -60,6 +60,7 @@ impl<T> InPort<T>
 where
     T: SimObject,
 {
+    #[must_use]
     pub fn new(parent: &Arc<Entity>, name: &str) -> Self {
         let entity = Arc::new(Entity::new(parent, name));
         Self {
@@ -71,7 +72,7 @@ where
 
     pub fn state(&self) -> Rc<PortState<T>> {
         if *self.connected.borrow() {
-            panic!("{} already connected", self);
+            panic!("{self} already connected");
         }
 
         *self.connected.borrow_mut() = true;
@@ -81,7 +82,7 @@ where
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
     pub fn get(&self) -> PortGet<T> {
         if !*self.connected.borrow() {
-            panic!("{} not connected", self);
+            panic!("{self} not connected");
         }
 
         PortGet {
@@ -94,7 +95,7 @@ where
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
     pub fn start_get(&self) -> PortStartGet<T> {
         if !*self.connected.borrow() {
-            panic!("{} not connected", self);
+            panic!("{self} not connected");
         }
 
         PortStartGet {
@@ -132,6 +133,7 @@ impl<T> OutPort<T>
 where
     T: SimObject,
 {
+    #[must_use]
     pub fn new(parent: &Arc<Entity>, name: &str) -> Self {
         let entity = Arc::new(Entity::new(parent, name));
         Self {
@@ -154,7 +156,7 @@ where
         let state = self
             .state
             .as_ref()
-            .unwrap_or_else(|| panic!("{} not connected", self))
+            .unwrap_or_else(|| panic!("{self} not connected"))
             .clone();
         PortPut {
             state,
@@ -168,7 +170,7 @@ where
         let state = self
             .state
             .as_ref()
-            .unwrap_or_else(|| panic!("{} not connected", self))
+            .unwrap_or_else(|| panic!("{self} not connected"))
             .clone();
         PortTryPut { state, done: false }
     }

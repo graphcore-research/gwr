@@ -17,6 +17,7 @@ pub const SRC_MAC_BYTES: usize = 6;
 pub const PACKET_OVERHEAD_BYTES: usize =
     PREAMBLE_BYTES + SFD_BYTES + DEST_MAC_BYTES + SRC_MAC_BYTES;
 
+#[must_use]
 pub fn mac_to_u64(mac: &[u8; DEST_MAC_BYTES]) -> u64 {
     ((mac[5] as u64) << (8 * 5))
         | ((mac[4] as u64) << (8 * 4))
@@ -26,6 +27,7 @@ pub fn mac_to_u64(mac: &[u8; DEST_MAC_BYTES]) -> u64 {
         | (mac[0] as u64)
 }
 
+#[must_use]
 pub fn u64_to_mac(value: u64) -> [u8; DEST_MAC_BYTES] {
     let mut mac = [0_u8; DEST_MAC_BYTES];
     mac[0] = (value & 0xff) as u8;
@@ -51,6 +53,7 @@ pub struct EthernetFrame {
 }
 
 impl EthernetFrame {
+    #[must_use]
     pub fn new(created_by: &Arc<Entity>, payload_size_bytes: usize) -> Self {
         let frame = Self {
             created_by: created_by.clone(),
@@ -63,20 +66,24 @@ impl EthernetFrame {
         frame
     }
 
+    #[must_use]
     pub fn set_dest(mut self, dst_mac: [u8; DEST_MAC_BYTES]) -> Self {
         self.dst_mac = dst_mac;
         self
     }
 
+    #[must_use]
     pub fn set_src(mut self, src_mac: [u8; SRC_MAC_BYTES]) -> Self {
         self.src_mac = src_mac;
         self
     }
 
+    #[must_use]
     pub fn get_dst(&self) -> u64 {
         mac_to_u64(&self.dst_mac)
     }
 
+    #[must_use]
     pub fn get_src(&self) -> u64 {
         mac_to_u64(&self.src_mac)
     }

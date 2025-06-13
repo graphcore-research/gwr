@@ -22,7 +22,7 @@ macro_rules! build_register_file {
         }
 
         impl [< $regfile Regs >] {
-            pub fn new(states: &$states, index: usize) -> Self {
+            #[must_use] pub fn new(states: &$states, index: usize) -> Self {
                 $(
                 let [< $reg_view:lower _state >] = states.[< $state:lower >][index].clone();
                 let [< $reg_name:lower >] = [< $reg_view Reg >]::new([< $reg_view:lower _state >]);
@@ -41,7 +41,7 @@ macro_rules! build_register_file {
                 }
             }
 
-            pub fn read(&self, index: u64) -> u64 {
+            #[must_use] pub fn read(&self, index: u64) -> u64 {
                 match index {
                     $( $index => self.[< $reg_name:lower >].read(), )+
                     // ignore missing indices

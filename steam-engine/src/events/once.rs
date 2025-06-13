@@ -79,12 +79,11 @@ where
 
     pub fn notify(&self) -> SimResult {
         if *self.state.triggered.borrow() {
-            sim_error!("once event already triggered")
-        } else {
-            *self.state.triggered.borrow_mut() = true;
-            for waker in self.state.listen_waiting.borrow_mut().drain(..) {
-                waker.wake();
-            }
+            return sim_error!("once event already triggered");
+        }
+        *self.state.triggered.borrow_mut() = true;
+        for waker in self.state.listen_waiting.borrow_mut().drain(..) {
+            waker.wake();
         }
         Ok(())
     }

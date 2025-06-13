@@ -53,6 +53,7 @@ pub struct RingConfig {
 }
 
 impl RingConfig {
+    #[must_use]
     pub fn new(rx_buffer_entries: usize, tx_buffer_entries: usize) -> Self {
         Self {
             rx_buffer_entries,
@@ -125,6 +126,7 @@ impl<T> RingNode<T>
 where
     T: SimObject,
 {
+    #[must_use]
     pub fn new(
         parent: &Arc<Entity>,
         name: &str,
@@ -158,10 +160,12 @@ where
         connect_tx_i!(self.state.router, connect_port_tx_i, IO_INDEX ; port_state);
     }
 
+    #[must_use]
     pub fn port_ring_rx(&self) -> Rc<PortState<T>> {
         port_rx!(self.state.rx_buffer_limiter, port_rx)
     }
 
+    #[must_use]
     pub fn port_io_rx(&self) -> Rc<PortState<T>> {
         port_rx_i!(self.state.arbiter, port_rx_i, IO_INDEX)
     }

@@ -67,7 +67,7 @@ fn get_search_and_cursor(app: &App) -> (String, usize) {
 
 fn render_search<B: Backend>(app: &mut App, frame: &mut Frame<'_, B>, area: Rect) {
     let title = "Search";
-    let re = format!("Regex ({:?})", TOGGLE_RE)
+    let re = format!("Regex ({TOGGLE_RE:?})")
         .replace('(', "")
         .replace(')', "");
 
@@ -104,7 +104,7 @@ fn render_search<B: Backend>(app: &mut App, frame: &mut Frame<'_, B>, area: Rect
             .style(Style::default().fg(Color::Cyan).bg(Color::Black))
             .alignment(Alignment::Left),
         area,
-    )
+    );
 }
 
 fn render_log<B: Backend>(app: &mut App, frame: &mut Frame<'_, B>, area: Rect) {
@@ -143,7 +143,7 @@ fn render_log<B: Backend>(app: &mut App, frame: &mut Frame<'_, B>, area: Rect) {
             .style(Style::default().fg(Color::Cyan).bg(Color::Black))
             .alignment(Alignment::Left),
         area,
-    )
+    );
 }
 
 struct HelpRender<'a> {
@@ -186,7 +186,7 @@ impl<'a> HelpRender<'a> {
         self.lines.push(Line::from(vec![
             Span::from(self.indent),
             Span::styled(command, self.style_command),
-            Span::styled(format!(": {}", help), self.style_text),
+            Span::styled(format!(": {help}"), self.style_text),
         ]));
     }
 
@@ -195,7 +195,7 @@ impl<'a> HelpRender<'a> {
             Span::from(self.indent),
             Span::styled(" - ", self.style_text),
             Span::styled(command, self.style_command),
-            Span::styled(format!(": {}", help), self.style_text),
+            Span::styled(format!(": {help}"), self.style_text),
         ]));
     }
 
@@ -207,7 +207,7 @@ impl<'a> HelpRender<'a> {
 fn render_help<B: Backend>(_app: &mut App, frame: &mut Frame<'_, B>, area: Rect) {
     let mut renderer = HelpRender::new();
 
-    let re = format!("{:?}", TOGGLE_RE).replace('(', "").replace(')', "");
+    let re = format!("{TOGGLE_RE:?}").replace('(', "").replace(')', "");
     renderer.add_header(
         "Search:",
         vec![
@@ -257,7 +257,7 @@ fn render_help<B: Backend>(_app: &mut App, frame: &mut Frame<'_, B>, area: Rect)
             .style(Style::default().fg(Color::Cyan).bg(Color::Black))
             .alignment(Alignment::Left),
         area,
-    )
+    );
 }
 
 fn render_chart<B: Backend>(app: &mut App, frame: &mut Frame<'_, B>, area: Rect) {
@@ -275,7 +275,7 @@ fn render_chart<B: Backend>(app: &mut App, frame: &mut Frame<'_, B>, area: Rect)
 
     let mut max_value = u64::MIN;
     if let Some(indices) = renderer.render_indices.as_ref() {
-        for index in indices.iter() {
+        for index in indices {
             let value = if plot_fullness {
                 renderer.line_fullness(*index)
             } else {

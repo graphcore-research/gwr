@@ -35,6 +35,7 @@ pub struct EventHandler {
 
 impl EventHandler {
     /// Constructs a new instance of [`EventHandler`].
+    #[must_use]
     pub fn new(tick_rate: u64) -> Self {
         let tick_rate = Duration::from_millis(tick_rate);
         let (sender, receiver) = mpsc::channel();
@@ -54,7 +55,7 @@ impl EventHandler {
                             CrosstermEvent::Resize(w, h) => sender.send(Event::Resize(w, h)),
                             _ => unimplemented!(),
                         }
-                        .expect("failed to send terminal event")
+                        .expect("failed to send terminal event");
                     }
 
                     if last_tick.elapsed() >= tick_rate {

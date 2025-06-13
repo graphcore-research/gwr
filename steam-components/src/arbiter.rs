@@ -53,6 +53,7 @@ pub struct RoundRobinPolicy {
 }
 
 impl RoundRobinPolicy {
+    #[must_use]
     pub fn new() -> Self {
         Self { candidate: 0 }
     }
@@ -88,6 +89,7 @@ pub struct WeightedRoundRobinPolicy {
 }
 
 impl WeightedRoundRobinPolicy {
+    #[must_use]
     pub fn new(weights: Vec<usize>, num_inputs: usize) -> Self {
         if weights.len() != num_inputs {
             panic!("The number of weights must be equal to the number of inputs");
@@ -182,6 +184,7 @@ impl<P> PriorityRoundRobinPolicy<P>
 where
     P: Copy + Default + Ord,
 {
+    #[must_use]
     pub fn new(num_inputs: usize) -> Self {
         let default_priority = P::default();
         let priority_vec = vec![default_priority; num_inputs];
@@ -192,6 +195,7 @@ where
         }
     }
 
+    #[must_use]
     pub fn from_priorities(priority_vec: Vec<P>, num_inputs: usize) -> Self {
         if priority_vec.len() != num_inputs {
             panic!("The number of priorities must be equal to the number of inputs");
@@ -293,6 +297,7 @@ impl<T> Arbiter<T>
 where
     T: SimObject,
 {
+    #[must_use]
     pub fn new(
         parent: &Arc<Entity>,
         name: &str,
@@ -313,6 +318,7 @@ where
         connect_tx!(self.state.tx, connect ; port_state);
     }
 
+    #[must_use]
     pub fn port_rx_i(&self, i: usize) -> Rc<PortState<T>> {
         self.state.rx.borrow()[i].as_ref().unwrap().state()
     }
@@ -387,7 +393,7 @@ async fn run_input<T: SimObject>(
             None => None,
         };
         if let Some(once) = wait_event {
-            once.listen().await
+            once.listen().await;
         }
 
         // Set the value for this input

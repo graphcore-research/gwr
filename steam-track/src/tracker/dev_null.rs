@@ -29,9 +29,10 @@ impl Track for DevNullTracker {
 }
 
 /// Take the command-line string and convert it to a Level
+#[must_use]
 pub fn str_to_level(lvl: &str) -> log::Level {
     match log::Level::from_str(lvl) {
         Ok(level) => level,
-        Err(_) => panic!("Unable to parse level string '{}'", lvl),
+        Err(_) => panic!("Unable to parse level string '{lvl}'"),
     }
 }
