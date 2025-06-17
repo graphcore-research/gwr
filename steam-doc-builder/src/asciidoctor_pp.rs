@@ -92,6 +92,7 @@ impl AsciiDoctorPreProcessor {
         line
     }
 
+    #[allow(rustdoc::broken_intra_doc_links)]
     /// Process the markdown links and replace them with AsciiDoctor ones.
     ///
     /// Markdown links should be of the form: [`Visible Text`](link)

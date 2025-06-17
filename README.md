@@ -14,11 +14,11 @@ Welcome to the STEAM (Simulation Technology for Evaluation and Architecture
 Modelling) project. The core STEAM packages are provided as a monorepo, which
 together provide the following functionality:
 
-- An event-driven [simulation engine]
-- [Logging] and [log viewing] system
-- Hierarchical configuration support
-- Documentation tooling
-- A library of [components] and basic [models]
+- An event-driven [simulation engine].
+- [Logging] and [log viewing] system.
+- Hierarchical configuration support.
+- Documentation tooling.
+- A library of [components] and basic [models].
 
 <!-- ANCHOR_END: intro -->
 

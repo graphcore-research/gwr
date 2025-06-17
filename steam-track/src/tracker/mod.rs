@@ -102,13 +102,13 @@ pub struct EntityManager {
     /// Keep track of the current time.
     current_time: Mutex<f64>,
 
-    /// Keep track of entites that have trace enable/log levels different to the
-    /// default
+    /// Keep track of entities that have trace enable/log levels different to
+    /// the default
     entity_lookup: Mutex<HashMap<Tag, log::Level>>,
 }
 
 impl EntityManager {
-    /// Constructor with [`TraceState`] and [`log::Level`]
+    /// Constructor with default [`log::Level`]
     #[must_use]
     pub fn new(default_entity_level: log::Level) -> Self {
         Self {

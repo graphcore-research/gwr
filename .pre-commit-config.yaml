@@ -87,6 +87,16 @@ repos:
         entry: env RUSTFLAGS="-D warnings" cargo clippy-strict
         pass_filenames: false
         stages: [pre-commit, pre-merge-commit, pre-push, manual]
+      - id: cargo-doc
+        name: cargo doc
+        description: check Rust source code documentation
+        language: system
+        types: [rust]
+        entry:
+          env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features
+          --document-private-items --no-deps
+        pass_filenames: false
+        stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: cargo-semver-checks
         name: cargo semver-checks
         description: lint crate API changes for semver violations
