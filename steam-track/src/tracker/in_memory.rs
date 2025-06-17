@@ -12,7 +12,7 @@ use crate::tracker::{EntityManager, Track};
 /// A [`Track`] event.
 #[derive(Debug, Clone)]
 pub struct EventCommon {
-    /// The [`Tag`](crate::Tag) of the event originator.
+    /// The [`Tag`] of the event originator.
     tag: Tag,
 
     /// The time at which the event occurred.

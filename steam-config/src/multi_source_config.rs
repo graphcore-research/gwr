@@ -3,8 +3,8 @@
 //! The implementation of the [macro@crate::multi_source_config] macro.
 //!
 //! Within this file [proc_macro2] types are used, with [syn] providing the
-//! required parsing functionality and [quote] allowing new AST to be created as
-//! if writing Rust as normal.
+//! required parsing functionality and [mod@quote] allowing new AST to be
+//! created as if writing Rust as normal.
 
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
