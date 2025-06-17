@@ -10,7 +10,7 @@ use crate::steam_track_capnp::log::LogLevel;
 use crate::tracker::{EntityManager, Track};
 use crate::{SharedWriter, Tag, Writer};
 
-/// A tracer that writes Cap'n Proto binary data
+/// A tracker that writes Cap'n Proto binary data
 pub struct CapnProtoTracker {
     entity_manager: EntityManager,
     writer: SharedWriter,
