@@ -35,9 +35,9 @@ pub trait TraceVisitor {
     ///
     /// # Arguments
     ///
-    /// * `created_by` - Tag of the object causing the creation.
+    /// * `created_by` - Tag of the entity causing the creation.
     /// * `tag` - The originator of this event.
-    /// * `num_bytes` - Size of the created object in bytes.
+    /// * `num_bytes` - Size of the created entity in bytes.
     /// * `req_type` - The type of request being traced (Read, Write, etc).
     /// * `name` - Name of the entity being created.
     fn create(&mut self, created_by: Tag, tag: Tag, num_bytes: usize, req_type: i8, name: &str) {
@@ -53,7 +53,7 @@ pub trait TraceVisitor {
     ///
     /// # Arguments
     ///
-    /// * `destroyed_by` - Tag of the object causing the destruction.
+    /// * `destroyed_by` - Tag of the entity causing the destruction.
     /// * `tag` - The originator of this event.
     fn destroy(&mut self, destroyed_by: Tag, tag: Tag) {
         // Remove the unused variable warnings
@@ -61,12 +61,24 @@ pub trait TraceVisitor {
         let _ = tag;
     }
 
+    /// One entity is connected to another.
+    ///
+    /// # Arguments
+    ///
+    /// * `connect_from` - Tag of the entity being connected from.
+    /// * `connect_to` - Tag of the entity being connected to.
+    fn connect(&mut self, connect_from: Tag, connect_to: Tag) {
+        // Remove the unused variable warnings
+        let _ = connect_from;
+        let _ = connect_to;
+    }
+
     /// A tag is entered (e.g. start of a function or block).
     ///
     /// # Arguments
     ///
     /// * `tag` - The originator of this event.
-    /// * `entered` - The tag of the object entering.
+    /// * `entered` - The tag of the entity entering.
     fn enter(&mut self, tag: Tag, entered: Tag) {
         // Remove the unused variable warnings
         let _ = tag;
@@ -78,7 +90,7 @@ pub trait TraceVisitor {
     /// # Arguments
     ///
     /// * `tag` - The originator of this event.
-    /// * `exited` - The tag of the object exiting.
+    /// * `exited` - The tag of the entity exiting.
     fn exit(&mut self, tag: Tag, exited: Tag) {
         // Remove the unused variable warnings
         let _ = tag;
@@ -184,6 +196,9 @@ where
             }
             Ok(steam_track_capnp::event::Which::Destroy(destroyed_by)) => {
                 visitor.destroy(tag, Tag(destroyed_by));
+            }
+            Ok(steam_track_capnp::event::Which::Connect(connect_to)) => {
+                visitor.connect(tag, Tag(connect_to));
             }
             Ok(steam_track_capnp::event::Which::Enter(entered)) => {
                 visitor.enter(tag, Tag(entered));

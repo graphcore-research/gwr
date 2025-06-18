@@ -23,6 +23,7 @@ impl Track for DevNullTracker {
     fn exit(&self, _tag: Tag, _obj: Tag) {}
     fn create(&self, _tag: Tag, _obj: Tag, _num_bytes: usize, _req_type: i8, _name: &str) {}
     fn destroy(&self, _tag: Tag, _obj: Tag) {}
+    fn connect(&self, _connect_from: Tag, _connect_to: Tag) {}
     fn log(&self, _tag: Tag, _level: log::Level, _msg: std::fmt::Arguments) {}
     fn time(&self, _set_by: Tag, _time_ns: f64) {}
     fn shutdown(&self) {}

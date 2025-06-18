@@ -79,6 +79,14 @@ impl Track for MultiTracker {
         }
     }
 
+    fn connect(&self, connect_from: Tag, connect_to: Tag) {
+        for tracker in &self.trackers {
+            if tracker.is_entity_enabled(connect_from, log::Level::Trace) {
+                tracker.connect(connect_from, connect_to);
+            }
+        }
+    }
+
     fn log(&self, tag: Tag, level: log::Level, msg: std::fmt::Arguments) {
         for tracker in &self.trackers {
             if tracker.is_entity_enabled(tag, level) {

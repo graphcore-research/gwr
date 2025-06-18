@@ -11,6 +11,7 @@ use std::task::{Context, Poll, Waker};
 
 use futures::Future;
 use futures::future::FusedFuture;
+use steam_track::connect;
 use steam_track::entity::Entity;
 
 use crate::traits::SimObject;
@@ -23,17 +24,19 @@ where
     value: RefCell<Option<T>>,
     waiting_get: RefCell<Option<Waker>>,
     waiting_put: RefCell<Option<Waker>>,
+    pub in_port_entity: Arc<Entity>,
 }
 
-impl<T> Default for PortState<T>
+impl<T> PortState<T>
 where
     T: SimObject,
 {
-    fn default() -> Self {
+    fn new(in_port_entity: Arc<Entity>) -> Self {
         Self {
             value: RefCell::new(None),
             waiting_get: RefCell::new(None),
             waiting_put: RefCell::new(None),
+            in_port_entity,
         }
     }
 }
@@ -64,8 +67,8 @@ where
     pub fn new(parent: &Arc<Entity>, name: &str) -> Self {
         let entity = Arc::new(Entity::new(parent, name));
         Self {
-            entity,
-            state: Rc::new(PortState::default()),
+            entity: entity.clone(),
+            state: Rc::new(PortState::new(entity)),
             connected: RefCell::new(false),
         }
     }
@@ -143,6 +146,7 @@ where
     }
 
     pub fn connect(&mut self, port_state: Rc<PortState<T>>) {
+        connect!(self.entity ; port_state.in_port_entity);
         match self.state {
             Some(_) => panic!("{} already connected", self.entity),
             None => {

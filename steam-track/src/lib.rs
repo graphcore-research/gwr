@@ -188,6 +188,21 @@ macro_rules! destroy {
     }};
 }
 
+/// Connect two entities
+#[macro_export]
+macro_rules! connect {
+    ($from_entity:expr ; $to_entity:expr) => {{
+        if $from_entity
+            .tracker
+            .is_entity_enabled($from_entity.tag, log::Level::Trace)
+        {
+            $from_entity
+                .tracker
+                .connect($from_entity.tag, $to_entity.tag);
+        }
+    }};
+}
+
 /// Update the current time.
 #[macro_export]
 macro_rules! set_time {

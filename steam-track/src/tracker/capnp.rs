@@ -99,6 +99,12 @@ impl Track for CapnProtoTracker {
         });
     }
 
+    fn connect(&self, connect_from: Tag, connect_to: Tag) {
+        self.write_event(connect_from, |mut event| {
+            event.set_connect(connect_to.0);
+        });
+    }
+
     fn log(&self, tag: Tag, level: log::Level, msg: std::fmt::Arguments) {
         self.write_event(tag, |event| {
             let mut log = event.init_log();

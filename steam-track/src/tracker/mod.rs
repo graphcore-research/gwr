@@ -41,17 +41,20 @@ pub trait Track {
     /// Record an entity being created.
     fn add_entity(&self, tag: Tag, entity_name: &str);
 
-    /// Track when an object with the given tag arrives.
+    /// Track when an entity with the given tag arrives.
     fn enter(&self, enter_into: Tag, enter_obj: Tag);
 
-    /// Track when an object with the given tag leaves.
+    /// Track when an entity with the given tag leaves.
     fn exit(&self, exit_from: Tag, exit_obj: Tag);
 
-    /// Track when an object with the given tag is created.
+    /// Track when an entity with the given tag is created.
     fn create(&self, created_by: Tag, created_obj: Tag, num_bytes: usize, req_type: i8, name: &str);
 
-    /// Track when an object with the given tag is destroyed.
+    /// Track when an entity with the given tag is destroyed.
     fn destroy(&self, destroyed_by: Tag, destroyed_obj: Tag);
+
+    /// Track when an entity is connected to another entity
+    fn connect(&self, connect_from: Tag, connect_to: Tag);
 
     /// Track a log message of the given level.
     fn log(&self, msg_by: Tag, level: log::Level, msg: std::fmt::Arguments);
