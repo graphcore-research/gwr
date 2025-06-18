@@ -34,6 +34,7 @@ impl EventCommon {
 enum Event {
     Create { num_bytes: usize, req_type: i8 },
     Destroy,
+    Connect { to: Tag },
     Log { level: log::Level, text: String },
     Enter { entered: Tag },
     Exit { exited: Tag },
@@ -328,11 +329,20 @@ impl Track for InMemoryTracker {
         state_guard.add_name_to_tag(name, tag);
     }
 
-    /// Track when an object with the given tag is destroyed.
+    /// Track when an entity with the given tag is destroyed.
     fn destroy(&self, _destroyed_by: Tag, tag: Tag) {
         let time = self.time();
         let destroy = Event::Destroy;
         self.add_event(EventCommon::new(tag, time, destroy));
+
+        // TODO: Remove items from HashMaps to save memory?
+    }
+
+    /// Track when an entity is connected to another entity
+    fn connect(&self, connect_from: Tag, connect_to: Tag) {
+        let time = self.time();
+        let connect = Event::Connect { to: connect_to };
+        self.add_event(EventCommon::new(connect_from, time, connect));
 
         // TODO: Remove items from HashMaps to save memory?
     }

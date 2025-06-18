@@ -74,6 +74,14 @@ impl Track for TextTracker {
             .unwrap();
     }
 
+    fn connect(&self, connect_from: Tag, connect_to: Tag) {
+        self.writer
+            .lock()
+            .unwrap()
+            .write_all(format!("{connect_from}: connect to {connect_to}\n").as_bytes())
+            .unwrap();
+    }
+
     fn log(&self, tag: Tag, level: log::Level, msg: std::fmt::Arguments) {
         self.writer
             .lock()

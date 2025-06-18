@@ -27,6 +27,7 @@ struct Entity @0xbc946b85a6484339 {
 
 struct Event @0xc13b4d9cc5ead95b {
   union {
+    connect @7  :UInt64;
     time    @6  :Float64;
     enter   @5  :UInt64;
     exit    @4  :UInt64;

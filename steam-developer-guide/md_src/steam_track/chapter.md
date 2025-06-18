@@ -55,6 +55,7 @@ And then there are macros that map to simulation events:
 
 - `create!` - used when a new [`Tag`] is created.
 - `destroy!` - used when a [`Tag`] is destroyed.
+- `connect!` - used when an [`Entity`] is connected to another [`Entity`].
 - `enter!` - used when a [tagged] object enters another [tagged] object. For
   example, a packet enters a buffer.
 - `exit!` - used when a [tagged] object leaves another [tagged] object. For
