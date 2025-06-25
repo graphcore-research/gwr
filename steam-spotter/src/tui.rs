@@ -4,7 +4,8 @@ use std::{io, panic};
 
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
-use tui::{Terminal, backend::Backend};
+use tui::Terminal;
+use tui::backend::Backend;
 
 use crate::app::{App, AppResult};
 use crate::event::EventHandler;

@@ -2,13 +2,14 @@
 
 //! The EthernetFrame provides an implementation of a standard Ethernet frame
 
-use std::{fmt::Display, sync::Arc};
+use std::fmt::Display;
+use std::sync::Arc;
 
-use steam_engine::{
-    traits::{Routable, SimObject, TotalBytes},
-    types::ReqType,
-};
-use steam_track::{Tag, create, create_tag, entity::Entity, tag::Tagged};
+use steam_engine::traits::{Routable, SimObject, TotalBytes};
+use steam_engine::types::ReqType;
+use steam_track::entity::Entity;
+use steam_track::tag::Tagged;
+use steam_track::{Tag, create, create_tag};
 
 pub const PREAMBLE_BYTES: usize = 7;
 pub const SFD_BYTES: usize = 1;

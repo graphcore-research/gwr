@@ -4,11 +4,10 @@ use std::sync::{Arc, Mutex};
 
 use capnp::serialize_packed;
 
-use crate::steam_track_capnp;
 use crate::steam_track_capnp::event;
 use crate::steam_track_capnp::log::LogLevel;
 use crate::tracker::{EntityManager, Track};
-use crate::{SharedWriter, Tag, Writer};
+use crate::{SharedWriter, Tag, Writer, steam_track_capnp};
 
 /// A tracker that writes Cap'n Proto binary data
 pub struct CapnProtoTracker {

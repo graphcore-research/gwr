@@ -1,6 +1,7 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
-use std::{env, path::PathBuf};
+use std::env;
+use std::path::PathBuf;
 
 use steam_config::multi_source_config;
 

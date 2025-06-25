@@ -7,9 +7,8 @@ use std::io::BufRead;
 
 use capnp::serialize_packed;
 
-use crate::Tag;
-use crate::steam_track_capnp;
 use crate::steam_track_capnp::log::LogLevel;
+use crate::{Tag, steam_track_capnp};
 
 /// The `TraceVisitor` trait is the interface that allows a user to see all the
 /// events as a binary file is processed.
@@ -117,7 +116,8 @@ pub trait TraceVisitor {
 /// A simple visitor that will count how many tags are used.
 /// ```no_run
 /// # use std::error::Error;
-/// use std::{fs::File, io::BufReader};
+/// use std::fs::File;
+/// use std::io::BufReader;
 ///
 /// use steam_track::Tag;
 /// use steam_track::trace_visitor::{TraceVisitor, process_capnp};

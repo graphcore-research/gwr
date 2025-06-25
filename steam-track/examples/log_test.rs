@@ -26,12 +26,10 @@
 //!   capnp convert packed:text steam-track/schemas/steam_track.capnp Event < foo.bin
 //! ```
 
-use std::fs;
-use std::io;
 use std::io::BufWriter;
 use std::net::TcpStream;
 use std::sync::{Arc, mpsc};
-use std::thread;
+use std::{fs, io, thread};
 
 use steam_config::multi_source_config;
 use steam_track::entity::{Entity, toplevel};

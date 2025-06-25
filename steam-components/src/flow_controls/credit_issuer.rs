@@ -14,8 +14,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use steam_engine::port::OutPort;
-use steam_engine::port::{InPort, PortState};
+use steam_engine::port::{InPort, OutPort, PortState};
 use steam_engine::traits::SimObject;
 use steam_engine::types::SimResult;
 use steam_model_builder::EntityDisplay;

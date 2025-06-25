@@ -7,7 +7,8 @@ use steam_spotter::app::{App, AppResult};
 use steam_spotter::event::{Event, EventHandler};
 use steam_spotter::handler::handle_key_events;
 use steam_spotter::tui::Tui;
-use tui::{Terminal, backend::CrosstermBackend};
+use tui::Terminal;
+use tui::backend::CrosstermBackend;
 
 /// Command-line arguments.
 #[derive(Parser)]

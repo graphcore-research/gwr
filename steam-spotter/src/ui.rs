@@ -5,17 +5,12 @@ use std::vec;
 
 use tui::Frame;
 use tui::backend::Backend;
-use tui::layout::Direction;
-use tui::layout::Layout;
-use tui::layout::{Alignment, Constraint, Rect};
-use tui::style::Modifier;
-use tui::style::{Color, Style};
+use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use tui::style::{Color, Modifier, Style};
 use tui::text::{Line, Span};
-use tui::widgets::BarChart;
-use tui::widgets::{Block, BorderType, Borders, Paragraph};
+use tui::widgets::{BarChart, Block, BorderType, Borders, Paragraph};
 
-use crate::app::App;
-use crate::app::InputState;
+use crate::app::{App, InputState};
 use crate::handler::TOGGLE_RE;
 
 /// Renders the user interface widgets.
