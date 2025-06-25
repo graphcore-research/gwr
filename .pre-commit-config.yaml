@@ -87,14 +87,12 @@ repos:
         entry: env RUSTFLAGS="-D warnings" cargo clippy-strict
         pass_filenames: false
         stages: [pre-commit, pre-merge-commit, pre-push, manual]
-      - id: cargo-doc
-        name: cargo doc
+      - id: cargo-doc-steam-dev
+        name: cargo doc-steam-dev
         description: check Rust source code documentation
         language: system
         types: [rust]
-        entry:
-          env RUSTDOCFLAGS="-D warnings" DOCS_RS=1 cargo doc --workspace
-          --all-features --document-private-items --no-deps
+        entry: env RUSTDOCFLAGS="-D warnings" DOCS_RS=1 cargo doc-steam-dev
         pass_filenames: false
         stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: cargo-semver-checks
