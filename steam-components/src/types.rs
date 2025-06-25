@@ -6,10 +6,8 @@
 
 use std::mem::size_of;
 
-use steam_engine::{
-    traits::{Routable, SimObject, TotalBytes},
-    types::{ReqType, SimError},
-};
+use steam_engine::traits::{Routable, SimObject, TotalBytes};
+use steam_engine::types::{ReqType, SimError};
 use steam_track::tag::Tagged;
 
 /// The `DataGenerator` is what a [source](crate::source) uses

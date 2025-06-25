@@ -5,8 +5,7 @@
 //! Supports a number of helper macros that allow the user to embded content
 //! into documentation.
 
-use steam_doc_builder::helpers;
-use steam_doc_builder::toc;
+use steam_doc_builder::{helpers, toc};
 
 #[cfg(feature = "asciidoctor")]
 mod adoc;

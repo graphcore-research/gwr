@@ -1,6 +1,7 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
-use std::{cell::RefCell, rc::Rc};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use steam_engine::test_helpers::start_test;
 

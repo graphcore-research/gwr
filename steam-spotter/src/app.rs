@@ -4,10 +4,9 @@ use std::error;
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 
-use crate::bin_loader;
 use crate::filter::{Filter, start_background_filter};
-use crate::log_parser;
 use crate::renderer::Renderer;
+use crate::{bin_loader, log_parser};
 
 /// Size of blocks of data to read from the file and filter at a time
 pub const CHUNK_SIZE: usize = 50000;

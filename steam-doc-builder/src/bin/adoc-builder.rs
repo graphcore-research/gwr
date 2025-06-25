@@ -17,7 +17,8 @@
 //! ```bash
 //! > adoc-builder --help
 //! ```
-use std::{error::Error, fs::File};
+use std::error::Error;
+use std::fs::File;
 
 use clap::Parser;
 use steam_doc_builder::doc_parser::DocParser;

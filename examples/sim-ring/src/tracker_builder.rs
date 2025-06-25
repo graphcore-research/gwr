@@ -6,9 +6,8 @@ use std::io::BufWriter;
 use std::sync::Arc;
 use std::{fs, io};
 
-use steam_track::tracker::{
-    CapnProtoTracker, EntityManager, TextTracker, multi_tracker::MultiTracker,
-};
+use steam_track::tracker::multi_tracker::MultiTracker;
+use steam_track::tracker::{CapnProtoTracker, EntityManager, TextTracker};
 use steam_track::{Tracker, Writer};
 
 /// Create a tracker that prints to stdout

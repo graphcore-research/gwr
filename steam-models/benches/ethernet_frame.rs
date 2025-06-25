@@ -4,9 +4,10 @@ use criterion::{BatchSize, Criterion, criterion_group};
 use steam_components::connect_port;
 use steam_components::sink::Sink;
 use steam_components::store::Store;
+use steam_engine::engine::Engine;
 use steam_engine::port::OutPort;
 use steam_engine::spawn_simulation;
-use steam_engine::{engine::Engine, traits::SimObject};
+use steam_engine::traits::SimObject;
 use steam_models::ethernet_frame::{EthernetFrame, SRC_MAC_BYTES};
 use steam_track::tracker::dev_null_tracker;
 

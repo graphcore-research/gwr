@@ -1,7 +1,8 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
+use steam_engine::events::all_of::AllOf;
 use steam_engine::events::any_of::AnyOf;
-use steam_engine::{events::all_of::AllOf, test_helpers::start_test};
+use steam_engine::test_helpers::start_test;
 
 mod common;
 use common::{create_once_event_at_delay, spawn_activity};

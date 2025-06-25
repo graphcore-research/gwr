@@ -10,7 +10,8 @@
 //! unpredictable results.
 
 use core::sync::atomic::Ordering;
-use std::sync::{Mutex, atomic::AtomicU64};
+use std::sync::Mutex;
+use std::sync::atomic::AtomicU64;
 
 use regex::Regex;
 

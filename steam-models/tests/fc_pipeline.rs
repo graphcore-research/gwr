@@ -1,9 +1,9 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
+use steam_components::flow_controls::limiter::Limiter;
 use steam_components::sink::Sink;
 use steam_components::source::Source;
-use steam_components::{connect_port, rc_limiter};
-use steam_components::{flow_controls::limiter::Limiter, option_box_repeat};
+use steam_components::{connect_port, option_box_repeat, rc_limiter};
 use steam_engine::run_simulation;
 use steam_engine::test_helpers::start_test;
 use steam_models::fc_pipeline::FcPipeline;
