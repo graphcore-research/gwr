@@ -12,6 +12,7 @@ use steam_track::trace_visitor::{TraceVisitor, process_capnp};
 use crate::app::{CHUNK_SIZE, EventLine};
 use crate::filter::Filter;
 use crate::renderer::Renderer;
+use crate::rocket::SHARED_STATE;
 
 struct BinLoader {
     renderer: Arc<Mutex<Renderer>>,
@@ -86,6 +87,11 @@ impl TraceVisitor for BinLoader {
     }
 
     fn create(&mut self, _created_by: Tag, tag: Tag, num_bytes: usize, req_type: i8, name: &str) {
+        SHARED_STATE
+            .lock()
+            .unwrap()
+            .entity_names
+            .push(format!("{name}={tag}"));
         self.tag_to_name
             .as_mut()
             .unwrap()
@@ -105,6 +111,14 @@ impl TraceVisitor for BinLoader {
     }
 
     fn destroy(&mut self, _destroyed_by: Tag, _tag: Tag) {}
+
+    fn connect(&mut self, connect_from: Tag, connect_to: Tag) {
+        SHARED_STATE
+            .lock()
+            .unwrap()
+            .connections
+            .push(format!("{connect_from} -> {connect_to}").to_string());
+    }
 
     fn enter(&mut self, tag: Tag, entered: Tag) {
         // Add the fullness of 0 if not already there.

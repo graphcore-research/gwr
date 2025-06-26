@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::filter::{Filter, start_background_filter};
 use crate::renderer::Renderer;
+use crate::rocket::SHARED_STATE;
 use crate::{bin_loader, log_parser};
 
 /// Size of blocks of data to read from the file and filter at a time
@@ -156,7 +157,11 @@ impl App {
     }
 
     /// Handles the tick event of the terminal.
-    pub fn tick(&self) {}
+    pub fn tick(&self) {
+        if let Some(s) = SHARED_STATE.lock().unwrap().command.take() {
+            self.filter.lock().unwrap().set(&s);
+        }
+    }
 
     /// Set running to false to quit the application.
     pub fn quit(&mut self) {

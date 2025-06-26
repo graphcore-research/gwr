@@ -22,6 +22,13 @@ impl std::fmt::Debug for Tag {
     }
 }
 
+impl From<&str> for Tag {
+    fn from(val: &str) -> Self {
+        let value = val.parse::<u64>().unwrap();
+        Tag(value)
+    }
+}
+
 /// The `Tagged` trait provides a unique ID for logging
 pub trait Tagged {
     /// Return a unique tag for an object.

@@ -1,0 +1,223 @@
+/*
+ * Copyright (c) 2025 Graphcore Ltd. All rights reserved.
+ */
+:root {
+  --color-dark: #202020;
+  --color-medium: #505050;
+  --color-light: #E0E0E0;
+  --color-hover: cyan;
+
+  --transition-time: 0.4s;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+/***********************************************************************
+ * The buttons at the top of the page that stay visible at all times
+ */
+.btn {
+  position: fixed;
+  top: 15px;
+  height: 45px;
+  width: 45px;
+  text-align: center;
+  background: var(--color-dark);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: left var(--transition-time) ease;
+}
+
+.menu-btn {
+  left: 15px;
+}
+
+.btn span {
+  color: white;
+  font-size: 28px;
+  line-height: 45px;
+}
+
+.menu-btn span:before {
+  content: '=';
+}
+
+.menu-btn.click span:before {
+  content: 'x';
+}
+
+.menu-btn.click {
+  left: 265px;
+}
+
+/***********************************************************************
+ * The sidebar which contains all the controls - starts invisible at
+ * offset of negative the width.
+ */
+.sidebar {
+  position: fixed;
+  width: 250px;
+  height: 100%;
+  left: -250px;
+  background: var(--color-dark);
+  transition: left var(--transition-time) ease;
+  overflow: auto;
+}
+
+.sidebar.show {
+  left: 0px;
+}
+
+/***********************************************************************
+ * The header at the top of the sidebar
+ */
+.sidebar .text {
+  color: white;
+  font-size: 25px;
+  font-weight: 600;
+  line-height: 65px;
+  text-align: center;
+  background: var(--color-medium);
+  letter-spacing: 1px;
+}
+
+/***********************************************************************
+ * First level of the controls. These are always visible and used to
+ * click on to expand the settings hidden below.
+ */
+ul.level1 {
+  background: var(--color-dark);
+  height: 100%;
+  width: 100%;
+  list-style: none;
+}
+
+ul.level1 .show {
+  display: block;
+}
+
+li.level1 {
+  line-height: 60px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+li.level1:last-child {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+li.level1 a {
+  position: relative;
+  color: white;
+  text-decoration: none;
+  font-size: 18px;
+  padding-left: 20px;
+  font-weight: 500;
+  display: block;
+  width: 100%;
+  border-left: 3px solid transparent;
+}
+
+li.level1 i {
+  color: white;
+  width: 100%;
+  height: 65px;
+}
+
+li.active a {
+  color: var(--color-hover);
+  background: var(--color-medium);
+  border-left-color: var(--color-hover);
+}
+
+li.level1 a span {
+  position: absolute;
+  top: 50%;
+  right: 20px;
+  transform: translateY(-50%);
+  font-size: 22px;
+  transition: transform var(--transition-time);
+}
+
+li.level1 a span.rotate {
+  transform: translateY(-50%) rotate(-135deg);
+}
+
+/***********************************************************************
+ * Second level list of controls - hidden by default
+ */
+ul.level2 {
+  position: static;
+  display: none;
+}
+
+/***********************************************************************
+ * An individual control in the second level list
+ */
+li.level2 {
+  line-height: 42px;
+  border-bottom: none;
+  display: block;
+}
+
+li.level2 a {
+  font-size: 16px;
+  color: var(--color-light);
+  background: var(--color-dark);
+  border-left-color: transparent;
+  padding-left: 40px;
+}
+
+li.level2 a:hover {
+  color: cyan!important;
+  background: var(--color-medium);
+}
+
+li.level2 input {
+  position: relative;
+  font-size: 14px;
+  width: 60%;
+  border-radius: 3px;
+  left: 40px;
+}
+
+li.level2 a input {
+  left: 0px;
+}
+
+li.level2 select {
+  width: 50%;
+}
+
+/***********************************************************************
+ * Properties of the chart render area needed to make it play nicely
+ * with the sidebar
+ */
+#chart {
+  position: absolute;
+  width: 100%;
+  height: 100vh;
+  top: 65px;
+  left: 0px;
+  transition: left var(--transition-time) ease;
+}
+
+#chart.show {
+  left: 250px;
+}
+
+/***********************************************************************
+ * Dynamic changes
+ */
+.node:hover {
+  stroke: red;
+  stroke-width: 6;
+}
+
+.node.selected {
+  stroke: red;
+  stroke-width: 6;
+}
