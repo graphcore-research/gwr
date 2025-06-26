@@ -105,7 +105,7 @@ pub fn build_pipes(engine: &mut Engine, config: &Config) -> (Pipes, Pipes) {
     for i in 0..config.ring_size {
         ingress_pipes.push(FcPipeline::new(
             top,
-            format!("pipe{i}").as_str(),
+            format!("ingress_pipe{i}").as_str(),
             clock.clone(),
             spawner.clone(),
             500,
@@ -114,7 +114,7 @@ pub fn build_pipes(engine: &mut Engine, config: &Config) -> (Pipes, Pipes) {
         ));
         ring_pipes.push(FcPipeline::new(
             top,
-            format!("pipe{i}").as_str(),
+            format!("ring_pipe{i}").as_str(),
             clock.clone(),
             spawner.clone(),
             500,

@@ -1,0 +1,152 @@
+<!-- Copyright (c) 2025 Graphcore Ltd. All rights reserved. -->
+
+<!DOCTYPE html>
+<meta charset="utf-8">
+<head>
+  <link rel="stylesheet" href="style.css">
+  <script src="lib/d3.v7.min.js"></script>
+  <script src="lib/jquery-3.4.1.js"></script>
+  <script src="main.js"></script>
+  <script src="lib/force_tree.js"></script>
+  <script src="lib/radial_tidy_tree.js"></script>
+  <script src="lib/sunburst.js"></script>
+  <script src="lib/tree_map.js"></script>
+</head>
+<body>
+  <div id="chart"/></div>
+
+  <div class="btn menu-btn">
+    <span class="fas fa-bars"></span>
+  </div>
+
+  <nav class="sidebar">
+    <div class="text">Controls</div>
+
+    <ul class="level1">
+
+      <li class="level1 chart-type">
+        <a href="#" class="chart-type-btn">Chart options
+          <span class="fas fa-caret-down chart-type">+</span>
+        </a>
+        <ul class="chart-type-show level2 show rotate">
+          <li class="level2">
+            <a href="#">Plot:
+              <select id="plot"></select>
+            </a>
+          </li>
+
+    </ul>
+  </nav>
+
+<script>
+
+$('.menu-btn').click(function() {
+    $(this).toggleClass("click");
+    $('.sidebar').toggleClass("show");
+    $('#chart').toggleClass("show");
+  });
+
+  $('.chart-type-btn').click(function() {
+    $('nav ul .chart-type-show').toggleClass("show");
+    $('nav ul .chart-type').toggleClass("rotate");
+  });
+
+  /***********************************************************************
+   * Helper Functions
+   */
+  function controlValueNumber(guiElement, defaultValue) {
+    var str = guiElement ? guiElement.property("value") : "";
+    var floatValue = str ? parseFloat(str) : null;
+    if (floatValue === null || isNaN(floatValue)) {
+      return defaultValue;
+    }
+    return floatValue;
+  }
+
+  function controlValueStr(guiElement, defaultValue, isNumber) {
+    var str = guiElement ? guiElement.property("value") : defaultValue;
+    return str;
+  }
+
+  function controlValueArray(guiElement, defaultArray) {
+    var selected = [];
+    if (guiElement) {
+      var options = guiElement.property("selectedOptions");
+      for (var i = 0; i < options.length; ++i) {
+        selected.push(options[i].value);
+      }
+    } else {
+      defaultArray.forEach(d => selected.push(d));
+    }
+    return selected;
+  }
+
+  /***********************************************************************
+   * Constants
+   */
+  const serverUrl = "http://localhost:8000";
+
+  /***********************************************************************
+   * Renderer
+   */
+  const renderer = new Renderer(serverUrl);
+  const controls = renderer.controls;
+  const guiElements = renderer.guiElements;
+
+  // Setup all the different color scales that are available
+  const plotElement = d3.select(`#plot`);
+  const plotNames = Array.from(guiElements.plotTypes.keys());
+  plotElement.selectAll("option")
+      .data(plotNames)
+      .enter()
+      .append("option")
+      .text(d => d);
+
+  // Register the `redraw()` call for all controls that change
+  Object.keys(controls).forEach(function(key) {
+    const guiElement = d3.select(`#${key}`)
+    guiElement.on("change", redraw);
+  });
+
+function redraw() {
+    // Set all render control values from the GUI controls
+    Object.keys(controls).forEach(function(key) {
+      const control = controls[key];
+      const guiElement = d3.select(`#${key}`)
+
+      if (typeof(control.value) === "boolean") {
+        control.value = guiElement.property("checked");
+      } else if (control.value === null || typeof(control.value) === "number") {
+        control.value = controlValueNumber(guiElement, control.default);
+      } else if (typeof(control.value) === "string") {
+        control.value = controlValueStr(guiElement, control.default);
+      } else if (Array.isArray(control.value)) {
+        control.value = controlValueArray(guiElement, control.default);
+      } else {
+        console.log(`ERROR: control ${key} unsupported type ${typeof(control.value)}`);
+      }
+    });
+  renderer.render();
+}
+
+d3.text(serverUrl + "/entities")
+    .then(function(text) {
+      let root = []
+      let max_depth = parse_entities(text, root);
+      renderer.set_entities(root[0], max_depth);
+
+      d3.text(serverUrl + "/connections")
+          .then(function(text) {
+            let connections = parse_connections(text);
+            renderer.set_connections(connections);
+            renderer.render();
+          })
+          .catch(function(error) {
+            console.log(error);
+          });
+    })
+    .catch(function(error) {
+      console.log(error);
+    });
+</script>
+</body>

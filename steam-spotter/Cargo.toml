@@ -25,5 +25,7 @@ crossterm = "0.27.0"
 itertools.workspace = true
 log.workspace = true
 regex.workspace = true
+rocket = "0.5.1"
 steam-track = { path = "../steam-track" }
+tokio = "1.45.1"
 tui = { package = "ratatui", version = "0.23.0" }

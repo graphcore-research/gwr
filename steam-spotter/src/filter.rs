@@ -138,6 +138,13 @@ impl Filter {
         }
     }
 
+    pub fn set(&mut self, new_filter_string: &str) {
+        self.search = self.search[self.search_cursor_pos..].to_owned();
+        self.search_cursor_pos = 0;
+        self.search = new_filter_string.to_owned();
+        self.notify_filter.send(()).unwrap();
+    }
+
     pub fn clear_to_start(&mut self) {
         self.search = self.search[self.search_cursor_pos..].to_owned();
         self.search_cursor_pos = 0;

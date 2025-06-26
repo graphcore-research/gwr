@@ -1,12 +1,14 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
-use std::io;
+use std::{io, thread};
 
 use clap::Parser;
 use steam_spotter::app::{App, AppResult};
 use steam_spotter::event::{Event, EventHandler};
 use steam_spotter::handler::handle_key_events;
+use steam_spotter::rocket::rocket;
 use steam_spotter::tui::Tui;
+use tokio::runtime::Runtime;
 use tui::Terminal;
 use tui::backend::CrosstermBackend;
 
@@ -24,7 +26,23 @@ struct Cli {
     bin: Option<String>,
 }
 
-fn main() -> AppResult<()> {
+fn spawn_rocket() {
+    // Create new thread
+    thread::spawn(|| {
+        // Create new Tokio runtime
+        let rt = Runtime::new().unwrap();
+
+        // Create async function
+        rt.block_on(async {
+            let _start = rocket().launch().await;
+        });
+    });
+}
+
+#[rocket::main]
+async fn main() -> AppResult<()> {
+    spawn_rocket();
+
     let args = Cli::parse();
 
     // Create an application.
