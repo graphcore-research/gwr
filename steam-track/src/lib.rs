@@ -285,6 +285,7 @@ macro_rules! error {
 pub mod steam_track_capnp {
     // No need to emit warnings for auto-generated Cap'n Proto code
     #![allow(missing_docs)]
+    #![allow(clippy::all)]
     #![allow(clippy::pedantic)]
 
     include!(concat!(env!("OUT_DIR"), "/steam_track_capnp.rs"));
