@@ -180,9 +180,11 @@ When writing a commmit message in this form:
   changelog.
 - The `optional scope` should be used to detail the name of the updated package.
   For example:
+
   ```text
   fix(steam-developer-guide): check for panic when running mdBook tests
   ```
+
   - If the change applied to multiple, but not all packages, the names should be
     comma seperated. For example:
     ```text
