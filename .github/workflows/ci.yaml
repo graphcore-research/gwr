@@ -19,11 +19,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Required to cause the main branch to also be fetched
       - uses: ./.github/actions/install-build-dependencies
       - uses: ./.github/actions/install-dev-dependencies
 
       - name: Lint with pre-commit
-        run: pre-commit run --all-files
+        run: pre-commit run --from-ref origin/main --to-ref HEAD
 
   check-semantic-versioning:
     runs-on: macos-latest
