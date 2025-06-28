@@ -16,7 +16,7 @@ else
   exit 1
 fi
 
-npm install --no-save prettier@3.6.1
+npm install --no-save prettier@3.6.2
 
 rustup toolchain install --profile minimal --component rustfmt nightly
 
