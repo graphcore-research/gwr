@@ -16,10 +16,13 @@ else
   exit 1
 fi
 
-npm install --no-save prettier
+npm install --no-save prettier@3.6.1
 
-rustup update
-rustup toolchain install --profile default nightly
+rustup toolchain install --profile minimal --component rustfmt nightly
 
-cargo install --locked cargo-about cargo-deny cargo-semver-checks release-plz
-cargo install --locked --bin cog cocogitto
+cargo install --locked        \
+  cargo-about@0.7.1           \
+  cargo-deny@0.18.3           \
+  cargo-semver-checks@0.41.0  \
+  release-plz@0.3.136
+cargo install --locked --bin cog cocogitto@6.3.0
