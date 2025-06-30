@@ -37,7 +37,7 @@ fn add_env_build_triggers() {
     println!("cargo::rerun-if-env-changed={CAPNP_INC_DIR_ENV_VAR}");
 }
 
-fn get_schemas() -> Vec<PathBuf> {
+fn get_capnp_schemas() -> Vec<PathBuf> {
     let mut schemas: Vec<PathBuf> = Vec::new();
     for entry in get_schemas_root()
         .read_dir()
@@ -59,7 +59,7 @@ fn get_schemas() -> Vec<PathBuf> {
     schemas
 }
 
-fn try_default_compiler_env_var() -> String {
+fn try_default_capnp_compiler_bin() -> String {
     let default = match std::env::consts::OS {
         "linux" => "/usr/bin/capnp",
         "macos" if std::env::consts::ARCH == "aarch64" => "/opt/homebrew/bin/capnp",
@@ -76,11 +76,11 @@ fn try_default_compiler_env_var() -> String {
     default.to_string()
 }
 
-fn get_compiler_env_var() -> PathBuf {
-    PathBuf::from(env::var(CAPNP_BIN_ENV_VAR).unwrap_or_else(|_| try_default_compiler_env_var()))
+fn get_capnp_compiler_bin_env_var() -> PathBuf {
+    PathBuf::from(env::var(CAPNP_BIN_ENV_VAR).unwrap_or_else(|_| try_default_capnp_compiler_bin()))
 }
 
-fn try_default_include_dir_env_var() -> Option<String> {
+fn try_default_capnp_include_dir() -> Option<String> {
     let default = match std::env::consts::OS {
         "linux" => return None,
         "macos" if std::env::consts::ARCH == "aarch64" => "/opt/homebrew/include/capnp/",
@@ -97,10 +97,10 @@ fn try_default_include_dir_env_var() -> Option<String> {
     Some(default.to_string())
 }
 
-fn get_include_dir_env_var() -> Option<PathBuf> {
+fn get_capnp_include_dir_env_var() -> Option<PathBuf> {
     let inc_dir = PathBuf::from(
         env::var(CAPNP_INC_DIR_ENV_VAR)
-            .unwrap_or_else(|_| try_default_include_dir_env_var().unwrap_or_default()),
+            .unwrap_or_else(|_| try_default_capnp_include_dir().unwrap_or_default()),
     );
 
     if inc_dir == PathBuf::default() {
@@ -110,10 +110,10 @@ fn get_include_dir_env_var() -> Option<PathBuf> {
     Some(inc_dir)
 }
 
-fn compile_schemas(schemas: &[PathBuf]) {
+fn compile_capnp_schemas(schemas: &[PathBuf]) {
     let mut command = CompilerCommand::new();
-    command.capnp_executable(get_compiler_env_var());
-    if let Some(inc_dir) = get_include_dir_env_var() {
+    command.capnp_executable(get_capnp_compiler_bin_env_var());
+    if let Some(inc_dir) = get_capnp_include_dir_env_var() {
         command.import_path(inc_dir);
     }
     for schema in schemas {
@@ -132,6 +132,6 @@ fn main() {
     add_file_build_triggers();
     add_env_build_triggers();
 
-    let schemas = get_schemas();
-    compile_schemas(&schemas);
+    let schemas = get_capnp_schemas();
+    compile_capnp_schemas(&schemas);
 }
