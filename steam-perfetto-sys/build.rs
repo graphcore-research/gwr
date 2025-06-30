@@ -16,7 +16,7 @@ use std::process::exit;
 #[cfg(feature = "_perfetto_src")]
 mod consts {
     pub const PERFETTO_REPO_URL: &str = "https://github.com/google/perfetto";
-    pub const PERFETTO_REPO_REFSPEC: &str = "v49.0";
+    pub const PERFETTO_REPO_REFSPEC: &str = "v50.1";
 
     pub const PERFETTO_SYMLINK: &str = "./perfetto";
 }
