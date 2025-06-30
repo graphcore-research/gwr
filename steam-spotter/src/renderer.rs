@@ -148,8 +148,8 @@ impl Renderer {
         }
 
         let event_line = event_line.unwrap();
-        let mut name_tmp = String::new();
-        let mut pkt_tmp = String::new();
+        let mut tmp0 = String::new();
+        let mut tmp1 = String::new();
         let (mut line, time) = match event_line {
             EventLine::Enter {
                 tag,
@@ -157,8 +157,8 @@ impl Renderer {
                 fullness,
                 time,
             } => {
-                let name = self.name_tag(tag, &mut name_tmp);
-                let packet = self.packet_tag(entered, &mut pkt_tmp);
+                let name = self.name_tag(tag, &mut tmp0);
+                let packet = self.packet_tag(entered, &mut tmp1);
                 (format!("{name}: <= {packet} ({fullness})").to_owned(), time)
             }
 
@@ -168,8 +168,8 @@ impl Renderer {
                 fullness,
                 time,
             } => {
-                let name = self.name_tag(tag, &mut name_tmp);
-                let packet = self.packet_tag(exited, &mut pkt_tmp);
+                let name = self.name_tag(tag, &mut tmp0);
+                let packet = self.packet_tag(exited, &mut tmp1);
                 (format!("{name}: => {packet} ({fullness})").to_owned(), time)
             }
 
@@ -179,13 +179,26 @@ impl Renderer {
                 msg,
                 time,
             } => {
-                let name = self.name_tag(tag, &mut name_tmp);
+                let name = self.name_tag(tag, &mut tmp0);
                 (format!("{name}: {msg}").to_owned(), time)
             }
 
             EventLine::Create { tag, time } => {
-                let name = self.name_tag(tag, &mut name_tmp);
+                let name = self.name_tag(tag, &mut tmp0);
                 (format!("{name}: created").to_owned(), time)
+            }
+
+            EventLine::Connect {
+                from_tag,
+                to_tag,
+                time,
+            } => {
+                let from_name = self.name_tag(from_tag, &mut tmp0);
+                let to_name = self.name_tag(to_tag, &mut tmp1);
+                (
+                    format!("{from_name}: connect to {to_name}").to_owned(),
+                    time,
+                )
             }
         };
 

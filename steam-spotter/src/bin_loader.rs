@@ -118,6 +118,12 @@ impl TraceVisitor for BinLoader {
             .unwrap()
             .connections
             .push(format!("{connect_from} -> {connect_to}").to_string());
+        let time = self.current_time_ns;
+        self.add_event(EventLine::Connect {
+            from_tag: connect_from.0,
+            to_tag: connect_to.0,
+            time,
+        });
     }
 
     fn enter(&mut self, tag: Tag, entered: Tag) {

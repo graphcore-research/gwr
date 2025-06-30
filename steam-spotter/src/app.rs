@@ -30,6 +30,11 @@ pub enum EventLine {
         tag: u64,
         time: f64,
     },
+    Connect {
+        from_tag: u64,
+        to_tag: u64,
+        time: f64,
+    },
     Log {
         level: log::Level,
         tag: u64,
@@ -54,6 +59,11 @@ impl ToTime for EventLine {
     fn time(&self) -> f64 {
         match self {
             EventLine::Create { tag: _, time } => *time,
+            EventLine::Connect {
+                from_tag: _,
+                to_tag: _,
+                time,
+            } => *time,
             EventLine::Enter {
                 tag: _,
                 entered: _,
@@ -80,6 +90,11 @@ impl ToFullness for EventLine {
     fn fullness(&self) -> u64 {
         match self {
             EventLine::Create { tag: _, time: _ } => 0,
+            EventLine::Connect {
+                from_tag: _,
+                to_tag: _,
+                time: _,
+            } => 0,
             EventLine::Enter {
                 tag: _,
                 entered: _,
