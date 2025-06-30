@@ -42,9 +42,9 @@ impl Error for SimError {}
 /// The SimResult is the return type for most simulation functions
 pub type SimResult = Result<(), SimError>;
 
-// Generic packet types
+/// Generic access types
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
-pub enum ReqType {
+pub enum AccessType {
     #[default]
     Read,
     Write,
@@ -52,19 +52,19 @@ pub enum ReqType {
     Control,
 }
 
-impl fmt::Display for ReqType {
+impl fmt::Display for AccessType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            ReqType::Read => {
+            AccessType::Read => {
                 write!(f, "Read")
             }
-            ReqType::Write => {
+            AccessType::Write => {
                 write!(f, "Write")
             }
-            ReqType::WriteNonPosted => {
+            AccessType::WriteNonPosted => {
                 write!(f, "WriteNonPosted")
             }
-            ReqType::Control => {
+            AccessType::Control => {
                 write!(f, "Control")
             }
         }

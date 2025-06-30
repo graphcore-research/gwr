@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use steam_track::tag::Tagged;
 
 use crate::sim_error;
-use crate::types::{ReqType, SimError, SimResult};
+use crate::types::{AccessType, SimError, SimResult};
 
 /// The `TotalBytes` trait is used to determine how many bytes an object
 /// represents
@@ -27,7 +27,7 @@ pub trait TotalBytes {
 /// routed
 pub trait Routable {
     fn dest(&self) -> Result<u64, SimError>;
-    fn req_type(&self) -> Result<ReqType, SimError>;
+    fn req_type(&self) -> Result<AccessType, SimError>;
 }
 
 /// A super-trait that objects that are passed around the simulation have to
@@ -61,12 +61,12 @@ impl Routable for i32 {
     fn dest(&self) -> Result<u64, SimError> {
         Ok(*self as u64)
     }
-    fn req_type(&self) -> Result<ReqType, SimError> {
+    fn req_type(&self) -> Result<AccessType, SimError> {
         Ok(match self {
-            0 => ReqType::Read,
-            1 => ReqType::Write,
-            2 => ReqType::WriteNonPosted,
-            3 => ReqType::Control,
+            0 => AccessType::Read,
+            1 => AccessType::Write,
+            2 => AccessType::WriteNonPosted,
+            3 => AccessType::Control,
             _ => return sim_error!(format!("Unsupported ReqType {}", self)),
         })
     }
@@ -85,12 +85,12 @@ impl Routable for usize {
     fn dest(&self) -> Result<u64, SimError> {
         Ok(*self as u64)
     }
-    fn req_type(&self) -> Result<ReqType, SimError> {
+    fn req_type(&self) -> Result<AccessType, SimError> {
         Ok(match self {
-            0 => ReqType::Read,
-            1 => ReqType::Write,
-            2 => ReqType::WriteNonPosted,
-            3 => ReqType::Control,
+            0 => AccessType::Read,
+            1 => AccessType::Write,
+            2 => AccessType::WriteNonPosted,
+            3 => AccessType::Control,
             _ => return sim_error!(format!("Unsupported ReqType {}", self)),
         })
     }

@@ -12,7 +12,7 @@ use steam_engine::executor::Spawner;
 use steam_engine::port::{InPort, OutPort, PortStateResult};
 use steam_engine::time::clock::Clock;
 use steam_engine::traits::{Runnable, SimObject};
-use steam_engine::types::{ReqType, SimError, SimResult};
+use steam_engine::types::{AccessType, SimError, SimResult};
 use steam_model_builder::EntityDisplay;
 use steam_track::entity::Entity;
 use steam_track::trace;
@@ -20,8 +20,8 @@ use steam_track::trace;
 #[derive(Clone)]
 pub struct MemoryConfig {
     base_address: u64,
-    capacity_bytes: u64,
-    bw_bytes_per_cycle: u64,
+    capacity_bytes: usize,
+    bw_bytes_per_cycle: usize,
     delay_ticks: usize,
 }
 
@@ -29,8 +29,8 @@ impl MemoryConfig {
     #[must_use]
     pub fn new(
         base_address: u64,
-        capacity_bytes: u64,
-        bw_bytes_per_cycle: u64,
+        capacity_bytes: usize,
+        bw_bytes_per_cycle: usize,
         delay_ticks: usize,
     ) -> Self {
         Self {
@@ -53,15 +53,18 @@ pub trait MemoryRead {
 }
 
 /// Trait implemented by all types that memory components support
-pub trait MemoryAccess {
-    /// Return the address of this access
-    fn addr(&self) -> u64;
+pub trait AccessMemory {
+    /// Return the destination address of this access
+    fn dst_addr(&self) -> u64;
+
+    /// Return the source address of this access
+    fn src_addr(&self) -> u64;
 
     /// Return the size of the access in bytes
-    fn num_bytes(&self) -> u64;
+    fn num_bytes(&self) -> usize;
 
     /// What type of memory operation is this
-    fn access_type(&self) -> ReqType;
+    fn access_type(&self) -> AccessType;
 
     /// Returns the appropriate response for a request
     fn to_response(&self, mem: &impl MemoryRead) -> Self;
@@ -72,8 +75,8 @@ pub trait MemoryAccess {
 
 #[derive(Clone)]
 pub struct MemoryMetrics {
-    bytes_read: u64,
-    bytes_written: u64,
+    bytes_read: usize,
+    bytes_written: usize,
 }
 
 impl MemoryMetrics {
@@ -88,7 +91,7 @@ impl MemoryMetrics {
 #[derive(EntityDisplay)]
 pub struct Memory<T>
 where
-    T: SimObject + MemoryAccess,
+    T: SimObject + AccessMemory,
 {
     pub entity: Arc<Entity>,
     clock: Clock,
@@ -102,7 +105,7 @@ where
 
 impl<T> Memory<T>
 where
-    T: SimObject + MemoryAccess,
+    T: SimObject + AccessMemory,
 {
     pub fn new_and_register(
         engine: &Engine,
@@ -151,12 +154,12 @@ where
     }
 
     #[must_use]
-    pub fn bytes_written(&self) -> u64 {
+    pub fn bytes_written(&self) -> usize {
         self.metrics.borrow().bytes_written
     }
 
     #[must_use]
-    pub fn bytes_read(&self) -> u64 {
+    pub fn bytes_read(&self) -> usize {
         self.metrics.borrow().bytes_read
     }
 }
@@ -164,7 +167,7 @@ where
 #[async_trait(?Send)]
 impl<T> Runnable for Memory<T>
 where
-    T: SimObject + MemoryAccess,
+    T: SimObject + AccessMemory,
 {
     async fn run(&self) -> SimResult {
         let rx = take_option!(self.rx);
@@ -174,35 +177,46 @@ where
             let access = rx.get()?.await;
             trace!(self.entity ; "Memory access {}", access);
 
-            let begin = access.addr();
-            let access_bytes = access.num_bytes();
-            let end = access.addr() + access_bytes;
+            let begin = access.dst_addr();
+            let access_bytes = access.num_bytes() as u64;
+            let end = begin + access_bytes;
 
             let config = &self.config;
             assert!(
-                begin >= config.base_address && end < (config.base_address + config.capacity_bytes),
+                begin >= config.base_address
+                    && end < (config.base_address + config.capacity_bytes as u64),
                 "Invalid memory access received"
             );
 
             match access.access_type() {
-                ReqType::Read => {
+                AccessType::Read => {
                     self.metrics.borrow_mut().bytes_read += access.num_bytes();
-                    response_tx.put(access)?.await;
+                    let response = access.to_response(self);
+                    response_tx.put(response)?.await;
                 }
-                ReqType::Write | ReqType::WriteNonPosted => {
+                AccessType::Write | AccessType::WriteNonPosted => {
                     self.metrics.borrow_mut().bytes_written += access.num_bytes();
 
-                    if access.access_type() == ReqType::WriteNonPosted {
+                    if access.access_type() == AccessType::WriteNonPosted {
                         response_tx.put(access)?.await;
                     }
                 }
-                ReqType::Control => {
+                AccessType::Control => {
                     todo!("control handling")
                 }
             }
 
-            let ticks = access_bytes.div_ceil(config.bw_bytes_per_cycle);
+            let ticks = access_bytes.div_ceil(config.bw_bytes_per_cycle as u64);
             self.clock.wait_ticks(ticks).await;
         }
+    }
+}
+
+impl<T> MemoryRead for Memory<T>
+where
+    T: SimObject + AccessMemory,
+{
+    fn read(&self) -> Vec<u8> {
+        Vec::new()
     }
 }

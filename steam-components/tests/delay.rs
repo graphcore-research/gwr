@@ -92,7 +92,7 @@ fn source_sink() {
 }
 
 #[test]
-#[should_panic(expected = "Delay output stalled")]
+#[should_panic(expected = "top::delay delay output stalled")]
 fn blocked_output() {
     // Cause the delay to raise an assertion because it will find the buffer full
     let mut engine = start_test(file!());
