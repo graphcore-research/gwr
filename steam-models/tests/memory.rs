@@ -1,7 +1,6 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
 use std::cmp::max;
-use std::fmt::Display;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -9,149 +8,49 @@ use steam_components::sink::Sink;
 use steam_components::source::Source;
 use steam_components::{connect_port, option_box_repeat};
 use steam_engine::engine::Engine;
+use steam_engine::port::{InPort, OutPort};
 use steam_engine::run_simulation;
 use steam_engine::test_helpers::start_test;
-use steam_engine::traits::{Routable, SimObject, TotalBytes};
-use steam_engine::types::{ReqType, SimError};
-use steam_models::memory::{CacheHintType, Memory, MemoryAccess, MemoryConfig};
+use steam_engine::traits::SimObject;
+use steam_engine::types::AccessType;
+use steam_models::memory::{AccessMemory, Memory, MemoryConfig};
+use steam_models::memory_access::MemoryAccess;
+use steam_models::test_helpers::{create_read, create_write, create_write_np};
 use steam_track::entity::Entity;
-use steam_track::tag::Tagged;
-use steam_track::{Tag, create_tag};
 
-const BASE_ADDRESS: u64 = 0x80000;
-const CAPACITY_BYTES: u64 = 0x40000;
-const BW_BYTES_PER_CYCLE: u64 = 32;
+const DST_ADDR: u64 = 0x80000;
+const SRC_ADDR: u64 = DST_ADDR + 0x1000;
+const CAPACITY_BYTES: usize = 0x40000;
+const BW_BYTES_PER_CYCLE: usize = 32;
 const DELAY_TICKS: usize = 8;
 const ACCESS_BYTES: usize = 128;
 
-const CYCLES_PER_ACCESS: u64 = (ACCESS_BYTES as u64).div_ceil(BW_BYTES_PER_CYCLE);
+const CYCLES_PER_ACCESS: u64 = (ACCESS_BYTES as u64).div_ceil(BW_BYTES_PER_CYCLE as u64);
 
-#[derive(Clone, Debug)]
-struct TestMemoryAccess {
-    created_by: Arc<Entity>,
-    tag: Tag,
-    access_type: ReqType,
-    num_bytes: usize,
-    address: u64,
-    cache_hint: CacheHintType,
-}
-
-impl Display for TestMemoryAccess {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "{}: {}@{}",
-            self.access_type, self.num_bytes, self.address
-        )
-    }
-}
-
-impl TotalBytes for TestMemoryAccess {
-    fn total_bytes(&self) -> usize {
-        self.num_bytes
-    }
-}
-
-impl Tagged for TestMemoryAccess {
-    fn tag(&self) -> Tag {
-        self.tag
-    }
-}
-
-impl MemoryAccess for TestMemoryAccess {
-    fn access_type(&self) -> ReqType {
-        self.access_type
-    }
-
-    fn addr(&self) -> u64 {
-        self.address
-    }
-
-    fn cache_hint(&self) -> CacheHintType {
-        CacheHintType::Allocate
-    }
-
-    fn num_bytes(&self) -> u64 {
-        self.num_bytes as u64
-    }
-
-    fn to_response(&self, _mem: &impl steam_models::memory::MemoryRead) -> Self {
-        TestMemoryAccess {
-            created_by: self.created_by.clone(),
-            tag: create_tag!(self.created_by),
-            access_type: ReqType::Write,
-            num_bytes: self.num_bytes,
-            address: self.address,
-            cache_hint: self.cache_hint,
-        }
-    }
-}
-
-impl Routable for TestMemoryAccess {
-    fn dest(&self) -> Result<u64, SimError> {
-        Ok(self.address)
-    }
-    fn req_type(&self) -> Result<ReqType, SimError> {
-        Ok(match self.access_type {
-            ReqType::Read => ReqType::Read,
-            ReqType::Write => ReqType::Write,
-            ReqType::WriteNonPosted => ReqType::WriteNonPosted,
-            ReqType::Control => ReqType::Control,
-        })
-    }
-}
-
-impl TestMemoryAccess {
-    fn new(created_by: &Arc<Entity>, access_type: ReqType) -> Self {
-        Self {
-            created_by: created_by.clone(),
-            tag: create_tag!(created_by),
-            num_bytes: ACCESS_BYTES,
-            access_type,
-            address: BASE_ADDRESS,
-            cache_hint: CacheHintType::Allocate,
-        }
-    }
-}
-
-impl SimObject for TestMemoryAccess {}
-
-fn create_read(created_by: &Arc<Entity>) -> TestMemoryAccess {
-    TestMemoryAccess::new(created_by, ReqType::Read)
-}
-
-fn create_write(created_by: &Arc<Entity>) -> TestMemoryAccess {
-    TestMemoryAccess::new(created_by, ReqType::Write)
-}
-
-fn create_write_np(created_by: &Arc<Entity>) -> TestMemoryAccess {
-    TestMemoryAccess::new(created_by, ReqType::WriteNonPosted)
+fn create_memory<T>(engine: &mut Engine) -> Rc<Memory<T>>
+where
+    T: SimObject + AccessMemory,
+{
+    let config = MemoryConfig::new(DST_ADDR, CAPACITY_BYTES, BW_BYTES_PER_CYCLE, DELAY_TICKS);
+    let clock = engine.default_clock();
+    let spawner = engine.spawner();
+    let top = engine.top();
+    let memory = Memory::new_and_register(&engine, top, "memory", clock, spawner, config).unwrap();
+    memory
 }
 
 fn setup_system(
     num_accesses: usize,
-    create_fn: fn(&Arc<Entity>) -> TestMemoryAccess,
-) -> (
-    Engine,
-    Rc<Sink<TestMemoryAccess>>,
-    Rc<Memory<TestMemoryAccess>>,
-) {
+    create_fn: fn(&Arc<Entity>, usize, u64, u64) -> MemoryAccess,
+) -> (Engine, Rc<Sink<MemoryAccess>>, Rc<Memory<MemoryAccess>>) {
     let mut engine = start_test(file!());
-    let spawner = engine.spawner();
-    let clock = engine.default_clock();
+    let memory = create_memory(&mut engine);
     let top = engine.top();
 
     let source = Source::new_and_register(&engine, top, "source", None).unwrap();
-    let to_put = create_fn(&source.entity);
+    let to_put = create_fn(&source.entity, ACCESS_BYTES, DST_ADDR, SRC_ADDR);
     source.set_generator(option_box_repeat!(to_put ; num_accesses));
 
-    let config = MemoryConfig::new(
-        BASE_ADDRESS,
-        CAPACITY_BYTES,
-        BW_BYTES_PER_CYCLE,
-        DELAY_TICKS,
-    );
-    let memory = Memory::new_and_register(&engine, top, "memory", clock, spawner, config).unwrap();
     let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
 
     connect_port!(source, tx => memory, rx).unwrap();
@@ -167,7 +66,7 @@ fn memory_read() {
 
     run_simulation!(engine);
     assert_eq!(sink.num_sunk(), num_accesses);
-    assert_eq!(memory.bytes_read(), (num_accesses * ACCESS_BYTES) as u64);
+    assert_eq!(memory.bytes_read(), (num_accesses * ACCESS_BYTES));
     assert_eq!(memory.bytes_written(), 0);
 
     let last_bw_limit_event = CYCLES_PER_ACCESS * num_accesses as u64;
@@ -183,7 +82,7 @@ fn memory_write() {
 
     run_simulation!(engine);
     assert_eq!(sink.num_sunk(), 0);
-    assert_eq!(memory.bytes_written(), (num_accesses * ACCESS_BYTES) as u64);
+    assert_eq!(memory.bytes_written(), num_accesses * ACCESS_BYTES);
     assert_eq!(memory.bytes_read(), 0);
 
     // Simulation will only complete once the Memory has finished handling all the
@@ -201,11 +100,44 @@ fn memory_write_np() {
     run_simulation!(engine);
 
     assert_eq!(sink.num_sunk(), num_accesses);
-    assert_eq!(memory.bytes_written(), (num_accesses * ACCESS_BYTES) as u64);
+    assert_eq!(memory.bytes_written(), num_accesses * ACCESS_BYTES);
     assert_eq!(memory.bytes_read(), 0);
 
     let last_bw_limit_event = CYCLES_PER_ACCESS * num_accesses as u64;
     let last_packet_ack = CYCLES_PER_ACCESS * ((num_accesses - 1) as u64) + DELAY_TICKS as u64;
     let last_event_time = max(last_bw_limit_event, last_packet_ack);
     assert_eq!(engine.time_now_ns(), last_event_time as f64);
+}
+
+#[test]
+fn read_becomes_write() {
+    let mut engine = start_test(file!());
+    let memory = create_memory(&mut engine);
+    let top = engine.top();
+
+    let mut mem_rx_driver = OutPort::new(&top, "mem_rx_driver");
+    mem_rx_driver.connect(memory.port_rx()).unwrap();
+
+    let mem_tx_recv = InPort::new(&top, "mem_tx_recv");
+    memory.connect_port_tx(mem_tx_recv.state()).unwrap();
+
+    engine.spawn(async move {
+        let dst_addr = DST_ADDR + 0x40;
+
+        // Make a device request
+        let request = create_read(&mem_rx_driver.entity, ACCESS_BYTES, dst_addr, SRC_ADDR);
+        mem_rx_driver.put(request)?.await;
+
+        let response = mem_tx_recv.get()?.await;
+
+        // The memory should reply to a Read with a Write
+        assert_eq!(response.access_type(), AccessType::Write);
+        assert_eq!(response.num_bytes(), ACCESS_BYTES);
+
+        Ok(())
+    });
+
+    run_simulation!(engine);
+
+    assert_eq!(engine.time_now_ns(), DELAY_TICKS as f64);
 }

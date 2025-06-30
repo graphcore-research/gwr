@@ -6,7 +6,7 @@ use steam_components::flow_controls::rate_limiter::RateLimiter;
 use steam_engine::engine::Engine;
 use steam_engine::test_helpers::start_test;
 use steam_engine::traits::{Routable, SimObject, TotalBytes};
-use steam_engine::types::{ReqType, SimError};
+use steam_engine::types::{AccessType, SimError};
 use steam_track::tag::{Tag, Tagged};
 
 #[derive(Clone, Debug)]
@@ -24,8 +24,8 @@ impl Routable for RateLimiterTest {
     fn dest(&self) -> Result<u64, SimError> {
         Ok(0)
     }
-    fn req_type(&self) -> Result<ReqType, SimError> {
-        Ok(ReqType::Read)
+    fn req_type(&self) -> Result<AccessType, SimError> {
+        Ok(AccessType::Read)
     }
 }
 

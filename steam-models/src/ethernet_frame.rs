@@ -6,7 +6,7 @@ use std::fmt::Display;
 use std::sync::Arc;
 
 use steam_engine::traits::{Routable, SimObject, TotalBytes};
-use steam_engine::types::{ReqType, SimError};
+use steam_engine::types::{AccessType, SimError};
 use steam_track::entity::Entity;
 use steam_track::tag::Tagged;
 use steam_track::{Tag, create, create_tag};
@@ -120,8 +120,8 @@ impl Routable for EthernetFrame {
         Ok(self.get_dst())
     }
 
-    fn req_type(&self) -> Result<ReqType, SimError> {
-        Ok(ReqType::Control)
+    fn req_type(&self) -> Result<AccessType, SimError> {
+        Ok(AccessType::Control)
     }
 }
 
@@ -144,7 +144,7 @@ impl Routable for Box<EthernetFrame> {
     fn dest(&self) -> Result<u64, SimError> {
         self.as_ref().dest()
     }
-    fn req_type(&self) -> Result<ReqType, SimError> {
+    fn req_type(&self) -> Result<AccessType, SimError> {
         self.as_ref().req_type()
     }
 }

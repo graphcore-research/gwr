@@ -8,7 +8,7 @@ use std::mem::size_of;
 
 use steam_engine::sim_error;
 use steam_engine::traits::{Routable, SimObject, TotalBytes};
-use steam_engine::types::{ReqType, SimError};
+use steam_engine::types::{AccessType, SimError};
 use steam_track::tag::Tagged;
 
 /// The `DataGenerator` is what a [source](crate::source) uses
@@ -33,8 +33,8 @@ impl Routable for Credit {
     fn dest(&self) -> Result<u64, SimError> {
         sim_error!("Cannot route Credit")
     }
-    fn req_type(&self) -> Result<ReqType, SimError> {
-        Ok(ReqType::Control)
+    fn req_type(&self) -> Result<AccessType, SimError> {
+        Ok(AccessType::Control)
     }
 }
 

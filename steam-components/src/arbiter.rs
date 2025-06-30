@@ -316,12 +316,11 @@ where
     async fn run(&self) -> SimResult {
         // Start running the handlers for each input
         for (i, mut rx) in self.rx.borrow_mut().drain(..).enumerate() {
+            let entity = self.entity.clone();
             let rx = rx.take().unwrap();
             let shared_state = self.shared_state.clone();
-            self.spawner.spawn(async move {
-                run_input(rx, i, shared_state).await?;
-                Ok(())
-            });
+            self.spawner
+                .spawn(async move { run_input(entity, rx, i, shared_state).await });
         }
 
         let tx = take_option!(self.tx);
@@ -365,13 +364,14 @@ where
 }
 
 async fn run_input<T: SimObject>(
+    entity: Arc<Entity>,
     rx: InPort<T>,
     input_idx: usize,
     shared_state: Rc<ArbiterSharedState<T>>,
 ) -> SimResult {
     loop {
         let value = rx.get()?.await;
-        enter!(rx.entity ; value.tag());
+        enter!(entity ; value.tag());
 
         // Check if this input needs to wait for the previous value to be handled
         let wait_event = match shared_state.active.borrow()[input_idx].as_ref() {

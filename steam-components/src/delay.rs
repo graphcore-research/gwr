@@ -152,7 +152,7 @@ where
                         clock.wait_ticks(tick.tick() - tick_now.tick()).await;
                     }
                     Ordering::Less => {
-                        return sim_error!("Delay output stalled");
+                        return sim_error!(format!("{entity} delay output stalled"));
                     }
                     Ordering::Equal => {
                         // Do nothing - no need to pause
