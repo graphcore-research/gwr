@@ -60,6 +60,11 @@ impl SearchState {
     pub fn search_matches(&self, line: &EventLine) -> bool {
         match line {
             EventLine::Create { tag, time: _ } => self.tag_matches(tag),
+            EventLine::Connect {
+                from_tag,
+                to_tag,
+                time: _,
+            } => self.tag_matches(from_tag) || self.tag_matches(to_tag),
             EventLine::Enter {
                 tag,
                 entered,

@@ -8,14 +8,17 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use itertools::Itertools;
+use log::Level;
 use regex::Regex;
 
 use crate::app::{CHUNK_SIZE, EventLine};
 use crate::filter::Filter;
 use crate::renderer::Renderer;
+use crate::rocket::SHARED_STATE;
 
 struct LogParser {
     log_line_re: Regex,
+    connect_re: Regex,
     create_re: Regex,
     enter_re: Regex,
     exit_re: Regex,
@@ -28,12 +31,15 @@ struct LogParser {
 impl LogParser {
     fn new() -> Self {
         Self {
-            log_line_re: Regex::new(r"^\[.*\] - (?<level>[^:]+): (?<target>[^ ]+) - (?<msg>.*)$")
-                .unwrap(),
+            log_line_re: Regex::new(r"(?<tag>\d+):(?<level>[^ :]+): (?<msg>.*)$").unwrap(),
 
-            create_re: Regex::new(r"(?<tag>\d+): (?<name>.*) created( by )?(?<by>\d+)?$").unwrap(),
-            enter_re: Regex::new(r"(\d+): (\d+) entered$").unwrap(),
-            exit_re: Regex::new(r"(\d+): (\d+) exited$").unwrap(),
+            connect_re: Regex::new(r"(\d+): connect to (\d+)$").unwrap(),
+            create_re: Regex::new(
+                r"(?<by>\d+): created (?<tag>\d+), (?<name>.*), (?<type>.*), (?<bytes>.*) bytes$",
+            )
+            .unwrap(),
+            enter_re: Regex::new(r"(\d+): enter (\d+)$").unwrap(),
+            exit_re: Regex::new(r"(\d+): exit (\d+)$").unwrap(),
             time_re: Regex::new(r"\d+: set time to ([^n]+)ns").unwrap(),
             text_re: Regex::new(r"(\d+): (\d+) entered$").unwrap(),
 
@@ -50,15 +56,18 @@ impl LogParser {
     ) -> EventLine {
         match self.log_line_re.captures(full_line) {
             Some(e) => {
-                let msg = e.name("msg").unwrap();
-                self.parse_msg(msg.as_str(), tag_to_name, tag_to_fullness, tag_is_source)
+                let tag_str = e.name("tag").unwrap().as_str();
+                let tag = tag_str.parse().unwrap();
+                let level_str = e.name("level").unwrap().as_str();
+                let msg = e.name("msg").unwrap().as_str();
+                EventLine::Log {
+                    level: Level::from_str(level_str).unwrap(),
+                    tag,
+                    msg: msg.to_owned(),
+                    time: self.current_time,
+                }
             }
-            None => EventLine::Log {
-                level: log::Level::Trace,
-                tag: 0,
-                msg: full_line.to_owned(),
-                time: self.current_time,
-            },
+            None => self.parse_msg(full_line, tag_to_name, tag_to_fullness, tag_is_source),
         }
     }
 
@@ -93,9 +102,7 @@ impl LogParser {
                 entered: entered_tag_str.parse().unwrap(),
                 time: self.current_time,
             };
-        }
-
-        if let Some(e) = self.exit_re.captures(msg) {
+        } else if let Some(e) = self.exit_re.captures(msg) {
             let tag_str = e.get(1).unwrap().as_str();
             let tag = tag_str.parse().unwrap();
             let exited_tag_str = e.get(2).unwrap().as_str();
@@ -120,14 +127,10 @@ impl LogParser {
                 exited: exited_tag_str.parse().unwrap(),
                 time: self.current_time,
             };
-        }
-
-        if let Some(e) = self.time_re.captures(msg) {
+        } else if let Some(e) = self.time_re.captures(msg) {
             let time_str = e.get(1).unwrap().as_str();
             self.current_time = time_str.parse().unwrap();
-        }
-
-        if let Some(e) = self.text_re.captures(msg) {
+        } else if let Some(e) = self.text_re.captures(msg) {
             let level_str = e.get(1).unwrap().as_str();
             let tag_str = e.get(2).unwrap().as_str();
             let text_str = e.get(3).unwrap().as_str();
@@ -137,20 +140,39 @@ impl LogParser {
                 msg: text_str.to_owned(),
                 time: self.current_time,
             };
-        }
-
-        if let Some(e) = self.create_re.captures(msg) {
+        } else if let Some(e) = self.create_re.captures(msg) {
             let tag_str = e.name("tag").unwrap().as_str();
             let tag = tag_str.parse().unwrap();
             let name_str = e.name("name").unwrap().as_str();
             let name = name_str.to_owned();
 
-            let _by_str = e.name("by");
+            SHARED_STATE
+                .lock()
+                .unwrap()
+                .entity_names
+                .push(format!("{name}={tag_str}"));
 
             tag_to_name.insert(tag, name);
 
             return EventLine::Create {
                 tag,
+                time: self.current_time,
+            };
+        } else if let Some(e) = self.connect_re.captures(msg) {
+            let from_tag_str = e.get(1).unwrap().as_str();
+            let from_tag = from_tag_str.parse().unwrap();
+            let to_tag_str = e.get(2).unwrap().as_str();
+            let to_tag = to_tag_str.parse().unwrap();
+
+            SHARED_STATE
+                .lock()
+                .unwrap()
+                .connections
+                .push(format!("{from_tag_str} -> {to_tag_str}").to_string());
+
+            return EventLine::Connect {
+                from_tag,
+                to_tag,
                 time: self.current_time,
             };
         }
