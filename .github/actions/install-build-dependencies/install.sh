@@ -7,10 +7,10 @@ echo "Installing build dependencies"
 
 if [[ $OSTYPE == "linux"* ]]; then
   sudo apt-get update
-  sudo apt install asciidoctor capnproto
+  sudo apt install asciidoctor capnproto protobuf-compiler
 elif [[ $OSTYPE == "darwin"* ]]; then
   brew update
-  brew install asciidoctor capnp
+  brew install asciidoctor capnp protobuf
 else
   echo "Installing build dependencies on $OSTYPE is unsupported"
   exit 1
