@@ -19,87 +19,50 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use steam_components::delay::Delay;
 use steam_components::flow_controls::credit_issuer::CreditIssuer;
 use steam_components::flow_controls::credit_limiter::CreditLimiter;
 use steam_components::store::Store;
 use steam_components::types::Credit;
 use steam_components::{connect_port, connect_tx, port_rx};
+use steam_engine::engine::Engine;
 use steam_engine::executor::Spawner;
 use steam_engine::port::PortState;
-use steam_engine::spawn_subcomponent;
 use steam_engine::time::clock::Clock;
 use steam_engine::traits::SimObject;
-use steam_engine::types::SimResult;
-use steam_model_builder::EntityDisplay;
+use steam_model_builder::{EntityDisplay, Runnable};
 use steam_track::entity::Entity;
 
-/// The Flow-Controlled Pipeline.
-///
-/// This `struct` shows all the building blocks of the FcPipeline.
-struct FcPipelineState<T>
-where
-    T: SimObject,
-{
-    credit_limiter: RefCell<Option<CreditLimiter<T>>>,
-    credit_delay: RefCell<Option<Delay<Credit>>>,
-    credit_issuer: RefCell<Option<CreditIssuer<T>>>,
-    data_delay: RefCell<Option<Delay<T>>>,
-    buffer: RefCell<Option<Store<T>>>,
+/// Configuration for a flow-controlled pipeline.
+pub struct FcPipelineConfig {
+    buffer_size: usize,
+    data_delay_ticks: usize,
+    credit_delay_ticks: usize,
 }
 
-impl<T> FcPipelineState<T>
-where
-    T: SimObject,
-{
-    fn new(
-        entity: &Arc<Entity>,
-        clock: Clock,
-        spawner: Spawner,
-        buffer_size: usize,
-        data_delay_ticks: usize,
-        credit_delay_ticks: usize,
-    ) -> Self {
-        let credit_limiter = CreditLimiter::new(entity, spawner.clone(), buffer_size);
-
-        let data_delay = Delay::new(
-            entity,
-            "pipe",
-            clock.clone(),
-            spawner.clone(),
-            data_delay_ticks,
-        );
-
-        let buffer = Store::new(entity, "buf", spawner.clone(), buffer_size);
-
-        connect_port!(credit_limiter, tx => data_delay, rx);
-        connect_port!(data_delay, tx => buffer, rx);
-
-        let credit_issuer = CreditIssuer::new(entity);
-        let credit_delay = Delay::new(entity, "credit_pipe", clock, spawner, credit_delay_ticks);
-
-        connect_port!(buffer, tx => credit_issuer, rx);
-        connect_port!(credit_issuer, credit_tx => credit_delay, rx);
-        connect_port!(credit_delay, tx => credit_limiter, credit_rx);
+impl FcPipelineConfig {
+    #[must_use]
+    pub fn new(buffer_size: usize, data_delay_ticks: usize, credit_delay_ticks: usize) -> Self {
         Self {
-            credit_limiter: RefCell::new(Some(credit_limiter)),
-            credit_delay: RefCell::new(Some(credit_delay)),
-            credit_issuer: RefCell::new(Some(credit_issuer)),
-            data_delay: RefCell::new(Some(data_delay)),
-            buffer: RefCell::new(Some(buffer)),
+            buffer_size,
+            data_delay_ticks,
+            credit_delay_ticks,
         }
     }
 }
 
 /// The Flow-Controlled Pipeline.
-#[derive(Clone, EntityDisplay)]
+#[derive(EntityDisplay, Runnable)]
 pub struct FcPipeline<T>
 where
     T: SimObject,
 {
     pub entity: Arc<Entity>,
-    spawner: Spawner,
-    state: Rc<FcPipelineState<T>>,
+    credit_limiter: RefCell<Option<Rc<CreditLimiter<T>>>>,
+    credit_delay: RefCell<Option<Rc<Delay<Credit>>>>,
+    credit_issuer: RefCell<Option<Rc<CreditIssuer<T>>>>,
+    data_delay: RefCell<Option<Rc<Delay<T>>>>,
 }
 
 impl<T> FcPipeline<T>
@@ -107,63 +70,77 @@ where
     T: SimObject,
 {
     #[must_use]
-    pub fn new(
+    pub fn new_and_register(
+        engine: &Engine,
         parent: &Arc<Entity>,
         name: &str,
         clock: Clock,
         spawner: Spawner,
-        buffer_size: usize,
-        data_delay_ticks: usize,
-        credit_delay_ticks: usize,
-    ) -> Self {
+        config: &FcPipelineConfig,
+    ) -> Rc<Self> {
         let entity = Arc::new(Entity::new(parent, name));
-        Self {
-            entity: entity.clone(),
-            spawner: spawner.clone(),
-            state: Rc::new(FcPipelineState::new(
-                &entity,
-                clock,
-                spawner,
-                buffer_size,
-                data_delay_ticks,
-                credit_delay_ticks,
-            )),
-        }
+
+        let credit_limiter =
+            CreditLimiter::new_and_register(engine, &entity, spawner.clone(), config.buffer_size);
+
+        let data_delay = Delay::new_and_register(
+            engine,
+            &entity,
+            "pipe",
+            clock.clone(),
+            spawner.clone(),
+            config.data_delay_ticks,
+        );
+
+        let buffer =
+            Store::new_and_register(engine, &entity, "buf", spawner.clone(), config.buffer_size);
+
+        connect_port!(credit_limiter, tx => data_delay, rx);
+        connect_port!(data_delay, tx => buffer, rx);
+
+        let credit_issuer = CreditIssuer::new_and_register(engine, &entity);
+        let credit_delay = Delay::new_and_register(
+            engine,
+            &entity,
+            "credit_pipe",
+            clock,
+            spawner,
+            config.credit_delay_ticks,
+        );
+
+        connect_port!(buffer, tx => credit_issuer, rx);
+        connect_port!(credit_issuer, credit_tx => credit_delay, rx);
+        connect_port!(credit_delay, tx => credit_limiter, credit_rx);
+
+        let rc_self = Rc::new(Self {
+            entity,
+            credit_limiter: RefCell::new(Some(credit_limiter)),
+            credit_delay: RefCell::new(Some(credit_delay)),
+            credit_issuer: RefCell::new(Some(credit_issuer)),
+            data_delay: RefCell::new(Some(data_delay)),
+        });
+        engine.register(rc_self.clone());
+        rc_self
     }
 
     pub fn set_data_delay(&self, delay: usize) {
-        self.state
-            .data_delay
-            .borrow()
-            .as_ref()
-            .unwrap()
-            .set_delay(delay);
+        self.data_delay.borrow().as_ref().unwrap().set_delay(delay);
     }
 
     pub fn set_credit_delay(&self, delay: usize) {
-        self.state
-            .credit_delay
+        self.credit_delay
             .borrow()
             .as_ref()
             .unwrap()
             .set_delay(delay);
     }
 
-    pub fn connect_port_tx(&mut self, port_state: Rc<PortState<T>>) {
-        connect_tx!(self.state.credit_issuer, connect_port_tx ; port_state);
+    pub fn connect_port_tx(&self, port_state: Rc<PortState<T>>) {
+        connect_tx!(self.credit_issuer, connect_port_tx ; port_state);
     }
 
     #[must_use]
     pub fn port_rx(&self) -> Rc<PortState<T>> {
-        port_rx!(self.state.credit_limiter, port_rx)
-    }
-
-    pub async fn run(&self) -> SimResult {
-        spawn_subcomponent!(self.spawner ; self.state.credit_limiter);
-        spawn_subcomponent!(self.spawner ; self.state.credit_delay);
-        spawn_subcomponent!(self.spawner ; self.state.credit_issuer);
-        spawn_subcomponent!(self.spawner ; self.state.data_delay);
-        spawn_subcomponent!(self.spawner ; self.state.buffer);
-        Ok(())
+        port_rx!(self.credit_limiter, port_rx)
     }
 }

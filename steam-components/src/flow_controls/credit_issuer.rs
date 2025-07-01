@@ -14,8 +14,10 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use async_trait::async_trait;
+use steam_engine::engine::Engine;
 use steam_engine::port::{InPort, OutPort, PortState};
-use steam_engine::traits::SimObject;
+use steam_engine::traits::{Runnable, SimObject};
 use steam_engine::types::SimResult;
 use steam_model_builder::EntityDisplay;
 use steam_track::entity::Entity;
@@ -24,35 +26,15 @@ use steam_track::trace;
 use crate::types::Credit;
 use crate::{connect_tx, port_rx, take_option};
 
-struct CreditIssuerState<T>
-where
-    T: SimObject,
-{
-    tx: RefCell<Option<OutPort<T>>>,
-    credit_tx: RefCell<Option<OutPort<Credit>>>,
-    rx: RefCell<Option<InPort<T>>>,
-}
-
-impl<T> CreditIssuerState<T>
-where
-    T: SimObject,
-{
-    fn new(entity: &Arc<Entity>) -> Self {
-        Self {
-            tx: RefCell::new(Some(OutPort::new(entity, "tx"))),
-            credit_tx: RefCell::new(Some(OutPort::new(entity, "credit_tx"))),
-            rx: RefCell::new(Some(InPort::new(entity, "rx"))),
-        }
-    }
-}
-
-#[derive(Clone, EntityDisplay)]
+#[derive(EntityDisplay)]
 pub struct CreditIssuer<T>
 where
     T: SimObject,
 {
     pub entity: Arc<Entity>,
-    state: Rc<CreditIssuerState<T>>,
+    tx: RefCell<Option<OutPort<T>>>,
+    credit_tx: RefCell<Option<OutPort<Credit>>>,
+    rx: RefCell<Option<InPort<T>>>,
 }
 
 impl<T> CreditIssuer<T>
@@ -60,29 +42,44 @@ where
     T: SimObject,
 {
     #[must_use]
-    pub fn new(parent: &Arc<Entity>) -> Self {
+    pub fn new_and_register(engine: &Engine, parent: &Arc<Entity>) -> Rc<Self> {
         let entity = Arc::new(Entity::new(parent, "credit_issue"));
-        let state = Rc::new(CreditIssuerState::new(&entity));
-        Self { entity, state }
+        let tx = OutPort::new(&entity, "tx");
+        let credit_tx = OutPort::new(&entity, "credit_tx");
+        let rx = InPort::new(&entity, "rx");
+        let rc_self = Rc::new(Self {
+            entity,
+            tx: RefCell::new(Some(tx)),
+            credit_tx: RefCell::new(Some(credit_tx)),
+            rx: RefCell::new(Some(rx)),
+        });
+        engine.register(rc_self.clone());
+        rc_self
     }
 
     pub fn connect_port_tx(&self, port_state: Rc<PortState<T>>) {
-        connect_tx!(self.state.tx, connect ; port_state);
+        connect_tx!(self.tx, connect ; port_state);
     }
 
     #[must_use]
     pub fn port_rx(&self) -> Rc<PortState<T>> {
-        port_rx!(self.state.rx, state)
+        port_rx!(self.rx, state)
     }
 
     pub fn connect_port_credit_tx(&self, port_state: Rc<PortState<Credit>>) {
-        connect_tx!(self.state.credit_tx, connect ; port_state);
+        connect_tx!(self.credit_tx, connect ; port_state);
     }
+}
 
-    pub async fn run(&self) -> SimResult {
-        let rx = take_option!(self.state.rx);
-        let credit_tx = take_option!(self.state.credit_tx);
-        let tx = take_option!(self.state.tx);
+#[async_trait(?Send)]
+impl<T> Runnable for CreditIssuer<T>
+where
+    T: SimObject,
+{
+    async fn run(&self) -> SimResult {
+        let rx = take_option!(self.rx);
+        let credit_tx = take_option!(self.credit_tx);
+        let tx = take_option!(self.tx);
 
         loop {
             let value = rx.get().await;

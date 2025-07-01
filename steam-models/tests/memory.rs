@@ -2,6 +2,7 @@
 
 use std::cmp::max;
 use std::fmt::Display;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use steam_components::sink::Sink;
@@ -132,15 +133,15 @@ fn setup_system(
     create_fn: fn(&Arc<Entity>) -> TestMemoryAccess,
 ) -> (
     Engine,
-    Source<TestMemoryAccess>,
-    Sink<TestMemoryAccess>,
-    Memory<TestMemoryAccess>,
+    Rc<Sink<TestMemoryAccess>>,
+    Rc<Memory<TestMemoryAccess>>,
 ) {
     let mut engine = start_test(file!());
     let spawner = engine.spawner();
     let clock = engine.default_clock();
+    let top = engine.top();
 
-    let source = Source::new(engine.top(), "source", None);
+    let source = Source::new_and_register(&engine, top, "source", None);
     let to_put = create_fn(&source.entity);
     source.set_generator(option_box_repeat!(to_put ; num_accesses));
 
@@ -150,21 +151,21 @@ fn setup_system(
         BW_BYTES_PER_CYCLE,
         DELAY_TICKS,
     );
-    let memory = Memory::new(engine.top(), "store", clock, spawner, config);
-    let sink = Sink::new(engine.top(), "sink");
+    let memory = Memory::new_and_register(&engine, top, "memory", clock, spawner, config);
+    let sink = Sink::new_and_register(&engine, top, "sink");
 
     connect_port!(source, tx => memory, rx);
     connect_port!(memory, tx => sink, rx);
 
-    (engine, source, sink, memory)
+    (engine, sink, memory)
 }
 
 #[test]
 fn memory_read() {
     let num_accesses = 100;
-    let (mut engine, source, sink, memory) = setup_system(num_accesses, create_read);
+    let (mut engine, sink, memory) = setup_system(num_accesses, create_read);
 
-    run_simulation!(engine; [source, memory, sink]);
+    run_simulation!(engine);
     assert_eq!(sink.num_sunk(), num_accesses);
     assert_eq!(memory.bytes_read(), (num_accesses * ACCESS_BYTES) as u64);
     assert_eq!(memory.bytes_written(), 0);
@@ -178,9 +179,9 @@ fn memory_read() {
 #[test]
 fn memory_write() {
     let num_accesses = 100;
-    let (mut engine, source, sink, memory) = setup_system(num_accesses, create_write);
+    let (mut engine, sink, memory) = setup_system(num_accesses, create_write);
 
-    run_simulation!(engine; [source, memory, sink]);
+    run_simulation!(engine);
     assert_eq!(sink.num_sunk(), 0);
     assert_eq!(memory.bytes_written(), (num_accesses * ACCESS_BYTES) as u64);
     assert_eq!(memory.bytes_read(), 0);
@@ -195,9 +196,9 @@ fn memory_write() {
 #[test]
 fn memory_write_np() {
     let num_accesses = 100;
-    let (mut engine, source, sink, memory) = setup_system(num_accesses, create_write_np);
+    let (mut engine, sink, memory) = setup_system(num_accesses, create_write_np);
 
-    run_simulation!(engine; [source, memory, sink]);
+    run_simulation!(engine);
 
     assert_eq!(sink.num_sunk(), num_accesses);
     assert_eq!(memory.bytes_written(), (num_accesses * ACCESS_BYTES) as u64);

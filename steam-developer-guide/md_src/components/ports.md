@@ -86,7 +86,7 @@ A component with a single output port called `tx` will have:
 # struct TestBlock<T> { phantom: PhantomData<T> }
 # impl<T: SimObject> TestBlock<T> {
 # #[allow(dead_code, unused_variables)]
-pub fn connect_port_tx(&mut self, port_state: Rc<PortState<T>>)
+pub fn connect_port_tx(&self, port_state: Rc<PortState<T>>)
 # { todo!() }
 # }
 # fn main() {}
@@ -122,8 +122,8 @@ example:
 # fn main() {
 # let num_puts = 10;
 # let mut engine = Engine::default();
-let mut source = Source::new(engine.top(), "source", option_box_repeat!(0x123 ; num_puts));
-let sink = Sink::new(engine.top(), "sink");
+let mut source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; num_puts));
+let sink = Sink::new_and_register(&engine, engine.top(), "sink");
 connect_port!(source, tx => sink, rx);
 }
 ```
@@ -141,9 +141,9 @@ then there will be a compile error.
 # fn main() {
 # let num_puts = 10;
 # let mut engine = Engine::default();
-let mut source = Source::new(engine.top(), "source", option_box_repeat!(0x123 ; num_puts));
-let sink = Sink::new(engine.top(), "sink");
-connect_put_port!(source, tx => sink, invalid);
+let mut source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; num_puts));
+let sink = Sink::new_and_register(&engine, engine.top(), "sink");
+connect_port!(source, tx => sink, invalid);
 # }
 ```
 

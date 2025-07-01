@@ -25,3 +25,19 @@ pub fn entity_display(input: proc_macro::TokenStream) -> proc_macro::TokenStream
 
     output.into()
 }
+
+/// Create a default (empty) implementation of Runnable.
+#[proc_macro_derive(Runnable)]
+pub fn runnable(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let DeriveInput {
+        ident, generics, ..
+    } = parse_macro_input!(input);
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+
+    let output = quote! {
+        #[async_trait(?Send)]
+        impl #impl_generics steam_engine::traits::Runnable for #ident #ty_generics #where_clause {}
+    };
+
+    output.into()
+}

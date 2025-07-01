@@ -13,8 +13,10 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use async_trait::async_trait;
+use steam_engine::engine::Engine;
 use steam_engine::port::{InPort, OutPort, PortState};
-use steam_engine::traits::SimObject;
+use steam_engine::traits::{Runnable, SimObject};
 use steam_engine::types::SimResult;
 use steam_model_builder::EntityDisplay;
 use steam_track::entity::Entity;
@@ -23,39 +25,19 @@ use steam_track::{enter, exit};
 use super::rate_limiter::RateLimiter;
 use crate::{connect_tx, port_rx, take_option};
 
-struct LimiterState<T>
-where
-    T: SimObject,
-{
-    limiter: Rc<RateLimiter<T>>,
-    tx: RefCell<Option<OutPort<T>>>,
-    rx: RefCell<Option<InPort<T>>>,
-}
-
-impl<T> LimiterState<T>
-where
-    T: SimObject,
-{
-    fn new(entity: &Arc<Entity>, limiter: Rc<RateLimiter<T>>) -> Self {
-        Self {
-            limiter,
-            tx: RefCell::new(Some(OutPort::new(entity, "tx"))),
-            rx: RefCell::new(Some(InPort::new(entity, "rx"))),
-        }
-    }
-}
-
 /// The [`Limiter`] is a component that will allow data through at a
 /// specified rate.
 ///
 /// The rate is defined in bits-per-second.
-#[derive(Clone, EntityDisplay)]
+#[derive(EntityDisplay)]
 pub struct Limiter<T>
 where
     T: SimObject,
 {
     pub entity: Arc<Entity>,
-    state: Rc<LimiterState<T>>,
+    limiter: Rc<RateLimiter<T>>,
+    tx: RefCell<Option<OutPort<T>>>,
+    rx: RefCell<Option<InPort<T>>>,
 }
 
 impl<T> Limiter<T>
@@ -63,25 +45,44 @@ where
     T: SimObject,
 {
     #[must_use]
-    pub fn new(parent: &Arc<Entity>, name: &str, limiter: Rc<RateLimiter<T>>) -> Self {
+    pub fn new_and_register(
+        engine: &Engine,
+        parent: &Arc<Entity>,
+        name: &str,
+        limiter: Rc<RateLimiter<T>>,
+    ) -> Rc<Self> {
         let entity = Arc::new(Entity::new(parent, name));
-        let state = Rc::new(LimiterState::new(&entity, limiter));
-        Self { entity, state }
+        let tx = OutPort::new(&entity, "tx");
+        let rx = InPort::new(&entity, "rx");
+        let rc_self = Rc::new(Self {
+            entity,
+            limiter,
+            tx: RefCell::new(Some(tx)),
+            rx: RefCell::new(Some(rx)),
+        });
+        engine.register(rc_self.clone());
+        rc_self
     }
 
     pub fn connect_port_tx(&self, port_state: Rc<PortState<T>>) {
-        connect_tx!(self.state.tx, connect ; port_state);
+        connect_tx!(self.tx, connect ; port_state);
     }
 
     #[must_use]
     pub fn port_rx(&self) -> Rc<PortState<T>> {
-        port_rx!(self.state.rx, state)
+        port_rx!(self.rx, state)
     }
+}
 
-    pub async fn run(&self) -> SimResult {
-        let rx = take_option!(self.state.rx);
-        let tx = take_option!(self.state.tx);
-        let limiter = &self.state.limiter;
+#[async_trait(?Send)]
+impl<T> Runnable for Limiter<T>
+where
+    T: SimObject,
+{
+    async fn run(&self) -> SimResult {
+        let rx = take_option!(self.rx);
+        let tx = take_option!(self.tx);
+        let limiter = &self.limiter;
         loop {
             // Get the value but without letting the OutPort complete
             let value = rx.start_get().await;

@@ -10,10 +10,10 @@ use steam_components::store::Store;
 use steam_components::{connect_port, option_box_repeat};
 use steam_engine::engine::Engine;
 use steam_engine::port::{InPort, OutPort};
+use steam_engine::run_simulation;
 use steam_engine::test_helpers::start_test;
 use steam_engine::time::clock::Clock;
 use steam_engine::traits::SimObject;
-use steam_engine::{run_simulation, spawn_simulation};
 
 #[test]
 fn put_get() {
@@ -21,13 +21,13 @@ fn put_get() {
     let clock = engine.default_clock();
     let spawner = engine.spawner();
 
+    let top = engine.top();
     // Create a pair of tasks that use a delay
-    let delay = Delay::new(engine.top(), "delay", clock.clone(), spawner.clone(), 20);
-    let buffer = Store::new(engine.top(), "buffer", spawner, 1);
+    let delay = Delay::new_and_register(&engine, top, "delay", clock.clone(), spawner.clone(), 20);
+    let buffer = Store::new_and_register(&engine, top, "buffer", spawner, 1);
     const NUM_PUTS: i32 = 100;
 
     connect_port!(delay, tx => buffer, rx);
-    spawn_simulation!(engine; [delay, buffer]);
 
     let mut tx = OutPort::new(engine.top(), "tb_tx");
     tx.connect(delay.port_rx());
@@ -57,7 +57,7 @@ fn put_get() {
         });
     }
 
-    engine.run().unwrap();
+    run_simulation!(engine);
 
     let now = clock.tick_now();
     let total = *rx_count.borrow();
@@ -74,14 +74,16 @@ fn source_sink() {
     const DELAY: usize = 3;
     const NUM_PUTS: usize = DELAY * 10;
 
-    let source = Source::new(engine.top(), "source", option_box_repeat!(500 ; NUM_PUTS));
-    let delay = Delay::new(engine.top(), "delay", clock, spawner, DELAY);
-    let sink = Sink::new(engine.top(), "sink");
+    let top = engine.top();
+    let source =
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(500 ; NUM_PUTS));
+    let delay = Delay::new_and_register(&engine, top, "delay", clock, spawner, DELAY);
+    let sink = Sink::new_and_register(&engine, top, "sink");
 
     connect_port!(source, tx => delay, rx);
     connect_port!(delay, tx => sink, rx);
 
-    run_simulation!(engine; [source, delay, sink]);
+    run_simulation!(engine);
 
     let num_sunk = sink.num_sunk();
     assert_eq!(num_sunk, NUM_PUTS);
@@ -98,14 +100,16 @@ fn blocked_output() {
     const DELAY: usize = 1;
     const NUM_PUTS: usize = 10;
 
-    let source = Source::new(engine.top(), "source", option_box_repeat!(500 ; NUM_PUTS));
-    let delay = Delay::new(engine.top(), "delay", clock.clone(), spawner.clone(), DELAY);
-    let store = Store::new(engine.top(), "store", spawner, 1);
+    let top = engine.top();
+    let source =
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(500 ; NUM_PUTS));
+    let delay =
+        Delay::new_and_register(&engine, top, "delay", clock.clone(), spawner.clone(), DELAY);
+    let store = Store::new_and_register(&engine, top, "store", spawner, 1);
 
     connect_port!(source, tx => delay, rx);
     connect_port!(delay, tx => store, rx);
 
-    spawn_simulation!(engine; [source, store, delay]);
     spawn_slow_reader(&engine, clock, &store);
     run_simulation!(engine);
 }
@@ -136,10 +140,12 @@ fn disconnected_delay() {
     const DELAY: usize = 1;
     const NUM_PUTS: usize = 10;
 
-    let source = Source::new(engine.top(), "source", option_box_repeat!(500 ; NUM_PUTS));
-    let delay = Delay::new(engine.top(), "delay", clock, spawner, DELAY);
+    let top = engine.top();
+    let source =
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(500 ; NUM_PUTS));
+    let delay = Delay::new_and_register(&engine, top, "delay", clock, spawner, DELAY);
 
     connect_port!(source, tx => delay, rx);
 
-    run_simulation!(engine; [source, delay]);
+    run_simulation!(engine);
 }

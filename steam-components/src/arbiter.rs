@@ -13,10 +13,12 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use async_trait::async_trait;
+use steam_engine::engine::Engine;
 use steam_engine::events::once::Once;
 use steam_engine::executor::Spawner;
 use steam_engine::port::{InPort, OutPort, PortState};
-use steam_engine::traits::{Event, SimObject};
+use steam_engine::traits::{Event, Runnable, SimObject};
 use steam_engine::types::SimResult;
 use steam_model_builder::EntityDisplay;
 use steam_track::entity::Entity;
@@ -255,41 +257,16 @@ where
     }
 }
 
-struct ArbiterState<T>
-where
-    T: SimObject,
-{
-    rx: RefCell<Vec<Option<InPort<T>>>>,
-    tx: RefCell<Option<OutPort<T>>>,
-    policy: RefCell<Option<Box<dyn Arbitrate<T>>>>,
-    shared_state: Rc<ArbiterSharedState<T>>,
-}
-
-impl<T> ArbiterState<T>
-where
-    T: SimObject,
-{
-    fn new(entity: &Arc<Entity>, num_rx: usize, policy: Box<dyn Arbitrate<T>>) -> Self {
-        let shared_state = Rc::new(ArbiterSharedState::new(num_rx));
-        let rx = (0..num_rx)
-            .map(|i| Some(InPort::new(entity, format!("rx{i}").as_str())))
-            .collect();
-        Self {
-            rx: RefCell::new(rx),
-            tx: RefCell::new(Some(OutPort::new(entity, "tx"))),
-            policy: RefCell::new(Some(policy)),
-            shared_state,
-        }
-    }
-}
-
-#[derive(Clone, EntityDisplay)]
+#[derive(EntityDisplay)]
 pub struct Arbiter<T>
 where
     T: SimObject,
 {
     pub entity: Arc<Entity>,
-    state: Rc<ArbiterState<T>>,
+    rx: RefCell<Vec<Option<InPort<T>>>>,
+    tx: RefCell<Option<OutPort<T>>>,
+    policy: RefCell<Option<Box<dyn Arbitrate<T>>>>,
+    shared_state: Rc<ArbiterSharedState<T>>,
     spawner: Spawner,
 }
 
@@ -298,44 +275,60 @@ where
     T: SimObject,
 {
     #[must_use]
-    pub fn new(
+    pub fn new_and_register(
+        engine: &Engine,
         parent: &Arc<Entity>,
         name: &str,
         spawner: Spawner,
         num_rx: usize,
         policy: Box<dyn Arbitrate<T>>,
-    ) -> Self {
+    ) -> Rc<Self> {
         let entity = Arc::new(Entity::new(parent, name));
-        let state = Rc::new(ArbiterState::new(&entity, num_rx, policy));
-        Self {
+        let shared_state = Rc::new(ArbiterSharedState::new(num_rx));
+        let rx = (0..num_rx)
+            .map(|i| Some(InPort::new(&entity, format!("rx{i}").as_str())))
+            .collect();
+        let tx = OutPort::new(&entity, "tx");
+        let rc_self = Rc::new(Self {
             entity,
-            state,
+            rx: RefCell::new(rx),
+            tx: RefCell::new(Some(tx)),
+            policy: RefCell::new(Some(policy)),
+            shared_state,
             spawner,
-        }
+        });
+        engine.register(rc_self.clone());
+        rc_self
     }
 
-    pub fn connect_port_tx(&mut self, port_state: Rc<PortState<T>>) {
-        connect_tx!(self.state.tx, connect ; port_state);
+    pub fn connect_port_tx(&self, port_state: Rc<PortState<T>>) {
+        connect_tx!(self.tx, connect ; port_state);
     }
 
     #[must_use]
     pub fn port_rx_i(&self, i: usize) -> Rc<PortState<T>> {
-        self.state.rx.borrow()[i].as_ref().unwrap().state()
+        self.rx.borrow()[i].as_ref().unwrap().state()
     }
+}
 
-    pub async fn run(&self) -> SimResult {
+#[async_trait(?Send)]
+impl<T> Runnable for Arbiter<T>
+where
+    T: SimObject,
+{
+    async fn run(&self) -> SimResult {
         // Start running the handlers for each input
-        for (i, mut rx) in self.state.rx.borrow_mut().drain(..).enumerate() {
+        for (i, mut rx) in self.rx.borrow_mut().drain(..).enumerate() {
             let rx = rx.take().unwrap();
-            let shared_state = self.state.shared_state.clone();
+            let shared_state = self.shared_state.clone();
             self.spawner.spawn(async move {
                 run_input(rx, i, shared_state).await;
                 Ok(())
             });
         }
 
-        let tx = take_option!(self.state.tx);
-        let mut policy = take_option!(self.state.policy);
+        let tx = take_option!(self.tx);
+        let mut policy = take_option!(self.policy);
 
         loop {
             let wait_event;
@@ -345,18 +338,18 @@ where
                 {
                     // Need to hold the guard for the entire arbitration until the wake_event has
                     // been taken
-                    let mut active = self.state.shared_state.active.borrow_mut();
+                    let mut active = self.shared_state.active.borrow_mut();
                     let t = policy.arbitrate(&self.entity, &mut active);
                     match t {
                         Some((i, t)) => {
                             trace!(self.entity ; "grant {}: {}", i, t);
-                            wake_event = self.state.shared_state.waiting_put[i].borrow_mut().take();
+                            wake_event = self.shared_state.waiting_put[i].borrow_mut().take();
                             value = t;
                         }
                         None => {
                             wait_event = Once::default();
                             trace!(self.entity ; "arb wait");
-                            *self.state.shared_state.arbiter_event.borrow_mut() =
+                            *self.shared_state.arbiter_event.borrow_mut() =
                                 Some(wait_event.clone());
                             break;
                         }

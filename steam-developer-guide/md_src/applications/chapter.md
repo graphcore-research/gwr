@@ -33,8 +33,8 @@ In this case the [`Source`] is configured to emit the value `0x123` ten times:
 # use steam_engine::engine::Engine;
 # fn main() {
 # let engine = Engine::default();
-let source = Source::new(engine.top(), "source", option_box_repeat!(0x123 ; 10));
-# let sink = Sink::new(engine.top(), "sink");
+let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10));
+# let sink = Sink::new_and_register(&engine, engine.top(), "sink");
 # connect_port!(source, tx => sink, rx);
 # }
 ```
@@ -46,8 +46,8 @@ let source = Source::new(engine.top(), "source", option_box_repeat!(0x123 ; 10))
 # use steam_engine::engine::Engine;
 # fn main() {
 # let engine = Engine::default();
-# let source = Source::new(engine.top(), "source", option_box_repeat!(0x123 ; 10));
-let sink = Sink::new(engine.top(), "sink");
+# let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10));
+let sink = Sink::new_and_register(&engine, engine.top(), "sink");
 # connect_port!(source, tx => sink, rx);
 # }
 ```
@@ -64,8 +64,8 @@ connections are always done in the direction of data flow `tx -> rx`.
 # use steam_engine::engine::Engine;
 # fn main() {
 # let engine = Engine::default();
-# let source = Source::new(engine.top(), "source", option_box_repeat!(0x123 ; 10));
-# let sink = Sink::new(engine.top(), "sink");
+# let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10));
+# let sink = Sink::new_and_register(&engine, engine.top(), "sink");
 connect_port!(source, tx => sink, rx);
 # }
 ```
@@ -83,10 +83,10 @@ using the `run_simulation!` macro:
 # use steam_engine::run_simulation;
 # fn main() {
 # let mut engine = Engine::default();
-# let source = Source::new(engine.top(), "source", option_box_repeat!(0x123 ; 10));
-# let sink = Sink::new(engine.top(), "sink");
+# let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10));
+# let sink = Sink::new_and_register(&engine, engine.top(), "sink");
 # connect_port!(source, tx => sink, rx);
-run_simulation!(engine ; [source, sink]);
+run_simulation!(engine);
 # }
 ```
 
@@ -106,35 +106,11 @@ has received all the expected data.
 # use steam_engine::run_simulation;
 # fn main() {
 # let mut engine = Engine::default();
-# let mut source = Source::new(engine.top(), "source", option_box_repeat!(0x123 ; 10));
-# let sink = Sink::new(engine.top(), "sink");
+# let mut source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10));
+# let sink = Sink::new_and_register(&engine, engine.top(), "sink");
 # connect_port!(source, tx => sink, rx);
-# run_simulation!(engine ; [source, sink]);
+# run_simulation!(engine);
 assert_eq!(sink.num_sunk(), 10);
-# }
-```
-
-## Spawn Simulation
-
-If a component needs to be interacted with during the simulation (for example to
-perform some active monitoring) then the `spawn_simulation!` macro can be used
-as well:
-
-```rust,no_run
-# use steam_components::source::Source;
-# use steam_components::sink::Sink;
-# use steam_components::{connect_port, option_box_repeat};
-# use steam_engine::engine::Engine;
-# use steam_engine::{run_simulation, spawn_simulation};
-# fn main() {
-# let mut engine = Engine::default();
-# let mut source = Source::new(engine.top(), "source", option_box_repeat!(0x123 ; 10));
-# let sink = Sink::new(engine.top(), "sink");
-# connect_port!(source, tx => sink, rx);
-spawn_simulation!(engine ; [source, sink]);
-// Spawn monitor thread with read-only version of source/sink
-// ...
-run_simulation!(engine);
 # }
 ```
 
@@ -152,10 +128,10 @@ use steam_engine::run_simulation;
 
 fn main() {
     let mut engine = Engine::default();
-    let source = Source::new(engine.top(), "source", option_box_repeat!(0x123 ; 10));
-    let sink = Sink::new(engine.top(), "sink");
+    let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10));
+    let sink = Sink::new_and_register(&engine, engine.top(), "sink");
     connect_port!(source, tx => sink, rx);
-    run_simulation!(engine ; [source, sink]);
+    run_simulation!(engine);
     assert_eq!(sink.num_sunk(), 10);
 }
 ```

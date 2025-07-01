@@ -1,12 +1,13 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
+use std::rc::Rc;
+
 use criterion::{BatchSize, Criterion, criterion_group};
 use steam_components::connect_port;
 use steam_components::sink::Sink;
 use steam_components::store::Store;
 use steam_engine::engine::Engine;
 use steam_engine::port::OutPort;
-use steam_engine::spawn_simulation;
 use steam_engine::traits::SimObject;
 use steam_models::ethernet_frame::{EthernetFrame, SRC_MAC_BYTES};
 use steam_track::tracker::dev_null_tracker;
@@ -19,7 +20,7 @@ fn create_engine() -> Engine {
     Engine::new(&tracker)
 }
 
-fn run_engine<T>(args: (Engine, Sink<T>))
+fn run_engine<T>(args: (Engine, Rc<Sink<T>>))
 where
     T: SimObject,
 {
@@ -28,22 +29,23 @@ where
     assert_eq!(sink.num_sunk(), NUM_FRAMES);
 }
 
-fn setup_frame_simulation() -> (Engine, Sink<EthernetFrame>) {
+fn setup_frame_simulation() -> (Engine, Rc<Sink<EthernetFrame>>) {
     let num_frames = NUM_FRAMES;
     let payload_size_bytes = 256;
     let frame_dest = [0, 1, 2, 3, 4, 5];
 
     let engine = create_engine();
+    let top = engine.top();
     let mut ring_frames = Vec::with_capacity(num_frames);
     for i in 0..num_frames {
-        let frame = EthernetFrame::new(engine.top(), payload_size_bytes)
+        let frame = EthernetFrame::new(top, payload_size_bytes)
             .set_dest(frame_dest)
             .set_src([i as u8; SRC_MAC_BYTES]);
         ring_frames.push(frame);
     }
 
     let store_capacity = num_frames / 4;
-    let store = Store::new(engine.top(), "store", engine.spawner(), store_capacity);
+    let store = Store::new_and_register(&engine, top, "store", engine.spawner(), store_capacity);
 
     {
         let mut frame_tx = OutPort::new(engine.top(), "frame_tx");
@@ -56,30 +58,30 @@ fn setup_frame_simulation() -> (Engine, Sink<EthernetFrame>) {
         });
     }
 
-    let sink = Sink::new(engine.top(), "sink");
+    let sink = Sink::new_and_register(&engine, top, "sink");
 
     connect_port!(store, tx => sink, rx);
 
-    spawn_simulation!(engine ; [store, sink]);
     (engine, sink)
 }
 
-fn setup_box_frame_simulation() -> (Engine, Sink<Box<EthernetFrame>>) {
+fn setup_box_frame_simulation() -> (Engine, Rc<Sink<Box<EthernetFrame>>>) {
     let num_frames = NUM_FRAMES;
     let payload_size_bytes = 256;
     let frame_dest = [0, 1, 2, 3, 4, 5];
 
     let engine = create_engine();
+    let top = engine.top();
     let mut ring_frames = Vec::with_capacity(num_frames);
     for i in 0..num_frames {
-        let frame = EthernetFrame::new(engine.top(), payload_size_bytes)
+        let frame = EthernetFrame::new(top, payload_size_bytes)
             .set_dest(frame_dest)
             .set_src([i as u8; SRC_MAC_BYTES]);
         ring_frames.push(Box::new(frame));
     }
 
     let store_capacity = num_frames / 4;
-    let store = Store::new(engine.top(), "store", engine.spawner(), store_capacity);
+    let store = Store::new_and_register(&engine, top, "store", engine.spawner(), store_capacity);
 
     {
         let mut frame_tx = OutPort::new(engine.top(), "frame_tx");
@@ -92,11 +94,10 @@ fn setup_box_frame_simulation() -> (Engine, Sink<Box<EthernetFrame>>) {
         });
     }
 
-    let sink = Sink::new(engine.top(), "sink");
+    let sink = Sink::new_and_register(&engine, top, "sink");
 
     connect_port!(store, tx => sink, rx);
 
-    spawn_simulation!(engine ; [store, sink]);
     (engine, sink)
 }
 

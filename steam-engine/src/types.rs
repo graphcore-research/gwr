@@ -4,13 +4,18 @@
 
 use std::error::Error;
 use std::fmt;
+use std::rc::Rc;
 
-use crate::traits::Event;
+use crate::traits::{Event, Runnable};
 
 /// The return value from a call to [listen()](crate::traits::Event)
 pub type EventResult<T> = T;
 
 pub type Eventable<T> = Box<dyn Event<T> + 'static>;
+
+/// The type of a component that can be registered with the `Engine` so that it
+/// will automatically be spawned.
+pub type Component = Rc<dyn Runnable + 'static>;
 
 // Simulation errors
 

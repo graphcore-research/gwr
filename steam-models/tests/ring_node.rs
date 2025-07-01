@@ -1,5 +1,7 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
+use std::rc::Rc;
+
 use steam_components::arbiter::WeightedRoundRobinPolicy;
 use steam_components::router::Route;
 use steam_components::sink::Sink;
@@ -32,22 +34,23 @@ fn run_test(
     mut io_frames: Vec<EthernetFrame>,
     weights: Vec<usize>,
     route_fn: Box<dyn Route<EthernetFrame>>,
-) -> (Sink<EthernetFrame>, Sink<EthernetFrame>, Clock) {
+) -> (Rc<Sink<EthernetFrame>>, Rc<Sink<EthernetFrame>>, Clock) {
     let rx_buffer_bytes = 1024;
     let tx_buffer_bytes = 1024;
 
     let clock = engine.clock_ghz(1.0);
     let spawner = engine.spawner();
+    let top = engine.top();
 
     let limiter_128b_per_tick = rc_limiter!(clock.clone(), 128);
 
-    let config = RingConfig::new(rx_buffer_bytes, tx_buffer_bytes);
-    let mut ring_node = RingNode::new(
-        engine.top(),
+    let config = RingConfig::new(rx_buffer_bytes, tx_buffer_bytes, limiter_128b_per_tick);
+    let ring_node = RingNode::new_and_register(
+        &engine,
+        top,
         "dut",
         spawner,
         &config,
-        limiter_128b_per_tick,
         route_fn,
         Box::new(WeightedRoundRobinPolicy::new(weights, 2)),
     );
@@ -74,13 +77,13 @@ fn run_test(
         });
     }
 
-    let io_sink = Sink::new(engine.top(), "io_sink");
-    let ring_sink = Sink::new(engine.top(), "ring_sink");
+    let io_sink = Sink::new_and_register(&engine, top, "io_sink");
+    let ring_sink = Sink::new_and_register(&engine, top, "ring_sink");
 
     connect_port!(ring_node, io_tx => io_sink, rx);
     connect_port!(ring_node, ring_tx => ring_sink, rx);
 
-    run_simulation!(engine; [ring_node, io_sink, ring_sink]);
+    run_simulation!(engine);
     (ring_sink, io_sink, clock)
 }
 

@@ -8,9 +8,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
 
+use async_trait::async_trait;
 use steam_track::tag::Tagged;
 
-use crate::types::ReqType;
+use crate::types::{ReqType, SimResult};
 
 /// The `TotalBytes` trait is used to determine how many bytes an object
 /// represents
@@ -141,3 +142,33 @@ pub trait Resolver {
 }
 
 pub type BoxFuture<'a, T> = Pin<std::boxed::Box<dyn Future<Output = T> + 'a>>;
+
+/// The `Runnable` trait defines any active functionality that is spawned by a
+/// component.
+///
+/// This is a trait that defines an `async` function and therefore currently
+/// needs to use the `#[async_trait(?Send)]` decorator that converts it to a
+/// pinned boxed result. A basic implementation of the trait looks like:
+///
+/// ```rust
+/// # use steam_engine::types::SimResult;
+/// # use async_trait::async_trait;
+/// #[async_trait(?Send)]
+/// pub trait Runnable {
+///     async fn run(&self) -> SimResult {
+///         Ok(())
+///     }
+/// }
+/// ```
+///
+/// A default implementation is provided for any compoment that doesn't have any
+/// active behaviour.
+#[async_trait(?Send)]
+pub trait Runnable {
+    /// Provides the method that defines the active element of this component.
+    ///
+    /// Default implementation is to do nothing.
+    async fn run(&self) -> SimResult {
+        Ok(())
+    }
+}

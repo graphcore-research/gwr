@@ -45,26 +45,29 @@ fn main() {
 
     let mut engine = Engine::default();
     let spawner = engine.spawner();
-    let mut scrambler = Scrambler::new(engine.top(), "scrambler", spawner, args.scramble);
-    let source_a = Source::new(
-        engine.top(),
+    let top = engine.top();
+    let scrambler = Scrambler::new_and_register(&engine, top, "scrambler", spawner, args.scramble);
+    let source_a = Source::new_and_register(
+        &engine,
+        top,
         &format!("{}_{}", "source", "a"),
         option_box_repeat!(1 ; 1),
     );
-    let source_b = Source::new(
-        engine.top(),
+    let source_b = Source::new_and_register(
+        &engine,
+        top,
         &format!("{}_{}", "source", "b"),
         option_box_repeat!(2 ; 2),
     );
-    let sink_a = Sink::new(engine.top(), "sink_a");
-    let sink_b = Sink::new(engine.top(), "sink_b");
+    let sink_a = Sink::new_and_register(&engine, top, "sink_a");
+    let sink_b = Sink::new_and_register(&engine, top, "sink_b");
 
     connect_port!(source_a, tx => scrambler, rx_a);
     connect_port!(source_b, tx => scrambler, rx_b);
     connect_port!(scrambler, tx_a => sink_a, rx);
     connect_port!(scrambler, tx_b => sink_b, rx);
 
-    run_simulation!(engine ; [source_a, source_b, sink_a, sink_b, scrambler]);
+    run_simulation!(engine);
 
     println!("Input order: {}, {}", sink_a.num_sunk(), sink_b.num_sunk());
 }

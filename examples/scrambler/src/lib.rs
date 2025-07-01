@@ -10,53 +10,27 @@
 //!  - Two [input port](steam_engine::port::InPort): `rx_a`, `rx_b`
 //!  - Two [output port](steam_engine::port::OutPort): `tx_a`, `tx_b`
 
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use steam_components::store::Store;
-use steam_components::{connect_tx, port_rx};
+use steam_engine::engine::Engine;
 use steam_engine::executor::Spawner;
 use steam_engine::port::PortState;
-use steam_engine::spawn_subcomponent;
 use steam_engine::traits::SimObject;
-use steam_engine::types::SimResult;
-use steam_model_builder::EntityDisplay;
+use steam_model_builder::{EntityDisplay, Runnable};
 use steam_track::entity::Entity;
 
-pub struct ScramblerState<T>
-where
-    T: SimObject,
-{
-    scramble: bool,
-    buffer_a: RefCell<Option<Store<T>>>,
-    buffer_b: RefCell<Option<Store<T>>>,
-}
-
-impl<T> ScramblerState<T>
-where
-    T: SimObject,
-{
-    #[must_use]
-    pub fn new(entity: &Arc<Entity>, spawner: Spawner, scramble: bool) -> Self {
-        let buffer_a = Store::new(entity, "buffer_a", spawner.clone(), 1);
-        let buffer_b = Store::new(entity, "buffer_b", spawner, 1);
-        Self {
-            scramble,
-            buffer_a: RefCell::new(Some(buffer_a)),
-            buffer_b: RefCell::new(Some(buffer_b)),
-        }
-    }
-}
-
-#[derive(Clone, EntityDisplay)]
+#[derive(EntityDisplay, Runnable)]
 pub struct Scrambler<T>
 where
     T: SimObject,
 {
     pub entity: Arc<Entity>,
-    spawner: Spawner,
-    state: Rc<ScramblerState<T>>,
+    scramble: bool,
+    buffer_a: Rc<Store<T>>,
+    buffer_b: Rc<Store<T>>,
 }
 
 impl<T> Scrambler<T>
@@ -64,45 +38,50 @@ where
     T: SimObject,
 {
     #[must_use]
-    pub fn new(parent: &Arc<Entity>, name: &str, spawner: Spawner, scramble: bool) -> Self {
+    pub fn new_and_register(
+        engine: &Engine,
+        parent: &Arc<Entity>,
+        name: &str,
+        spawner: Spawner,
+        scramble: bool,
+    ) -> Rc<Self> {
         let entity = Arc::new(Entity::new(parent, name));
+        let buffer_a = Store::new_and_register(engine, &entity, "buffer_a", spawner.clone(), 1);
+        let buffer_b = Store::new_and_register(engine, &entity, "buffer_b", spawner, 1);
 
-        Self {
+        let rc_self = Rc::new(Self {
             entity: entity.clone(),
-            spawner: spawner.clone(),
-            state: Rc::new(ScramblerState::new(&entity, spawner, scramble)),
+            scramble,
+            buffer_a,
+            buffer_b,
+        });
+        engine.register(rc_self.clone());
+        rc_self
+    }
+
+    pub fn connect_port_tx_a(&self, port_state: Rc<PortState<T>>) {
+        if self.scramble {
+            self.buffer_b.connect_port_tx(port_state);
+        } else {
+            self.buffer_a.connect_port_tx(port_state);
         }
     }
 
-    pub fn connect_port_tx_a(&mut self, port_state: Rc<PortState<T>>) {
-        if self.state.scramble {
-            connect_tx!(self.state.buffer_b, connect_port_tx ; port_state);
+    pub fn connect_port_tx_b(&self, port_state: Rc<PortState<T>>) {
+        if self.scramble {
+            self.buffer_a.connect_port_tx(port_state);
         } else {
-            connect_tx!(self.state.buffer_a, connect_port_tx ; port_state);
-        }
-    }
-
-    pub fn connect_port_tx_b(&mut self, port_state: Rc<PortState<T>>) {
-        if self.state.scramble {
-            connect_tx!(self.state.buffer_a, connect_port_tx ; port_state);
-        } else {
-            connect_tx!(self.state.buffer_b, connect_port_tx ; port_state);
+            self.buffer_b.connect_port_tx(port_state);
         }
     }
 
     #[must_use]
     pub fn port_rx_a(&self) -> Rc<PortState<T>> {
-        port_rx!(self.state.buffer_a, port_rx)
+        self.buffer_a.port_rx()
     }
 
     #[must_use]
     pub fn port_rx_b(&self) -> Rc<PortState<T>> {
-        port_rx!(self.state.buffer_b, port_rx)
-    }
-
-    pub async fn run(&self) -> SimResult {
-        spawn_subcomponent!(self.spawner ; self.state.buffer_a);
-        spawn_subcomponent!(self.spawner ; self.state.buffer_b);
-        Ok(())
+        self.buffer_b.port_rx()
     }
 }

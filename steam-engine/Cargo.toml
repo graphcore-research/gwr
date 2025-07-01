@@ -2,7 +2,7 @@
 
 [package]
 name = "steam-engine"
-version = "0.1.0"
+version = "0.2.0"
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -20,6 +20,7 @@ publish.workspace = true
 
 [dependencies]
 async-std.workspace = true
+async-trait.workspace = true
 clap.workspace = true
 event-listener.workspace = true
 futures.workspace = true

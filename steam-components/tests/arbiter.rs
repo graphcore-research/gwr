@@ -1,5 +1,6 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
+use std::rc::Rc;
 use std::sync::Arc;
 use std::vec;
 
@@ -26,26 +27,29 @@ fn source_sink() {
 
     const NUM_PUTS: usize = 25;
 
-    let mut arbiter = Arbiter::new(
-        engine.top(),
+    let top = engine.top();
+    let arbiter = Arbiter::new_and_register(
+        &engine,
+        top,
         "arb",
         spawner,
         3,
         Box::new(RoundRobinPolicy::new()),
     );
-    let source_a = Source::new(engine.top(), "source_a", option_box_repeat!(1; NUM_PUTS));
-    let source_b = Source::new(engine.top(), "source_b", option_box_repeat!(2; NUM_PUTS));
-    let source_c = Source::new(engine.top(), "source_c", option_box_repeat!(3; NUM_PUTS));
-    let sink = Sink::new(engine.top(), "sink");
+    let source_a =
+        Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; NUM_PUTS));
+    let source_b =
+        Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; NUM_PUTS));
+    let source_c =
+        Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; NUM_PUTS));
+    let sink = Sink::new_and_register(&engine, top, "sink");
 
     connect_port!(source_a, tx => arbiter, rx, 0);
     connect_port!(source_b, tx => arbiter, rx, 1);
     connect_port!(source_c, tx => arbiter, rx, 2);
     connect_port!(arbiter, tx => sink, rx);
 
-    let mut sources = vec![source_a, source_b, source_c];
-
-    run_simulation!(engine; sources, [arbiter, sink]);
+    run_simulation!(engine);
 
     let num_sunk = sink.num_sunk();
     assert_eq!(num_sunk, NUM_PUTS * 3);
@@ -60,26 +64,26 @@ fn two_active_inputs() {
     let nb = 0;
     let nc = 20;
 
-    let mut arbiter = Arbiter::new(
-        engine.top(),
+    let top = engine.top();
+    let arbiter = Arbiter::new_and_register(
+        &engine,
+        top,
         "arb",
         spawner,
         3,
         Box::new(RoundRobinPolicy::new()),
     );
-    let source_a = Source::new(engine.top(), "source_a", option_box_repeat!(1; na));
-    let source_b = Source::new(engine.top(), "source_b", option_box_repeat!(2; nb));
-    let source_c = Source::new(engine.top(), "source_c", option_box_repeat!(3; nc));
-    let sink = Sink::new(engine.top(), "sink");
+    let source_a = Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na));
+    let source_b = Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; nb));
+    let source_c = Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc));
+    let sink = Sink::new_and_register(&engine, top, "sink");
 
     connect_port!(source_a, tx => arbiter, rx, 0);
     connect_port!(source_b, tx => arbiter, rx, 1);
     connect_port!(source_c, tx => arbiter, rx, 2);
     connect_port!(arbiter, tx => sink, rx);
 
-    let mut sources = vec![source_a, source_b, source_c];
-
-    run_simulation!(engine; sources, [arbiter, sink]);
+    run_simulation!(engine);
 
     let num_sunk = sink.num_sunk();
     assert_eq!(num_sunk, 30);
@@ -111,42 +115,45 @@ fn input_order() {
         },
     ];
 
-    let mut arbiter = Arbiter::new(
-        engine.top(),
+    let clock = engine.default_clock();
+    let top = engine.top();
+    let arbiter = Arbiter::new_and_register(
+        &engine,
+        top,
         "arb",
         spawner.clone(),
         3,
         Box::new(RoundRobinPolicy::new()),
     );
-    let source_a = Source::new(
-        engine.top(),
+    let source_a = Source::new_and_register(
+        &engine,
+        top,
         "source_a",
         option_box_repeat!(inputs[0].val; inputs[0].count),
     );
-    let source_b = Source::new(
-        engine.top(),
+    let source_b = Source::new_and_register(
+        &engine,
+        top,
         "source_b",
         option_box_repeat!(inputs[1].val; inputs[1].count),
     );
-    let source_c = Source::new(
-        engine.top(),
+    let source_c = Source::new_and_register(
+        &engine,
+        top,
         "source_c",
         option_box_repeat!(inputs[2].val; inputs[2].count),
     );
     let total_count = inputs.iter().map(|i| i.count).sum();
 
-    let clock = engine.default_clock();
     let write_limiter = rc_limiter!(clock, 1);
-    let store_limiter = Limiter::new(engine.top(), "limit_wr", write_limiter);
-    let store = Store::new(engine.top(), "store", spawner, total_count);
+    let store_limiter = Limiter::new_and_register(&engine, top, "limit_wr", write_limiter);
+    let store = Store::new_and_register(&engine, top, "store", spawner, total_count);
 
     connect_port!(source_a, tx => arbiter, rx, 0);
     connect_port!(source_b, tx => arbiter, rx, 1);
     connect_port!(source_c, tx => arbiter, rx, 2);
     connect_port!(arbiter, tx => store_limiter, rx);
     connect_port!(store_limiter, tx => store, rx);
-
-    let mut sources = vec![source_a, source_b, source_c];
 
     let port = InPort::new(&Arc::new(Entity::new(engine.top(), "port")), "test_rx");
     store.connect_port_tx(port.state());
@@ -160,7 +167,7 @@ fn input_order() {
         Ok(())
     });
 
-    run_simulation!(engine; sources, [arbiter, store_limiter, store]);
+    run_simulation!(engine);
 }
 
 #[test]
@@ -173,26 +180,26 @@ fn more_inputs() {
     let nb = 5;
     let nc = 15;
 
-    let mut arbiter = Arbiter::new(
-        engine.top(),
+    let top = engine.top();
+    let arbiter = Arbiter::new_and_register(
+        &engine,
+        top,
         "arb",
         spawner.clone(),
         2,
         Box::new(RoundRobinPolicy::new()),
     );
-    let source_a = Source::new(engine.top(), "source_a", option_box_repeat!(1; na));
-    let source_b = Source::new(engine.top(), "source_b", option_box_repeat!(2; nb));
-    let source_c = Source::new(engine.top(), "source_c", option_box_repeat!(3; nc));
-    let store = Store::new(engine.top(), "store", spawner, na + nb + nc);
+    let source_a = Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na));
+    let source_b = Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; nb));
+    let source_c = Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc));
+    let store = Store::new_and_register(&engine, top, "store", spawner, na + nb + nc);
 
     connect_port!(source_a, tx => arbiter, rx, 0);
     connect_port!(source_b, tx => arbiter, rx, 1);
     connect_port!(source_c, tx => arbiter, rx, 2);
     connect_port!(arbiter, tx => store, rx);
 
-    let mut sources = vec![source_a, source_b, source_c];
-
-    run_simulation!(engine; sources, [arbiter, store]);
+    run_simulation!(engine);
 }
 
 #[test]
@@ -205,25 +212,26 @@ fn no_output() {
     let nb = 5;
     let nc = 15;
 
-    let arbiter = Arbiter::new(
-        engine.top(),
+    let top = engine.top();
+    let arbiter = Arbiter::new_and_register(
+        &engine,
+        top,
         "arb",
         spawner.clone(),
         3,
         Box::new(RoundRobinPolicy::new()),
     );
-    let source_a = Source::new(engine.top(), "source_a", option_box_repeat!(1; na));
-    let source_b = Source::new(engine.top(), "source_b", option_box_repeat!(2; nb));
-    let source_c = Source::new(engine.top(), "source_c", option_box_repeat!(3; nc));
-    let store: Store<i32> = Store::new(engine.top(), "store", spawner, na + nb + nc);
+    let source_a = Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na));
+    let source_b = Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; nb));
+    let source_c = Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc));
+    let _store: Rc<Store<i32>> =
+        Store::new_and_register(&engine, top, "store", spawner, na + nb + nc);
 
     connect_port!(source_a, tx => arbiter, rx, 0);
     connect_port!(source_b, tx => arbiter, rx, 1);
     connect_port!(source_c, tx => arbiter, rx, 2);
 
-    let mut sources = vec![source_a, source_b, source_c];
-
-    run_simulation!(engine; sources, [arbiter, store]);
+    run_simulation!(engine);
 }
 
 #[test]
@@ -251,26 +259,30 @@ fn weighted_policy() {
     let total_count = inputs.iter().map(|e| e.count).sum();
     let weights: Vec<usize> = inputs.iter().map(|e| e.weight).collect();
 
-    let mut arbiter = Arbiter::new(
-        engine.top(),
+    let top = engine.top();
+    let arbiter = Arbiter::new_and_register(
+        &engine,
+        top,
         file!(),
         spawner.clone(),
         num_inputs,
         Box::new(WeightedRoundRobinPolicy::new(weights.clone(), num_inputs)),
     );
-    let source_a = Source::new(
-        engine.top(),
+    let source_a = Source::new_and_register(
+        &engine,
+        top,
         "source_a",
         option_box_repeat!(inputs[0].val; inputs[0].count),
     );
-    let source_b = Source::new(
-        engine.top(),
+    let source_b = Source::new_and_register(
+        &engine,
+        top,
         "source_b",
         option_box_repeat!(inputs[1].val; inputs[1].count),
     );
     let write_limiter = rc_limiter!(clock, 1);
-    let store_limiter = Limiter::new(engine.top(), "limit_wr", write_limiter);
-    let store = Store::new(engine.top(), "store", spawner, total_count);
+    let store_limiter = Limiter::new_and_register(&engine, top, "limit_wr", write_limiter);
+    let store = Store::new_and_register(&engine, top, "store", spawner, total_count);
 
     connect_port!(source_a, tx => arbiter, rx, 0);
     connect_port!(source_b, tx => arbiter, rx, 1);
@@ -289,9 +301,7 @@ fn weighted_policy() {
         Ok(())
     });
 
-    let mut sources = vec![source_a, source_b];
-
-    run_simulation!(engine; sources, [arbiter, store_limiter, store]);
+    run_simulation!(engine);
 }
 
 #[test]
@@ -313,7 +323,7 @@ fn same_priority_policy() {
     ];
 
     priority_policy_test_core(&mut engine, &inputs);
-    engine.run().unwrap();
+    run_simulation!(engine);
 }
 
 #[test]
@@ -335,7 +345,7 @@ fn diff_priority_policy() {
     ];
 
     priority_policy_test_core(&mut engine, &inputs);
-    engine.run().unwrap();
+    run_simulation!(engine);
 }
 
 #[test]
@@ -369,7 +379,7 @@ fn multiple_inputs_priority_policy() {
     ];
 
     priority_policy_test_core(&mut engine, &inputs);
-    engine.run().unwrap();
+    run_simulation!(engine);
 }
 
 #[test]
@@ -396,8 +406,10 @@ fn panic_priority_policy() {
     let num_inputs = inputs.len();
     let priorities: Vec<Priority> = inputs.iter().map(|e| e.priority).collect();
 
-    let _arbiter: Arbiter<usize> = Arbiter::new(
-        engine.top(),
+    let top = engine.top();
+    let _arbiter: Rc<Arbiter<usize>> = Arbiter::new_and_register(
+        &engine,
+        top,
         "arb",
         spawner,
         num_inputs,

@@ -41,6 +41,7 @@ publish = ["kellnr"]
 [workspace.dependencies]
 approx = "0.5.1"
 async-std = { version = "1.12.0", features = ["attributes"] }
+async-trait = "0.1.88"
 capnp = "0.21.1"
 capnpc = "0.21.0"
 clap = { version = "4.4.6", features = ["derive"] }
