@@ -48,14 +48,16 @@ fn main() {
 
     let num_puts = args.num_packets;
 
-    let source = Source::new(engine.top(), "source", option_box_repeat!(0x123 ; num_puts));
-    let mut flaky = Flaky::new(engine.top(), "flaky", args.drop, args.seed);
-    let sink = Sink::new(engine.top(), "sink");
+    let top = engine.top();
+    let source =
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(0x123 ; num_puts));
+    let flaky = Flaky::new_and_register(&engine, top, "flaky", args.drop, args.seed);
+    let sink = Sink::new_and_register(&engine, top, "sink");
 
     connect_port!(source, tx => flaky, rx);
     connect_port!(flaky, tx => sink, rx);
 
-    run_simulation!(engine ; [source, flaky, sink]);
+    run_simulation!(engine);
 
     println!("Sink received {}/{}", sink.num_sunk(), num_puts);
 }

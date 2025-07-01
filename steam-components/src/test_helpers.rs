@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use steam_engine::engine::Engine;
 use steam_engine::port::InPort;
-use steam_engine::spawn_simulation;
 use steam_track::entity::Entity;
 
 use crate::arbiter::{Arbiter, Priority, PriorityRoundRobinPolicy};
@@ -85,7 +84,8 @@ pub fn priority_policy_test_core(engine: &mut Engine, inputs: &[ArbiterInputData
         policy = policy.set_priority(i, input.priority);
     }
 
-    let mut arbiter = Arbiter::new(
+    let arbiter = Arbiter::new_and_register(
+        engine,
         engine.top(),
         "arb",
         spawner.clone(),
@@ -94,7 +94,8 @@ pub fn priority_policy_test_core(engine: &mut Engine, inputs: &[ArbiterInputData
     );
     let mut sources = Vec::new();
     for (i, input) in inputs.iter().enumerate() {
-        sources.push(Source::new(
+        sources.push(Source::new_and_register(
+            engine,
             engine.top(),
             &("source_".to_owned() + &i.to_string()),
             option_box_repeat!(input.val; input.count),
@@ -102,8 +103,8 @@ pub fn priority_policy_test_core(engine: &mut Engine, inputs: &[ArbiterInputData
     }
 
     let write_limiter = rc_limiter!(clock, 1);
-    let store_limiter = Limiter::new(engine.top(), "limit_wr", write_limiter);
-    let store = Store::new(engine.top(), "store", spawner, total_count);
+    let store_limiter = Limiter::new_and_register(engine, engine.top(), "limit_wr", write_limiter);
+    let store = Store::new_and_register(engine, engine.top(), "store", spawner, total_count);
     connect_port!(store_limiter, tx => store, rx);
 
     for (i, source) in sources.iter_mut().enumerate() {
@@ -124,6 +125,4 @@ pub fn priority_policy_test_core(engine: &mut Engine, inputs: &[ArbiterInputData
         check_round_robin(&check_inputs, &store_get);
         Ok(())
     });
-
-    spawn_simulation!(engine; sources, [arbiter, store_limiter, store]);
 }

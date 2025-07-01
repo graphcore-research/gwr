@@ -5,19 +5,21 @@
 //!
 //! For latest usage run:
 //! ```bash
-//! cargo run --bin flaky-with_delay -- --help
+//! cargo run --bin flaky-with-delay -- --help
 //! ```
 //!
 //! # Example
 //!
 //! Send 10000 packets and drop 50% of them:
 //! ```bash
-//! $ cargo run --bin flaky-with_delay -- --seed 1 --drop 0.5 --num-packets 10000
+//! $ cargo run --bin flaky-with-delay -- --seed 1 --drop 0.5 --num-packets 10000
 //! Sink received 4934/10000
 //! ```
 
+use std::process::exit;
+
 use clap::Parser;
-use flaky_with_delay::Flaky;
+use flaky_with_delay::{Config, Flaky};
 use steam_components::sink::Sink;
 use steam_components::source::Source;
 use steam_components::{connect_port, option_box_repeat};
@@ -54,22 +56,22 @@ fn main() {
 
     let num_puts = args.num_packets;
 
-    let source = Source::new(engine.top(), "source", option_box_repeat!(0x123 ; num_puts));
-    let mut flaky = Flaky::new(
-        engine.top(),
-        "flaky",
-        clock,
-        spawner,
-        args.drop,
-        args.seed,
-        args.delay,
-    );
-    let sink = Sink::new(engine.top(), "sink");
+    let top = engine.top();
+    let source =
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(0x123 ; num_puts));
+
+    if !(0.0..=1.0).contains(&args.drop) {
+        println!("ERROR: --drop ratio outside valid range [0, 1]");
+        exit(1);
+    }
+    let config = Config::new(args.drop, args.seed, args.delay);
+    let flaky = Flaky::new_and_register(&engine, top, "flaky", clock, spawner, &config);
+    let sink = Sink::new_and_register(&engine, top, "sink");
 
     connect_port!(source, tx => flaky, rx);
     connect_port!(flaky, tx => sink, rx);
 
-    run_simulation!(engine ; [source, flaky, sink]);
+    run_simulation!(engine);
 
     println!("Sink received {}/{}", sink.num_sunk(), num_puts);
 }

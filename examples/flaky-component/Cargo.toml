@@ -2,7 +2,7 @@
 
 [package]
 name = "flaky-component"
-version = "1.0.0"
+version = "2.0.0"
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -19,6 +19,7 @@ publish.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+async-trait.workspace = true
 clap.workspace = true
 rand.workspace = true
 steam-components = { path = "../../steam-components" }

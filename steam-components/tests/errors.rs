@@ -10,10 +10,11 @@ use steam_engine::test_helpers::start_test;
 fn connect_outport_twice() {
     let engine = start_test(file!());
 
-    let source = Source::new(engine.top(), "source", option_box_repeat!(1 ; 1));
+    let top = engine.top();
+    let source = Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; 1));
 
-    let sink1 = Sink::new(engine.top(), "sink1");
-    let sink2 = Sink::new(engine.top(), "sink2");
+    let sink1 = Sink::new_and_register(&engine, top, "sink1");
+    let sink2 = Sink::new_and_register(&engine, top, "sink2");
 
     connect_port!(source, tx => sink1, rx);
     connect_port!(source, tx => sink2, rx);
@@ -24,10 +25,11 @@ fn connect_outport_twice() {
 fn connect_inport_twice() {
     let engine = start_test(file!());
 
-    let source1 = Source::new(engine.top(), "source1", option_box_repeat!(1 ; 1));
-    let source2 = Source::new(engine.top(), "source2", option_box_repeat!(1 ; 1));
+    let top = engine.top();
+    let source1 = Source::new_and_register(&engine, top, "source1", option_box_repeat!(1 ; 1));
+    let source2 = Source::new_and_register(&engine, top, "source2", option_box_repeat!(1 ; 1));
 
-    let sink = Sink::new(engine.top(), "sink");
+    let sink = Sink::new_and_register(&engine, top, "sink");
 
     connect_port!(source1, tx => sink, rx);
     connect_port!(source2, tx => sink, rx);

@@ -73,7 +73,7 @@ use steam_components::connect_port;
 use steam_engine::engine::Engine;
 use steam_engine::executor::Spawner;
 use steam_engine::time::clock::Clock;
-use steam_engine::{run_simulation, sim_error, spawn_simulation};
+use steam_engine::{run_simulation, sim_error};
 use steam_models::ethernet_frame::PACKET_OVERHEAD_BYTES;
 use steam_track::{error, info};
 
@@ -237,10 +237,10 @@ fn main() -> Result<(), SimRingError> {
         config.tx_buffer_frames
     );
 
-    let mut ring_nodes = build_ring_nodes(&mut engine, &config);
-    let (mut sources, mut sinks) = build_source_sinks(&mut engine, &config);
-    let (mut ingress_pipes, mut ring_pipes) = build_pipes(&mut engine, &config);
-    let (mut source_limiters, mut ring_limiters, mut sink_limiters) =
+    let ring_nodes = build_ring_nodes(&mut engine, &config);
+    let (sources, sinks) = build_source_sinks(&mut engine, &config);
+    let (ingress_pipes, ring_pipes) = build_pipes(&mut engine, &config);
+    let (source_limiters, ring_limiters, sink_limiters) =
         build_limiters(&mut engine, &config, ETHERNET_GBPS);
 
     for i in 0..config.ring_size {
@@ -262,8 +262,6 @@ fn main() -> Result<(), SimRingError> {
         connect_port!(ring_nodes[i], io_tx => sink_limiters[i], rx);
         connect_port!(sink_limiters[i], tx => sinks[i], rx);
     }
-
-    spawn_simulation!(engine ; sources, ingress_pipes, source_limiters, ring_limiters, sink_limiters, sinks, ring_nodes, ring_pipes);
 
     info!(top ; "Platform built and connected");
 

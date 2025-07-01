@@ -4,13 +4,14 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use steam_components::delay::Delay;
-use steam_components::{connect_tx, port_rx, take_option};
+use steam_components::{port_rx, take_option};
+use steam_engine::engine::Engine;
 use steam_engine::executor::Spawner;
 use steam_engine::port::{InPort, OutPort, PortState};
-use steam_engine::spawn_subcomponent;
 use steam_engine::time::clock::Clock;
-use steam_engine::traits::SimObject;
+use steam_engine::traits::{Runnable, SimObject};
 use steam_engine::types::{ReqType, SimResult};
 use steam_model_builder::EntityDisplay;
 use steam_track::entity::Entity;
@@ -84,43 +85,19 @@ impl MemoryMetrics {
     }
 }
 
-struct MemoryState<T>
-where
-    T: SimObject + MemoryAccess,
-{
-    clock: Clock,
-    config: MemoryConfig,
-    metrics: RefCell<MemoryMetrics>,
-
-    response_delay: RefCell<Option<Delay<T>>>,
-    rx: RefCell<Option<InPort<T>>>,
-}
-
-impl<T> MemoryState<T>
-where
-    T: SimObject + MemoryAccess,
-{
-    fn new(entity: &Arc<Entity>, clock: Clock, spawner: Spawner, config: MemoryConfig) -> Self {
-        let response_delay =
-            Delay::new(entity, "delay", clock.clone(), spawner, config.delay_ticks);
-        Self {
-            clock,
-            config,
-            metrics: RefCell::new(MemoryMetrics::new()),
-            response_delay: RefCell::new(Some(response_delay)),
-            rx: RefCell::new(Some(InPort::new(entity, "rx"))),
-        }
-    }
-}
-
-#[derive(Clone, EntityDisplay)]
+#[derive(EntityDisplay)]
 pub struct Memory<T>
 where
     T: SimObject + MemoryAccess,
 {
     pub entity: Arc<Entity>,
-    spawner: Spawner,
-    state: Rc<MemoryState<T>>,
+    clock: Clock,
+    config: MemoryConfig,
+    metrics: RefCell<MemoryMetrics>,
+
+    response_delay: Rc<Delay<T>>,
+    response_tx: RefCell<Option<OutPort<T>>>,
+    rx: RefCell<Option<InPort<T>>>,
 }
 
 impl<T> Memory<T>
@@ -128,39 +105,72 @@ where
     T: SimObject + MemoryAccess,
 {
     #[must_use]
-    pub fn new(
+    pub fn new_and_register(
+        engine: &Engine,
         parent: &Arc<Entity>,
         name: &str,
         clock: Clock,
         spawner: Spawner,
         config: MemoryConfig,
-    ) -> Self {
+    ) -> Rc<Self> {
         let entity = Arc::new(Entity::new(parent, name));
-        let state = Rc::new(MemoryState::new(&entity, clock, spawner.clone(), config));
-        Self {
-            entity,
+
+        let rx = InPort::new(&entity, "rx");
+
+        let response_delay = Delay::new_and_register(
+            engine,
+            &entity,
+            "delay",
+            clock.clone(),
             spawner,
-            state,
-        }
+            config.delay_ticks,
+        );
+
+        // Create a local port to drive into the response delay
+        let mut response_tx = OutPort::new(&entity, "response");
+        response_tx.connect(response_delay.port_rx());
+
+        let rc_self = Rc::new(Self {
+            entity,
+            clock,
+            config,
+            metrics: RefCell::new(MemoryMetrics::new()),
+            response_delay,
+            rx: RefCell::new(Some(rx)),
+            response_tx: RefCell::new(Some(response_tx)),
+        });
+        engine.register(rc_self.clone());
+        rc_self
     }
 
     pub fn connect_port_tx(&self, port_state: Rc<PortState<T>>) {
-        connect_tx!(self.state.response_delay, connect_port_tx ; port_state);
+        self.response_delay.connect_port_tx(port_state);
     }
 
     #[must_use]
     pub fn port_rx(&self) -> Rc<PortState<T>> {
-        port_rx!(self.state.rx, state)
+        port_rx!(self.rx, state)
     }
 
-    pub async fn run(&self) -> SimResult {
-        let rx = take_option!(self.state.rx);
+    #[must_use]
+    pub fn bytes_written(&self) -> u64 {
+        self.metrics.borrow().bytes_written
+    }
 
-        // Create a local port to drive into the response delay
-        let mut response_tx = OutPort::new(&self.entity, "response");
-        response_tx.connect(port_rx!(self.state.response_delay, port_rx));
+    #[must_use]
+    pub fn bytes_read(&self) -> u64 {
+        self.metrics.borrow().bytes_read
+    }
+}
 
-        spawn_subcomponent!(self.spawner ; self.state.response_delay);
+#[async_trait(?Send)]
+impl<T> Runnable for Memory<T>
+where
+    T: SimObject + MemoryAccess,
+{
+    async fn run(&self) -> SimResult {
+        let rx = take_option!(self.rx);
+        let response_tx = take_option!(self.response_tx);
 
         loop {
             let access = rx.get().await;
@@ -170,7 +180,7 @@ where
             let access_bytes = access.num_bytes();
             let end = access.addr() + access_bytes;
 
-            let config = &self.state.config;
+            let config = &self.config;
             assert!(
                 begin >= config.base_address && end < (config.base_address + config.capacity_bytes),
                 "Invalid memory access received"
@@ -178,11 +188,11 @@ where
 
             match access.access_type() {
                 ReqType::Read => {
-                    self.state.metrics.borrow_mut().bytes_read += access.num_bytes();
+                    self.metrics.borrow_mut().bytes_read += access.num_bytes();
                     response_tx.put(access).await?;
                 }
                 ReqType::Write | ReqType::WriteNonPosted => {
-                    self.state.metrics.borrow_mut().bytes_written += access.num_bytes();
+                    self.metrics.borrow_mut().bytes_written += access.num_bytes();
 
                     if access.access_type() == ReqType::WriteNonPosted {
                         response_tx.put(access).await?;
@@ -194,17 +204,7 @@ where
             }
 
             let ticks = access_bytes.div_ceil(config.bw_bytes_per_cycle);
-            self.state.clock.wait_ticks(ticks).await;
+            self.clock.wait_ticks(ticks).await;
         }
-    }
-
-    #[must_use]
-    pub fn bytes_written(&self) -> u64 {
-        self.state.metrics.borrow().bytes_written
-    }
-
-    #[must_use]
-    pub fn bytes_read(&self) -> u64 {
-        self.state.metrics.borrow().bytes_read
     }
 }

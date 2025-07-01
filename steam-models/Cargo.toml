@@ -2,7 +2,7 @@
 
 [package]
 name = "steam-models"
-version = "0.1.0"
+version = "0.2.0"
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -24,6 +24,7 @@ harness = false
 
 [dependencies]
 async-std.workspace = true
+async-trait.workspace = true
 futures.workspace = true
 paste.workspace = true
 log.workspace = true

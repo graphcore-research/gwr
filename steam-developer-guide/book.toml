@@ -14,6 +14,7 @@ command = "mdbook-keeper"
 manifest_dir = "../"
 is_workspace = true
 externs = [
+    "async_trait",
     "steam_components",
     "steam_engine",
     "steam_model_builder",

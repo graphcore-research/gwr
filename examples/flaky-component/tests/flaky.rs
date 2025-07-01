@@ -17,14 +17,16 @@ fn drop_precent() {
 
     let drop = 0.5;
     let seed = 1;
-    let source = Source::new(engine.top(), "source", option_box_repeat!(0x123 ; num_puts));
-    let mut flaky = Flaky::new(engine.top(), "flaky", drop, seed);
-    let sink = Sink::new(engine.top(), "sink");
+    let top = engine.top();
+    let source =
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(0x123 ; num_puts));
+    let flaky = Flaky::new_and_register(&engine, top, "flaky", drop, seed);
+    let sink = Sink::new_and_register(&engine, top, "sink");
 
     connect_port!(source, tx => flaky, rx);
     connect_port!(flaky, tx => sink, rx);
 
-    run_simulation!(engine ; [source, flaky, sink]);
+    run_simulation!(engine);
 
     // We requested 50%, but it might be slightly more
     assert!(sink.num_sunk() < 55);

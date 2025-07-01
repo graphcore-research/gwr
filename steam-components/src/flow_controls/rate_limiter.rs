@@ -52,7 +52,7 @@
 //! let rate_limiter = rc_limiter!(clock, 16);
 //!
 //! // Build the source (initially with no generator).
-//! let source = Source::new(engine.top(), "source", None);
+//! let source = Source::new_and_register(&engine, engine.top(), "source", None);
 //!
 //! // Create a packet that uses the source as its trace-control entity.
 //! let packet = 0; // TODO implement a packet type to use here
@@ -61,17 +61,17 @@
 //! source.set_generator(option_box_repeat!(packet ; 10));
 //!
 //! // Create the a limiter component to enforce the limit
-//! let limiter = Limiter::new(engine.top(), "limit", rate_limiter);
+//! let limiter = Limiter::new_and_register(&engine, engine.top(), "limit", rate_limiter);
 //!
 //! // Create the sink to accept these packets.
-//! let sink = Sink::new(engine.top(), "sink");
+//! let sink = Sink::new_and_register(&engine, engine.top(), "sink");
 //!
 //! // Connect the components.
 //! connect_port!(source, tx => limiter, rx);
 //! connect_port!(limiter, tx => sink, rx);
 //!
 //! // Run the simulation.
-//! run_simulation!(engine ; [source, limiter,  sink]);
+//! run_simulation!(engine);
 //!
 //! // Ensure the time is as expected.
 //! assert_eq!(engine.time_now_ns(), 20.0);

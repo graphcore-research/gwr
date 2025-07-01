@@ -2,6 +2,8 @@
 //
 //! Library functions to build parts of the SimRing application.
 
+use std::rc::Rc;
+
 use steam_components::arbiter::WeightedRoundRobinPolicy;
 use steam_components::flow_controls::limiter::Limiter;
 use steam_components::rc_limiter;
@@ -11,17 +13,17 @@ use steam_components::source::Source;
 use steam_engine::engine::Engine;
 use steam_engine::traits::Routable;
 use steam_models::ethernet_frame::{EthernetFrame, u64_to_mac};
-use steam_models::fc_pipeline::FcPipeline;
+use steam_models::fc_pipeline::{FcPipeline, FcPipelineConfig};
 use steam_models::ring_node::{IO_INDEX, RING_INDEX, RingConfig, RingNode};
 
 use crate::packet_gen::PacketGen;
 
 // Define some types to aid readability
-pub type Limiters = Vec<Limiter<EthernetFrame>>;
-pub type Nodes = Vec<RingNode<EthernetFrame>>;
-pub type Pipes = Vec<FcPipeline<EthernetFrame>>;
-pub type Sources = Vec<Source<EthernetFrame>>;
-pub type Sinks = Vec<Sink<EthernetFrame>>;
+pub type Limiters = Vec<Rc<Limiter<EthernetFrame>>>;
+pub type Nodes = Vec<Rc<RingNode<EthernetFrame>>>;
+pub type Pipes = Vec<Rc<FcPipeline<EthernetFrame>>>;
+pub type Sources = Vec<Rc<Source<EthernetFrame>>>;
+pub type Sinks = Vec<Rc<Sink<EthernetFrame>>>;
 
 pub struct Config {
     pub ring_size: usize,
@@ -50,17 +52,21 @@ pub fn build_ring_nodes(engine: &mut Engine, config: &Config) -> Nodes {
     let spawner = engine.spawner().clone();
     let clock = engine.default_clock().clone();
     let limiter_128_gbps = rc_limiter!(clock.clone(), 128);
-    let ring_config = RingConfig::new(config.rx_buffer_frames, config.tx_buffer_frames);
+    let ring_config = RingConfig::new(
+        config.rx_buffer_frames,
+        config.tx_buffer_frames,
+        limiter_128_gbps.clone(),
+    );
     let top = engine.top();
     let ring_nodes: Nodes = (0..config.ring_size)
         .map(|i| {
             let weights = vec![config.ring_priority, 1];
-            RingNode::new(
+            RingNode::new_and_register(
+                engine,
                 top,
                 format!("node{i}").as_str(),
                 spawner.clone(),
                 &ring_config,
-                limiter_128_gbps.clone(),
                 Box::new(Router(i)),
                 Box::new(WeightedRoundRobinPolicy::new(weights, 2)),
             )
@@ -76,7 +82,8 @@ pub fn build_source_sinks(engine: &mut Engine, config: &Config) -> (Sources, Sin
     for i in 0..config.ring_size {
         let neighbour_left = if i > 0 { i - 1 } else { config.ring_size - 1 };
 
-        sources.push(Source::new(
+        sources.push(Source::new_and_register(
+            engine,
             top,
             format!("source{i}").as_str(),
             Some(Box::new(PacketGen::new(
@@ -89,7 +96,7 @@ pub fn build_source_sinks(engine: &mut Engine, config: &Config) -> (Sources, Sin
     }
 
     let sinks: Sinks = (0..config.ring_size)
-        .map(|i| Sink::new(top, format!("sink{i}").as_str()))
+        .map(|i| Sink::new_and_register(engine, top, format!("sink{i}").as_str()))
         .collect();
 
     (sources, sinks)
@@ -102,24 +109,24 @@ pub fn build_pipes(engine: &mut Engine, config: &Config) -> (Pipes, Pipes) {
     let clock = engine.default_clock();
     let top = engine.top();
     let spawner = engine.spawner();
+
+    let pipe_config = FcPipelineConfig::new(500, 500, 500);
     for i in 0..config.ring_size {
-        ingress_pipes.push(FcPipeline::new(
+        ingress_pipes.push(FcPipeline::new_and_register(
+            engine,
             top,
             format!("ingress_pipe{i}").as_str(),
             clock.clone(),
             spawner.clone(),
-            500,
-            500,
-            500,
+            &pipe_config,
         ));
-        ring_pipes.push(FcPipeline::new(
+        ring_pipes.push(FcPipeline::new_and_register(
+            engine,
             top,
             format!("ring_pipe{i}").as_str(),
             clock.clone(),
             spawner.clone(),
-            500,
-            500,
-            500,
+            &pipe_config,
         ));
     }
     (ingress_pipes, ring_pipes)
@@ -134,15 +141,36 @@ pub fn build_limiters(
     let limiter_gbps = rc_limiter!(clock, gbps);
     let top = engine.top();
     let source_limiters: Limiters = (0..config.ring_size)
-        .map(|i| Limiter::new(top, format!("src_limit{i}").as_str(), limiter_gbps.clone()))
+        .map(|i| {
+            Limiter::new_and_register(
+                engine,
+                top,
+                format!("src_limit{i}").as_str(),
+                limiter_gbps.clone(),
+            )
+        })
         .collect();
 
     let ring_limiters: Limiters = (0..config.ring_size)
-        .map(|i| Limiter::new(top, format!("ring_limit{i}").as_str(), limiter_gbps.clone()))
+        .map(|i| {
+            Limiter::new_and_register(
+                engine,
+                top,
+                format!("ring_limit{i}").as_str(),
+                limiter_gbps.clone(),
+            )
+        })
         .collect();
 
     let sink_limiters: Limiters = (0..config.ring_size)
-        .map(|i| Limiter::new(top, format!("sink_limit{i}").as_str(), limiter_gbps.clone()))
+        .map(|i| {
+            Limiter::new_and_register(
+                engine,
+                top,
+                format!("sink_limit{i}").as_str(),
+                limiter_gbps.clone(),
+            )
+        })
         .collect();
     (source_limiters, ring_limiters, sink_limiters)
 }

@@ -13,8 +13,10 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use async_trait::async_trait;
+use steam_engine::engine::Engine;
 use steam_engine::port::{InPort, OutPort, PortState};
-use steam_engine::traits::{Routable, SimObject};
+use steam_engine::traits::{Routable, Runnable, SimObject};
 use steam_engine::types::SimResult;
 use steam_model_builder::EntityDisplay;
 use steam_track::entity::Entity;
@@ -40,39 +42,15 @@ where
     }
 }
 
-struct RouterState<T>
-where
-    T: SimObject,
-{
-    rx: RefCell<Option<InPort<T>>>,
-    tx: RefCell<Vec<OutPort<T>>>,
-    router: Box<dyn Route<T>>,
-}
-
-impl<T> RouterState<T>
-where
-    T: SimObject,
-{
-    fn new(entity: &Arc<Entity>, num_egress: usize, router: Box<dyn Route<T>>) -> Self {
-        let mut tx = Vec::with_capacity(num_egress);
-        for i in 0..num_egress {
-            tx.push(OutPort::new(entity, format!("tx{i}").as_str()));
-        }
-        Self {
-            rx: RefCell::new(Some(InPort::new(entity, "rx"))),
-            tx: RefCell::new(tx),
-            router,
-        }
-    }
-}
-
-#[derive(Clone, EntityDisplay)]
+#[derive(EntityDisplay)]
 pub struct Router<T>
 where
     T: SimObject,
 {
     pub entity: Arc<Entity>,
-    state: Rc<RouterState<T>>,
+    rx: RefCell<Option<InPort<T>>>,
+    tx: RefCell<Vec<OutPort<T>>>,
+    router: Box<dyn Route<T>>,
 }
 
 impl<T> Router<T>
@@ -80,19 +58,31 @@ where
     T: SimObject,
 {
     #[must_use]
-    pub fn new(
+    pub fn new_and_register(
+        engine: &Engine,
         parent: &Arc<Entity>,
         name: &str,
         num_egress: usize,
         router: Box<dyn Route<T>>,
-    ) -> Self {
+    ) -> Rc<Self> {
         let entity = Arc::new(Entity::new(parent, name));
-        let state = Rc::new(RouterState::new(&entity, num_egress, router));
-        Self { entity, state }
+        let rx = InPort::new(&entity, "rx");
+        let mut tx = Vec::with_capacity(num_egress);
+        for i in 0..num_egress {
+            tx.push(OutPort::new(&entity, format!("tx{i}").as_str()));
+        }
+        let rc_self = Rc::new(Self {
+            entity,
+            rx: RefCell::new(Some(rx)),
+            tx: RefCell::new(tx),
+            router,
+        });
+        engine.register(rc_self.clone());
+        rc_self
     }
 
     pub fn connect_port_tx_i(&self, i: usize, port_state: Rc<PortState<T>>) {
-        match self.state.tx.borrow_mut().get_mut(i) {
+        match self.tx.borrow_mut().get_mut(i) {
             None => {
                 panic!("{}: no tx port {}", self.entity, i);
             }
@@ -102,13 +92,19 @@ where
 
     #[must_use]
     pub fn port_rx(&self) -> Rc<PortState<T>> {
-        self.state.rx.borrow().as_ref().unwrap().state()
+        self.rx.borrow().as_ref().unwrap().state()
     }
+}
 
-    pub async fn run(&self) -> SimResult {
-        let tx: Vec<OutPort<T>> = self.state.tx.borrow_mut().drain(..).collect();
-        let rx = take_option!(self.state.rx);
-        let router = &self.state.router;
+#[async_trait(?Send)]
+impl<T> Runnable for Router<T>
+where
+    T: SimObject,
+{
+    async fn run(&self) -> SimResult {
+        let tx: Vec<OutPort<T>> = self.tx.borrow_mut().drain(..).collect();
+        let rx = take_option!(self.rx);
+        let router = &self.router;
 
         loop {
             let value = rx.get().await;

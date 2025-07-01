@@ -12,10 +12,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use async_trait::async_trait;
+use steam_engine::engine::Engine;
 use steam_engine::executor::Spawner;
 use steam_engine::port::{InPort, OutPort, PortState};
 use steam_engine::spawn_subcomponent;
-use steam_engine::traits::SimObject;
+use steam_engine::traits::{Runnable, SimObject};
 use steam_engine::types::SimResult;
 use steam_model_builder::EntityDisplay;
 use steam_resources::Resource;
@@ -25,40 +27,31 @@ use steam_track::trace;
 use crate::types::Credit;
 use crate::{connect_tx, port_rx, take_option};
 
-struct CreditState {
-    credit: Resource,
-    rx: RefCell<Option<InPort<Credit>>>,
-}
-
-impl CreditState {
-    fn new(entity: &Arc<Entity>, credit: Resource) -> Self {
-        Self {
-            credit,
-            rx: RefCell::new(Some(InPort::new(entity, "rx"))),
-        }
-    }
-}
-
-#[derive(Clone, EntityDisplay)]
+#[derive(EntityDisplay)]
 struct PortCredit {
     pub entity: Arc<Entity>,
-    state: Rc<CreditState>,
+    credit: Resource,
+    rx: RefCell<Option<InPort<Credit>>>,
 }
 
 impl PortCredit {
     pub fn new(parent: &Arc<Entity>, name: &str, credit: Resource) -> Self {
         let entity = Arc::new(Entity::new(parent, name));
-        let state = Rc::new(CreditState::new(&entity, credit));
-        Self { entity, state }
+        let rx = InPort::new(&entity, "rx");
+        Self {
+            entity,
+            credit,
+            rx: RefCell::new(Some(rx)),
+        }
     }
 
     pub fn port_rx(&self) -> Rc<PortState<Credit>> {
-        port_rx!(self.state.rx, state)
+        port_rx!(self.rx, state)
     }
 
     pub async fn run(&self) -> SimResult {
-        let rx = take_option!(self.state.rx);
-        let credit = self.state.credit.clone();
+        let rx = take_option!(self.rx);
+        let credit = self.credit.clone();
 
         loop {
             let credits = rx.get().await;
@@ -70,10 +63,13 @@ impl PortCredit {
     }
 }
 
-struct CreditLimiterState<T>
+#[derive(EntityDisplay)]
+pub struct CreditLimiter<T>
 where
     T: SimObject,
 {
+    pub entity: Arc<Entity>,
+    spawner: Spawner,
     credit: Resource,
 
     tx: RefCell<Option<OutPort<T>>>,
@@ -81,69 +77,61 @@ where
     rx: RefCell<Option<InPort<T>>>,
 }
 
-impl<T> CreditLimiterState<T>
-where
-    T: SimObject,
-{
-    fn new(entity: &Arc<Entity>, num_credits: usize) -> Self {
-        let credit = Resource::new(num_credits);
-        let credit_rx = PortCredit::new(entity, "credit_rx", credit.clone());
-
-        Self {
-            credit,
-            tx: RefCell::new(Some(OutPort::new(entity, "tx"))),
-            credit_rx: RefCell::new(Some(credit_rx)),
-            rx: RefCell::new(Some(InPort::new(entity, "rx"))),
-        }
-    }
-}
-
-#[derive(Clone, EntityDisplay)]
-pub struct CreditLimiter<T>
-where
-    T: SimObject,
-{
-    pub entity: Arc<Entity>,
-    spawner: Spawner,
-    state: Rc<CreditLimiterState<T>>,
-}
-
 impl<T> CreditLimiter<T>
 where
     T: SimObject,
 {
     #[must_use]
-    pub fn new(parent: &Arc<Entity>, spawner: Spawner, num_credits: usize) -> Self {
+    pub fn new_and_register(
+        engine: &Engine,
+        parent: &Arc<Entity>,
+        spawner: Spawner,
+        num_credits: usize,
+    ) -> Rc<Self> {
         let entity = Arc::new(Entity::new(parent, "credit"));
-        let state = Rc::new(CreditLimiterState::new(&entity, num_credits));
+        let credit = Resource::new(num_credits);
+        let credit_rx = PortCredit::new(&entity, "credit_rx", credit.clone());
+        let tx = OutPort::new(&entity, "tx");
+        let rx = InPort::new(&entity, "rx");
 
-        Self {
+        let rc_self = Rc::new(Self {
             entity,
-            state,
+            credit,
+            tx: RefCell::new(Some(tx)),
+            credit_rx: RefCell::new(Some(credit_rx)),
+            rx: RefCell::new(Some(rx)),
             spawner,
-        }
+        });
+        engine.register(rc_self.clone());
+        rc_self
     }
 
     pub fn connect_port_tx(&self, port_state: Rc<PortState<T>>) {
-        connect_tx!(self.state.tx, connect ; port_state);
+        connect_tx!(self.tx, connect ; port_state);
     }
 
     #[must_use]
     pub fn port_rx(&self) -> Rc<PortState<T>> {
-        port_rx!(self.state.rx, state)
+        port_rx!(self.rx, state)
     }
 
     #[must_use]
     pub fn port_credit_rx(&self) -> Rc<PortState<Credit>> {
-        port_rx!(self.state.credit_rx, port_rx)
+        port_rx!(self.credit_rx, port_rx)
     }
+}
 
-    pub async fn run(&self) -> SimResult {
-        let rx = take_option!(self.state.rx);
-        let tx = take_option!(self.state.tx);
-        let credit = self.state.credit.clone();
+#[async_trait(?Send)]
+impl<T> Runnable for CreditLimiter<T>
+where
+    T: SimObject,
+{
+    async fn run(&self) -> SimResult {
+        let rx = take_option!(self.rx);
+        let tx = take_option!(self.tx);
+        let credit = self.credit.clone();
 
-        spawn_subcomponent!(self.spawner ; self.state.credit_rx);
+        spawn_subcomponent!(self.spawner ; self.credit_rx);
 
         loop {
             let value = rx.get().await;

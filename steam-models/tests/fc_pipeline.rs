@@ -6,7 +6,7 @@ use steam_components::source::Source;
 use steam_components::{connect_port, option_box_repeat, rc_limiter};
 use steam_engine::run_simulation;
 use steam_engine::test_helpers::start_test;
-use steam_models::fc_pipeline::FcPipeline;
+use steam_models::fc_pipeline::{FcPipeline, FcPipelineConfig};
 
 fn test_fc_pipeline(buffer_size: usize, data_delay: usize, credit_delay: usize) {
     let mut engine = start_test(file!());
@@ -16,22 +16,16 @@ fn test_fc_pipeline(buffer_size: usize, data_delay: usize, credit_delay: usize) 
     let num_puts = 10;
 
     // Create a pair of tasks that use a pipeline
-    let source = Source::new(engine.top(), "source", option_box_repeat!(1 ; num_puts));
-    let mut pipeline = FcPipeline::new(
-        engine.top(),
-        "pipe",
-        clock,
-        spawner,
-        buffer_size,
-        data_delay,
-        credit_delay,
-    );
-    let sink = Sink::new(engine.top(), "sink");
+    let top = engine.top();
+    let source = Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; num_puts));
+    let pipe_config = FcPipelineConfig::new(buffer_size, data_delay, credit_delay);
+    let pipeline = FcPipeline::new_and_register(&engine, top, "pipe", clock, spawner, &pipe_config);
+    let sink = Sink::new_and_register(&engine, top, "sink");
 
     connect_port!(source, tx => pipeline, rx);
     connect_port!(pipeline, tx => sink, rx);
 
-    run_simulation!(engine ; [source, pipeline, sink]);
+    run_simulation!(engine);
 
     assert_eq!(sink.num_sunk(), num_puts);
 }
@@ -76,33 +70,28 @@ fn test_fc_pipeline_throughput(
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
     let spawner = engine.spawner();
+    let top = engine.top();
 
     // Set the rate limit such that each packet sent will take one cycle
     let bits_per_tick = 128;
     let rate_limiter = rc_limiter!(clock.clone(), bits_per_tick);
-    let limiter = Limiter::new(engine.top(), "limiter", rate_limiter);
+    let limiter = Limiter::new_and_register(&engine, top, "limiter", rate_limiter);
 
     // Create a pair of tasks that use a pipeline
-    let source = Source::new(engine.top(), "source", None);
+    let source = Source::new_and_register(&engine, top, "source", None);
     let word = 101;
     source.set_generator(option_box_repeat!(word ; num_puts));
 
-    let mut pipeline = FcPipeline::new(
-        engine.top(),
-        "pipe",
-        clock.clone(),
-        spawner,
-        buffer_size,
-        data_delay,
-        credit_delay,
-    );
-    let sink = Sink::new(engine.top(), "sink");
+    let pipe_config = FcPipelineConfig::new(buffer_size, data_delay, credit_delay);
+    let pipeline =
+        FcPipeline::new_and_register(&engine, top, "pipe", clock.clone(), spawner, &pipe_config);
+    let sink = Sink::new_and_register(&engine, top, "sink");
 
     connect_port!(source, tx => limiter, rx);
     connect_port!(limiter, tx => pipeline, rx);
     connect_port!(pipeline, tx => sink, rx);
 
-    run_simulation!(engine ; [source, limiter, pipeline, sink]);
+    run_simulation!(engine);
     assert_eq!(sink.num_sunk(), num_puts);
 
     clock.tick_now().tick() as usize

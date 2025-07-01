@@ -43,10 +43,10 @@
 //! use steam_engine::run_simulation;
 //!
 //! let mut engine = Engine::default();
-//! let mut source = Source::new(engine.top(), "source", option_box_repeat!(0x123 ; 10));
-//! let sink = Sink::new(engine.top(), "sink");
+//! let mut source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10));
+//! let sink = Sink::new_and_register(&engine, engine.top(), "sink");
 //! connect_port!(source, tx => sink, rx);
-//! run_simulation!(engine ; [source, sink]);
+//! run_simulation!(engine);
 //! assert_eq!(sink.num_sunk(), 10);
 //! ```
 
@@ -70,75 +70,12 @@ pub mod traits;
 pub mod types;
 
 #[macro_export]
-/// Spawn the run() for all components and provide read-only clones.
-///
-/// This allows the user to access the component through read-only functions
-/// after the simulation has been run.
-macro_rules! spawn_simulation {
-    ($engine:ident ; $($iterable:ident),* $(,)?) => {
-        $(
-        let $iterable = $iterable.drain(..).map(|i| {
-            let c = i.clone();
-            $engine.spawn(async move { i.run().await });
-            c
-        }).collect::<Vec<_>>();
-
-        // Get rid of any unused variable warnings
-        let _ = $iterable;
-        )*
-    };
-    ($engine:ident ; $($iterable:ident),* $(,)* [$($block:ident),* $(,)?]) => {
-        $(
-        let $iterable = $iterable.drain(..).map(|i| {
-            let c = i.clone();
-            $engine.spawn(async move { i.run().await });
-            c
-        }).collect::<Vec<_>>();
-
-        // Get rid of any unused variable warnings
-        let _ = $iterable;
-        )*
-
-        $(
-        let clone = $block.clone();
-        $engine.spawn(async move { $block.run().await } );
-        let $block = clone;
-
-        // Get rid of any unused variable warnings
-        let _ = $block;
-        )*
-    };
-}
-
-#[macro_export]
 /// Spawn all component run() functions and then run the simulation.
 macro_rules! run_simulation {
     ($engine:ident) => {
         $engine.run().unwrap();
     };
-    ($engine:ident ; $($iterable:ident),* $(,)?) => {
-        $crate::spawn_simulation!($engine ; $($iterable,)*);
-        $engine.run().unwrap();
-    };
-    ($engine:ident ; $($iterable:ident),* $(,)? [$($block:ident),* $(,)?]) => {
-        $crate::spawn_simulation!($engine ; $($iterable,)* , [$($block,)*]);
-        $engine.run().unwrap();
-    };
     ($engine:ident, $expect:expr) => {
-        match $engine.run() {
-            Ok(()) => panic!("Expected an error!"),
-            Err(e) => assert_eq!(format!("{e}").as_str(), $expect),
-        }
-    };
-    ($engine:ident, $expect:expr ; $($iterable:ident),* $(,)?) => {
-        $crate::spawn_simulation!($engine ; $($iterable,)*);
-        match $engine.run() {
-            Ok(()) => panic!("Expected an error!"),
-            Err(e) => assert_eq!(format!("{e}").as_str(), $expect),
-        }
-    };
-    ($engine:ident, $expect:expr ; $($iterable:ident),* $(,)? [$($block:ident),* $(,)?]) => {
-        $crate::spawn_simulation!($engine ; $($iterable,)* , [$($block,)*]);
         match $engine.run() {
             Ok(()) => panic!("Expected an error!"),
             Err(e) => assert_eq!(format!("{e}").as_str(), $expect),

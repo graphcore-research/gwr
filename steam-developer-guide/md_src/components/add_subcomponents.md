@@ -2,7 +2,8 @@
 
 # Create Subcomponents
 
-A component will almost always be built of subcomponents with some extra logic.
+A component is the building block of models. It will have ports and usually
+comprise subcomponents and some extra logic.
 
 The **examples/flaky-with_delay** gives an example of a simple component that
 uses an existing subcomponent.

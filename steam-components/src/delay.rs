@@ -19,11 +19,13 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use async_trait::async_trait;
+use steam_engine::engine::Engine;
 use steam_engine::events::repeated::Repeated;
 use steam_engine::executor::Spawner;
 use steam_engine::port::{InPort, OutPort, PortState};
 use steam_engine::time::clock::{Clock, ClockTick};
-use steam_engine::traits::{Event, SimObject};
+use steam_engine::traits::{Event, Runnable, SimObject};
 use steam_engine::types::SimResult;
 use steam_model_builder::EntityDisplay;
 use steam_track::entity::Entity;
@@ -31,45 +33,20 @@ use steam_track::{enter, exit};
 
 use crate::{connect_tx, port_rx, take_option};
 
-struct DelayState<T>
-where
-    T: SimObject,
-{
-    pub entity: Arc<Entity>,
-    clock: Clock,
-    delay_ticks: RefCell<usize>,
-
-    rx: RefCell<Option<InPort<T>>>,
-    pending: RefCell<VecDeque<(T, ClockTick)>>,
-    pending_changed: Repeated<usize>,
-    tx: RefCell<Option<OutPort<T>>>,
-}
-
-impl<T> DelayState<T>
-where
-    T: SimObject,
-{
-    fn new(entity: &Arc<Entity>, clock: Clock, delay_ticks: usize) -> Self {
-        Self {
-            entity: entity.clone(),
-            clock,
-            delay_ticks: RefCell::new(delay_ticks),
-            rx: RefCell::new(Some(InPort::new(entity, "rx"))),
-            pending: RefCell::new(VecDeque::new()),
-            pending_changed: Repeated::new(usize::default()),
-            tx: RefCell::new(Some(OutPort::new(entity, "tx"))),
-        }
-    }
-}
-
-#[derive(Clone, EntityDisplay)]
+#[derive(EntityDisplay)]
 pub struct Delay<T>
 where
     T: SimObject,
 {
     pub entity: Arc<Entity>,
     spawner: Spawner,
-    state: Rc<DelayState<T>>,
+    clock: Clock,
+    delay_ticks: RefCell<usize>,
+
+    rx: RefCell<Option<InPort<T>>>,
+    pending: Rc<RefCell<VecDeque<(T, ClockTick)>>>,
+    pending_changed: Repeated<usize>,
+    tx: RefCell<Option<OutPort<T>>>,
 }
 
 impl<T> Delay<T>
@@ -77,79 +54,102 @@ where
     T: SimObject,
 {
     #[must_use]
-    pub fn new(
+    pub fn new_and_register(
+        engine: &Engine,
         parent: &Arc<Entity>,
         name: &str,
         clock: Clock,
         spawner: Spawner,
         delay_ticks: usize,
-    ) -> Self {
+    ) -> Rc<Self> {
         let entity = Arc::new(Entity::new(parent, name));
-        let state = Rc::new(DelayState::new(&entity, clock, delay_ticks));
-        Self {
+        let tx = OutPort::new(&entity, "tx");
+        let rx = InPort::new(&entity, "rx");
+        let rc_self = Rc::new(Self {
             entity,
             spawner,
-            state,
-        }
+            clock,
+            delay_ticks: RefCell::new(delay_ticks),
+            rx: RefCell::new(Some(rx)),
+            pending: Rc::new(RefCell::new(VecDeque::new())),
+            pending_changed: Repeated::new(usize::default()),
+            tx: RefCell::new(Some(tx)),
+        });
+        engine.register(rc_self.clone());
+        rc_self
     }
 
     pub fn connect_port_tx(&self, port_state: Rc<PortState<T>>) {
-        connect_tx!(self.state.tx, connect ; port_state);
+        connect_tx!(self.tx, connect ; port_state);
     }
 
     #[must_use]
     pub fn port_rx(&self) -> Rc<PortState<T>> {
-        port_rx!(self.state.rx, state)
+        port_rx!(self.rx, state)
     }
 
     pub fn set_delay(&self, delay_ticks: usize) {
-        if self.state.rx.borrow().is_none() {
+        if self.rx.borrow().is_none() {
             panic!(
                 "{}: can't change the delay after the simulation has started",
                 self.entity
             );
         }
-        *self.state.delay_ticks.borrow_mut() = delay_ticks;
+        *self.delay_ticks.borrow_mut() = delay_ticks;
     }
+}
 
-    pub async fn run(&self) -> SimResult {
+#[async_trait(?Send)]
+impl<T> Runnable for Delay<T>
+where
+    T: SimObject,
+{
+    async fn run(&self) -> SimResult {
         // Spawn the other end of the delay
-        let tx = take_option!(self.state.tx);
+        let tx = take_option!(self.tx);
 
         let entity = self.entity.clone();
-        let state = self.state.clone();
+        let clock = self.clock.clone();
+        let pending = self.pending.clone();
+        let pending_changed = self.pending_changed.clone();
         self.spawner
-            .spawn(async move { run_tx(entity, tx, state).await });
+            .spawn(async move { run_tx(entity, tx, clock, pending, pending_changed).await });
 
-        let rx = take_option!(self.state.rx);
-        let delay_ticks = *self.state.delay_ticks.borrow() as u64;
+        let rx = take_option!(self.rx);
+        let delay_ticks = *self.delay_ticks.borrow() as u64;
         loop {
             let value = rx.get().await;
             let value_tag = value.tag();
-            enter!(self.state.entity ; value_tag);
+            enter!(self.entity ; value_tag);
 
-            let mut tick = self.state.clock.tick_now();
+            let mut tick = self.clock.tick_now();
             tick.set_tick(tick.tick() + delay_ticks);
 
-            self.state.pending.borrow_mut().push_back((value, tick));
-            self.state.pending_changed.notify()?;
+            self.pending.borrow_mut().push_back((value, tick));
+            self.pending_changed.notify()?;
         }
     }
 }
 
-async fn run_tx<T>(entity: Arc<Entity>, tx: OutPort<T>, state: Rc<DelayState<T>>) -> SimResult
+async fn run_tx<T>(
+    entity: Arc<Entity>,
+    tx: OutPort<T>,
+    clock: Clock,
+    pending: Rc<RefCell<VecDeque<(T, ClockTick)>>>,
+    pending_changed: Repeated<usize>,
+) -> SimResult
 where
     T: SimObject,
 {
     loop {
-        let next = state.pending.borrow_mut().pop_front();
+        let next = pending.borrow_mut().pop_front();
 
         match next {
             Some((value, tick)) => {
-                let tick_now = state.clock.tick_now();
+                let tick_now = clock.tick_now();
                 match tick.cmp(&tick_now) {
                     Ordering::Greater => {
-                        state.clock.wait_ticks(tick.tick() - tick_now.tick()).await;
+                        clock.wait_ticks(tick.tick() - tick_now.tick()).await;
                     }
                     Ordering::Less => {
                         panic!("Delay output stalled");
@@ -163,7 +163,7 @@ where
                 tx.put(value).await?;
             }
             None => {
-                state.pending_changed.listen().await;
+                pending_changed.listen().await;
             }
         }
     }
