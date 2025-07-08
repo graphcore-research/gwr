@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use steam_engine::engine::Engine;
-use steam_engine::port::{InPort, PortState};
+use steam_engine::port::{InPort, PortStateResult};
 use steam_engine::traits::{Runnable, SimObject};
-use steam_engine::types::SimResult;
+use steam_engine::types::{SimError, SimResult};
 use steam_model_builder::EntityDisplay;
 use steam_track::enter;
 use steam_track::entity::Entity;
@@ -31,8 +31,11 @@ impl<T> Sink<T>
 where
     T: SimObject,
 {
-    #[must_use]
-    pub fn new_and_register(engine: &Engine, parent: &Arc<Entity>, name: &str) -> Rc<Self> {
+    pub fn new_and_register(
+        engine: &Engine,
+        parent: &Arc<Entity>,
+        name: &str,
+    ) -> Result<Rc<Self>, SimError> {
         let entity = Arc::new(Entity::new(parent, name));
         let rx = InPort::new(&entity, "rx");
         let rc_self = Rc::new(Self {
@@ -41,11 +44,10 @@ where
             rx: RefCell::new(Some(rx)),
         });
         engine.register(rc_self.clone());
-        rc_self
+        Ok(rc_self)
     }
 
-    #[must_use]
-    pub fn port_rx(&self) -> Rc<PortState<T>> {
+    pub fn port_rx(&self) -> PortStateResult<T> {
         port_rx!(self.rx, state)
     }
 
@@ -63,7 +65,7 @@ where
     async fn run(&self) -> SimResult {
         let rx = take_option!(self.rx);
         loop {
-            let value = rx.get().await;
+            let value = rx.get()?.await;
             enter!(self.entity ; value.tag());
             *self.sunk_count.borrow_mut() += 1;
         }

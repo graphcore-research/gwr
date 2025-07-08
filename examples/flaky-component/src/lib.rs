@@ -29,9 +29,9 @@ use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 use steam_components::{connect_tx, port_rx, take_option};
 use steam_engine::engine::Engine;
-use steam_engine::port::{InPort, OutPort, PortState};
+use steam_engine::port::{InPort, OutPort, PortStateResult};
 use steam_engine::traits::{Runnable, SimObject};
-use steam_engine::types::SimResult;
+use steam_engine::types::{SimError, SimResult};
 use steam_model_builder::EntityDisplay;
 /// The steam_track library provides tracing/logging features.
 use steam_track::entity::Entity;
@@ -94,14 +94,13 @@ where
 {
     /// In this case, the `new()` function creates the component from the
     /// parameters provided.
-    #[must_use]
     pub fn new_and_register(
         engine: &Engine,
         parent: &Arc<Entity>,
         name: &str,
         drop_ratio: f64,
         seed: u64,
-    ) -> Rc<Self> {
+    ) -> Result<Rc<Self>, SimError> {
         // The entity needs to be created first because it is shared between the state
         // and the component itself.
         let entity = Entity::new(parent, name);
@@ -120,12 +119,11 @@ where
             tx: RefCell::new(Some(tx)),
         });
         engine.register(rc_self.clone());
-        rc_self
+        Ok(rc_self)
     }
 
     /// This provides the `InPort` to which you can connect
-    #[must_use]
-    pub fn port_rx(&self) -> Rc<PortState<T>> {
+    pub fn port_rx(&self) -> PortStateResult<T> {
         // The `port_rx!` macro is the most consise way to access the rx port state.
         port_rx!(self.rx, state)
     }
@@ -134,10 +132,10 @@ where
     /// this component exposes. In this case, the `connect_port_tx` shows
     /// that this component has an TX port which should be connected to an RX
     /// port.
-    pub fn connect_port_tx(&self, port_state: Rc<PortState<T>>) {
+    pub fn connect_port_tx(&self, port_state: PortStateResult<T>) -> SimResult {
         // Because the State is immutable then we use the `connect_tx!` macro
         // in order to simplify the setup.
-        connect_tx!(self.tx, connect ; port_state);
+        connect_tx!(self.tx, connect ; port_state)
     }
 
     /// Return the next random u32
@@ -159,13 +157,13 @@ where
 
         loop {
             // Receive a value from the input
-            let value = rx.get().await;
+            let value = rx.get()?.await;
 
             let next_u32 = self.next_u32();
             let ratio = next_u32 as f64 / u32::MAX as f64;
             if ratio > self.drop_ratio {
                 // Only pass on a percentage of the data
-                tx.put(value).await?;
+                tx.put(value)?.await;
             } else {
                 // Let the user know this value has been dropped.
                 trace!(self.entity ; "drop {}", value);

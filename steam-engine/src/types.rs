@@ -23,7 +23,7 @@ pub type Component = Rc<dyn Runnable + 'static>;
 /// Build a [SimError] from a message that supports `to_string`
 macro_rules! sim_error {
     ($msg:expr) => {
-        Err($crate::types::SimError($msg.to_string()))?
+        Err($crate::types::SimError($msg.to_string()))
     };
 }
 

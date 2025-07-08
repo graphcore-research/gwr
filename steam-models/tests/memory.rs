@@ -12,7 +12,7 @@ use steam_engine::engine::Engine;
 use steam_engine::run_simulation;
 use steam_engine::test_helpers::start_test;
 use steam_engine::traits::{Routable, SimObject, TotalBytes};
-use steam_engine::types::ReqType;
+use steam_engine::types::{ReqType, SimError};
 use steam_models::memory::{CacheHintType, Memory, MemoryAccess, MemoryConfig};
 use steam_track::entity::Entity;
 use steam_track::tag::Tagged;
@@ -88,16 +88,16 @@ impl MemoryAccess for TestMemoryAccess {
 }
 
 impl Routable for TestMemoryAccess {
-    fn dest(&self) -> u64 {
-        self.address
+    fn dest(&self) -> Result<u64, SimError> {
+        Ok(self.address)
     }
-    fn req_type(&self) -> ReqType {
-        match self.access_type {
+    fn req_type(&self) -> Result<ReqType, SimError> {
+        Ok(match self.access_type {
             ReqType::Read => ReqType::Read,
             ReqType::Write => ReqType::Write,
             ReqType::WriteNonPosted => ReqType::WriteNonPosted,
             ReqType::Control => ReqType::Control,
-        }
+        })
     }
 }
 
@@ -141,7 +141,7 @@ fn setup_system(
     let clock = engine.default_clock();
     let top = engine.top();
 
-    let source = Source::new_and_register(&engine, top, "source", None);
+    let source = Source::new_and_register(&engine, top, "source", None).unwrap();
     let to_put = create_fn(&source.entity);
     source.set_generator(option_box_repeat!(to_put ; num_accesses));
 
@@ -151,11 +151,11 @@ fn setup_system(
         BW_BYTES_PER_CYCLE,
         DELAY_TICKS,
     );
-    let memory = Memory::new_and_register(&engine, top, "memory", clock, spawner, config);
-    let sink = Sink::new_and_register(&engine, top, "sink");
+    let memory = Memory::new_and_register(&engine, top, "memory", clock, spawner, config).unwrap();
+    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
 
-    connect_port!(source, tx => memory, rx);
-    connect_port!(memory, tx => sink, rx);
+    connect_port!(source, tx => memory, rx).unwrap();
+    connect_port!(memory, tx => sink, rx).unwrap();
 
     (engine, sink, memory)
 }

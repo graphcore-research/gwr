@@ -12,18 +12,18 @@ fn put_get_synced() {
     let mut tx_port = OutPort::new(engine.top(), "tx");
     let rx_port = InPort::new(engine.top(), "rx");
 
-    tx_port.connect(rx_port.state());
+    tx_port.connect(rx_port.state()).unwrap();
 
     {
         let clock = engine.default_clock();
         engine.spawn(async move {
             // Do put before any gets happen
-            tx_port.put(1).await?;
+            tx_port.put(1)?.await;
 
             // The `put()` should not have completed until the matching `get()` happens
             assert!(clock.time_now_ns() == 1.0);
 
-            tx_port.put(2).await?;
+            tx_port.put(2)?.await;
             Ok(())
         });
     }
@@ -32,9 +32,9 @@ fn put_get_synced() {
         let clock = engine.default_clock();
         engine.spawn(async move {
             clock.wait_ticks(1).await;
-            let i = rx_port.get().await;
+            let i = rx_port.get()?.await;
             assert_eq!(i, 1);
-            let i = rx_port.get().await;
+            let i = rx_port.get()?.await;
             assert_eq!(i, 2);
 
             // Time should not change for any other reason than the `wait_ticks()`
@@ -55,23 +55,23 @@ fn select_on_ports() {
 
     let mut tx_port1 = OutPort::new(engine.top(), "tx");
     let rx_port1 = InPort::new(engine.top(), "rx");
-    tx_port1.connect(rx_port1.state());
+    tx_port1.connect(rx_port1.state()).unwrap();
 
     let mut tx_port2 = OutPort::new(engine.top(), "tx");
     let rx_port2 = InPort::new(engine.top(), "rx");
-    tx_port2.connect(rx_port2.state());
+    tx_port2.connect(rx_port2.state()).unwrap();
 
     {
         let clock = engine.default_clock();
         engine.spawn(async move {
             clock.wait_ticks(1).await;
-            tx_port1.put(1).await?;
+            tx_port1.put(1)?.await;
 
             // Time will depend on order of select
             let ns = clock.time_now_ns();
             assert!(ns == 1.0 || ns == 3.0);
 
-            tx_port1.put(3).await?;
+            tx_port1.put(3)?.await;
             assert_eq!(clock.time_now_ns(), 5.0);
             Ok(())
         });
@@ -80,7 +80,7 @@ fn select_on_ports() {
         let clock = engine.default_clock();
         engine.spawn(async move {
             clock.wait_ticks(1).await;
-            tx_port2.put(2).await?;
+            tx_port2.put(2)?.await;
 
             // Time will depend on order of select
             let ns = clock.time_now_ns();
@@ -90,7 +90,7 @@ fn select_on_ports() {
                 assert_eq!(ns, 3.0);
                 clock.wait_ticks(8).await;
             }
-            tx_port2.put(4).await?;
+            tx_port2.put(4)?.await;
             Ok(())
         });
     }
@@ -98,20 +98,20 @@ fn select_on_ports() {
     {
         let clock = engine.default_clock();
         engine.spawn(async move {
-            let mut rx1 = rx_port1.get();
-            let mut rx2 = rx_port2.get();
+            let mut rx1 = rx_port1.get()?;
+            let mut rx2 = rx_port2.get()?;
 
             let mut received = Vec::new();
             loop {
                 let i = select! {
                     a = rx1 => {
                         assert!((a & 0x1) == 1);
-                        rx1 = rx_port1.get();
+                        rx1 = rx_port1.get()?;
                         a
                     }
                     b = rx2 => {
                         assert!((b & 0x1) == 0);
-                        rx2 = rx_port2.get();
+                        rx2 = rx_port2.get()?;
                         b
                     }
                 };

@@ -2,10 +2,10 @@
 
 //! A component that adds `delay_ticks` between receiving anything and sending
 //! it on to its output. The output of the delay should never be blocked. If
-//! the output causes the delay to block then this block will `panic!`. If a
-//! component is required to support outputs to other components that may block
-//! then a flow-controlled component is more suitable as it contains buffering
-//! to support this.
+//! the output causes the delay to block then this block will return a
+//! `SimError`. If a component is required to support outputs to other
+//! components that may block then a flow-controlled component is more suitable
+//! as it contains buffering to support this.
 //!
 //! # Ports
 //!
@@ -23,10 +23,11 @@ use async_trait::async_trait;
 use steam_engine::engine::Engine;
 use steam_engine::events::repeated::Repeated;
 use steam_engine::executor::Spawner;
-use steam_engine::port::{InPort, OutPort, PortState};
+use steam_engine::port::{InPort, OutPort, PortStateResult};
+use steam_engine::sim_error;
 use steam_engine::time::clock::{Clock, ClockTick};
 use steam_engine::traits::{Event, Runnable, SimObject};
-use steam_engine::types::SimResult;
+use steam_engine::types::{SimError, SimResult};
 use steam_model_builder::EntityDisplay;
 use steam_track::entity::Entity;
 use steam_track::{enter, exit};
@@ -53,7 +54,6 @@ impl<T> Delay<T>
 where
     T: SimObject,
 {
-    #[must_use]
     pub fn new_and_register(
         engine: &Engine,
         parent: &Arc<Entity>,
@@ -61,7 +61,7 @@ where
         clock: Clock,
         spawner: Spawner,
         delay_ticks: usize,
-    ) -> Rc<Self> {
+    ) -> Result<Rc<Self>, SimError> {
         let entity = Arc::new(Entity::new(parent, name));
         let tx = OutPort::new(&entity, "tx");
         let rx = InPort::new(&entity, "rx");
@@ -76,26 +76,26 @@ where
             tx: RefCell::new(Some(tx)),
         });
         engine.register(rc_self.clone());
-        rc_self
+        Ok(rc_self)
     }
 
-    pub fn connect_port_tx(&self, port_state: Rc<PortState<T>>) {
-        connect_tx!(self.tx, connect ; port_state);
+    pub fn connect_port_tx(&self, port_state: PortStateResult<T>) -> SimResult {
+        connect_tx!(self.tx, connect ; port_state)
     }
 
-    #[must_use]
-    pub fn port_rx(&self) -> Rc<PortState<T>> {
+    pub fn port_rx(&self) -> PortStateResult<T> {
         port_rx!(self.rx, state)
     }
 
-    pub fn set_delay(&self, delay_ticks: usize) {
+    pub fn set_delay(&self, delay_ticks: usize) -> SimResult {
         if self.rx.borrow().is_none() {
-            panic!(
+            return sim_error!(format!(
                 "{}: can't change the delay after the simulation has started",
                 self.entity
-            );
+            ));
         }
         *self.delay_ticks.borrow_mut() = delay_ticks;
+        Ok(())
     }
 }
 
@@ -118,7 +118,7 @@ where
         let rx = take_option!(self.rx);
         let delay_ticks = *self.delay_ticks.borrow() as u64;
         loop {
-            let value = rx.get().await;
+            let value = rx.get()?.await;
             let value_tag = value.tag();
             enter!(self.entity ; value_tag);
 
@@ -152,7 +152,7 @@ where
                         clock.wait_ticks(tick.tick() - tick_now.tick()).await;
                     }
                     Ordering::Less => {
-                        panic!("Delay output stalled");
+                        return sim_error!("Delay output stalled");
                     }
                     Ordering::Equal => {
                         // Do nothing - no need to pause
@@ -160,7 +160,7 @@ where
                 }
 
                 exit!(entity ; value.tag());
-                tx.put(value).await?;
+                tx.put(value)?.await;
             }
             None => {
                 pending_changed.listen().await;

@@ -35,19 +35,23 @@ fn source_sink() {
         spawner,
         3,
         Box::new(RoundRobinPolicy::new()),
-    );
+    )
+    .unwrap();
     let source_a =
-        Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; NUM_PUTS));
+        Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; NUM_PUTS))
+            .unwrap();
     let source_b =
-        Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; NUM_PUTS));
+        Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; NUM_PUTS))
+            .unwrap();
     let source_c =
-        Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; NUM_PUTS));
-    let sink = Sink::new_and_register(&engine, top, "sink");
+        Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; NUM_PUTS))
+            .unwrap();
+    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
 
-    connect_port!(source_a, tx => arbiter, rx, 0);
-    connect_port!(source_b, tx => arbiter, rx, 1);
-    connect_port!(source_c, tx => arbiter, rx, 2);
-    connect_port!(arbiter, tx => sink, rx);
+    connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
+    connect_port!(source_b, tx => arbiter, rx, 1).unwrap();
+    connect_port!(source_c, tx => arbiter, rx, 2).unwrap();
+    connect_port!(arbiter, tx => sink, rx).unwrap();
 
     run_simulation!(engine);
 
@@ -72,16 +76,20 @@ fn two_active_inputs() {
         spawner,
         3,
         Box::new(RoundRobinPolicy::new()),
-    );
-    let source_a = Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na));
-    let source_b = Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; nb));
-    let source_c = Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc));
-    let sink = Sink::new_and_register(&engine, top, "sink");
+    )
+    .unwrap();
+    let source_a =
+        Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na)).unwrap();
+    let source_b =
+        Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; nb)).unwrap();
+    let source_c =
+        Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc)).unwrap();
+    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
 
-    connect_port!(source_a, tx => arbiter, rx, 0);
-    connect_port!(source_b, tx => arbiter, rx, 1);
-    connect_port!(source_c, tx => arbiter, rx, 2);
-    connect_port!(arbiter, tx => sink, rx);
+    connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
+    connect_port!(source_b, tx => arbiter, rx, 1).unwrap();
+    connect_port!(source_c, tx => arbiter, rx, 2).unwrap();
+    connect_port!(arbiter, tx => sink, rx).unwrap();
 
     run_simulation!(engine);
 
@@ -124,43 +132,47 @@ fn input_order() {
         spawner.clone(),
         3,
         Box::new(RoundRobinPolicy::new()),
-    );
+    )
+    .unwrap();
     let source_a = Source::new_and_register(
         &engine,
         top,
         "source_a",
         option_box_repeat!(inputs[0].val; inputs[0].count),
-    );
+    )
+    .unwrap();
     let source_b = Source::new_and_register(
         &engine,
         top,
         "source_b",
         option_box_repeat!(inputs[1].val; inputs[1].count),
-    );
+    )
+    .unwrap();
     let source_c = Source::new_and_register(
         &engine,
         top,
         "source_c",
         option_box_repeat!(inputs[2].val; inputs[2].count),
-    );
+    )
+    .unwrap();
     let total_count = inputs.iter().map(|i| i.count).sum();
 
     let write_limiter = rc_limiter!(clock, 1);
-    let store_limiter = Limiter::new_and_register(&engine, top, "limit_wr", write_limiter);
-    let store = Store::new_and_register(&engine, top, "store", spawner, total_count);
+    let store_limiter = Limiter::new_and_register(&engine, top, "limit_wr", write_limiter).unwrap();
+    let store = Store::new_and_register(&engine, top, "store", spawner, total_count).unwrap();
 
-    connect_port!(source_a, tx => arbiter, rx, 0);
-    connect_port!(source_b, tx => arbiter, rx, 1);
-    connect_port!(source_c, tx => arbiter, rx, 2);
-    connect_port!(arbiter, tx => store_limiter, rx);
-    connect_port!(store_limiter, tx => store, rx);
+    connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
+    connect_port!(source_b, tx => arbiter, rx, 1).unwrap();
+    connect_port!(source_c, tx => arbiter, rx, 2).unwrap();
+    connect_port!(arbiter, tx => store_limiter, rx).unwrap();
+    connect_port!(store_limiter, tx => store, rx).unwrap();
 
     let port = InPort::new(&Arc::new(Entity::new(engine.top(), "port")), "test_rx");
-    store.connect_port_tx(port.state());
+    store.connect_port_tx(port.state()).unwrap();
     engine.spawn(async move {
         let mut store_get = vec![0; total_count];
         for i in &mut store_get {
-            *i = port.get().await;
+            *i = port.get()?.await;
         }
 
         check_round_robin(&inputs, &store_get);
@@ -188,16 +200,20 @@ fn more_inputs() {
         spawner.clone(),
         2,
         Box::new(RoundRobinPolicy::new()),
-    );
-    let source_a = Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na));
-    let source_b = Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; nb));
-    let source_c = Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc));
-    let store = Store::new_and_register(&engine, top, "store", spawner, na + nb + nc);
+    )
+    .unwrap();
+    let source_a =
+        Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na)).unwrap();
+    let source_b =
+        Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; nb)).unwrap();
+    let source_c =
+        Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc)).unwrap();
+    let store = Store::new_and_register(&engine, top, "store", spawner, na + nb + nc).unwrap();
 
-    connect_port!(source_a, tx => arbiter, rx, 0);
-    connect_port!(source_b, tx => arbiter, rx, 1);
-    connect_port!(source_c, tx => arbiter, rx, 2);
-    connect_port!(arbiter, tx => store, rx);
+    connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
+    connect_port!(source_b, tx => arbiter, rx, 1).unwrap();
+    connect_port!(source_c, tx => arbiter, rx, 2).unwrap();
+    connect_port!(arbiter, tx => store, rx).unwrap();
 
     run_simulation!(engine);
 }
@@ -220,16 +236,20 @@ fn no_output() {
         spawner.clone(),
         3,
         Box::new(RoundRobinPolicy::new()),
-    );
-    let source_a = Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na));
-    let source_b = Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; nb));
-    let source_c = Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc));
+    )
+    .unwrap();
+    let source_a =
+        Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na)).unwrap();
+    let source_b =
+        Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; nb)).unwrap();
+    let source_c =
+        Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc)).unwrap();
     let _store: Rc<Store<i32>> =
-        Store::new_and_register(&engine, top, "store", spawner, na + nb + nc);
+        Store::new_and_register(&engine, top, "store", spawner, na + nb + nc).unwrap();
 
-    connect_port!(source_a, tx => arbiter, rx, 0);
-    connect_port!(source_b, tx => arbiter, rx, 1);
-    connect_port!(source_c, tx => arbiter, rx, 2);
+    connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
+    connect_port!(source_b, tx => arbiter, rx, 1).unwrap();
+    connect_port!(source_c, tx => arbiter, rx, 2).unwrap();
 
     run_simulation!(engine);
 }
@@ -266,35 +286,38 @@ fn weighted_policy() {
         file!(),
         spawner.clone(),
         num_inputs,
-        Box::new(WeightedRoundRobinPolicy::new(weights.clone(), num_inputs)),
-    );
+        Box::new(WeightedRoundRobinPolicy::new(weights.clone(), num_inputs).unwrap()),
+    )
+    .unwrap();
     let source_a = Source::new_and_register(
         &engine,
         top,
         "source_a",
         option_box_repeat!(inputs[0].val; inputs[0].count),
-    );
+    )
+    .unwrap();
     let source_b = Source::new_and_register(
         &engine,
         top,
         "source_b",
         option_box_repeat!(inputs[1].val; inputs[1].count),
-    );
+    )
+    .unwrap();
     let write_limiter = rc_limiter!(clock, 1);
-    let store_limiter = Limiter::new_and_register(&engine, top, "limit_wr", write_limiter);
-    let store = Store::new_and_register(&engine, top, "store", spawner, total_count);
+    let store_limiter = Limiter::new_and_register(&engine, top, "limit_wr", write_limiter).unwrap();
+    let store = Store::new_and_register(&engine, top, "store", spawner, total_count).unwrap();
 
-    connect_port!(source_a, tx => arbiter, rx, 0);
-    connect_port!(source_b, tx => arbiter, rx, 1);
-    connect_port!(arbiter, tx => store_limiter, rx);
-    connect_port!(store_limiter, tx => store, rx);
+    connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
+    connect_port!(source_b, tx => arbiter, rx, 1).unwrap();
+    connect_port!(arbiter, tx => store_limiter, rx).unwrap();
+    connect_port!(store_limiter, tx => store, rx).unwrap();
 
     let port = InPort::new(&Arc::new(Entity::new(engine.top(), "port")), "test_rx");
-    store.connect_port_tx(port.state());
+    store.connect_port_tx(port.state()).unwrap();
     engine.spawn(async move {
         let mut store_get = vec![0; total_count];
         for i in &mut store_get {
-            *i = port.get().await;
+            *i = port.get()?.await;
         }
 
         check_round_robin(&inputs, &store_get);
@@ -413,9 +436,9 @@ fn panic_priority_policy() {
         "arb",
         spawner,
         num_inputs,
-        Box::new(PriorityRoundRobinPolicy::from_priorities(
-            priorities.clone(),
-            num_inputs + 1,
-        )),
-    );
+        Box::new(
+            PriorityRoundRobinPolicy::from_priorities(priorities.clone(), num_inputs + 1).unwrap(),
+        ),
+    )
+    .unwrap();
 }

@@ -16,9 +16,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use steam_engine::engine::Engine;
-use steam_engine::port::{InPort, OutPort, PortState};
+use steam_engine::port::{InPort, OutPort, PortStateResult};
 use steam_engine::traits::{Runnable, SimObject};
-use steam_engine::types::SimResult;
+use steam_engine::types::{SimError, SimResult};
 use steam_model_builder::EntityDisplay;
 use steam_track::entity::Entity;
 use steam_track::trace;
@@ -41,8 +41,7 @@ impl<T> CreditIssuer<T>
 where
     T: SimObject,
 {
-    #[must_use]
-    pub fn new_and_register(engine: &Engine, parent: &Arc<Entity>) -> Rc<Self> {
+    pub fn new_and_register(engine: &Engine, parent: &Arc<Entity>) -> Result<Rc<Self>, SimError> {
         let entity = Arc::new(Entity::new(parent, "credit_issue"));
         let tx = OutPort::new(&entity, "tx");
         let credit_tx = OutPort::new(&entity, "credit_tx");
@@ -54,20 +53,19 @@ where
             rx: RefCell::new(Some(rx)),
         });
         engine.register(rc_self.clone());
-        rc_self
+        Ok(rc_self)
     }
 
-    pub fn connect_port_tx(&self, port_state: Rc<PortState<T>>) {
-        connect_tx!(self.tx, connect ; port_state);
+    pub fn connect_port_tx(&self, port_state: PortStateResult<T>) -> SimResult {
+        connect_tx!(self.tx, connect ; port_state)
     }
 
-    #[must_use]
-    pub fn port_rx(&self) -> Rc<PortState<T>> {
+    pub fn port_rx(&self) -> PortStateResult<T> {
         port_rx!(self.rx, state)
     }
 
-    pub fn connect_port_credit_tx(&self, port_state: Rc<PortState<Credit>>) {
-        connect_tx!(self.credit_tx, connect ; port_state);
+    pub fn connect_port_credit_tx(&self, port_state: PortStateResult<Credit>) -> SimResult {
+        connect_tx!(self.credit_tx, connect ; port_state)
     }
 }
 
@@ -82,10 +80,10 @@ where
         let tx = take_option!(self.tx);
 
         loop {
-            let value = rx.get().await;
+            let value = rx.get()?.await;
             trace!(self.entity ; "issue credit");
-            credit_tx.put(Credit(1)).await?;
-            tx.put(value).await?;
+            credit_tx.put(Credit(1))?.await;
+            tx.put(value)?.await;
         }
     }
 }

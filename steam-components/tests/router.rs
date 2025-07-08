@@ -15,14 +15,15 @@ fn router() {
 
     let iter = Box::new((0..2).cycle().take(NUM_PUTS));
     let top = engine.top();
-    let source = Source::new_and_register(&engine, top, "source", Some(iter));
-    let router = Router::new_and_register(&engine, top, "router", 2, Box::new(DefaultRouter {}));
-    let sink_a = Sink::new_and_register(&engine, top, "sink_a");
-    let sink_b = Sink::new_and_register(&engine, top, "sink_b");
+    let source = Source::new_and_register(&engine, top, "source", Some(iter)).unwrap();
+    let router =
+        Router::new_and_register(&engine, top, "router", 2, Box::new(DefaultRouter {})).unwrap();
+    let sink_a = Sink::new_and_register(&engine, top, "sink_a").unwrap();
+    let sink_b = Sink::new_and_register(&engine, top, "sink_b").unwrap();
 
-    connect_port!(source, tx => router, rx);
-    connect_port!(router, tx, 0 => sink_a, rx);
-    connect_port!(router, tx, 1 => sink_b, rx);
+    connect_port!(source, tx => router, rx).unwrap();
+    connect_port!(router, tx, 0 => sink_a, rx).unwrap();
+    connect_port!(router, tx, 1 => sink_b, rx).unwrap();
 
     run_simulation!(engine);
 

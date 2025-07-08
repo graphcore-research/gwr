@@ -6,6 +6,7 @@
 
 use std::mem::size_of;
 
+use steam_engine::sim_error;
 use steam_engine::traits::{Routable, SimObject, TotalBytes};
 use steam_engine::types::{ReqType, SimError};
 use steam_track::tag::Tagged;
@@ -29,11 +30,11 @@ impl TotalBytes for Credit {
 }
 
 impl Routable for Credit {
-    fn dest(&self) -> u64 {
-        panic!("Cannot route Credit");
+    fn dest(&self) -> Result<u64, SimError> {
+        sim_error!("Cannot route Credit")
     }
-    fn req_type(&self) -> ReqType {
-        ReqType::Control
+    fn req_type(&self) -> Result<ReqType, SimError> {
+        Ok(ReqType::Control)
     }
 }
 

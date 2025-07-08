@@ -15,9 +15,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use steam_engine::engine::Engine;
-use steam_engine::port::{InPort, OutPort, PortState};
+use steam_engine::port::{InPort, OutPort, PortStateResult};
 use steam_engine::traits::{Runnable, SimObject};
-use steam_engine::types::SimResult;
+use steam_engine::types::{SimError, SimResult};
 use steam_model_builder::EntityDisplay;
 use steam_track::entity::Entity;
 use steam_track::{enter, exit};
@@ -44,13 +44,12 @@ impl<T> Limiter<T>
 where
     T: SimObject,
 {
-    #[must_use]
     pub fn new_and_register(
         engine: &Engine,
         parent: &Arc<Entity>,
         name: &str,
         limiter: Rc<RateLimiter<T>>,
-    ) -> Rc<Self> {
+    ) -> Result<Rc<Self>, SimError> {
         let entity = Arc::new(Entity::new(parent, name));
         let tx = OutPort::new(&entity, "tx");
         let rx = InPort::new(&entity, "rx");
@@ -61,15 +60,14 @@ where
             rx: RefCell::new(Some(rx)),
         });
         engine.register(rc_self.clone());
-        rc_self
+        Ok(rc_self)
     }
 
-    pub fn connect_port_tx(&self, port_state: Rc<PortState<T>>) {
-        connect_tx!(self.tx, connect ; port_state);
+    pub fn connect_port_tx(&self, port_state: PortStateResult<T>) -> SimResult {
+        connect_tx!(self.tx, connect ; port_state)
     }
 
-    #[must_use]
-    pub fn port_rx(&self) -> Rc<PortState<T>> {
+    pub fn port_rx(&self) -> PortStateResult<T> {
         port_rx!(self.rx, state)
     }
 }
@@ -85,13 +83,13 @@ where
         let limiter = &self.limiter;
         loop {
             // Get the value but without letting the OutPort complete
-            let value = rx.start_get().await;
+            let value = rx.start_get()?.await;
 
             let value_tag = value.tag();
             let ticks = limiter.ticks(&value);
             enter!(self.entity ; value_tag);
 
-            tx.put(value).await?;
+            tx.put(value)?.await;
             limiter.delay_ticks(ticks).await;
             exit!(self.entity ; value_tag);
 

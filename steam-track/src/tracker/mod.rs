@@ -29,6 +29,10 @@ pub use text::TextTracker;
 
 use crate::{ROOT, Tag};
 
+/// Error used to return configuration errors
+#[derive(Debug)]
+pub struct TrackConfigError(pub String);
+
 /// This is the interface that is supported by all [`Tracker`]s.
 pub trait Track {
     /// Allocate a new global tag
@@ -168,11 +172,20 @@ impl EntityManager {
     /// let mut manager = EntityManager::new(log::Level::Warn);
     /// manager.add_entity_level_filter(".*arb.*", log::Level::Trace);
     /// ```
-    pub fn add_entity_level_filter(&mut self, regex_str: &str, level: crate::log::Level) {
+    pub fn add_entity_level_filter(
+        &mut self,
+        regex_str: &str,
+        level: crate::log::Level,
+    ) -> Result<(), TrackConfigError> {
         match Regex::new(regex_str) {
             Ok(regex) => self.regex_to_entity_level.push((regex, level)),
-            Err(e) => panic!("Failed to parse regex {regex_str}:\n{e}\n"),
+            Err(e) => {
+                return Err(TrackConfigError(format!(
+                    "Failed to parse regex {regex_str}:\n{e}\n"
+                )));
+            }
         }
+        Ok(())
     }
 
     fn time(&self) -> f64 {
@@ -208,7 +221,9 @@ mod tests {
     #[test]
     fn filter_dev_trace() {
         let mut manager = EntityManager::new(Level::Error);
-        manager.add_entity_level_filter(r".*dev.*", Level::Trace);
+        manager
+            .add_entity_level_filter(r".*dev.*", Level::Trace)
+            .unwrap();
 
         let expected_levels = [Level::Error, Level::Trace, Level::Trace, Level::Trace];
 
@@ -220,7 +235,9 @@ mod tests {
     #[test]
     fn filter_node0_error() {
         let mut manager = EntityManager::new(Level::Warn);
-        manager.add_entity_level_filter(r".*node0", Level::Error);
+        manager
+            .add_entity_level_filter(r".*node0", Level::Error)
+            .unwrap();
 
         let expected_levels = [Level::Warn, Level::Warn, Level::Error, Level::Warn];
 
@@ -232,7 +249,9 @@ mod tests {
     #[test]
     fn filter_node0_warn() {
         let mut manager = EntityManager::new(Level::Error);
-        manager.add_entity_level_filter(r".*node0", Level::Warn);
+        manager
+            .add_entity_level_filter(r".*node0", Level::Warn)
+            .unwrap();
 
         let expected_levels = [Level::Error, Level::Error, Level::Warn, Level::Error];
 
@@ -245,8 +264,12 @@ mod tests {
     fn filter_dev_and_node0_info() {
         let mut manager = EntityManager::new(Level::Error);
         // The first pattern seen should be highest priority
-        manager.add_entity_level_filter(r".*node0", Level::Warn);
-        manager.add_entity_level_filter(r".*dev.*", Level::Info);
+        manager
+            .add_entity_level_filter(r".*node0", Level::Warn)
+            .unwrap();
+        manager
+            .add_entity_level_filter(r".*dev.*", Level::Info)
+            .unwrap();
 
         let expected_levels = [Level::Error, Level::Info, Level::Warn, Level::Info];
 
@@ -259,9 +282,15 @@ mod tests {
     fn filter_log_dev_and_node0_info() {
         let mut manager = EntityManager::new(Level::Error);
         // The first pattern seen should be highest priority
-        manager.add_entity_level_filter(r".*node0", Level::Info);
-        manager.add_entity_level_filter(r".*dev.*", Level::Trace);
-        manager.add_entity_level_filter(r"top.*", Level::Warn);
+        manager
+            .add_entity_level_filter(r".*node0", Level::Info)
+            .unwrap();
+        manager
+            .add_entity_level_filter(r".*dev.*", Level::Trace)
+            .unwrap();
+        manager
+            .add_entity_level_filter(r"top.*", Level::Warn)
+            .unwrap();
 
         let expected_levels = [Level::Warn, Level::Trace, Level::Info, Level::Trace];
 

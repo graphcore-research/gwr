@@ -17,8 +17,9 @@ use async_trait::async_trait;
 use steam_components::store::Store;
 use steam_engine::engine::Engine;
 use steam_engine::executor::Spawner;
-use steam_engine::port::PortState;
+use steam_engine::port::PortStateResult;
 use steam_engine::traits::SimObject;
+use steam_engine::types::{SimError, SimResult};
 use steam_model_builder::{EntityDisplay, Runnable};
 use steam_track::entity::Entity;
 
@@ -37,17 +38,16 @@ impl<T> Scrambler<T>
 where
     T: SimObject,
 {
-    #[must_use]
     pub fn new_and_register(
         engine: &Engine,
         parent: &Arc<Entity>,
         name: &str,
         spawner: Spawner,
         scramble: bool,
-    ) -> Rc<Self> {
+    ) -> Result<Rc<Self>, SimError> {
         let entity = Arc::new(Entity::new(parent, name));
-        let buffer_a = Store::new_and_register(engine, &entity, "buffer_a", spawner.clone(), 1);
-        let buffer_b = Store::new_and_register(engine, &entity, "buffer_b", spawner, 1);
+        let buffer_a = Store::new_and_register(engine, &entity, "buffer_a", spawner.clone(), 1)?;
+        let buffer_b = Store::new_and_register(engine, &entity, "buffer_b", spawner, 1)?;
 
         let rc_self = Rc::new(Self {
             entity: entity.clone(),
@@ -56,32 +56,30 @@ where
             buffer_b,
         });
         engine.register(rc_self.clone());
-        rc_self
+        Ok(rc_self)
     }
 
-    pub fn connect_port_tx_a(&self, port_state: Rc<PortState<T>>) {
+    pub fn connect_port_tx_a(&self, port_state: PortStateResult<T>) -> SimResult {
         if self.scramble {
-            self.buffer_b.connect_port_tx(port_state);
+            self.buffer_b.connect_port_tx(port_state)
         } else {
-            self.buffer_a.connect_port_tx(port_state);
+            self.buffer_a.connect_port_tx(port_state)
         }
     }
 
-    pub fn connect_port_tx_b(&self, port_state: Rc<PortState<T>>) {
+    pub fn connect_port_tx_b(&self, port_state: PortStateResult<T>) -> SimResult {
         if self.scramble {
-            self.buffer_a.connect_port_tx(port_state);
+            self.buffer_a.connect_port_tx(port_state)
         } else {
-            self.buffer_b.connect_port_tx(port_state);
+            self.buffer_b.connect_port_tx(port_state)
         }
     }
 
-    #[must_use]
-    pub fn port_rx_a(&self) -> Rc<PortState<T>> {
+    pub fn port_rx_a(&self) -> PortStateResult<T> {
         self.buffer_a.port_rx()
     }
 
-    #[must_use]
-    pub fn port_rx_b(&self) -> Rc<PortState<T>> {
+    pub fn port_rx_b(&self) -> PortStateResult<T> {
         self.buffer_b.port_rx()
     }
 }

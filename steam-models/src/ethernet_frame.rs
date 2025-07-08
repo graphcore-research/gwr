@@ -6,7 +6,7 @@ use std::fmt::Display;
 use std::sync::Arc;
 
 use steam_engine::traits::{Routable, SimObject, TotalBytes};
-use steam_engine::types::ReqType;
+use steam_engine::types::{ReqType, SimError};
 use steam_track::entity::Entity;
 use steam_track::tag::Tagged;
 use steam_track::{Tag, create, create_tag};
@@ -63,7 +63,8 @@ impl EthernetFrame {
             src_mac: [0; DEST_MAC_BYTES],
             payload_size_bytes,
         };
-        create!(created_by ; frame, frame.total_bytes(), frame.req_type() as i8);
+        // Having just created the frame the req_type must be valid
+        create!(created_by ; frame, frame.total_bytes(), frame.req_type().unwrap() as i8);
         frame
     }
 
@@ -115,12 +116,12 @@ impl Tagged for EthernetFrame {
 }
 
 impl Routable for EthernetFrame {
-    fn dest(&self) -> u64 {
-        self.get_dst()
+    fn dest(&self) -> Result<u64, SimError> {
+        Ok(self.get_dst())
     }
 
-    fn req_type(&self) -> ReqType {
-        ReqType::Control
+    fn req_type(&self) -> Result<ReqType, SimError> {
+        Ok(ReqType::Control)
     }
 }
 
@@ -140,10 +141,10 @@ impl Tagged for Box<EthernetFrame> {
 }
 
 impl Routable for Box<EthernetFrame> {
-    fn dest(&self) -> u64 {
+    fn dest(&self) -> Result<u64, SimError> {
         self.as_ref().dest()
     }
-    fn req_type(&self) -> ReqType {
+    fn req_type(&self) -> Result<ReqType, SimError> {
         self.as_ref().req_type()
     }
 }

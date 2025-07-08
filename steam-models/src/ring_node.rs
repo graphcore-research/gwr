@@ -36,8 +36,9 @@ use steam_components::router::{Route, Router};
 use steam_components::store::Store;
 use steam_engine::engine::Engine;
 use steam_engine::executor::Spawner;
-use steam_engine::port::PortState;
+use steam_engine::port::PortStateResult;
 use steam_engine::traits::SimObject;
+use steam_engine::types::{SimError, SimResult};
 use steam_model_builder::{EntityDisplay, Runnable};
 use steam_track::entity::Entity;
 
@@ -89,7 +90,6 @@ impl<T> RingNode<T>
 where
     T: SimObject,
 {
-    #[must_use]
     pub fn new_and_register(
         engine: &Engine,
         parent: &Arc<Entity>,
@@ -98,37 +98,37 @@ where
         config: &RingConfig<T>,
         route_fn: Box<dyn Route<T>>,
         policy: Box<dyn Arbitrate<T>>,
-    ) -> Rc<Self> {
+    ) -> Result<Rc<Self>, SimError> {
         let entity = Arc::new(Entity::new(parent, name));
 
         let rx_buffer_limiter =
-            Limiter::new_and_register(engine, &entity, "limit_rx", config.write_limiter.clone());
+            Limiter::new_and_register(engine, &entity, "limit_rx", config.write_limiter.clone())?;
         let rx_buffer = Store::new_and_register(
             engine,
             &entity,
             "rx_buf",
             spawner.clone(),
             config.rx_buffer_entries,
-        );
-        connect_port!(rx_buffer_limiter, tx => rx_buffer, rx);
+        )?;
+        connect_port!(rx_buffer_limiter, tx => rx_buffer, rx)?;
 
         let tx_buffer_limiter =
-            Limiter::new_and_register(engine, &entity, "limit_tx", config.write_limiter.clone());
+            Limiter::new_and_register(engine, &entity, "limit_tx", config.write_limiter.clone())?;
         let tx_buffer = Store::new_and_register(
             engine,
             &entity,
             "tx_buf",
             spawner.clone(),
             config.tx_buffer_entries,
-        );
-        connect_port!(tx_buffer_limiter, tx => tx_buffer, rx);
+        )?;
+        connect_port!(tx_buffer_limiter, tx => tx_buffer, rx)?;
 
-        let router = Router::new_and_register(engine, &entity, "router", 2, route_fn);
-        connect_port!(rx_buffer, tx => router, rx);
+        let router = Router::new_and_register(engine, &entity, "router", 2, route_fn)?;
+        connect_port!(rx_buffer, tx => router, rx)?;
 
-        let arbiter = Arbiter::new_and_register(engine, &entity, "arb", spawner, 2, policy);
-        connect_port!(router, tx, RING_INDEX => arbiter, rx, RING_INDEX);
-        connect_port!(arbiter, tx => tx_buffer_limiter, rx);
+        let arbiter = Arbiter::new_and_register(engine, &entity, "arb", spawner, 2, policy)?;
+        connect_port!(router, tx, RING_INDEX => arbiter, rx, RING_INDEX)?;
+        connect_port!(arbiter, tx => tx_buffer_limiter, rx)?;
 
         let rc_self = Rc::new(Self {
             entity,
@@ -138,24 +138,22 @@ where
             router,
         });
         engine.register(rc_self.clone());
-        rc_self
+        Ok(rc_self)
     }
 
-    pub fn connect_port_ring_tx(&self, port_state: Rc<PortState<T>>) {
-        self.tx_buffer.connect_port_tx(port_state);
+    pub fn connect_port_ring_tx(&self, port_state: PortStateResult<T>) -> SimResult {
+        self.tx_buffer.connect_port_tx(port_state)
     }
 
-    pub fn connect_port_io_tx(&self, port_state: Rc<PortState<T>>) {
-        self.router.connect_port_tx_i(IO_INDEX, port_state);
+    pub fn connect_port_io_tx(&self, port_state: PortStateResult<T>) -> SimResult {
+        self.router.connect_port_tx_i(IO_INDEX, port_state)
     }
 
-    #[must_use]
-    pub fn port_ring_rx(&self) -> Rc<PortState<T>> {
+    pub fn port_ring_rx(&self) -> PortStateResult<T> {
         self.rx_buffer_limiter.port_rx()
     }
 
-    #[must_use]
-    pub fn port_io_rx(&self) -> Rc<PortState<T>> {
+    pub fn port_io_rx(&self) -> PortStateResult<T> {
         self.arbiter.port_rx_i(IO_INDEX)
     }
 }

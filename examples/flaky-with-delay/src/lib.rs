@@ -31,15 +31,15 @@ use steam_components::store::Store;
 /// The steam components crate provides many connectable building blocks.
 /// Component traits and types are provided along with the components
 /// themselves.
-use steam_components::{connect_port, connect_tx, port_rx, take_option};
+use steam_components::{connect_tx, port_rx, take_option};
 use steam_engine::engine::Engine;
 /// The steam engine core provides the traits and types required to be
 /// implemented by a component.
 use steam_engine::executor::Spawner;
-use steam_engine::port::{InPort, OutPort, PortState};
+use steam_engine::port::{InPort, OutPort, PortStateResult};
 use steam_engine::time::clock::Clock;
 use steam_engine::traits::{Runnable, SimObject};
-use steam_engine::types::SimResult;
+use steam_engine::types::{SimError, SimResult};
 use steam_model_builder::EntityDisplay;
 /// The steam_track library provides tracing/logging features.
 use steam_track::entity::Entity;
@@ -122,7 +122,6 @@ where
     /// In this case, the `new_and_register()` function creates the component
     /// from the parameters provided as well as registering the component
     /// with the `Engine`.
-    #[must_use]
     pub fn new_and_register(
         engine: &Engine,
         parent: &Arc<Entity>,
@@ -130,7 +129,7 @@ where
         clock: Clock,
         spawner: Spawner,
         config: &Config,
-    ) -> Rc<Self> {
+    ) -> Result<Rc<Self>, SimError> {
         // The entity needs to be created first because this component will be the
         // parent to the subcomponents.
         let entity = Entity::new(parent, name);
@@ -145,14 +144,14 @@ where
             clock,
             spawner.clone(),
             config.delay_ticks,
-        );
-        let buffer = Store::new_and_register(engine, &entity, "buffer", spawner, 1);
+        )?;
+        let buffer = Store::new_and_register(engine, &entity, "buffer", spawner, 1)?;
 
-        connect_port!(delay, tx => buffer, rx);
+        delay.connect_port_tx(buffer.port_rx())?;
 
         // Create an internal `tx` port and connect into the `delay` subcomponent
         let mut tx = OutPort::new(&entity, "delay_tx");
-        tx.connect(delay.port_rx());
+        tx.connect(delay.port_rx())?;
 
         let rx = InPort::new(&entity, "rx");
 
@@ -166,12 +165,11 @@ where
             rng: RefCell::new(StdRng::seed_from_u64(config.seed)),
         });
         engine.register(rc_self.clone());
-        rc_self
+        Ok(rc_self)
     }
 
     /// This provides the `InPort` to which you can connect
-    #[must_use]
-    pub fn port_rx(&self) -> Rc<PortState<T>> {
+    pub fn port_rx(&self) -> PortStateResult<T> {
         // The `port_rx!` macro is the most consise way to access the rx port state.
         port_rx!(self.rx, state)
     }
@@ -183,10 +181,10 @@ where
     ///
     /// In this case the `tx` port is connected directly to the buffer's `tx`
     /// port.
-    pub fn connect_port_tx(&self, port_state: Rc<PortState<T>>) {
+    pub fn connect_port_tx(&self, port_state: PortStateResult<T>) -> SimResult {
         // Because the State is immutable then we use the `connect_tx!` macro
         // in order to simplify the setup.
-        connect_tx!(self.buffer, connect_port_tx ; port_state);
+        connect_tx!(self.buffer, connect_port_tx ; port_state)
     }
 
     /// Return the next random u32
@@ -215,13 +213,13 @@ where
 
         loop {
             // Receive a value from the input
-            let value = rx.get().await;
+            let value = rx.get()?.await;
 
             let next_u32 = self.next_u32();
             let ratio = next_u32 as f64 / u32::MAX as f64;
             if ratio > self.drop_ratio {
                 // Only pass on a percentage of the data
-                tx.put(value).await?;
+                tx.put(value)?.await;
             } else {
                 // Let the user know this value has been dropped.
                 trace!(self.entity ; "drop {}", value);

@@ -15,9 +15,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use steam_engine::engine::Engine;
-use steam_engine::port::{InPort, OutPort, PortState};
+use steam_engine::port::{InPort, OutPort, PortStateResult};
+use steam_engine::sim_error;
 use steam_engine::traits::{Routable, Runnable, SimObject};
-use steam_engine::types::SimResult;
+use steam_engine::types::{SimError, SimResult};
 use steam_model_builder::EntityDisplay;
 use steam_track::entity::Entity;
 use steam_track::{enter, exit, trace};
@@ -28,7 +29,7 @@ pub trait Route<T>
 where
     T: Routable,
 {
-    fn route(&self, object: &T) -> usize;
+    fn route(&self, object: &T) -> Result<usize, SimError>;
 }
 
 pub struct DefaultRouter {}
@@ -37,8 +38,8 @@ impl<T> Route<T> for DefaultRouter
 where
     T: Routable,
 {
-    fn route(&self, obj_to_route: &T) -> usize {
-        obj_to_route.dest() as usize
+    fn route(&self, obj_to_route: &T) -> Result<usize, SimError> {
+        Ok(obj_to_route.dest()? as usize)
     }
 }
 
@@ -57,14 +58,13 @@ impl<T> Router<T>
 where
     T: SimObject,
 {
-    #[must_use]
     pub fn new_and_register(
         engine: &Engine,
         parent: &Arc<Entity>,
         name: &str,
         num_egress: usize,
         router: Box<dyn Route<T>>,
-    ) -> Rc<Self> {
+    ) -> Result<Rc<Self>, SimError> {
         let entity = Arc::new(Entity::new(parent, name));
         let rx = InPort::new(&entity, "rx");
         let mut tx = Vec::with_capacity(num_egress);
@@ -78,20 +78,19 @@ where
             router,
         });
         engine.register(rc_self.clone());
-        rc_self
+        Ok(rc_self)
     }
 
-    pub fn connect_port_tx_i(&self, i: usize, port_state: Rc<PortState<T>>) {
+    pub fn connect_port_tx_i(&self, i: usize, port_state: PortStateResult<T>) -> SimResult {
         match self.tx.borrow_mut().get_mut(i) {
             None => {
-                panic!("{}: no tx port {}", self.entity, i);
+                sim_error!(format!("{}: no tx port {}", self.entity, i))
             }
             Some(tx) => tx.connect(port_state),
         }
     }
 
-    #[must_use]
-    pub fn port_rx(&self) -> Rc<PortState<T>> {
+    pub fn port_rx(&self) -> PortStateResult<T> {
         self.rx.borrow().as_ref().unwrap().state()
     }
 }
@@ -107,22 +106,22 @@ where
         let router = &self.router;
 
         loop {
-            let value = rx.get().await;
+            let value = rx.get()?.await;
             enter!(self.entity ; value.tag());
 
-            let tx_index = router.route(&value);
+            let tx_index = router.route(&value)?;
             trace!(self.entity ; "Route {} to {}", value, tx_index);
 
             match tx.get(tx_index) {
                 None => {
-                    panic!(
+                    return sim_error!(format!(
                         "{}: {:?} selected invalid egress index {}",
                         self.entity, value, tx_index
-                    );
+                    ));
                 }
                 Some(tx) => {
                     exit!(self.entity ; value.tag());
-                    tx.put(value).await?;
+                    tx.put(value)?.await;
                 }
             }
         }

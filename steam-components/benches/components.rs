@@ -31,12 +31,13 @@ fn spawn_source_store_sink() -> Engine {
     let num_puts = 200;
 
     let top = engine.top();
-    let source = Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; num_puts));
-    let store = Store::new_and_register(&engine, top, "store", spawner, capacity);
-    let sink = Sink::new_and_register(&engine, top, "sink");
+    let source =
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; num_puts)).unwrap();
+    let store = Store::new_and_register(&engine, top, "store", spawner, capacity).unwrap();
+    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
 
-    connect_port!(source, tx => store, rx);
-    connect_port!(store, tx => sink, rx);
+    source.connect_port_tx(store.port_rx()).unwrap();
+    connect_port!(store, tx => sink, rx).unwrap();
 
     engine
 }
@@ -52,12 +53,13 @@ fn spawn_source_delay_sink() -> Engine {
 
     let top = engine.top();
     let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(500; num_puts));
-    let delay = Delay::new_and_register(&engine, top, "delay", clock, spawner, delay);
-    let sink = Sink::new_and_register(&engine, top, "sink");
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(500; num_puts))
+            .unwrap();
+    let delay = Delay::new_and_register(&engine, top, "delay", clock, spawner, delay).unwrap();
+    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
 
-    connect_port!(source, tx => delay, rx);
-    connect_port!(delay, tx => sink, rx);
+    connect_port!(source, tx => delay, rx).unwrap();
+    connect_port!(delay, tx => sink, rx).unwrap();
 
     engine
 }
@@ -114,21 +116,25 @@ fn spawn_larger_simulation() -> Engine {
         spawner,
         num_sources,
         Box::new(RoundRobinPolicy::new()),
-    );
-    let sink_limiter = Limiter::new_and_register(&engine, top, "limit_sink", rate_limiter);
-    let sink = Sink::new_and_register(&engine, top, "sink");
+    )
+    .unwrap();
+    let sink_limiter = Limiter::new_and_register(&engine, top, "limit_sink", rate_limiter).unwrap();
+    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
     for i in 0..num_sources {
-        sources.push(Source::new_and_register(
-            &engine,
-            top,
-            format!("source{i}").as_str(),
-            option_box_repeat!(i ; num_puts),
-        ));
-        connect_port!(sources[i], tx => arbiter, rx, i);
+        sources.push(
+            Source::new_and_register(
+                &engine,
+                top,
+                format!("source{i}").as_str(),
+                option_box_repeat!(i ; num_puts),
+            )
+            .unwrap(),
+        );
+        connect_port!(sources[i], tx => arbiter, rx, i).unwrap();
     }
 
-    connect_port!(arbiter, tx => sink_limiter, rx);
-    connect_port!(sink_limiter, tx => sink, rx);
+    connect_port!(arbiter, tx => sink_limiter, rx).unwrap();
+    connect_port!(sink_limiter, tx => sink, rx).unwrap();
 
     engine
 }
