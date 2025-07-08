@@ -33,9 +33,12 @@ In this case the [`Source`] is configured to emit the value `0x123` ten times:
 # use steam_engine::engine::Engine;
 # fn main() {
 # let engine = Engine::default();
-let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10));
-# let sink = Sink::new_and_register(&engine, engine.top(), "sink");
-# connect_port!(source, tx => sink, rx);
+let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10))
+    .expect("should be able to create and register `Source`");
+# let sink = Sink::new_and_register(&engine, engine.top(), "sink")
+#     .expect("should be able to create and register `Sink`");
+# connect_port!(source, tx => sink, rx)
+#     .expect("should be able to connect `Source` to `Sink`");
 # }
 ```
 
@@ -46,9 +49,12 @@ let source = Source::new_and_register(&engine, engine.top(), "source", option_bo
 # use steam_engine::engine::Engine;
 # fn main() {
 # let engine = Engine::default();
-# let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10));
-let sink = Sink::new_and_register(&engine, engine.top(), "sink");
-# connect_port!(source, tx => sink, rx);
+# let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10))
+#     .expect("should be able to create and register `Source`");
+let sink = Sink::new_and_register(&engine, engine.top(), "sink")
+    .expect("should be able to create and register `Sink`");
+# connect_port!(source, tx => sink, rx)
+#     .expect("should be able to connect `Source` to `Sink`");
 # }
 ```
 
@@ -64,9 +70,12 @@ connections are always done in the direction of data flow `tx -> rx`.
 # use steam_engine::engine::Engine;
 # fn main() {
 # let engine = Engine::default();
-# let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10));
-# let sink = Sink::new_and_register(&engine, engine.top(), "sink");
-connect_port!(source, tx => sink, rx);
+# let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10))
+#     .expect("should be able to create and register `Source`");
+# let sink = Sink::new_and_register(&engine, engine.top(), "sink")
+#     .expect("should be able to create and register `Sink`");
+connect_port!(source, tx => sink, rx)
+    .expect("should be able to connect `Source` to `Sink`");
 # }
 ```
 
@@ -83,9 +92,12 @@ using the `run_simulation!` macro:
 # use steam_engine::run_simulation;
 # fn main() {
 # let mut engine = Engine::default();
-# let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10));
-# let sink = Sink::new_and_register(&engine, engine.top(), "sink");
-# connect_port!(source, tx => sink, rx);
+# let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10))
+#     .expect("should be able to create and register `Source`");
+# let sink = Sink::new_and_register(&engine, engine.top(), "sink")
+#     .expect("should be able to create and register `Sink`");
+# connect_port!(source, tx => sink, rx)
+#     .expect("should be able to connect `Source` to `Sink`");
 run_simulation!(engine);
 # }
 ```
@@ -106,9 +118,12 @@ has received all the expected data.
 # use steam_engine::run_simulation;
 # fn main() {
 # let mut engine = Engine::default();
-# let mut source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10));
-# let sink = Sink::new_and_register(&engine, engine.top(), "sink");
-# connect_port!(source, tx => sink, rx);
+# let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10))
+#     .expect("should be able to create and register `Source`");
+# let sink = Sink::new_and_register(&engine, engine.top(), "sink")
+#     .expect("should be able to create and register `Sink`");
+# connect_port!(source, tx => sink, rx)
+#     .expect("should be able to connect `Source` to `Sink`");
 # run_simulation!(engine);
 assert_eq!(sink.num_sunk(), 10);
 # }
@@ -128,9 +143,12 @@ use steam_engine::run_simulation;
 
 fn main() {
     let mut engine = Engine::default();
-    let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10));
-    let sink = Sink::new_and_register(&engine, engine.top(), "sink");
-    connect_port!(source, tx => sink, rx);
+    let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10))
+        .expect("should be able to create and register `Source`");
+    let sink = Sink::new_and_register(&engine, engine.top(), "sink")
+        .expect("should be able to create and register `Sink`");
+    connect_port!(source, tx => sink, rx)
+        .expect("should be able to connect `Source` to `Sink`");
     run_simulation!(engine);
     assert_eq!(sink.num_sunk(), 10);
 }

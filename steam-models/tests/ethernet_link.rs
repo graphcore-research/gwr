@@ -22,23 +22,24 @@ fn run_test(
     let spawner = engine.spawner();
     let top = engine.top();
 
-    let source_a = Source::new_and_register(&engine, top, "src_a", None);
+    let source_a = Source::new_and_register(&engine, top, "src_a", None).unwrap();
     let frame_a = EthernetFrame::new(&source_a.entity, payload_bytes);
     source_a.set_generator(option_box_repeat!(frame_a; num_put_a));
 
-    let source_b = Source::new_and_register(&engine, top, "src_b", None);
+    let source_b = Source::new_and_register(&engine, top, "src_b", None).unwrap();
     let frame_b = EthernetFrame::new(&source_b.entity, payload_bytes);
     source_b.set_generator(option_box_repeat!(frame_b; num_put_b));
 
-    let link = EthernetLink::new_and_register(&engine, top, "link", clock.clone(), spawner);
+    let link =
+        EthernetLink::new_and_register(&engine, top, "link", clock.clone(), spawner).unwrap();
 
-    let sink_a = Sink::new_and_register(&engine, top, "sink_a");
-    let sink_b = Sink::new_and_register(&engine, top, "sink_b");
+    let sink_a = Sink::new_and_register(&engine, top, "sink_a").unwrap();
+    let sink_b = Sink::new_and_register(&engine, top, "sink_b").unwrap();
 
-    connect_port!(source_a, tx => link, rx_a);
-    connect_port!(source_b, tx => link, rx_b);
-    connect_port!(link, tx_a => sink_a, rx);
-    connect_port!(link, tx_b => sink_b, rx);
+    connect_port!(source_a, tx => link, rx_a).unwrap();
+    connect_port!(source_b, tx => link, rx_b).unwrap();
+    connect_port!(link, tx_a => sink_a, rx).unwrap();
+    connect_port!(link, tx_b => sink_b, rx).unwrap();
 
     run_simulation!(engine);
     (sink_a, sink_b, clock)
@@ -106,22 +107,23 @@ fn change_delay() {
     let spawner = engine.spawner();
     let top = engine.top();
 
-    let source_a = Source::new_and_register(&engine, top, "src_a", None);
+    let source_a = Source::new_and_register(&engine, top, "src_a", None).unwrap();
     let etwr = EthernetFrame::new(&source_a.entity, 128);
     source_a.set_generator(option_box_repeat!(etwr; 1));
 
-    let source_b = Source::new_and_register(&engine, top, "src_b", None);
+    let source_b = Source::new_and_register(&engine, top, "src_b", None).unwrap();
 
-    let link = EthernetLink::new_and_register(&engine, top, "link", clock.clone(), spawner);
-    link.set_delay(DELAY_TICKS);
+    let link =
+        EthernetLink::new_and_register(&engine, top, "link", clock.clone(), spawner).unwrap();
+    link.set_delay(DELAY_TICKS).unwrap();
 
-    let sink_a = Sink::new_and_register(&engine, top, "sink_a");
-    let sink_b = Sink::new_and_register(&engine, top, "sink_b");
+    let sink_a = Sink::new_and_register(&engine, top, "sink_a").unwrap();
+    let sink_b = Sink::new_and_register(&engine, top, "sink_b").unwrap();
 
-    connect_port!(source_a, tx => link, rx_a);
-    connect_port!(source_b, tx => link, rx_b);
-    connect_port!(link, tx_a => sink_a, rx);
-    connect_port!(link, tx_b => sink_b, rx);
+    connect_port!(source_a, tx => link, rx_a).unwrap();
+    connect_port!(source_b, tx => link, rx_b).unwrap();
+    connect_port!(link, tx_a => sink_a, rx).unwrap();
+    connect_port!(link, tx_b => sink_b, rx).unwrap();
 
     run_simulation!(engine);
 

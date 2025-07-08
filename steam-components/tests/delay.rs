@@ -23,32 +23,33 @@ fn put_get() {
 
     let top = engine.top();
     // Create a pair of tasks that use a delay
-    let delay = Delay::new_and_register(&engine, top, "delay", clock.clone(), spawner.clone(), 20);
-    let buffer = Store::new_and_register(&engine, top, "buffer", spawner, 1);
+    let delay =
+        Delay::new_and_register(&engine, top, "delay", clock.clone(), spawner.clone(), 20).unwrap();
+    let buffer = Store::new_and_register(&engine, top, "buffer", spawner, 1).unwrap();
     const NUM_PUTS: i32 = 100;
 
-    connect_port!(delay, tx => buffer, rx);
+    connect_port!(delay, tx => buffer, rx).unwrap();
 
     let mut tx = OutPort::new(engine.top(), "tb_tx");
-    tx.connect(delay.port_rx());
+    tx.connect(delay.port_rx()).unwrap();
     engine.spawn(async move {
         for _ in 0..NUM_PUTS {
             let value = 1;
             println!("Push {value}");
-            tx.put(value).await?;
+            tx.put(value)?.await;
         }
         Ok(())
     });
 
     let rx = InPort::new(engine.top(), "test_rx");
-    buffer.connect_port_tx(rx.state());
+    buffer.connect_port_tx(rx.state()).unwrap();
     let rx_count = Rc::new(RefCell::new(0));
     {
         let rx_count = rx_count.clone();
         let clock = clock.clone();
         engine.spawn(async move {
             for _ in 0..NUM_PUTS {
-                let j = rx.get().await;
+                let j = rx.get()?.await;
                 let now = clock.tick_now();
                 println!("Received {j} @{now}");
                 *rx_count.borrow_mut() += j;
@@ -76,12 +77,13 @@ fn source_sink() {
 
     let top = engine.top();
     let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(500 ; NUM_PUTS));
-    let delay = Delay::new_and_register(&engine, top, "delay", clock, spawner, DELAY);
-    let sink = Sink::new_and_register(&engine, top, "sink");
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(500 ; NUM_PUTS))
+            .unwrap();
+    let delay = Delay::new_and_register(&engine, top, "delay", clock, spawner, DELAY).unwrap();
+    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
 
-    connect_port!(source, tx => delay, rx);
-    connect_port!(delay, tx => sink, rx);
+    connect_port!(source, tx => delay, rx).unwrap();
+    connect_port!(delay, tx => sink, rx).unwrap();
 
     run_simulation!(engine);
 
@@ -102,13 +104,15 @@ fn blocked_output() {
 
     let top = engine.top();
     let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(500 ; NUM_PUTS));
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(500 ; NUM_PUTS))
+            .unwrap();
     let delay =
-        Delay::new_and_register(&engine, top, "delay", clock.clone(), spawner.clone(), DELAY);
-    let store = Store::new_and_register(&engine, top, "store", spawner, 1);
+        Delay::new_and_register(&engine, top, "delay", clock.clone(), spawner.clone(), DELAY)
+            .unwrap();
+    let store = Store::new_and_register(&engine, top, "store", spawner, 1).unwrap();
 
-    connect_port!(source, tx => delay, rx);
-    connect_port!(delay, tx => store, rx);
+    connect_port!(source, tx => delay, rx).unwrap();
+    connect_port!(delay, tx => store, rx).unwrap();
 
     spawn_slow_reader(&engine, clock, &store);
     run_simulation!(engine);
@@ -119,10 +123,10 @@ where
     T: SimObject,
 {
     let rx = InPort::new(engine.top(), "rx");
-    store.connect_port_tx(rx.state());
+    store.connect_port_tx(rx.state()).unwrap();
     engine.spawn(async move {
         loop {
-            let value = rx.get().await;
+            let value = rx.get()?.await;
             let now = clock.tick_now();
             println!("Pipeline received {value} @{now}");
             clock.wait_ticks(10).await;
@@ -142,10 +146,11 @@ fn disconnected_delay() {
 
     let top = engine.top();
     let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(500 ; NUM_PUTS));
-    let delay = Delay::new_and_register(&engine, top, "delay", clock, spawner, DELAY);
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(500 ; NUM_PUTS))
+            .unwrap();
+    let delay = Delay::new_and_register(&engine, top, "delay", clock, spawner, DELAY).unwrap();
 
-    connect_port!(source, tx => delay, rx);
+    connect_port!(source, tx => delay, rx).unwrap();
 
     run_simulation!(engine);
 }

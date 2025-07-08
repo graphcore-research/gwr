@@ -45,22 +45,23 @@ fn setup_frame_simulation() -> (Engine, Rc<Sink<EthernetFrame>>) {
     }
 
     let store_capacity = num_frames / 4;
-    let store = Store::new_and_register(&engine, top, "store", engine.spawner(), store_capacity);
+    let store =
+        Store::new_and_register(&engine, top, "store", engine.spawner(), store_capacity).unwrap();
 
     {
         let mut frame_tx = OutPort::new(engine.top(), "frame_tx");
-        frame_tx.connect(store.port_rx());
+        frame_tx.connect(store.port_rx()).unwrap();
         engine.spawn(async move {
             for frame in ring_frames.drain(..) {
-                frame_tx.put(frame).await?;
+                frame_tx.put(frame)?.await;
             }
             Ok(())
         });
     }
 
-    let sink = Sink::new_and_register(&engine, top, "sink");
+    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
 
-    connect_port!(store, tx => sink, rx);
+    connect_port!(store, tx => sink, rx).unwrap();
 
     (engine, sink)
 }
@@ -81,22 +82,23 @@ fn setup_box_frame_simulation() -> (Engine, Rc<Sink<Box<EthernetFrame>>>) {
     }
 
     let store_capacity = num_frames / 4;
-    let store = Store::new_and_register(&engine, top, "store", engine.spawner(), store_capacity);
+    let store =
+        Store::new_and_register(&engine, top, "store", engine.spawner(), store_capacity).unwrap();
 
     {
         let mut frame_tx = OutPort::new(engine.top(), "frame_tx");
-        frame_tx.connect(store.port_rx());
+        frame_tx.connect(store.port_rx()).unwrap();
         engine.spawn(async move {
             for frame in ring_frames.drain(..) {
-                frame_tx.put(frame).await?;
+                frame_tx.put(frame)?.await;
             }
             Ok(())
         });
     }
 
-    let sink = Sink::new_and_register(&engine, top, "sink");
+    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
 
-    connect_port!(store, tx => sink, rx);
+    connect_port!(store, tx => sink, rx).unwrap();
 
     (engine, sink)
 }

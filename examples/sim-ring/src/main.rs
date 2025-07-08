@@ -72,6 +72,7 @@ use steam_components::connect_port;
 use steam_engine::engine::Engine;
 use steam_engine::executor::Spawner;
 use steam_engine::time::clock::Clock;
+use steam_engine::types::SimError;
 use steam_engine::{run_simulation, sim_error};
 use steam_models::ethernet_frame::PACKET_OVERHEAD_BYTES;
 use steam_track::{error, info};
@@ -190,9 +191,7 @@ fn start_packet_dump(
     });
 }
 
-type SimRingError = &'static str;
-
-fn main() -> Result<(), SimRingError> {
+fn main() -> Result<(), SimError> {
     let args = Cli::parse();
 
     let tracker = setup_trackers(
@@ -203,7 +202,8 @@ fn main() -> Result<(), SimRingError> {
         args.binary_level,
         &args.binary_filter_regex,
         &args.binary_file,
-    );
+    )
+    .unwrap();
 
     let mut engine = Engine::new(&tracker);
     let spawner = engine.spawner();
@@ -247,19 +247,19 @@ fn main() -> Result<(), SimRingError> {
 
         // Connect the sources to the ring using a rater limiter and flow controlled
         // pipeline.
-        connect_port!(sources[i], tx => source_limiters[i], rx);
-        connect_port!(source_limiters[i], tx => ingress_pipes[i], rx);
-        connect_port!(ingress_pipes[i], tx => ring_nodes[i], io_rx);
+        connect_port!(sources[i], tx => source_limiters[i], rx)?;
+        connect_port!(source_limiters[i], tx => ingress_pipes[i], rx)?;
+        connect_port!(ingress_pipes[i], tx => ring_nodes[i], io_rx)?;
 
         // Connect the ring together using a rate limiter and a flow controlled
         // pipeline.
-        connect_port!(ring_nodes[i], ring_tx => ring_limiters[i], rx);
-        connect_port!(ring_limiters[i], tx => ring_pipes[i], rx);
-        connect_port!(ring_pipes[i], tx => ring_nodes[right], ring_rx);
+        connect_port!(ring_nodes[i], ring_tx => ring_limiters[i], rx)?;
+        connect_port!(ring_limiters[i], tx => ring_pipes[i], rx)?;
+        connect_port!(ring_pipes[i], tx => ring_nodes[right], ring_rx)?;
 
         // Connect the ring to the sinks using a rate limiter.
-        connect_port!(ring_nodes[i], io_tx => sink_limiters[i], rx);
-        connect_port!(sink_limiters[i], tx => sinks[i], rx);
+        connect_port!(ring_nodes[i], io_tx => sink_limiters[i], rx)?;
+        connect_port!(sink_limiters[i], tx => sinks[i], rx)?;
     }
 
     info!(top ; "Platform built and connected");
@@ -288,7 +288,7 @@ fn main() -> Result<(), SimRingError> {
             error!(top ; "Deadlock detected at {:.2}ns", clock.time_now_ns());
 
             tracker.shutdown();
-            return Err("Deadlock");
+            return sim_error!("Deadlock");
         }
     }
     info!(top ; "Pass ({:.2}ns)", clock.time_now_ns());

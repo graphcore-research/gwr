@@ -10,7 +10,10 @@ fn disconnected_outport() {
     let mut engine = start_test(file!());
 
     let tx_port = OutPort::new(engine.top(), "tx");
-    engine.spawn(async move { tx_port.put(1).await });
+    engine.spawn(async move {
+        tx_port.put(1)?.await;
+        Ok(())
+    });
     run_simulation!(engine);
 }
 
@@ -21,8 +24,9 @@ fn disconnected_outport_try_put() {
 
     let tx_port = OutPort::new(engine.top(), "tx");
     engine.spawn(async move {
-        tx_port.try_put().await?;
-        tx_port.put(1).await
+        tx_port.try_put()?.await;
+        tx_port.put(1)?.await;
+        Ok(())
     });
     run_simulation!(engine);
 }
@@ -34,7 +38,7 @@ fn disconnected_input() {
 
     let rx_port = InPort::new(engine.top(), "rx");
     engine.spawn(async move {
-        let _: i32 = rx_port.get().await;
+        let _: i32 = rx_port.get()?.await;
         Ok(())
     });
     run_simulation!(engine);
@@ -47,7 +51,7 @@ fn disconnected_input_start() {
 
     let rx_port = InPort::new(engine.top(), "rx");
     engine.spawn(async move {
-        let _: i32 = rx_port.start_get().await;
+        let _: i32 = rx_port.start_get()?.await;
         rx_port.finish_get();
         Ok(())
     });

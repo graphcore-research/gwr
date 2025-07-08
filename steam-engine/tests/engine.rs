@@ -12,9 +12,9 @@ fn all_spawned() {
     let mut engine = start_test(file!());
 
     let top = engine.top();
-    let source: Rc<Source<i32>> = Source::new_and_register(&engine, top, "source", None);
-    let sink = Sink::new_and_register(&engine, top, "sink");
+    let source: Rc<Source<i32>> = Source::new_and_register(&engine, top, "source", None).unwrap();
+    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
 
-    source.connect_port_tx(sink.port_rx());
+    source.connect_port_tx(sink.port_rx()).unwrap();
     run_simulation!(engine);
 }

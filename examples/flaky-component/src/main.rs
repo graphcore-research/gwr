@@ -23,6 +23,7 @@ use steam_components::source::Source;
 use steam_components::{connect_port, option_box_repeat};
 use steam_engine::engine::Engine;
 use steam_engine::run_simulation;
+use steam_engine::types::SimResult;
 
 /// Command-line arguments.
 #[derive(Parser)]
@@ -41,7 +42,7 @@ struct Cli {
     num_packets: usize,
 }
 
-fn main() {
+fn main() -> SimResult {
     let args = Cli::parse();
 
     let mut engine = Engine::default();
@@ -50,14 +51,15 @@ fn main() {
 
     let top = engine.top();
     let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(0x123 ; num_puts));
-    let flaky = Flaky::new_and_register(&engine, top, "flaky", args.drop, args.seed);
-    let sink = Sink::new_and_register(&engine, top, "sink");
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(0x123 ; num_puts))?;
+    let flaky = Flaky::new_and_register(&engine, top, "flaky", args.drop, args.seed)?;
+    let sink = Sink::new_and_register(&engine, top, "sink")?;
 
-    connect_port!(source, tx => flaky, rx);
-    connect_port!(flaky, tx => sink, rx);
+    connect_port!(source, tx => flaky, rx)?;
+    connect_port!(flaky, tx => sink, rx)?;
 
     run_simulation!(engine);
 
     println!("Sink received {}/{}", sink.num_sunk(), num_puts);
+    Ok(())
 }

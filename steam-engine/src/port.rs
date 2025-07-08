@@ -14,8 +14,15 @@ use futures::future::FusedFuture;
 use steam_track::connect;
 use steam_track::entity::Entity;
 
+use crate::sim_error;
 use crate::traits::SimObject;
-use crate::types::SimResult;
+use crate::types::{SimError, SimResult};
+
+pub type PortStateResult<T> = Result<Rc<PortState<T>>, SimError>;
+pub type PortGetResult<T> = Result<PortGet<T>, SimError>;
+pub type PortStartGetResult<T> = Result<PortStartGet<T>, SimError>;
+pub type PortPutResult<T> = Result<PortPut<T>, SimError>;
+pub type PortTryPutResult<T> = Result<PortTryPut<T>, SimError>;
 
 pub struct PortState<T>
 where
@@ -73,38 +80,38 @@ where
         }
     }
 
-    pub fn state(&self) -> Rc<PortState<T>> {
+    pub fn state(&self) -> PortStateResult<T> {
         if *self.connected.borrow() {
-            panic!("{self} already connected");
+            return sim_error!(format!("{self} already connected"));
         }
 
         *self.connected.borrow_mut() = true;
-        self.state.clone()
+        Ok(self.state.clone())
     }
 
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
-    pub fn get(&self) -> PortGet<T> {
+    pub fn get(&self) -> PortGetResult<T> {
         if !*self.connected.borrow() {
-            panic!("{self} not connected");
+            return sim_error!(format!("{self} not connected"));
         }
 
-        PortGet {
+        Ok(PortGet {
             state: self.state.clone(),
             done: false,
-        }
+        })
     }
 
     /// Must be matched with a `finish_get` to allow the OutPort to continue.
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
-    pub fn start_get(&self) -> PortStartGet<T> {
+    pub fn start_get(&self) -> PortStartGetResult<T> {
         if !*self.connected.borrow() {
-            panic!("{self} not connected");
+            return sim_error!(format!("{self} not connected"));
         }
 
-        PortStartGet {
+        Ok(PortStartGet {
             state: self.state.clone(),
             done: false,
-        }
+        })
     }
 
     /// Must be matched with a `start_get ` to consume the value.
@@ -145,38 +152,41 @@ where
         }
     }
 
-    pub fn connect(&mut self, port_state: Rc<PortState<T>>) {
+    pub fn connect(&mut self, port_state: PortStateResult<T>) -> SimResult {
+        let port_state = port_state?;
+
         connect!(self.entity ; port_state.in_port_entity);
         match self.state {
-            Some(_) => panic!("{} already connected", self.entity),
+            Some(_) => {
+                return sim_error!(format!("{self} already connected"));
+            }
             None => {
                 self.state = Some(port_state);
             }
         }
+        Ok(())
     }
 
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
-    pub fn put(&self, value: T) -> PortPut<T> {
-        let state = self
-            .state
-            .as_ref()
-            .unwrap_or_else(|| panic!("{self} not connected"))
-            .clone();
-        PortPut {
+    pub fn put(&self, value: T) -> PortPutResult<T> {
+        let state = match self.state.as_ref() {
+            Some(s) => s.clone(),
+            None => return sim_error!(format!("{self} not connected")),
+        };
+        Ok(PortPut {
             state,
             value: RefCell::new(Some(value)),
             done: RefCell::new(false),
-        }
+        })
     }
 
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
-    pub fn try_put(&self) -> PortTryPut<T> {
-        let state = self
-            .state
-            .as_ref()
-            .unwrap_or_else(|| panic!("{self} not connected"))
-            .clone();
-        PortTryPut { state, done: false }
+    pub fn try_put(&self) -> PortTryPutResult<T> {
+        let state = match self.state.as_ref() {
+            Some(s) => s.clone(),
+            None => return sim_error!(format!("{self} not connected")),
+        };
+        Ok(PortTryPut { state, done: false })
     }
 }
 
@@ -193,7 +203,7 @@ impl<T> Future for PortPut<T>
 where
     T: SimObject,
 {
-    type Output = SimResult;
+    type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.value.take() {
@@ -212,7 +222,7 @@ where
             None => {
                 // Value already sent, woken because it has been consumed
                 *self.done.borrow_mut() = true;
-                Poll::Ready(Ok(()))
+                Poll::Ready(())
             }
         }
     }
@@ -239,12 +249,12 @@ impl<T> Future for PortTryPut<T>
 where
     T: SimObject,
 {
-    type Output = SimResult;
+    type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if self.state.waiting_get.borrow().is_some() {
             self.done = true;
-            Poll::Ready(Ok(()))
+            Poll::Ready(())
         } else {
             *self.state.waiting_put.borrow_mut() = Some(cx.waker().clone());
             Poll::Pending

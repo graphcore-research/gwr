@@ -12,6 +12,7 @@ use steam_components::sink::Sink;
 use steam_components::source::Source;
 use steam_engine::engine::Engine;
 use steam_engine::traits::Routable;
+use steam_engine::types::SimError;
 use steam_models::ethernet_frame::{EthernetFrame, u64_to_mac};
 use steam_models::fc_pipeline::{FcPipeline, FcPipelineConfig};
 use steam_models::ring_node::{IO_INDEX, RING_INDEX, RingConfig, RingNode};
@@ -40,11 +41,11 @@ impl<T> Route<T> for Router
 where
     T: Routable,
 {
-    fn route(&self, obj: &T) -> usize {
+    fn route(&self, obj: &T) -> Result<usize, SimError> {
         // If the dest matches then exit via port 1, otherwise use port 0 as that is the
         // ring
-        let dest = obj.dest() as usize;
-        if self.0 == dest { IO_INDEX } else { RING_INDEX }
+        let dest = obj.dest()? as usize;
+        Ok(if self.0 == dest { IO_INDEX } else { RING_INDEX })
     }
 }
 
@@ -68,8 +69,9 @@ pub fn build_ring_nodes(engine: &mut Engine, config: &Config) -> Nodes {
                 spawner.clone(),
                 &ring_config,
                 Box::new(Router(i)),
-                Box::new(WeightedRoundRobinPolicy::new(weights, 2)),
+                Box::new(WeightedRoundRobinPolicy::new(weights, 2).unwrap()),
             )
+            .unwrap()
         })
         .collect();
     ring_nodes
@@ -82,21 +84,24 @@ pub fn build_source_sinks(engine: &mut Engine, config: &Config) -> (Sources, Sin
     for i in 0..config.ring_size {
         let neighbour_left = if i > 0 { i - 1 } else { config.ring_size - 1 };
 
-        sources.push(Source::new_and_register(
-            engine,
-            top,
-            format!("source{i}").as_str(),
-            Some(Box::new(PacketGen::new(
+        sources.push(
+            Source::new_and_register(
+                engine,
                 top,
-                u64_to_mac(neighbour_left as u64),
-                config.packet_payload_bytes,
-                config.num_send_packets,
-            ))),
-        ));
+                format!("source{i}").as_str(),
+                Some(Box::new(PacketGen::new(
+                    top,
+                    u64_to_mac(neighbour_left as u64),
+                    config.packet_payload_bytes,
+                    config.num_send_packets,
+                ))),
+            )
+            .unwrap(),
+        );
     }
 
     let sinks: Sinks = (0..config.ring_size)
-        .map(|i| Sink::new_and_register(engine, top, format!("sink{i}").as_str()))
+        .map(|i| Sink::new_and_register(engine, top, format!("sink{i}").as_str()).unwrap())
         .collect();
 
     (sources, sinks)
@@ -112,22 +117,28 @@ pub fn build_pipes(engine: &mut Engine, config: &Config) -> (Pipes, Pipes) {
 
     let pipe_config = FcPipelineConfig::new(500, 500, 500);
     for i in 0..config.ring_size {
-        ingress_pipes.push(FcPipeline::new_and_register(
-            engine,
-            top,
-            format!("ingress_pipe{i}").as_str(),
-            clock.clone(),
-            spawner.clone(),
-            &pipe_config,
-        ));
-        ring_pipes.push(FcPipeline::new_and_register(
-            engine,
-            top,
-            format!("ring_pipe{i}").as_str(),
-            clock.clone(),
-            spawner.clone(),
-            &pipe_config,
-        ));
+        ingress_pipes.push(
+            FcPipeline::new_and_register(
+                engine,
+                top,
+                format!("ingress_pipe{i}").as_str(),
+                clock.clone(),
+                spawner.clone(),
+                &pipe_config,
+            )
+            .unwrap(),
+        );
+        ring_pipes.push(
+            FcPipeline::new_and_register(
+                engine,
+                top,
+                format!("ring_pipe{i}").as_str(),
+                clock.clone(),
+                spawner.clone(),
+                &pipe_config,
+            )
+            .unwrap(),
+        );
     }
     (ingress_pipes, ring_pipes)
 }
@@ -148,6 +159,7 @@ pub fn build_limiters(
                 format!("src_limit{i}").as_str(),
                 limiter_gbps.clone(),
             )
+            .unwrap()
         })
         .collect();
 
@@ -159,6 +171,7 @@ pub fn build_limiters(
                 format!("ring_limit{i}").as_str(),
                 limiter_gbps.clone(),
             )
+            .unwrap()
         })
         .collect();
 
@@ -170,6 +183,7 @@ pub fn build_limiters(
                 format!("sink_limit{i}").as_str(),
                 limiter_gbps.clone(),
             )
+            .unwrap()
         })
         .collect();
     (source_limiters, ring_limiters, sink_limiters)

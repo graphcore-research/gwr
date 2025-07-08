@@ -40,14 +40,13 @@ A component with a single input port called `rx` will have:
 
 ```rust,no_run
 # use std::marker::PhantomData;
-# use std::rc::Rc;
-# use steam_engine::port::PortState;
+# use steam_engine::port::PortStateResult;
 # use steam_engine::traits::SimObject;
 # #[allow(dead_code)]
 # struct TestBlock<T> { phantom: PhantomData<T> }
 # impl<T: SimObject> TestBlock<T> {
 # #[allow(dead_code)]
-pub fn port_rx(&self) -> Rc<PortState<T>>
+pub fn port_rx(&self) -> PortStateResult<T>
 # { todo!() }
 # }
 # fn main() {}
@@ -57,14 +56,13 @@ A component with an array of input ports called `in` will have:
 
 ```rust,no_run
 # use std::marker::PhantomData;
-# use std::rc::Rc;
-# use steam_engine::port::PortState;
+# use steam_engine::port::PortStateResult;
 # use steam_engine::traits::SimObject;
 # #[allow(dead_code)]
 # struct TestBlock<T> { phantom: PhantomData<T> }
 # impl<T: SimObject> TestBlock<T> {
 # #[allow(dead_code, unused_variables)]
-pub fn port_in_i(&self, i: usize) -> Rc<PortState<T>>
+pub fn port_in_i(&self, i: usize) -> PortStateResult<T>
 # { todo!() }
 # }
 # fn main() {}
@@ -79,14 +77,14 @@ A component with a single output port called `tx` will have:
 
 ```rust,no_run
 # use std::marker::PhantomData;
-# use std::rc::Rc;
-# use steam_engine::port::PortState;
+# use steam_engine::port::PortStateResult;
 # use steam_engine::traits::SimObject;
+# use steam_engine::types::SimResult;
 # #[allow(dead_code)]
 # struct TestBlock<T> { phantom: PhantomData<T> }
 # impl<T: SimObject> TestBlock<T> {
 # #[allow(dead_code, unused_variables)]
-pub fn connect_port_tx(&self, port_state: Rc<PortState<T>>)
+pub fn connect_port_tx(&self, port_state: PortStateResult<T>) -> SimResult
 # { todo!() }
 # }
 # fn main() {}
@@ -96,14 +94,14 @@ A component with an array of output ports called `out` will have:
 
 ```rust,no_run
 # use std::marker::PhantomData;
-# use std::rc::Rc;
-# use steam_engine::port::PortState;
+# use steam_engine::port::PortStateResult;
 # use steam_engine::traits::SimObject;
+# use steam_engine::types::SimResult;
 # #[allow(dead_code)]
 # struct TestBlock<T> { phantom: PhantomData<T> }
 # impl<T: SimObject> TestBlock<T> {
 # #[allow(dead_code, unused_variables)]
-pub fn connect_port_out_i(&self, i: usize, port_state: Rc<PortState<T>>)
+pub fn connect_port_out_i(&self, i: usize, port_state: PortStateResult<T>) -> SimResult
 # { todo!() }
 # }
 # fn main() {}
@@ -122,9 +120,12 @@ example:
 # fn main() {
 # let num_puts = 10;
 # let mut engine = Engine::default();
-let mut source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; num_puts));
-let sink = Sink::new_and_register(&engine, engine.top(), "sink");
-connect_port!(source, tx => sink, rx);
+let mut source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; num_puts))
+    .expect("should be able to create and register `Source`");
+let sink = Sink::new_and_register(&engine, engine.top(), "sink")
+    .expect("should be able to create and register `Sink`");
+connect_port!(source, tx => sink, rx)
+    .expect("should be able to connect `Source` to `Sink`");
 }
 ```
 
@@ -141,9 +142,12 @@ then there will be a compile error.
 # fn main() {
 # let num_puts = 10;
 # let mut engine = Engine::default();
-let mut source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; num_puts));
-let sink = Sink::new_and_register(&engine, engine.top(), "sink");
-connect_port!(source, tx => sink, invalid);
+let mut source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; num_puts))
+    .expect("should be able to create and register `Source`");
+let sink = Sink::new_and_register(&engine, engine.top(), "sink")
+    .expect("should be able to create and register `Sink`");
+connect_port!(source, tx => sink, invalid)
+    .expect("should be able to connect `Source` to `Sink`");
 # }
 ```
 

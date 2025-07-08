@@ -33,14 +33,15 @@
 //!     //   - a [spawner](steam_engine::executor::Spawner) that is used to spawn
 //!     //     internal concurrent tasks.
 //!     //   - a capacity.
-//!     let store: Rc<Store<i32>> = Store::new_and_register(engine, parent, "store", spawner, 5);
+//!     let store: Rc<Store<i32>> = Store::new_and_register(engine, parent, "store", spawner, 5)
+//!         .expect("should be able to create and register `Store`");
 //!     store
 //! }
 //! ```
 //!
 //! By default, the store enters a waiting state if the capacity is overflown,
-//! but this behaviour can be changed to panic, by using the
-//! `set_panic_on_overflow()` method.
+//! but this behaviour can be changed to return an error, by using the
+//! `set_error_on_overflow()` method.
 //!
 //! ```rust
 //! use std::rc::Rc;
@@ -57,9 +58,10 @@
 //!     spawner: Spawner,
 //! ) -> Rc<Store<i32>> {
 //!     // Create a store that panics on overflow. Use `new_and_register()` as before,
-//!     // then call `set_panic_on_overflow()` on the resulting struct.
-//!     let store = Store::new_and_register(engine, parent, "store_panic", spawner, 5);
-//!     store.set_panic_on_overflow();
+//!     // then call `set_error_on_overflow()` on the resulting struct.
+//!     let store = Store::new_and_register(engine, parent, "store_error", spawner, 5)
+//!         .expect("should be able to create and register `Store`");
+//!     store.set_error_on_overflow();
 //!     store
 //! }
 //! ```
@@ -90,18 +92,23 @@
 //!
 //! // Create the basic componets:
 //! // The simplest use of the source is to inject the same value repeatedly.
-//! let source = Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; 10));
+//! let source = Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; 10))
+//!     .expect("should be able to create and register `Source`");
 //! // Create the store - its type will be derived from the connections to its ports.
-//! let store = Store::new_and_register(&engine, top, "store", spawner, 5);
+//! let store = Store::new_and_register(&engine, top, "store", spawner, 5)
+//!     .expect("should be able to create and register `Store`");
 //! // Create the sink which will pull all of the data items out of the store
-//! let sink = Sink::new_and_register(&engine, top, "sink");
+//! let sink = Sink::new_and_register(&engine, top, "sink")
+//!     .expect("should be able to create and register `Sink`");
 //!
 //! // Connect the ports together:
 //! // The source will drive data into the store:
-//! connect_port!(source, tx => store, rx);
+//! connect_port!(source, tx => store, rx)
+//!     .expect("should be able to connect `Source` to `Store`");
 //!
 //! // The sink will pull data out of the store
-//! connect_port!(store, tx => sink, rx);
+//! connect_port!(store, tx => sink, rx)
+//!     .expect("should be able to connect `Store` to `Sink`");
 //!
 //! // The `run_simulation!` macro then spawns all active components
 //! // and runs the simulation to completion.
@@ -117,9 +124,10 @@ use async_trait::async_trait;
 use steam_engine::engine::Engine;
 use steam_engine::events::repeated::Repeated;
 use steam_engine::executor::Spawner;
-use steam_engine::port::{InPort, OutPort, PortState};
+use steam_engine::port::{InPort, OutPort, PortStateResult};
+use steam_engine::sim_error;
 use steam_engine::traits::{Event, Runnable, SimObject};
-use steam_engine::types::SimResult;
+use steam_engine::types::{SimError, SimResult};
 use steam_model_builder::EntityDisplay;
 use steam_track::entity::Entity;
 use steam_track::{enter, exit};
@@ -134,7 +142,7 @@ where
     entity: Arc<Entity>,
     capacity: usize,
     data: RefCell<VecDeque<T>>,
-    panic_on_overflow: RefCell<bool>,
+    error_on_overflow: RefCell<bool>,
     level_change: Repeated<usize>,
 }
 
@@ -148,7 +156,7 @@ where
             entity: entity.clone(),
             capacity,
             data: RefCell::new(VecDeque::with_capacity(capacity)),
-            panic_on_overflow: RefCell::new(false),
+            error_on_overflow: RefCell::new(false),
             level_change: Repeated::new(usize::default()),
         }
     }
@@ -156,32 +164,29 @@ where
     /// Place an object into the store state.
     ///
     /// There must be room before this is called.
-    fn push_value(&self, value: T) {
+    fn push_value(&self, value: T) -> SimResult {
         enter!(self.entity ; value.tag());
-        if *self.panic_on_overflow.borrow() {
+        if *self.error_on_overflow.borrow() {
             if self.data.borrow().len() >= self.capacity {
-                panic!("Overflow in {:?}", self.entity.full_name());
+                return sim_error!(format!("Overflow in {:?}", self.entity.full_name()));
             }
         } else {
             assert!(self.data.borrow().len() < self.capacity);
         }
 
         self.data.borrow_mut().push_back(value);
-        self.level_change
-            .notify_result(self.data.borrow().len())
-            .unwrap();
+        self.level_change.notify_result(self.data.borrow().len())?;
+        Ok(())
     }
 
     /// Remove an object from the store state.
     ///
     /// There must be an object available to remove before this is called.
-    fn pop_value(&self) -> T {
+    fn pop_value(&self) -> Result<T, SimError> {
         let value = self.data.borrow_mut().pop_front().unwrap();
-        self.level_change
-            .notify_result(self.data.borrow().len())
-            .unwrap();
+        self.level_change.notify_result(self.data.borrow().len())?;
         exit!(self.entity ; value.tag());
-        value
+        Ok(value)
     }
 }
 
@@ -207,16 +212,17 @@ where
 {
     /// Basic store constructor
     ///
-    /// **Panics** if `capacity` is 0.
-    #[must_use]
+    /// Returns a `SimError` if `capacity` is 0.
     pub fn new_and_register(
         engine: &Engine,
         parent: &Arc<Entity>,
         name: &str,
         spawner: Spawner,
         capacity: usize,
-    ) -> Rc<Self> {
-        assert_ne!(capacity, 0, "Unsupported Store with 0 capacity");
+    ) -> Result<Rc<Self>, SimError> {
+        if capacity == 0 {
+            return sim_error!("Unsupported Store with 0 capacity");
+        }
         let entity = Arc::new(Entity::new(parent, name));
         let state = Rc::new(State::new(&entity, capacity));
         let tx = OutPort::new(&entity, "tx");
@@ -229,15 +235,14 @@ where
             rx: RefCell::new(Some(rx)),
         });
         engine.register(rc_self.clone());
-        rc_self
+        Ok(rc_self)
     }
 
-    pub fn connect_port_tx(&self, port_state: Rc<PortState<T>>) {
-        connect_tx!(self.tx, connect ; port_state);
+    pub fn connect_port_tx(&self, port_state: PortStateResult<T>) -> SimResult {
+        connect_tx!(self.tx, connect ; port_state)
     }
 
-    #[must_use]
-    pub fn port_rx(&self) -> Rc<PortState<T>> {
+    pub fn port_rx(&self) -> PortStateResult<T> {
         port_rx!(self.rx, state)
     }
 
@@ -246,8 +251,8 @@ where
         self.state.data.borrow().len()
     }
 
-    pub fn set_panic_on_overflow(&self) {
-        *self.state.panic_on_overflow.borrow_mut() = true;
+    pub fn set_error_on_overflow(&self) {
+        *self.state.error_on_overflow.borrow_mut() = true;
     }
 
     #[must_use]
@@ -278,12 +283,12 @@ where
     T: SimObject,
 {
     let level_change = state.level_change.clone();
-    let panic_on_overflow = *state.panic_on_overflow.borrow();
+    let error_on_overflow = *state.error_on_overflow.borrow();
     loop {
         let level = state.data.borrow().len();
-        if level < state.capacity || panic_on_overflow {
-            let value = rx.get().await;
-            state.push_value(value);
+        if level < state.capacity || error_on_overflow {
+            let value = rx.get()?.await;
+            state.push_value(value)?;
         } else {
             level_change.listen().await;
         }
@@ -299,9 +304,9 @@ where
         let level = state.data.borrow().len();
         if level > 0 {
             // Wait for something to actually want the store value
-            tx.try_put().await?;
-            let value = state.pop_value();
-            tx.put(value).await?;
+            tx.try_put()?.await;
+            let value = state.pop_value()?;
+            tx.put(value)?.await;
         } else {
             level_change.listen().await;
         }

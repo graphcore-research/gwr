@@ -19,12 +19,13 @@ fn drop_precent() {
     let seed = 1;
     let top = engine.top();
     let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(0x123 ; num_puts));
-    let flaky = Flaky::new_and_register(&engine, top, "flaky", drop, seed);
-    let sink = Sink::new_and_register(&engine, top, "sink");
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(0x123 ; num_puts))
+            .unwrap();
+    let flaky = Flaky::new_and_register(&engine, top, "flaky", drop, seed).unwrap();
+    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
 
-    connect_port!(source, tx => flaky, rx);
-    connect_port!(flaky, tx => sink, rx);
+    connect_port!(source, tx => flaky, rx).unwrap();
+    connect_port!(flaky, tx => sink, rx).unwrap();
 
     run_simulation!(engine);
 

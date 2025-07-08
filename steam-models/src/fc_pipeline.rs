@@ -28,9 +28,10 @@ use steam_components::types::Credit;
 use steam_components::{connect_port, connect_tx, port_rx};
 use steam_engine::engine::Engine;
 use steam_engine::executor::Spawner;
-use steam_engine::port::PortState;
+use steam_engine::port::PortStateResult;
 use steam_engine::time::clock::Clock;
 use steam_engine::traits::SimObject;
+use steam_engine::types::{SimError, SimResult};
 use steam_model_builder::{EntityDisplay, Runnable};
 use steam_track::entity::Entity;
 
@@ -69,7 +70,6 @@ impl<T> FcPipeline<T>
 where
     T: SimObject,
 {
-    #[must_use]
     pub fn new_and_register(
         engine: &Engine,
         parent: &Arc<Entity>,
@@ -77,11 +77,11 @@ where
         clock: Clock,
         spawner: Spawner,
         config: &FcPipelineConfig,
-    ) -> Rc<Self> {
+    ) -> Result<Rc<Self>, SimError> {
         let entity = Arc::new(Entity::new(parent, name));
 
         let credit_limiter =
-            CreditLimiter::new_and_register(engine, &entity, spawner.clone(), config.buffer_size);
+            CreditLimiter::new_and_register(engine, &entity, spawner.clone(), config.buffer_size)?;
 
         let data_delay = Delay::new_and_register(
             engine,
@@ -90,15 +90,15 @@ where
             clock.clone(),
             spawner.clone(),
             config.data_delay_ticks,
-        );
+        )?;
 
         let buffer =
-            Store::new_and_register(engine, &entity, "buf", spawner.clone(), config.buffer_size);
+            Store::new_and_register(engine, &entity, "buf", spawner.clone(), config.buffer_size)?;
 
-        connect_port!(credit_limiter, tx => data_delay, rx);
-        connect_port!(data_delay, tx => buffer, rx);
+        connect_port!(credit_limiter, tx => data_delay, rx)?;
+        connect_port!(data_delay, tx => buffer, rx)?;
 
-        let credit_issuer = CreditIssuer::new_and_register(engine, &entity);
+        let credit_issuer = CreditIssuer::new_and_register(engine, &entity)?;
         let credit_delay = Delay::new_and_register(
             engine,
             &entity,
@@ -106,11 +106,11 @@ where
             clock,
             spawner,
             config.credit_delay_ticks,
-        );
+        )?;
 
-        connect_port!(buffer, tx => credit_issuer, rx);
-        connect_port!(credit_issuer, credit_tx => credit_delay, rx);
-        connect_port!(credit_delay, tx => credit_limiter, credit_rx);
+        connect_port!(buffer, tx => credit_issuer, rx)?;
+        connect_port!(credit_issuer, credit_tx => credit_delay, rx)?;
+        connect_port!(credit_delay, tx => credit_limiter, credit_rx)?;
 
         let rc_self = Rc::new(Self {
             entity,
@@ -120,27 +120,26 @@ where
             data_delay: RefCell::new(Some(data_delay)),
         });
         engine.register(rc_self.clone());
-        rc_self
+        Ok(rc_self)
     }
 
-    pub fn set_data_delay(&self, delay: usize) {
-        self.data_delay.borrow().as_ref().unwrap().set_delay(delay);
+    pub fn set_data_delay(&self, delay: usize) -> SimResult {
+        self.data_delay.borrow().as_ref().unwrap().set_delay(delay)
     }
 
-    pub fn set_credit_delay(&self, delay: usize) {
+    pub fn set_credit_delay(&self, delay: usize) -> SimResult {
         self.credit_delay
             .borrow()
             .as_ref()
             .unwrap()
-            .set_delay(delay);
+            .set_delay(delay)
     }
 
-    pub fn connect_port_tx(&self, port_state: Rc<PortState<T>>) {
-        connect_tx!(self.credit_issuer, connect_port_tx ; port_state);
+    pub fn connect_port_tx(&self, port_state: PortStateResult<T>) -> SimResult {
+        connect_tx!(self.credit_issuer, connect_port_tx ; port_state)
     }
 
-    #[must_use]
-    pub fn port_rx(&self) -> Rc<PortState<T>> {
+    pub fn port_rx(&self) -> PortStateResult<T> {
         port_rx!(self.credit_limiter, port_rx)
     }
 }

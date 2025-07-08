@@ -9,10 +9,10 @@ use steam_components::delay::Delay;
 use steam_components::{port_rx, take_option};
 use steam_engine::engine::Engine;
 use steam_engine::executor::Spawner;
-use steam_engine::port::{InPort, OutPort, PortState};
+use steam_engine::port::{InPort, OutPort, PortStateResult};
 use steam_engine::time::clock::Clock;
 use steam_engine::traits::{Runnable, SimObject};
-use steam_engine::types::{ReqType, SimResult};
+use steam_engine::types::{ReqType, SimError, SimResult};
 use steam_model_builder::EntityDisplay;
 use steam_track::entity::Entity;
 use steam_track::trace;
@@ -104,7 +104,6 @@ impl<T> Memory<T>
 where
     T: SimObject + MemoryAccess,
 {
-    #[must_use]
     pub fn new_and_register(
         engine: &Engine,
         parent: &Arc<Entity>,
@@ -112,7 +111,7 @@ where
         clock: Clock,
         spawner: Spawner,
         config: MemoryConfig,
-    ) -> Rc<Self> {
+    ) -> Result<Rc<Self>, SimError> {
         let entity = Arc::new(Entity::new(parent, name));
 
         let rx = InPort::new(&entity, "rx");
@@ -124,11 +123,11 @@ where
             clock.clone(),
             spawner,
             config.delay_ticks,
-        );
+        )?;
 
         // Create a local port to drive into the response delay
         let mut response_tx = OutPort::new(&entity, "response");
-        response_tx.connect(response_delay.port_rx());
+        response_tx.connect(response_delay.port_rx())?;
 
         let rc_self = Rc::new(Self {
             entity,
@@ -140,15 +139,14 @@ where
             response_tx: RefCell::new(Some(response_tx)),
         });
         engine.register(rc_self.clone());
-        rc_self
+        Ok(rc_self)
     }
 
-    pub fn connect_port_tx(&self, port_state: Rc<PortState<T>>) {
-        self.response_delay.connect_port_tx(port_state);
+    pub fn connect_port_tx(&self, port_state: PortStateResult<T>) -> SimResult {
+        self.response_delay.connect_port_tx(port_state)
     }
 
-    #[must_use]
-    pub fn port_rx(&self) -> Rc<PortState<T>> {
+    pub fn port_rx(&self) -> PortStateResult<T> {
         port_rx!(self.rx, state)
     }
 
@@ -173,7 +171,7 @@ where
         let response_tx = take_option!(self.response_tx);
 
         loop {
-            let access = rx.get().await;
+            let access = rx.get()?.await;
             trace!(self.entity ; "Memory access {}", access);
 
             let begin = access.addr();
@@ -189,13 +187,13 @@ where
             match access.access_type() {
                 ReqType::Read => {
                     self.metrics.borrow_mut().bytes_read += access.num_bytes();
-                    response_tx.put(access).await?;
+                    response_tx.put(access)?.await;
                 }
                 ReqType::Write | ReqType::WriteNonPosted => {
                     self.metrics.borrow_mut().bytes_written += access.num_bytes();
 
                     if access.access_type() == ReqType::WriteNonPosted {
-                        response_tx.put(access).await?;
+                        response_tx.put(access)?.await;
                     }
                 }
                 ReqType::Control => {

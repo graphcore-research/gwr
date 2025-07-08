@@ -12,6 +12,7 @@ use steam_engine::run_simulation;
 use steam_engine::test_helpers::start_test;
 use steam_engine::time::clock::Clock;
 use steam_engine::traits::Routable;
+use steam_engine::types::SimError;
 use steam_models::ethernet_frame::{EthernetFrame, SRC_MAC_BYTES, mac_to_u64};
 use steam_models::ring_node::{IO_INDEX, RING_INDEX, RingConfig, RingNode};
 
@@ -21,10 +22,10 @@ impl<T> Route<T> for TestRouter
 where
     T: Routable,
 {
-    fn route(&self, obj: &T) -> usize {
+    fn route(&self, obj: &T) -> Result<usize, SimError> {
         // If the dest matches then exit via IO port, otherwise use ring port
-        let dest = obj.dest();
-        if self.0 == dest { IO_INDEX } else { RING_INDEX }
+        let dest = obj.dest()?;
+        Ok(if self.0 == dest { IO_INDEX } else { RING_INDEX })
     }
 }
 
@@ -52,15 +53,16 @@ fn run_test(
         spawner,
         &config,
         route_fn,
-        Box::new(WeightedRoundRobinPolicy::new(weights, 2)),
-    );
+        Box::new(WeightedRoundRobinPolicy::new(weights, 2).unwrap()),
+    )
+    .unwrap();
 
     {
         let mut ring_tx = OutPort::new(engine.top(), "ring_tx");
-        ring_tx.connect(ring_node.port_ring_rx());
+        ring_tx.connect(ring_node.port_ring_rx()).unwrap();
         engine.spawn(async move {
             for frame in ring_frames.drain(..) {
-                ring_tx.put(frame).await?;
+                ring_tx.put(frame)?.await;
             }
             Ok(())
         });
@@ -68,20 +70,20 @@ fn run_test(
 
     {
         let mut io_tx = OutPort::new(engine.top(), "io_tx");
-        io_tx.connect(ring_node.port_io_rx());
+        io_tx.connect(ring_node.port_io_rx()).unwrap();
         engine.spawn(async move {
             for frame in io_frames.drain(..) {
-                io_tx.put(frame).await?;
+                io_tx.put(frame)?.await;
             }
             Ok(())
         });
     }
 
-    let io_sink = Sink::new_and_register(&engine, top, "io_sink");
-    let ring_sink = Sink::new_and_register(&engine, top, "ring_sink");
+    let io_sink = Sink::new_and_register(&engine, top, "io_sink").unwrap();
+    let ring_sink = Sink::new_and_register(&engine, top, "ring_sink").unwrap();
 
-    connect_port!(ring_node, io_tx => io_sink, rx);
-    connect_port!(ring_node, ring_tx => ring_sink, rx);
+    connect_port!(ring_node, io_tx => io_sink, rx).unwrap();
+    connect_port!(ring_node, ring_tx => ring_sink, rx).unwrap();
 
     run_simulation!(engine);
     (ring_sink, io_sink, clock)

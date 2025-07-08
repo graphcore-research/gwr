@@ -10,7 +10,8 @@ fn main() {
     let engine = Engine::default();
     let top = engine.top();
     let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(0x123 ; num_puts));
-    let sink = Sink::new_and_register(&engine, top, "sink");
-    connect_port!(source, tx => sink, invalid_rx);
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(0x123 ; num_puts))
+            .unwrap();
+    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
+    connect_port!(source, tx => sink, invalid_rx).unwrap();
 }

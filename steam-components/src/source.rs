@@ -16,9 +16,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use steam_engine::engine::Engine;
-use steam_engine::port::{OutPort, PortState};
+use steam_engine::port::{OutPort, PortStateResult};
 use steam_engine::traits::{Runnable, SimObject};
-use steam_engine::types::SimResult;
+use steam_engine::types::{SimError, SimResult};
 use steam_model_builder::EntityDisplay;
 use steam_track::entity::Entity;
 use steam_track::exit;
@@ -53,13 +53,12 @@ impl<T> Source<T>
 where
     T: SimObject,
 {
-    #[must_use]
     pub fn new_and_register(
         engine: &Engine,
         parent: &Arc<Entity>,
         name: &str,
         data_generator: Option<DataGenerator<T>>,
-    ) -> Rc<Self> {
+    ) -> Result<Rc<Self>, SimError> {
         let entity = Arc::new(Entity::new(parent, name));
         let tx = OutPort::new(&entity, "tx");
         let rc_self = Rc::new(Self {
@@ -68,7 +67,7 @@ where
             tx: RefCell::new(Some(tx)),
         });
         engine.register(rc_self.clone());
-        rc_self
+        Ok(rc_self)
     }
 
     #[must_use]
@@ -80,8 +79,8 @@ where
         *self.data_generator.borrow_mut() = data_generator;
     }
 
-    pub fn connect_port_tx(&self, port_state: Rc<PortState<T>>) {
-        connect_tx!(self.tx, connect ; port_state);
+    pub fn connect_port_tx(&self, port_state: PortStateResult<T>) -> SimResult {
+        connect_tx!(self.tx, connect ; port_state)
     }
 }
 
@@ -101,7 +100,7 @@ where
             let value = data_generator.next();
             if let Some(value) = value {
                 exit!(self.entity ; value.tag());
-                tx.put(value).await?;
+                tx.put(value)?.await;
             } else {
                 break;
             }

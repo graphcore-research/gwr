@@ -91,35 +91,41 @@ pub fn priority_policy_test_core(engine: &mut Engine, inputs: &[ArbiterInputData
         spawner.clone(),
         num_inputs,
         Box::new(policy),
-    );
+    )
+    .unwrap();
     let mut sources = Vec::new();
     for (i, input) in inputs.iter().enumerate() {
-        sources.push(Source::new_and_register(
-            engine,
-            engine.top(),
-            &("source_".to_owned() + &i.to_string()),
-            option_box_repeat!(input.val; input.count),
-        ));
+        sources.push(
+            Source::new_and_register(
+                engine,
+                engine.top(),
+                &("source_".to_owned() + &i.to_string()),
+                option_box_repeat!(input.val; input.count),
+            )
+            .unwrap(),
+        );
     }
 
     let write_limiter = rc_limiter!(clock, 1);
-    let store_limiter = Limiter::new_and_register(engine, engine.top(), "limit_wr", write_limiter);
-    let store = Store::new_and_register(engine, engine.top(), "store", spawner, total_count);
-    connect_port!(store_limiter, tx => store, rx);
+    let store_limiter =
+        Limiter::new_and_register(engine, engine.top(), "limit_wr", write_limiter).unwrap();
+    let store =
+        Store::new_and_register(engine, engine.top(), "store", spawner, total_count).unwrap();
+    connect_port!(store_limiter, tx => store, rx).unwrap();
 
     for (i, source) in sources.iter_mut().enumerate() {
-        connect_port!(source, tx => arbiter, rx, i);
+        connect_port!(source, tx => arbiter, rx, i).unwrap();
     }
-    connect_port!(arbiter, tx => store_limiter, rx);
+    connect_port!(arbiter, tx => store_limiter, rx).unwrap();
 
     let port = InPort::new(&Arc::new(Entity::new(engine.top(), "port")), "test_rx");
-    store.connect_port_tx(port.state());
+    store.connect_port_tx(port.state()).unwrap();
 
     let check_inputs = inputs.to_owned();
     engine.spawn(async move {
         let mut store_get = vec![0; total_count];
         for i in &mut store_get {
-            *i = port.get().await;
+            *i = port.get()?.await;
         }
 
         check_round_robin(&check_inputs, &store_get);

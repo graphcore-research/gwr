@@ -17,9 +17,10 @@ use async_trait::async_trait;
 use steam_engine::engine::Engine;
 use steam_engine::events::once::Once;
 use steam_engine::executor::Spawner;
-use steam_engine::port::{InPort, OutPort, PortState};
+use steam_engine::port::{InPort, OutPort, PortStateResult};
+use steam_engine::sim_error;
 use steam_engine::traits::{Event, Runnable, SimObject};
-use steam_engine::types::SimResult;
+use steam_engine::types::{SimError, SimResult};
 use steam_model_builder::EntityDisplay;
 use steam_track::entity::Entity;
 use steam_track::{enter, exit, trace};
@@ -91,17 +92,16 @@ pub struct WeightedRoundRobinPolicy {
 }
 
 impl WeightedRoundRobinPolicy {
-    #[must_use]
-    pub fn new(weights: Vec<usize>, num_inputs: usize) -> Self {
+    pub fn new(weights: Vec<usize>, num_inputs: usize) -> Result<Self, SimError> {
         if weights.len() != num_inputs {
-            panic!("The number of weights must be equal to the number of inputs");
+            return sim_error!("The number of weights must be equal to the number of inputs");
         }
 
-        Self {
+        Ok(Self {
             candidate: 0,
             grants: vec![0; weights.len()],
             weights,
-        }
+        })
     }
 }
 
@@ -197,16 +197,15 @@ where
         }
     }
 
-    #[must_use]
-    pub fn from_priorities(priority_vec: Vec<P>, num_inputs: usize) -> Self {
+    pub fn from_priorities(priority_vec: Vec<P>, num_inputs: usize) -> Result<Self, SimError> {
         if priority_vec.len() != num_inputs {
-            panic!("The number of priorities must be equal to the number of inputs");
+            return sim_error!("The number of priorities must be equal to the number of inputs");
         }
 
-        Self {
+        Ok(Self {
             priority_vec,
             priority_map: None,
-        }
+        })
     }
 
     pub fn set_priority(mut self, port_index: usize, new_priority: P) -> Self {
@@ -274,7 +273,6 @@ impl<T> Arbiter<T>
 where
     T: SimObject,
 {
-    #[must_use]
     pub fn new_and_register(
         engine: &Engine,
         parent: &Arc<Entity>,
@@ -282,7 +280,7 @@ where
         spawner: Spawner,
         num_rx: usize,
         policy: Box<dyn Arbitrate<T>>,
-    ) -> Rc<Self> {
+    ) -> Result<Rc<Self>, SimError> {
         let entity = Arc::new(Entity::new(parent, name));
         let shared_state = Rc::new(ArbiterSharedState::new(num_rx));
         let rx = (0..num_rx)
@@ -298,15 +296,14 @@ where
             spawner,
         });
         engine.register(rc_self.clone());
-        rc_self
+        Ok(rc_self)
     }
 
-    pub fn connect_port_tx(&self, port_state: Rc<PortState<T>>) {
-        connect_tx!(self.tx, connect ; port_state);
+    pub fn connect_port_tx(&self, port_state: PortStateResult<T>) -> SimResult {
+        connect_tx!(self.tx, connect ; port_state)
     }
 
-    #[must_use]
-    pub fn port_rx_i(&self, i: usize) -> Rc<PortState<T>> {
+    pub fn port_rx_i(&self, i: usize) -> PortStateResult<T> {
         self.rx.borrow()[i].as_ref().unwrap().state()
     }
 }
@@ -322,7 +319,7 @@ where
             let rx = rx.take().unwrap();
             let shared_state = self.shared_state.clone();
             self.spawner.spawn(async move {
-                run_input(rx, i, shared_state).await;
+                run_input(rx, i, shared_state).await?;
                 Ok(())
             });
         }
@@ -360,7 +357,7 @@ where
                     event.notify()?;
                 }
                 exit!(self.entity ; value.tag());
-                tx.put(value).await?;
+                tx.put(value)?.await;
             }
             wait_event.listen().await;
         }
@@ -371,9 +368,9 @@ async fn run_input<T: SimObject>(
     rx: InPort<T>,
     input_idx: usize,
     shared_state: Rc<ArbiterSharedState<T>>,
-) {
+) -> SimResult {
     loop {
-        let value = rx.get().await;
+        let value = rx.get()?.await;
         enter!(rx.entity ; value.tag());
 
         // Check if this input needs to wait for the previous value to be handled

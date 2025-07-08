@@ -15,10 +15,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use steam_engine::engine::Engine;
 use steam_engine::executor::Spawner;
-use steam_engine::port::{InPort, OutPort, PortState};
+use steam_engine::port::{InPort, OutPort, PortStateResult};
 use steam_engine::spawn_subcomponent;
 use steam_engine::traits::{Runnable, SimObject};
-use steam_engine::types::SimResult;
+use steam_engine::types::{SimError, SimResult};
 use steam_model_builder::EntityDisplay;
 use steam_resources::Resource;
 use steam_track::entity::Entity;
@@ -45,7 +45,7 @@ impl PortCredit {
         }
     }
 
-    pub fn port_rx(&self) -> Rc<PortState<Credit>> {
+    pub fn port_rx(&self) -> PortStateResult<Credit> {
         port_rx!(self.rx, state)
     }
 
@@ -54,7 +54,7 @@ impl PortCredit {
         let credit = self.credit.clone();
 
         loop {
-            let credits = rx.get().await;
+            let credits = rx.get()?.await;
             for _ in 0..credits.0 {
                 trace!(self.entity ; "release credit");
                 credit.release().await?;
@@ -81,13 +81,12 @@ impl<T> CreditLimiter<T>
 where
     T: SimObject,
 {
-    #[must_use]
     pub fn new_and_register(
         engine: &Engine,
         parent: &Arc<Entity>,
         spawner: Spawner,
         num_credits: usize,
-    ) -> Rc<Self> {
+    ) -> Result<Rc<Self>, SimError> {
         let entity = Arc::new(Entity::new(parent, "credit"));
         let credit = Resource::new(num_credits);
         let credit_rx = PortCredit::new(&entity, "credit_rx", credit.clone());
@@ -103,20 +102,18 @@ where
             spawner,
         });
         engine.register(rc_self.clone());
-        rc_self
+        Ok(rc_self)
     }
 
-    pub fn connect_port_tx(&self, port_state: Rc<PortState<T>>) {
-        connect_tx!(self.tx, connect ; port_state);
+    pub fn connect_port_tx(&self, port_state: PortStateResult<T>) -> SimResult {
+        connect_tx!(self.tx, connect ; port_state)
     }
 
-    #[must_use]
-    pub fn port_rx(&self) -> Rc<PortState<T>> {
+    pub fn port_rx(&self) -> PortStateResult<T> {
         port_rx!(self.rx, state)
     }
 
-    #[must_use]
-    pub fn port_credit_rx(&self) -> Rc<PortState<Credit>> {
+    pub fn port_credit_rx(&self) -> PortStateResult<Credit> {
         port_rx!(self.credit_rx, port_rx)
     }
 }
@@ -134,12 +131,12 @@ where
         spawn_subcomponent!(self.spawner ; self.credit_rx);
 
         loop {
-            let value = rx.get().await;
+            let value = rx.get()?.await;
 
             credit.request().await;
             trace!(self.entity ; "consume credit");
 
-            tx.put(value).await?;
+            tx.put(value)?.await;
         }
     }
 }
