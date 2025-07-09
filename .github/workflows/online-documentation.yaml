@@ -38,8 +38,7 @@ jobs:
       - name: Build with mdBook
         run: |
           mdbook build
-          mdbook build # Second run required for cmdrun to work
-          cat steam-developer-guide/rustdoc_build.log
+          cat rustdoc_build.log
         working-directory: ./steam-developer-guide
 
       - name: Generate top-level index.html
