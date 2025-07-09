@@ -25,14 +25,17 @@ fn main() {
     println!("cargo::rerun-if-changed=build.rs");
     println!("cargo::rerun-if-changed=src/lib.rs");
 
-    if std::env::var("DOCS_RS").is_ok() {
+    if std::env::var("STEAM_DOCS_ONLY").is_ok() || std::env::var("DOCS_RS").is_ok() {
         // Do not attempt to download or build Perfetto if a documentation only
         // build is occuring, regardless of the features enabled. This is useful
         // as it allows the `--all-features` flag to be passed to rustdoc
         // without incurring the time penalty of the Perfetto build.
-        // `DOCS_RS` was chosen as it is the defacto-standard mechanism used,
-        // due to a lack of support for detecting documentation builds in Cargo,
-        // see https://docs.rs/about/builds#detecting-docsrs.
+        //
+        // `DOCS_RS` is also supported as it is the defacto-standard mechanism
+        // used, due to a lack of support for detecting documentation builds in
+        // Cargo, see https://docs.rs/about/builds#detecting-docsrs.
+        // However as the build of the Rocket crate fails when `DOCS_RS` is set,
+        // within the STEAM infrastructure only `STEAM_DOCS_ONLY` is used.
         exit(0);
     }
 
