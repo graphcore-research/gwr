@@ -3,7 +3,7 @@
 # API Documentation
 
 <!-- cmdrun cargo clean --doc --target-dir ../../rustdoc_cache -->
-<!-- cmdrun DOCS_RS=1 cargo doc-steam --target-dir ../../rustdoc_cache -->
+<!-- cmdrun STEAM_DOCS_ONLY=1 cargo doc-steam --target-dir ../../rustdoc_cache -->
 <!-- cmdrun rm -rf ../../book/rustdoc -->
 <!-- cmdrun cp -r ../../rustdoc_cache/doc ../../book/rustdoc -->
 

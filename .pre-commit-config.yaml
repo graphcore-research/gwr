@@ -94,7 +94,8 @@ repos:
         description: check Rust source code documentation
         language: system
         types: [rust]
-        entry: env RUSTDOCFLAGS="-D warnings" DOCS_RS=1 cargo doc-steam-dev
+        entry:
+          env RUSTDOCFLAGS="-D warnings" STEAM_DOCS_ONLY=1 cargo doc-steam-dev
         pass_filenames: false
         stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: cargo-semver-checks
