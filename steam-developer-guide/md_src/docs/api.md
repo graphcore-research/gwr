@@ -2,10 +2,10 @@
 
 # API Documentation
 
-<!-- cmdrun cargo clean --doc --target-dir ../../rustdoc_cache -->
-<!-- cmdrun STEAM_DOCS_ONLY=1 cargo doc-steam --target-dir ../../rustdoc_cache -->
-<!-- cmdrun rm -rf ../../book/rustdoc -->
-<!-- cmdrun cp -r ../../rustdoc_cache/doc ../../book/rustdoc -->
+<!-- cmdrun bash -x -c "cargo clean --doc --target-dir ../../rustdoc_cache" > ../../rustdoc_build.log 2>&1 -->
+<!-- cmdrun bash -x -c "STEAM_DOCS_ONLY=1 cargo doc-steam --target-dir ../../rustdoc_cache" >> ../../rustdoc_build.log 2>&1 -->
+<!-- cmdrun bash -x -c "rm -rfv ../../book/rustdoc" >> ../../rustdoc_build.log 2>&1 -->
+<!-- cmdrun bash -x -c "cp -rv ../../rustdoc_cache/doc/. ../../book/rustdoc" >> ../../rustdoc_build.log 2>&1 -->
 
 <iframe src="../../rustdoc/steam_engine/index.html" width="100%" height="600" style="border:1px solid black;">
 </iframe>
