@@ -2,5 +2,6 @@
 
 book
 doctest_cache
+rustdoc_build.log
 rustdoc_cache
 md_src/licenses.html
