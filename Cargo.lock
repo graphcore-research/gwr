@@ -2044,7 +2044,7 @@ dependencies = [
 
 [[package]]
 name = "steam-components"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "async-std",
  "async-trait",
@@ -2108,7 +2108,7 @@ dependencies = [
 
 [[package]]
 name = "steam-engine"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "arc-swap",
  "async-std",
@@ -2136,7 +2136,7 @@ dependencies = [
 
 [[package]]
 name = "steam-models"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "async-std",
  "async-trait",
@@ -2175,7 +2175,7 @@ dependencies = [
 
 [[package]]
 name = "steam-spotter"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "capnp",
  "clap",
@@ -2191,7 +2191,7 @@ dependencies = [
 
 [[package]]
 name = "steam-track"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bincode",
  "capnp",

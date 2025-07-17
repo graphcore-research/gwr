@@ -26,29 +26,29 @@ pub trait ToFullness {
 #[derive(Debug, Clone)]
 pub enum EventLine {
     Create {
-        // Only need to keep the tag to be rendered.
-        tag: u64,
+        // Only need to keep the ID to be rendered.
+        id: u64,
         time: f64,
     },
     Connect {
-        from_tag: u64,
-        to_tag: u64,
+        from_id: u64,
+        to_id: u64,
         time: f64,
     },
     Log {
         level: log::Level,
-        tag: u64,
+        id: u64,
         msg: String,
         time: f64,
     },
     Enter {
-        tag: u64,
+        id: u64,
         entered: u64,
         fullness: u64,
         time: f64,
     },
     Exit {
-        tag: u64,
+        id: u64,
         exited: u64,
         fullness: u64,
         time: f64,
@@ -58,27 +58,27 @@ pub enum EventLine {
 impl ToTime for EventLine {
     fn time(&self) -> f64 {
         match self {
-            EventLine::Create { tag: _, time } => *time,
+            EventLine::Create { id: _, time } => *time,
             EventLine::Connect {
-                from_tag: _,
-                to_tag: _,
+                from_id: _,
+                to_id: _,
                 time,
             } => *time,
             EventLine::Enter {
-                tag: _,
+                id: _,
                 entered: _,
                 fullness: _,
                 time,
             } => *time,
             EventLine::Exit {
-                tag: _,
+                id: _,
                 exited: _,
                 fullness: _,
                 time,
             } => *time,
             EventLine::Log {
                 level: _,
-                tag: _,
+                id: _,
                 msg: _,
                 time,
             } => *time,
@@ -89,27 +89,27 @@ impl ToTime for EventLine {
 impl ToFullness for EventLine {
     fn fullness(&self) -> u64 {
         match self {
-            EventLine::Create { tag: _, time: _ } => 0,
+            EventLine::Create { id: _, time: _ } => 0,
             EventLine::Connect {
-                from_tag: _,
-                to_tag: _,
+                from_id: _,
+                to_id: _,
                 time: _,
             } => 0,
             EventLine::Enter {
-                tag: _,
+                id: _,
                 entered: _,
                 fullness,
                 time: _,
             } => *fullness,
             EventLine::Exit {
-                tag: _,
+                id: _,
                 exited: _,
                 fullness,
                 time: _,
             } => *fullness,
             EventLine::Log {
                 level: _,
-                tag: _,
+                id: _,
                 msg: _,
                 time: _,
             } => 0,

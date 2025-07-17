@@ -91,6 +91,9 @@ where
             spawner.clone(),
             config.data_delay_ticks,
         )?;
+        // The whole point of the flow-controlled pipeline is that the delays should
+        // never have to stall at their outputs
+        data_delay.set_error_on_output_stall();
 
         let buffer =
             Store::new_and_register(engine, &entity, "buf", spawner.clone(), config.buffer_size)?;
@@ -107,6 +110,9 @@ where
             spawner,
             config.credit_delay_ticks,
         )?;
+        // The whole point of the flow-controlled pipeline is that the delays should
+        // never have to stall at their outputs
+        credit_delay.set_error_on_output_stall();
 
         connect_port!(buffer, tx => credit_issuer, rx)?;
         connect_port!(credit_issuer, credit_tx => credit_delay, rx)?;

@@ -99,7 +99,7 @@ where
         loop {
             let value = data_generator.next();
             if let Some(value) = value {
-                exit!(self.entity ; value.tag());
+                exit!(self.entity ; value.id());
                 tx.put(value)?.await;
             } else {
                 break;

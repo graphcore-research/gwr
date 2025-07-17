@@ -3,20 +3,20 @@
 //! A simulation entity.
 //!
 //! All parts of a model should contain an entity in order to maintain a
-//! hierarchy of simulation entities. They contain a name and a unique tag
+//! hierarchy of simulation entities. They contain a name and a unique ID
 //! for tracing.
 
 use std::fmt;
 use std::sync::Arc;
 
-use crate::{Tag, Tracker, create, destroy};
+use crate::{Id, Tracker, create, destroy};
 
 /// A simulation entity
 ///
 /// An entity is a part of a hierarchical simulation in which it must have a
 /// parent. The simulation top-level should be created using `toplevel("name")`.
 ///
-/// The entity is used when logging so that its unique tag can be emitted and
+/// The entity is used when logging so that its unique ID can be emitted and
 /// it can determine which messages are emitted to both the binary and textual
 /// outputs.
 pub struct Entity {
@@ -27,7 +27,7 @@ pub struct Entity {
     pub parent: Option<Arc<Entity>>,
 
     /// Unique simulation identifier used for bin/log messages.
-    pub tag: Tag,
+    pub id: Id,
 
     /// [`Tracker`] used to handle trace/log events.
     pub tracker: Tracker,
@@ -44,13 +44,13 @@ impl Entity {
         full_name.push_str(name);
 
         let tracker = parent.tracker.clone();
-        let tag = tracker.unique_tag();
-        tracker.add_entity(tag, &full_name);
+        let id = tracker.unique_id();
+        tracker.add_entity(id, &full_name);
 
         let entity = Self {
             name: String::from(name),
             parent: Some(parent.clone()),
-            tag,
+            id,
             tracker,
         };
 
@@ -85,7 +85,7 @@ impl fmt::Debug for Entity {
         f.debug_struct("Entity")
             .field("name", &self.name)
             .field("parent", &self.parent)
-            .field("tag", &self.tag)
+            .field("id", &self.id)
             .finish()
     }
 }
@@ -104,12 +104,12 @@ impl fmt::Display for Entity {
 /// Create the top-level entity. This should be the only entity without a
 /// parent.
 pub fn toplevel(tracker: &Tracker, name: &str) -> Arc<Entity> {
-    let tag = tracker.unique_tag();
-    tracker.add_entity(tag, name);
+    let id = tracker.unique_id();
+    tracker.add_entity(id, name);
     let top = Arc::new(Entity {
         parent: None,
         name: String::from(name),
-        tag,
+        id,
         tracker: tracker.clone(),
     });
     create!(top);

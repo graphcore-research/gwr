@@ -1,11 +1,11 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
 //! A component that adds `delay_ticks` between receiving anything and sending
-//! it on to its output. The output of the delay should never be blocked. If
-//! the output causes the delay to block then this block will return a
-//! `SimError`. If a component is required to support outputs to other
-//! components that may block then a flow-controlled component is more suitable
-//! as it contains buffering to support this.
+//! it on to its output.
+//!
+//! The `Delay` can be configured such that it will return an error if the
+//! output is ever blocked. Otherwise it will implicitly assert back-pressure on
+//! the input.
 //!
 //! # Ports
 //!
@@ -47,7 +47,10 @@ where
     rx: RefCell<Option<InPort<T>>>,
     pending: Rc<RefCell<VecDeque<(T, ClockTick)>>>,
     pending_changed: Repeated<usize>,
+    output_changed: Repeated<usize>,
     tx: RefCell<Option<OutPort<T>>>,
+
+    error_on_output_stall: RefCell<bool>,
 }
 
 impl<T> Delay<T>
@@ -73,10 +76,16 @@ where
             rx: RefCell::new(Some(rx)),
             pending: Rc::new(RefCell::new(VecDeque::new())),
             pending_changed: Repeated::new(usize::default()),
+            output_changed: Repeated::new(usize::default()),
             tx: RefCell::new(Some(tx)),
+            error_on_output_stall: RefCell::new(false),
         });
         engine.register(rc_self.clone());
         Ok(rc_self)
+    }
+
+    pub fn set_error_on_output_stall(&self) {
+        *self.error_on_output_stall.borrow_mut() = true;
     }
 
     pub fn connect_port_tx(&self, port_state: PortStateResult<T>) -> SimResult {
@@ -112,21 +121,40 @@ where
         let clock = self.clock.clone();
         let pending = self.pending.clone();
         let pending_changed = self.pending_changed.clone();
-        self.spawner
-            .spawn(async move { run_tx(entity, tx, clock, pending, pending_changed).await });
+        let output_changed = self.output_changed.clone();
+        let error_on_output_stall = *self.error_on_output_stall.borrow();
+        self.spawner.spawn(async move {
+            run_tx(
+                entity,
+                tx,
+                clock,
+                pending,
+                pending_changed,
+                output_changed,
+                error_on_output_stall,
+            )
+            .await
+        });
 
         let rx = take_option!(self.rx);
-        let delay_ticks = *self.delay_ticks.borrow() as u64;
+        let delay_ticks = *self.delay_ticks.borrow();
         loop {
             let value = rx.get()?.await;
-            let value_tag = value.tag();
-            enter!(self.entity ; value_tag);
+            let value_id = value.id();
+            enter!(self.entity ; value_id);
 
             let mut tick = self.clock.tick_now();
-            tick.set_tick(tick.tick() + delay_ticks);
+            tick.set_tick(tick.tick() + delay_ticks as u64);
 
             self.pending.borrow_mut().push_back((value, tick));
             self.pending_changed.notify()?;
+
+            if delay_ticks > 0 && !*self.error_on_output_stall.borrow() {
+                // Enforce back-pressure by waiting until there is room in the pending queue
+                while self.pending.borrow().len() >= delay_ticks {
+                    self.output_changed.listen().await;
+                }
+            }
         }
     }
 }
@@ -137,6 +165,8 @@ async fn run_tx<T>(
     clock: Clock,
     pending: Rc<RefCell<VecDeque<(T, ClockTick)>>>,
     pending_changed: Repeated<usize>,
+    output_changed: Repeated<usize>,
+    error_on_output_stall: bool,
 ) -> SimResult
 where
     T: SimObject,
@@ -152,15 +182,18 @@ where
                         clock.wait_ticks(tick.tick() - tick_now.tick()).await;
                     }
                     Ordering::Less => {
-                        return sim_error!(format!("{entity} delay output stalled"));
+                        if error_on_output_stall {
+                            return sim_error!(format!("{entity} delay output stalled"));
+                        }
                     }
                     Ordering::Equal => {
                         // Do nothing - no need to pause
                     }
                 }
 
-                exit!(entity ; value.tag());
+                exit!(entity ; value.id());
                 tx.put(value)?.await;
+                output_changed.notify()?;
             }
             None => {
                 pending_changed.listen().await;

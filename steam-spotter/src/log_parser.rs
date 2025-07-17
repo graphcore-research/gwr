@@ -31,11 +31,11 @@ struct LogParser {
 impl LogParser {
     fn new() -> Self {
         Self {
-            log_line_re: Regex::new(r"(?<tag>\d+):(?<level>[^ :]+): (?<msg>.*)$").unwrap(),
+            log_line_re: Regex::new(r"(?<id>\d+):(?<level>[^ :]+): (?<msg>.*)$").unwrap(),
 
             connect_re: Regex::new(r"(\d+): connect to (\d+)$").unwrap(),
             create_re: Regex::new(
-                r"(?<by>\d+): created (?<tag>\d+), (?<name>.*), (?<type>.*), (?<bytes>.*) bytes$",
+                r"(?<by>\d+): created (?<id>\d+), (?<name>.*), (?<type>.*), (?<bytes>.*) bytes$",
             )
             .unwrap(),
             enter_re: Regex::new(r"(\d+): enter (\d+)$").unwrap(),
@@ -50,81 +50,81 @@ impl LogParser {
     fn parse_line(
         &mut self,
         full_line: &str,
-        tag_to_name: &mut HashMap<u64, String>,
-        tag_to_fullness: &mut HashMap<u64, u64>,
-        tag_is_source: &mut HashMap<u64, bool>,
+        id_to_name: &mut HashMap<u64, String>,
+        id_to_fullness: &mut HashMap<u64, u64>,
+        id_is_source: &mut HashMap<u64, bool>,
     ) -> EventLine {
         match self.log_line_re.captures(full_line) {
             Some(e) => {
-                let tag_str = e.name("tag").unwrap().as_str();
-                let tag = tag_str.parse().unwrap();
+                let id_str = e.name("id").unwrap().as_str();
+                let id = id_str.parse().unwrap();
                 let level_str = e.name("level").unwrap().as_str();
                 let msg = e.name("msg").unwrap().as_str();
                 EventLine::Log {
                     level: Level::from_str(level_str).unwrap(),
-                    tag,
+                    id,
                     msg: msg.to_owned(),
                     time: self.current_time,
                 }
             }
-            None => self.parse_msg(full_line, tag_to_name, tag_to_fullness, tag_is_source),
+            None => self.parse_msg(full_line, id_to_name, id_to_fullness, id_is_source),
         }
     }
 
     fn parse_msg(
         &mut self,
         msg: &str,
-        tag_to_name: &mut HashMap<u64, String>,
-        tag_to_fullness: &mut HashMap<u64, u64>,
-        tag_is_source: &mut HashMap<u64, bool>,
+        id_to_name: &mut HashMap<u64, String>,
+        id_to_fullness: &mut HashMap<u64, u64>,
+        id_is_source: &mut HashMap<u64, bool>,
     ) -> EventLine {
         if let Some(e) = self.enter_re.captures(msg) {
-            let tag_str = e.get(1).unwrap().as_str();
-            let tag = tag_str.parse().unwrap();
-            let entered_tag_str = e.get(2).unwrap().as_str();
+            let id_str = e.get(1).unwrap().as_str();
+            let id = id_str.parse().unwrap();
+            let entered_id_str = e.get(2).unwrap().as_str();
 
             // Add the fullness of 0 if not already there.
-            let fullness = tag_to_fullness.entry(tag).or_insert(0);
+            let fullness = id_to_fullness.entry(id).or_insert(0);
             if *fullness == 0 {
                 // This is a standard block
-                tag_is_source.insert(tag, true);
+                id_is_source.insert(id, true);
             }
 
-            if *tag_is_source.get(&tag).unwrap() {
+            if *id_is_source.get(&id).unwrap() {
                 *fullness += 1;
             } else {
                 *fullness -= 1;
             }
 
             return EventLine::Enter {
-                tag,
+                id,
                 fullness: *fullness,
-                entered: entered_tag_str.parse().unwrap(),
+                entered: entered_id_str.parse().unwrap(),
                 time: self.current_time,
             };
         } else if let Some(e) = self.exit_re.captures(msg) {
-            let tag_str = e.get(1).unwrap().as_str();
-            let tag = tag_str.parse().unwrap();
-            let exited_tag_str = e.get(2).unwrap().as_str();
+            let id_str = e.get(1).unwrap().as_str();
+            let id = id_str.parse().unwrap();
+            let exited_id_str = e.get(2).unwrap().as_str();
 
             // Add the fullness of 0 if not already there (a source only ever has exit
             // events)
-            let fullness = tag_to_fullness.entry(tag).or_insert(0);
+            let fullness = id_to_fullness.entry(id).or_insert(0);
             if *fullness == 0 {
                 // This is a source so never sees Enter, only Exit
-                tag_is_source.insert(tag, false);
+                id_is_source.insert(id, false);
             }
 
-            if *tag_is_source.get(&tag).unwrap() {
+            if *id_is_source.get(&id).unwrap() {
                 *fullness -= 1;
             } else {
                 *fullness += 1;
             }
 
             return EventLine::Exit {
-                tag,
+                id,
                 fullness: *fullness,
-                exited: exited_tag_str.parse().unwrap(),
+                exited: exited_id_str.parse().unwrap(),
                 time: self.current_time,
             };
         } else if let Some(e) = self.time_re.captures(msg) {
@@ -132,17 +132,17 @@ impl LogParser {
             self.current_time = time_str.parse().unwrap();
         } else if let Some(e) = self.text_re.captures(msg) {
             let level_str = e.get(1).unwrap().as_str();
-            let tag_str = e.get(2).unwrap().as_str();
+            let id_str = e.get(2).unwrap().as_str();
             let text_str = e.get(3).unwrap().as_str();
             return EventLine::Log {
                 level: log::Level::from_str(level_str).unwrap(),
-                tag: tag_str.parse().unwrap(),
+                id: id_str.parse().unwrap(),
                 msg: text_str.to_owned(),
                 time: self.current_time,
             };
         } else if let Some(e) = self.create_re.captures(msg) {
-            let tag_str = e.name("tag").unwrap().as_str();
-            let tag = tag_str.parse().unwrap();
+            let id_str = e.name("id").unwrap().as_str();
+            let id = id_str.parse().unwrap();
             let name_str = e.name("name").unwrap().as_str();
             let name = name_str.to_owned();
 
@@ -150,36 +150,36 @@ impl LogParser {
                 .lock()
                 .unwrap()
                 .entity_names
-                .push(format!("{name}={tag_str}"));
+                .push(format!("{name}={id_str}"));
 
-            tag_to_name.insert(tag, name);
+            id_to_name.insert(id, name);
 
             return EventLine::Create {
-                tag,
+                id,
                 time: self.current_time,
             };
         } else if let Some(e) = self.connect_re.captures(msg) {
-            let from_tag_str = e.get(1).unwrap().as_str();
-            let from_tag = from_tag_str.parse().unwrap();
-            let to_tag_str = e.get(2).unwrap().as_str();
-            let to_tag = to_tag_str.parse().unwrap();
+            let from_id_str = e.get(1).unwrap().as_str();
+            let from_id = from_id_str.parse().unwrap();
+            let to_id_str = e.get(2).unwrap().as_str();
+            let to_id = to_id_str.parse().unwrap();
 
             SHARED_STATE
                 .lock()
                 .unwrap()
                 .connections
-                .push(format!("{from_tag_str} -> {to_tag_str}").to_string());
+                .push(format!("{from_id_str} -> {to_id_str}").to_string());
 
             return EventLine::Connect {
-                from_tag,
-                to_tag,
+                from_id,
+                to_id,
                 time: self.current_time,
             };
         }
 
         EventLine::Log {
             level: log::Level::Trace,
-            tag: 0,
+            id: 0,
             msg: msg.to_owned(),
             time: self.current_time,
         }
@@ -204,31 +204,31 @@ pub fn start_background_load(
 
         // Keep track of the fullness of each entity so that Enter/Exit events can
         // contain the absolute value
-        let mut tag_to_fullness = HashMap::new();
+        let mut id_to_fullness = HashMap::new();
 
         // The BarChart widget plots u64 values. As a result, we can't simply have Exit
         // mean the fullness is decremented as otherwise Sources will always
         // have negative fullnesses. As a result, we detect the first operation
         // on an entity and decide if it is a source.
-        let mut tag_is_source = HashMap::new();
+        let mut id_is_source = HashMap::new();
 
         let reader = BufReader::new(file);
         for chunk in &reader.lines().chunks(CHUNK_SIZE) {
             let mut events = Vec::with_capacity(CHUNK_SIZE);
-            let mut tag_to_name = HashMap::new();
+            let mut id_to_name = HashMap::new();
 
             for l in chunk {
                 match l {
                     Ok(line) => events.push(parser.parse_line(
                         line.as_str(),
-                        &mut tag_to_name,
-                        &mut tag_to_fullness,
-                        &mut tag_is_source,
+                        &mut id_to_name,
+                        &mut id_to_fullness,
+                        &mut id_is_source,
                     )),
                     Err(e) => {
                         let err_line = EventLine::Log {
                             level: log::Level::Error,
-                            tag: 0,
+                            id: 0,
                             msg: e.to_string(),
                             time: 0.0,
                         };
@@ -241,8 +241,8 @@ pub fn start_background_load(
             renderer
                 .lock()
                 .unwrap()
-                .extend_tag_to_name(tag_to_name.clone());
-            filter.lock().unwrap().extend_tag_to_name(tag_to_name);
+                .extend_id_to_name(id_to_name.clone());
+            filter.lock().unwrap().extend_id_to_name(id_to_name);
         }
     });
 }

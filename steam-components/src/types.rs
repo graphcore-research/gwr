@@ -6,10 +6,9 @@
 
 use std::mem::size_of;
 
-use steam_engine::sim_error;
-use steam_engine::traits::{Routable, SimObject, TotalBytes};
-use steam_engine::types::{AccessType, SimError};
-use steam_track::tag::Tagged;
+use steam_engine::traits::{SimObject, TotalBytes};
+use steam_engine::types::SimError;
+use steam_track::id::Unique;
 
 /// The `DataGenerator` is what a [source](crate::source) uses
 /// to generate data values to send.
@@ -29,18 +28,9 @@ impl TotalBytes for Credit {
     }
 }
 
-impl Routable for Credit {
-    fn dest(&self) -> Result<u64, SimError> {
-        sim_error!("Cannot route Credit")
-    }
-    fn req_type(&self) -> Result<AccessType, SimError> {
-        Ok(AccessType::Control)
-    }
-}
-
-impl Tagged for Credit {
-    fn tag(&self) -> steam_track::Tag {
-        steam_track::Tag(0)
+impl Unique for Credit {
+    fn id(&self) -> steam_track::Id {
+        steam_track::Id(0)
     }
 }
 

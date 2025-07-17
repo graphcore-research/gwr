@@ -1,0 +1,84 @@
+// Copyright (c) 2025 Graphcore Ltd. All rights reserved.
+
+//! Weighted Round Robin policy
+
+use std::sync::Arc;
+
+use steam_engine::sim_error;
+use steam_engine::traits::SimObject;
+use steam_engine::types::SimError;
+use steam_track::entity::Entity;
+use steam_track::trace;
+
+use crate::arbiter::Arbitrate;
+
+pub struct WeightedRoundRobin {
+    candidate: usize,
+    grants: Vec<usize>,
+    weights: Vec<usize>,
+}
+
+impl WeightedRoundRobin {
+    pub fn new(weights: Vec<usize>, num_inputs: usize) -> Result<Self, SimError> {
+        if weights.len() != num_inputs {
+            return sim_error!("The number of weights must be equal to the number of inputs");
+        }
+
+        Ok(Self {
+            candidate: 0,
+            grants: vec![0; weights.len()],
+            weights,
+        })
+    }
+}
+
+impl WeightedRoundRobin {
+    pub fn state_str<T>(&self, inputs: &[Option<T>]) -> String
+    where
+        T: SimObject,
+    {
+        let mut s = String::new();
+        s.push_str(format!("{}: ", self.candidate).as_str());
+        for (i, grant) in self.grants.iter().enumerate() {
+            let req = if inputs[i].is_some() { "r" } else { "-" };
+            s.push_str(format!("{}/{}/{}, ", req, grant, self.weights[i]).as_str());
+        }
+        s
+    }
+}
+
+impl<T> Arbitrate<T> for WeightedRoundRobin
+where
+    T: SimObject,
+{
+    fn arbitrate(&mut self, entity: &Arc<Entity>, inputs: &mut [Option<T>]) -> Option<(usize, T)> {
+        trace!(entity ; "wrr: arbitrate {}", self.state_str(inputs));
+
+        let num_inputs = inputs.len();
+        let mut selected_candidate = None;
+        for i in 0..num_inputs {
+            let index = (i + self.candidate) % num_inputs;
+            if inputs[index].is_none() {
+                continue;
+            }
+            if self.weights[index] > self.grants[index] {
+                selected_candidate = Some(index);
+                break;
+            } else if selected_candidate.is_none() {
+                selected_candidate = Some(index);
+            }
+        }
+        if let Some(index) = selected_candidate {
+            if self.weights[index] == self.grants[index] {
+                self.grants[index] = 0;
+            }
+            self.grants[index] += 1;
+
+            let value = inputs[index].take().unwrap();
+            self.candidate = (index + 1) % num_inputs;
+            Some((index, value))
+        } else {
+            None
+        }
+    }
+}

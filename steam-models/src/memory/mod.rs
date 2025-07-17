@@ -17,6 +17,19 @@ use steam_model_builder::EntityDisplay;
 use steam_track::entity::Entity;
 use steam_track::trace;
 
+use crate::memory::traits::{AccessMemory, ReadMemory};
+
+pub mod cache;
+pub mod memory_access;
+pub mod memory_access_gen;
+pub mod traits;
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum CacheHintType {
+    Allocate,
+    NoAllocate,
+}
+
 #[derive(Clone)]
 pub struct MemoryConfig {
     base_address: u64,
@@ -40,37 +53,6 @@ impl MemoryConfig {
             delay_ticks,
         }
     }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub enum CacheHintType {
-    Allocate,
-    NoAllocate,
-}
-
-pub trait MemoryRead {
-    fn read(&self) -> Vec<u8>;
-}
-
-/// Trait implemented by all types that memory components support
-pub trait AccessMemory {
-    /// Return the destination address of this access
-    fn dst_addr(&self) -> u64;
-
-    /// Return the source address of this access
-    fn src_addr(&self) -> u64;
-
-    /// Return the size of the access in bytes
-    fn num_bytes(&self) -> usize;
-
-    /// What type of memory operation is this
-    fn access_type(&self) -> AccessType;
-
-    /// Returns the appropriate response for a request
-    fn to_response(&self, mem: &impl MemoryRead) -> Self;
-
-    /// Returns the requested caching behaviour of a request
-    fn cache_hint(&self) -> CacheHintType;
 }
 
 #[derive(Clone)]
@@ -177,9 +159,9 @@ where
             let access = rx.get()?.await;
             trace!(self.entity ; "Memory access {}", access);
 
-            let begin = access.dst_addr();
-            let access_bytes = access.num_bytes() as u64;
-            let end = begin + access_bytes;
+            let begin = access.destination();
+            let payload_bytes = access.access_size_bytes();
+            let end = begin + payload_bytes as u64;
 
             let config = &self.config;
             assert!(
@@ -188,16 +170,17 @@ where
                 "Invalid memory access received"
             );
 
-            match access.access_type() {
+            let access_type = access.access_type();
+            match access_type {
                 AccessType::Read => {
-                    self.metrics.borrow_mut().bytes_read += access.num_bytes();
+                    self.metrics.borrow_mut().bytes_read += payload_bytes;
                     let response = access.to_response(self);
                     response_tx.put(response)?.await;
                 }
                 AccessType::Write | AccessType::WriteNonPosted => {
-                    self.metrics.borrow_mut().bytes_written += access.num_bytes();
+                    self.metrics.borrow_mut().bytes_written += payload_bytes;
 
-                    if access.access_type() == AccessType::WriteNonPosted {
+                    if access_type == AccessType::WriteNonPosted {
                         response_tx.put(access)?.await;
                     }
                 }
@@ -206,13 +189,13 @@ where
                 }
             }
 
-            let ticks = access_bytes.div_ceil(config.bw_bytes_per_cycle as u64);
+            let ticks = payload_bytes.div_ceil(config.bw_bytes_per_cycle) as u64;
             self.clock.wait_ticks(ticks).await;
         }
     }
 }
 
-impl<T> MemoryRead for Memory<T>
+impl<T> ReadMemory for Memory<T>
 where
     T: SimObject + AccessMemory,
 {

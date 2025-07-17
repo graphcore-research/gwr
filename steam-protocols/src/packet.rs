@@ -30,8 +30,8 @@ macro_rules! build_packet_type {
             /// The entity responsible for the logging control of this packet.
             pub entity: std::sync::Arc<Entity>,
 
-            /// The unique tag used for logging this packet.
-            pub tag: steam_track::Tag,
+            /// The unique id used for logging this packet.
+            pub id: steam_track::Id,
 
             pkt_type: $types,
             $($field: $type,)+
@@ -44,7 +44,7 @@ macro_rules! build_packet_type {
                 let pkt = Self {
                     entity: created_by.clone(),
                     pkt_type: $types::$pkt_type,
-                    tag: steam_track::create_tag!(created_by),
+                    id: steam_track::create_id!(created_by),
                     payload_bytes: cfg.payload_bytes,
                     payload: None,
                     $(
@@ -100,7 +100,7 @@ macro_rules! build_packet_type {
 
         impl std::fmt::Display for [< $packet_type  >] {
             fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                write!(f, "{}", self.tag)
+                write!(f, "{}", self.id)
             }
         }
 
@@ -114,9 +114,9 @@ macro_rules! build_packet_type {
             }
         }
 
-        impl steam_track::tag::Tagged for [< $packet_type  >] {
-            fn tag(&self) -> steam_track::tag::Tag {
-                self.tag
+        impl steam_track::id::Unique for [< $packet_type  >] {
+            fn id(&self) -> steam_track::id::Id {
+                self.id
             }
         }
 

@@ -213,7 +213,7 @@ li.level2 select {
  * Dynamic changes
  */
 .node:hover {
-  stroke: red;
+  stroke: grey;
   stroke-width: 6;
 }
 

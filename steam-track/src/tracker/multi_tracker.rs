@@ -1,6 +1,6 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
-use crate::Tag;
+use crate::Id;
 use crate::tracker::{EntityManager, Track, Tracker};
 
 /// Container for multiple [`Tracker`]s
@@ -20,7 +20,7 @@ impl MultiTracker {
 impl Default for MultiTracker {
     fn default() -> Self {
         Self {
-            // Create a local entity_manager that will just be used for handling tags
+            // Create a local entity_manager that will just be used for handling IDs
             entity_manager: EntityManager::new(log::Level::Error),
             trackers: Vec::new(),
         }
@@ -28,58 +28,58 @@ impl Default for MultiTracker {
 }
 
 impl Track for MultiTracker {
-    fn unique_tag(&self) -> Tag {
-        self.entity_manager.unique_tag()
+    fn unique_id(&self) -> Id {
+        self.entity_manager.unique_id()
     }
 
-    fn is_entity_enabled(&self, tag: Tag, level: log::Level) -> bool {
+    fn is_entity_enabled(&self, id: Id, level: log::Level) -> bool {
         for tracker in &self.trackers {
-            if tracker.is_entity_enabled(tag, level) {
+            if tracker.is_entity_enabled(id, level) {
                 return true;
             }
         }
         false
     }
 
-    fn add_entity(&self, tag: Tag, entity_name: &str) {
+    fn add_entity(&self, id: Id, entity_name: &str) {
         for tracker in &self.trackers {
-            tracker.add_entity(tag, entity_name);
+            tracker.add_entity(id, entity_name);
         }
     }
 
-    fn enter(&self, tag: Tag, object: Tag) {
+    fn enter(&self, id: Id, object: Id) {
         for tracker in &self.trackers {
-            if tracker.is_entity_enabled(tag, log::Level::Trace) {
-                tracker.enter(tag, object);
+            if tracker.is_entity_enabled(id, log::Level::Trace) {
+                tracker.enter(id, object);
             }
         }
     }
 
-    fn exit(&self, tag: Tag, object: Tag) {
+    fn exit(&self, id: Id, object: Id) {
         for tracker in &self.trackers {
-            if tracker.is_entity_enabled(tag, log::Level::Trace) {
-                tracker.exit(tag, object);
+            if tracker.is_entity_enabled(id, log::Level::Trace) {
+                tracker.exit(id, object);
             }
         }
     }
 
-    fn create(&self, created_by: Tag, tag: Tag, num_bytes: usize, req_type: i8, name: &str) {
+    fn create(&self, created_by: Id, id: Id, num_bytes: usize, req_type: i8, name: &str) {
         for tracker in &self.trackers {
-            if tracker.is_entity_enabled(tag, log::Level::Trace) {
-                tracker.create(created_by, tag, num_bytes, req_type, name);
+            if tracker.is_entity_enabled(id, log::Level::Trace) {
+                tracker.create(created_by, id, num_bytes, req_type, name);
             }
         }
     }
 
-    fn destroy(&self, destroyed_by: Tag, tag: Tag) {
+    fn destroy(&self, destroyed_by: Id, id: Id) {
         for tracker in &self.trackers {
-            if tracker.is_entity_enabled(tag, log::Level::Trace) {
-                tracker.destroy(destroyed_by, tag);
+            if tracker.is_entity_enabled(id, log::Level::Trace) {
+                tracker.destroy(destroyed_by, id);
             }
         }
     }
 
-    fn connect(&self, connect_from: Tag, connect_to: Tag) {
+    fn connect(&self, connect_from: Id, connect_to: Id) {
         for tracker in &self.trackers {
             if tracker.is_entity_enabled(connect_from, log::Level::Trace) {
                 tracker.connect(connect_from, connect_to);
@@ -87,15 +87,15 @@ impl Track for MultiTracker {
         }
     }
 
-    fn log(&self, tag: Tag, level: log::Level, msg: std::fmt::Arguments) {
+    fn log(&self, id: Id, level: log::Level, msg: std::fmt::Arguments) {
         for tracker in &self.trackers {
-            if tracker.is_entity_enabled(tag, level) {
-                tracker.log(tag, level, msg);
+            if tracker.is_entity_enabled(id, level) {
+                tracker.log(id, level, msg);
             }
         }
     }
 
-    fn time(&self, set_by: Tag, time_ns: f64) {
+    fn time(&self, set_by: Id, time_ns: f64) {
         for tracker in &self.trackers {
             if tracker.is_entity_enabled(set_by, log::Level::Trace) {
                 tracker.time(set_by, time_ns);

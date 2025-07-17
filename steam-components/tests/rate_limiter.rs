@@ -6,8 +6,8 @@ use steam_components::flow_controls::rate_limiter::RateLimiter;
 use steam_engine::engine::Engine;
 use steam_engine::test_helpers::start_test;
 use steam_engine::traits::{Routable, SimObject, TotalBytes};
-use steam_engine::types::{AccessType, SimError};
-use steam_track::tag::{Tag, Tagged};
+use steam_engine::types::AccessType;
+use steam_track::id::{Id, Unique};
 
 #[derive(Clone, Debug)]
 struct RateLimiterTest {
@@ -21,11 +21,11 @@ impl TotalBytes for RateLimiterTest {
 }
 
 impl Routable for RateLimiterTest {
-    fn dest(&self) -> Result<u64, SimError> {
-        Ok(0)
+    fn destination(&self) -> u64 {
+        0
     }
-    fn req_type(&self) -> Result<AccessType, SimError> {
-        Ok(AccessType::Read)
+    fn access_type(&self) -> AccessType {
+        AccessType::Read
     }
 }
 
@@ -35,9 +35,9 @@ impl Display for RateLimiterTest {
     }
 }
 
-impl Tagged for RateLimiterTest {
-    fn tag(&self) -> Tag {
-        Tag(0)
+impl Unique for RateLimiterTest {
+    fn id(&self) -> Id {
+        Id(0)
     }
 }
 

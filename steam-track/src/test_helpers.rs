@@ -15,13 +15,13 @@ use std::sync::atomic::AtomicU64;
 
 use regex::Regex;
 
-use crate::{Tag, Track};
+use crate::{Id, Track};
 
 /// A tracker that keeps track events.
 pub struct TestTracker {
     events: Mutex<Vec<String>>,
 
-    unique_tag: AtomicU64,
+    unique_id: AtomicU64,
 }
 
 impl TestTracker {
@@ -29,10 +29,10 @@ impl TestTracker {
     ///
     /// This keeps the track events in memory for checking later.
     #[must_use]
-    pub fn new(initial_tag: u64) -> Self {
+    pub fn new(initial_id: u64) -> Self {
         Self {
             events: Mutex::new(Vec::new()),
-            unique_tag: AtomicU64::new(initial_tag),
+            unique_id: AtomicU64::new(initial_id),
         }
     }
 
@@ -44,46 +44,46 @@ impl TestTracker {
 }
 
 impl Track for TestTracker {
-    fn unique_tag(&self) -> Tag {
-        let tag = self.unique_tag.fetch_add(1, Ordering::SeqCst);
-        Tag(tag)
+    fn unique_id(&self) -> Id {
+        let id = self.unique_id.fetch_add(1, Ordering::SeqCst);
+        Id(id)
     }
 
-    fn is_entity_enabled(&self, _tag: Tag, _level: log::Level) -> bool {
+    fn is_entity_enabled(&self, _id: Id, _level: log::Level) -> bool {
         true
     }
 
-    fn add_entity(&self, _tag: Tag, _entity_name: &str) {
+    fn add_entity(&self, _id: Id, _entity_name: &str) {
         // Do nothing
     }
 
-    fn enter(&self, tag: Tag, item: Tag) {
-        self.add_event(format!("{tag}: {item} entered"));
+    fn enter(&self, id: Id, item: Id) {
+        self.add_event(format!("{id}: {item} entered"));
     }
 
-    fn exit(&self, tag: Tag, item: Tag) {
-        self.add_event(format!("{tag}: {item} exited"));
+    fn exit(&self, id: Id, item: Id) {
+        self.add_event(format!("{id}: {item} exited"));
     }
 
-    fn create(&self, created_by: Tag, tag: Tag, num_bytes: usize, req_type: i8, name: &str) {
+    fn create(&self, created_by: Id, id: Id, num_bytes: usize, req_type: i8, name: &str) {
         self.add_event(format!(
-            "{created_by}: created {tag}, {name}, {req_type}, {num_bytes} bytes"
+            "{created_by}: created {id}, {name}, {req_type}, {num_bytes} bytes"
         ));
     }
 
-    fn destroy(&self, destroyed_by: Tag, tag: Tag) {
-        self.add_event(format!("{destroyed_by}: destroyed {tag}"));
+    fn destroy(&self, destroyed_by: Id, id: Id) {
+        self.add_event(format!("{destroyed_by}: destroyed {id}"));
     }
 
-    fn connect(&self, connect_from: Tag, connect_to: Tag) {
+    fn connect(&self, connect_from: Id, connect_to: Id) {
         self.add_event(format!("{connect_from}: connect to {connect_to}"));
     }
 
-    fn log(&self, tag: Tag, level: log::Level, msg: std::fmt::Arguments) {
-        self.add_event(format!("{tag}:{level}: {msg}"));
+    fn log(&self, id: Id, level: log::Level, msg: std::fmt::Arguments) {
+        self.add_event(format!("{id}:{level}: {msg}"));
     }
 
-    fn time(&self, set_by: Tag, time_ns: f64) {
+    fn time(&self, set_by: Id, time_ns: f64) {
         self.add_event(format!("{set_by}: set time {time_ns:.1}ns"));
     }
 
@@ -103,7 +103,7 @@ impl Track for TestTracker {
 ///
 /// # Arguments
 ///
-/// * `start_tag` - The tag value to be set as the starting value
+/// * `start_id` - The ID value to be set as the starting value
 ///
 /// # Examples
 ///
@@ -122,8 +122,8 @@ impl Track for TestTracker {
 /// ```
 #[macro_export]
 macro_rules! test_init {
-    ($start_tag:expr) => {{
-        let test_tracker = std::sync::Arc::new($crate::test_helpers::TestTracker::new($start_tag));
+    ($start_id:expr) => {{
+        let test_tracker = std::sync::Arc::new($crate::test_helpers::TestTracker::new($start_id));
         let tracker: $crate::Tracker = test_tracker.clone();
         (test_tracker, tracker)
     }};
@@ -158,7 +158,7 @@ macro_rules! test_init {
 /// fn smoke() {
 ///     let (test_tracker, tracker) = steam_track::test_init!(20);
 ///     let top = steam_track::entity::toplevel(&tracker, "top");
-///     let tag = steam_track::create_tag!(top);
+///     let id = steam_track::create_id!(top);
 ///     test_helpers::check_and_clear(&test_tracker, &["20: top created"]);
 /// }
 /// ```

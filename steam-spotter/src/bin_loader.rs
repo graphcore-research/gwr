@@ -6,7 +6,7 @@ use std::io::BufReader;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use steam_track::Tag;
+use steam_track::Id;
 use steam_track::trace_visitor::{TraceVisitor, process_capnp};
 
 use crate::app::{CHUNK_SIZE, EventLine};
@@ -18,11 +18,11 @@ struct BinLoader {
     renderer: Arc<Mutex<Renderer>>,
     filter: Arc<Mutex<Filter>>,
     events: Option<Vec<EventLine>>,
-    tag_to_fullness: HashMap<u64, u64>,
-    tag_is_source: HashMap<u64, bool>,
-    tag_to_name: Option<HashMap<u64, String>>,
-    tag_to_num_bytes: Option<HashMap<u64, usize>>,
-    tag_to_req_type: Option<HashMap<u64, i8>>,
+    id_to_fullness: HashMap<u64, u64>,
+    id_is_source: HashMap<u64, bool>,
+    id_to_name: Option<HashMap<u64, String>>,
+    id_to_num_bytes: Option<HashMap<u64, usize>>,
+    id_to_req_type: Option<HashMap<u64, i8>>,
     current_time_ns: f64,
 }
 
@@ -32,11 +32,11 @@ impl BinLoader {
             renderer,
             filter,
             events: Some(Vec::with_capacity(CHUNK_SIZE)),
-            tag_to_fullness: HashMap::new(),
-            tag_is_source: HashMap::new(),
-            tag_to_name: Some(HashMap::new()),
-            tag_to_num_bytes: Some(HashMap::new()),
-            tag_to_req_type: Some(HashMap::new()),
+            id_to_fullness: HashMap::new(),
+            id_is_source: HashMap::new(),
+            id_to_name: Some(HashMap::new()),
+            id_to_num_bytes: Some(HashMap::new()),
+            id_to_req_type: Some(HashMap::new()),
             current_time_ns: 0.0,
         }
     }
@@ -62,57 +62,54 @@ impl BinLoader {
             .lock()
             .unwrap()
             .add_chunk(self.events.take().unwrap());
-        let tag_to_name = self.tag_to_name.take().unwrap();
+        let id_to_name = self.id_to_name.take().unwrap();
         self.renderer
             .lock()
             .unwrap()
-            .extend_tag_to_name(tag_to_name.clone());
-        self.filter.lock().unwrap().extend_tag_to_name(tag_to_name);
+            .extend_id_to_name(id_to_name.clone());
+        self.filter.lock().unwrap().extend_id_to_name(id_to_name);
 
         self.events = Some(Vec::with_capacity(CHUNK_SIZE));
-        self.tag_to_name = Some(HashMap::new());
+        self.id_to_name = Some(HashMap::new());
     }
 }
 
 /// The `TraceVisitor` trait is the interface that allows a user to see all the
 /// events as a binary file is processed
 impl TraceVisitor for BinLoader {
-    fn log(&mut self, tag: Tag, level: log::Level, message: &str) {
+    fn log(&mut self, id: Id, level: log::Level, message: &str) {
         self.add_event(EventLine::Log {
             level,
-            tag: tag.0,
+            id: id.0,
             msg: message.to_owned(),
             time: self.current_time_ns,
         });
     }
 
-    fn create(&mut self, _created_by: Tag, tag: Tag, num_bytes: usize, req_type: i8, name: &str) {
+    fn create(&mut self, _created_by: Id, id: Id, num_bytes: usize, req_type: i8, name: &str) {
         SHARED_STATE
             .lock()
             .unwrap()
             .entity_names
-            .push(format!("{name}={tag}"));
-        self.tag_to_name
+            .push(format!("{name}={id}"));
+        self.id_to_name
             .as_mut()
             .unwrap()
-            .insert(tag.0, name.to_owned());
-        self.tag_to_num_bytes
+            .insert(id.0, name.to_owned());
+        self.id_to_num_bytes
             .as_mut()
             .unwrap()
-            .insert(tag.0, num_bytes);
-        self.tag_to_req_type
-            .as_mut()
-            .unwrap()
-            .insert(tag.0, req_type);
+            .insert(id.0, num_bytes);
+        self.id_to_req_type.as_mut().unwrap().insert(id.0, req_type);
         self.add_event(EventLine::Create {
-            tag: tag.0,
+            id: id.0,
             time: self.current_time_ns,
         });
     }
 
-    fn destroy(&mut self, _destroyed_by: Tag, _tag: Tag) {}
+    fn destroy(&mut self, _destroyed_by: Id, _id: Id) {}
 
-    fn connect(&mut self, connect_from: Tag, connect_to: Tag) {
+    fn connect(&mut self, connect_from: Id, connect_to: Id) {
         SHARED_STATE
             .lock()
             .unwrap()
@@ -120,22 +117,22 @@ impl TraceVisitor for BinLoader {
             .push(format!("{connect_from} -> {connect_to}").to_string());
         let time = self.current_time_ns;
         self.add_event(EventLine::Connect {
-            from_tag: connect_from.0,
-            to_tag: connect_to.0,
+            from_id: connect_from.0,
+            to_id: connect_to.0,
             time,
         });
     }
 
-    fn enter(&mut self, tag: Tag, entered: Tag) {
+    fn enter(&mut self, id: Id, entered: Id) {
         // Add the fullness of 0 if not already there.
         let fullness = {
-            let fullness = self.tag_to_fullness.entry(tag.0).or_insert(0);
+            let fullness = self.id_to_fullness.entry(id.0).or_insert(0);
             if *fullness == 0 {
                 // This is a standard block
-                self.tag_is_source.insert(tag.0, true);
+                self.id_is_source.insert(id.0, true);
             }
 
-            if *self.tag_is_source.get(&tag.0).unwrap() {
+            if *self.id_is_source.get(&id.0).unwrap() {
                 *fullness += 1;
             } else {
                 *fullness -= 1;
@@ -144,24 +141,24 @@ impl TraceVisitor for BinLoader {
         };
         let time = self.current_time_ns;
         self.add_event(EventLine::Enter {
-            tag: tag.0,
+            id: id.0,
             entered: entered.0,
             fullness,
             time,
         });
     }
 
-    fn exit(&mut self, tag: Tag, exited: Tag) {
+    fn exit(&mut self, id: Id, exited: Id) {
         // Add the fullness of 0 if not already there (a source only ever has exit
         // events)
         let fullness = {
-            let fullness = self.tag_to_fullness.entry(tag.0).or_insert(0);
+            let fullness = self.id_to_fullness.entry(id.0).or_insert(0);
             if *fullness == 0 {
                 // This is a source so never sees Enter, only Exit
-                self.tag_is_source.insert(tag.0, false);
+                self.id_is_source.insert(id.0, false);
             }
 
-            if *self.tag_is_source.get(&tag.0).unwrap() {
+            if *self.id_is_source.get(&id.0).unwrap() {
                 *fullness -= 1;
             } else {
                 *fullness += 1;
@@ -170,14 +167,14 @@ impl TraceVisitor for BinLoader {
         };
         let time = self.current_time_ns;
         self.add_event(EventLine::Exit {
-            tag: tag.0,
+            id: id.0,
             exited: exited.0,
             fullness,
             time,
         });
     }
 
-    fn time(&mut self, _tag: Tag, time_ns: f64) {
+    fn time(&mut self, _id: Id, time_ns: f64) {
         self.current_time_ns = time_ns;
     }
 }

@@ -44,14 +44,16 @@ function tree_map(serverUrl, data) {
     .selectAll("g")
     .data(d => d[1])
     .join("g")
-      .attr("transform", d => `translate(${d.x0},${d.y0})`);
+      .attr("transform", d => `translate(${d.x0},${d.y0})`)
+      .on("click", (event, d) => select(svg, d.id.id, d.data));
 
   const format = d3.format(",d");
   node.append("title")
       .text(d => d.data.full_name);
 
   node.append("rect")
-      .attr("id", d => (d.nodeUid = uid("node")).id)
+      .attr("id", d => (d.id = uid("node")).id)
+      .attr("class", "node")
       .attr("fill", d => color(d.height))
       .attr("width", d => d.x1 - d.x0)
       .attr("height", d => d.y1 - d.y0);
@@ -59,7 +61,7 @@ function tree_map(serverUrl, data) {
   node.append("clipPath")
       .attr("id", d => (d.clipUid = uid("clip")).id)
     .append("use")
-      .attr("xlink:href", d => d.nodeUid.href);
+      .attr("xlink:href", d => d.id.href);
 
   node.append("text")
       .attr("clip-path", d => d.clipUid)
@@ -76,4 +78,5 @@ function tree_map(serverUrl, data) {
   node.filter(d => !d.children).selectAll("tspan")
       .attr("x", 3)
       .attr("y", (d, i, nodes) => `${(i === nodes.length - 1) * 0.3 + 1.1 + i * 0.9}em`);
+
 }

@@ -4,7 +4,7 @@
 
 use std::rc::Rc;
 
-use steam_components::arbiter::WeightedRoundRobinPolicy;
+use steam_components::arbiter::policy::WeightedRoundRobin;
 use steam_components::flow_controls::limiter::Limiter;
 use steam_components::rc_limiter;
 use steam_components::router::Route;
@@ -44,7 +44,7 @@ where
     fn route(&self, obj: &T) -> Result<usize, SimError> {
         // If the dest matches then exit via port 1, otherwise use port 0 as that is the
         // ring
-        let dest = obj.dest()? as usize;
+        let dest = obj.destination() as usize;
         Ok(if self.0 == dest { IO_INDEX } else { RING_INDEX })
     }
 }
@@ -69,7 +69,7 @@ pub fn build_ring_nodes(engine: &mut Engine, config: &Config) -> Nodes {
                 spawner.clone(),
                 &ring_config,
                 Box::new(Router(i)),
-                Box::new(WeightedRoundRobinPolicy::new(weights, 2).unwrap()),
+                Box::new(WeightedRoundRobin::new(weights, 2).unwrap()),
             )
             .unwrap()
         })

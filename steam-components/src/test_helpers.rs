@@ -8,7 +8,8 @@ use steam_engine::engine::Engine;
 use steam_engine::port::InPort;
 use steam_track::entity::Entity;
 
-use crate::arbiter::{Arbiter, Priority, PriorityRoundRobinPolicy};
+use crate::arbiter::Arbiter;
+use crate::arbiter::policy::{Priority, PriorityRoundRobin};
 use crate::flow_controls::limiter::Limiter;
 use crate::source::Source;
 use crate::store::Store;
@@ -79,7 +80,7 @@ pub fn priority_policy_test_core(engine: &mut Engine, inputs: &[ArbiterInputData
     let spawner = engine.spawner();
     let num_inputs = inputs.len();
     let total_count = inputs.iter().map(|e| e.count).sum();
-    let mut policy = PriorityRoundRobinPolicy::new(num_inputs);
+    let mut policy = PriorityRoundRobin::new(num_inputs);
     for (i, input) in inputs.iter().enumerate() {
         policy = policy.set_priority(i, input.priority);
     }

@@ -39,14 +39,14 @@ where
     T: Routable,
 {
     fn route(&self, obj_to_route: &T) -> Result<usize, SimError> {
-        Ok(obj_to_route.dest()? as usize)
+        Ok(obj_to_route.destination() as usize)
     }
 }
 
 #[derive(EntityDisplay)]
 pub struct Router<T>
 where
-    T: SimObject,
+    T: SimObject + Routable,
 {
     pub entity: Arc<Entity>,
     rx: RefCell<Option<InPort<T>>>,
@@ -56,7 +56,7 @@ where
 
 impl<T> Router<T>
 where
-    T: SimObject,
+    T: SimObject + Routable,
 {
     pub fn new_and_register(
         engine: &Engine,
@@ -98,7 +98,7 @@ where
 #[async_trait(?Send)]
 impl<T> Runnable for Router<T>
 where
-    T: SimObject,
+    T: SimObject + Routable,
 {
     async fn run(&self) -> SimResult {
         let tx: Vec<OutPort<T>> = self.tx.borrow_mut().drain(..).collect();
@@ -107,7 +107,7 @@ where
 
         loop {
             let value = rx.get()?.await;
-            enter!(self.entity ; value.tag());
+            enter!(self.entity ; value.id());
 
             let tx_index = router.route(&value)?;
             trace!(self.entity ; "Route {} to {}", value, tx_index);
@@ -119,7 +119,7 @@ where
                     ));
                 }
                 Some(tx) => {
-                    exit!(self.entity ; value.tag());
+                    exit!(self.entity ; value.id());
                     tx.put(value)?.await;
                 }
             }

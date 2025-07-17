@@ -7,7 +7,7 @@ use capnp::serialize_packed;
 use crate::steam_track_capnp::event;
 use crate::steam_track_capnp::log::LogLevel;
 use crate::tracker::{EntityManager, Track};
-use crate::{SharedWriter, Tag, Writer, steam_track_capnp};
+use crate::{Id, SharedWriter, Writer, steam_track_capnp};
 
 /// A tracker that writes Cap'n Proto binary data
 pub struct CapnProtoTracker {
@@ -32,14 +32,14 @@ impl CapnProtoTracker {
     ///   details of the location
     /// * `lvl` - The logging level which is used to filter events
     /// * `build` - The event builder function
-    fn write_event<F>(&self, tag: Tag, build: F)
+    fn write_event<F>(&self, id: Id, build: F)
     where
         F: FnOnce(steam_track_capnp::event::Builder<'_>),
     {
         let mut builder = capnp::message::Builder::new_default();
         {
             let mut event = builder.init_root::<event::Builder>();
-            event.set_tag(tag.0);
+            event.set_id(id.0);
 
             // Call build method to populate the rest of the event
             build(event);
@@ -58,54 +58,54 @@ impl CapnProtoTracker {
 /// [`write_event`](crate::tracker::capnp::CapnProtoTracker), passing in a
 /// function that is used to populate the event body.
 impl Track for CapnProtoTracker {
-    fn unique_tag(&self) -> Tag {
-        self.entity_manager.unique_tag()
+    fn unique_id(&self) -> Id {
+        self.entity_manager.unique_id()
     }
 
-    fn is_entity_enabled(&self, tag: Tag, level: log::Level) -> bool {
-        self.entity_manager.is_enabled(tag, level)
+    fn is_entity_enabled(&self, id: Id, level: log::Level) -> bool {
+        self.entity_manager.is_enabled(id, level)
     }
 
-    fn add_entity(&self, tag: Tag, entity_name: &str) {
-        self.entity_manager.add_entity(tag, entity_name);
+    fn add_entity(&self, id: Id, entity_name: &str) {
+        self.entity_manager.add_entity(id, entity_name);
     }
 
-    fn enter(&self, tag: Tag, object: Tag) {
-        self.write_event(tag, |mut event| {
+    fn enter(&self, id: Id, object: Id) {
+        self.write_event(id, |mut event| {
             event.set_enter(object.0);
         });
     }
 
-    fn exit(&self, tag: Tag, object: Tag) {
-        self.write_event(tag, |mut event| {
+    fn exit(&self, id: Id, object: Id) {
+        self.write_event(id, |mut event| {
             event.set_exit(object.0);
         });
     }
 
-    fn create(&self, created_by: Tag, tag: Tag, num_bytes: usize, req_type: i8, name: &str) {
+    fn create(&self, created_by: Id, id: Id, num_bytes: usize, req_type: i8, name: &str) {
         self.write_event(created_by, |event| {
             let mut entity = event.init_create();
-            entity.set_tag(tag.0);
+            entity.set_id(id.0);
             entity.set_num_bytes(num_bytes as u64);
             entity.set_req_type(req_type);
             entity.set_name(name);
         });
     }
 
-    fn destroy(&self, destroyed_by: Tag, tag: Tag) {
+    fn destroy(&self, destroyed_by: Id, id: Id) {
         self.write_event(destroyed_by, |mut event| {
-            event.set_destroy(tag.0);
+            event.set_destroy(id.0);
         });
     }
 
-    fn connect(&self, connect_from: Tag, connect_to: Tag) {
+    fn connect(&self, connect_from: Id, connect_to: Id) {
         self.write_event(connect_from, |mut event| {
             event.set_connect(connect_to.0);
         });
     }
 
-    fn log(&self, tag: Tag, level: log::Level, msg: std::fmt::Arguments) {
-        self.write_event(tag, |event| {
+    fn log(&self, id: Id, level: log::Level, msg: std::fmt::Arguments) {
+        self.write_event(id, |event| {
             let mut log = event.init_log();
             let txt = format!("{msg}");
             log.set_message(&txt);
@@ -113,7 +113,7 @@ impl Track for CapnProtoTracker {
         });
     }
 
-    fn time(&self, set_by: Tag, time_ns: f64) {
+    fn time(&self, set_by: Id, time_ns: f64) {
         self.write_event(set_by, |mut event| {
             event.set_time(time_ns);
         });

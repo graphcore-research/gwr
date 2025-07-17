@@ -27,7 +27,7 @@ pub use in_memory::InMemoryTracker;
 use regex::Regex;
 pub use text::TextTracker;
 
-use crate::{ROOT, Tag};
+use crate::{Id, ROOT};
 
 /// Error used to return configuration errors
 #[derive(Debug)]
@@ -35,36 +35,36 @@ pub struct TrackConfigError(pub String);
 
 /// This is the interface that is supported by all [`Tracker`]s.
 pub trait Track {
-    /// Allocate a new global tag
-    fn unique_tag(&self) -> Tag;
+    /// Allocate a new global ID
+    fn unique_id(&self) -> Id;
 
     /// Determine whether tracking is enabled, and at what level for an
-    /// entity looked up by its tag.
-    fn is_entity_enabled(&self, tag: Tag, level: log::Level) -> bool;
+    /// entity looked up by its ID.
+    fn is_entity_enabled(&self, id: Id, level: log::Level) -> bool;
 
     /// Record an entity being created.
-    fn add_entity(&self, tag: Tag, entity_name: &str);
+    fn add_entity(&self, id: Id, entity_name: &str);
 
-    /// Track when an entity with the given tag arrives.
-    fn enter(&self, enter_into: Tag, enter_obj: Tag);
+    /// Track when an entity with the given ID arrives.
+    fn enter(&self, enter_into: Id, enter_obj: Id);
 
-    /// Track when an entity with the given tag leaves.
-    fn exit(&self, exit_from: Tag, exit_obj: Tag);
+    /// Track when an entity with the given ID leaves.
+    fn exit(&self, exit_from: Id, exit_obj: Id);
 
-    /// Track when an entity with the given tag is created.
-    fn create(&self, created_by: Tag, created_obj: Tag, num_bytes: usize, req_type: i8, name: &str);
+    /// Track when an entity with the given ID is created.
+    fn create(&self, created_by: Id, created_obj: Id, num_bytes: usize, req_type: i8, name: &str);
 
-    /// Track when an entity with the given tag is destroyed.
-    fn destroy(&self, destroyed_by: Tag, destroyed_obj: Tag);
+    /// Track when an entity with the given ID is destroyed.
+    fn destroy(&self, destroyed_by: Id, destroyed_obj: Id);
 
     /// Track when an entity is connected to another entity
-    fn connect(&self, connect_from: Tag, connect_to: Tag);
+    fn connect(&self, connect_from: Id, connect_to: Id);
 
     /// Track a log message of the given level.
-    fn log(&self, msg_by: Tag, level: log::Level, msg: std::fmt::Arguments);
+    fn log(&self, msg_by: Id, level: log::Level, msg: std::fmt::Arguments);
 
     /// Advance the time to the time specified in `ns`.
-    fn time(&self, set_by: Tag, time_ns: f64);
+    fn time(&self, set_by: Id, time_ns: f64);
 
     /// Perform any pre-exit shutdown/cleanup
     fn shutdown(&self);
@@ -95,7 +95,7 @@ pub fn dev_null_tracker() -> Tracker {
 /// This is shared by the [`Text`](crate::tracker::text) and
 /// [`Capnp`](crate::tracker::capnp)-based trackers.
 ///
-/// This manager is also used to allocate unique [`Tag`] values.
+/// This manager is also used to allocate unique [`Id`] values.
 pub struct EntityManager {
     /// Level of tracking events to output.
     default_entity_level: log::Level,
@@ -103,15 +103,15 @@ pub struct EntityManager {
     /// List of regular expressions mapping entity names to log levels.
     regex_to_entity_level: Vec<(Regex, log::Level)>,
 
-    /// Used to assign unique tags.
-    unique_tag: AtomicU64,
+    /// Used to assign unique IDs.
+    unique_id: AtomicU64,
 
     /// Keep track of the current time.
     current_time: Mutex<f64>,
 
     /// Keep track of entities that have trace enable/log levels different to
     /// the default
-    entity_lookup: Mutex<HashMap<Tag, log::Level>>,
+    entity_lookup: Mutex<HashMap<Id, log::Level>>,
 }
 
 impl EntityManager {
@@ -121,35 +121,35 @@ impl EntityManager {
         Self {
             default_entity_level,
             regex_to_entity_level: Vec::new(),
-            unique_tag: AtomicU64::new(ROOT.0 + 1),
+            unique_id: AtomicU64::new(ROOT.0 + 1),
             current_time: Mutex::new(0.0),
             entity_lookup: Mutex::new(HashMap::new()),
         }
     }
 
-    fn unique_tag(&self) -> Tag {
-        let tag = self.unique_tag.fetch_add(1, Ordering::SeqCst);
-        Tag(tag)
+    fn unique_id(&self) -> Id {
+        let id = self.unique_id.fetch_add(1, Ordering::SeqCst);
+        Id(id)
     }
 
-    fn is_enabled(&self, tag: Tag, level: log::Level) -> bool {
-        match self.entity_lookup.lock().unwrap().get(&tag) {
+    fn is_enabled(&self, id: Id, level: log::Level) -> bool {
+        match self.entity_lookup.lock().unwrap().get(&id) {
             None => level <= self.default_entity_level,
             Some(entity_level) => level <= *entity_level,
         }
     }
 
-    fn add_entity(&self, tag: Tag, entity_name: &str) {
+    fn add_entity(&self, id: Id, entity_name: &str) {
         let entity_level = self.log_level_for(entity_name);
         if entity_level != self.default_entity_level
             && self
                 .entity_lookup
                 .lock()
                 .unwrap()
-                .insert(tag, entity_level)
+                .insert(id, entity_level)
                 .is_some()
         {
-            panic!("Entity tag {tag} already seen ({entity_name})");
+            panic!("Entity ID {id} already seen ({entity_name})");
         }
     }
 
@@ -300,10 +300,10 @@ mod tests {
     }
 
     #[test]
-    fn tags() {
+    fn ids() {
         let manager = EntityManager::new(Level::Error);
         for i in 0..10 {
-            assert_eq!(manager.unique_tag(), Tag(i + ROOT.0 + 1));
+            assert_eq!(manager.unique_id(), Id(i + ROOT.0 + 1));
         }
     }
 }

@@ -3,8 +3,8 @@
 //! Read and check a Cap'n Proto trace file created using steam_track
 //!
 //! Checks:
-//!  - all tags used were created first
-//!  - no destroyed tags are used again
+//!  - all IDs used were created first
+//!  - no destroyed IDs are used again
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -14,13 +14,13 @@ use std::str::FromStr;
 use log::{LevelFilter, debug, error, info, trace, warn};
 use simplelog::{ConfigBuilder, SimpleLogger};
 use steam_config::multi_source_config;
-use steam_track::Tag;
+use steam_track::Id;
 use steam_track::trace_visitor::{TraceVisitor, process_capnp};
 
 /// Decide whether message is trace!() or info!()
 ///
 /// The user can decide what messages are trace!() or info!() depending on what
-/// tags are being displayed
+/// IDs are being displayed
 macro_rules! info_trace {
     ($cond:expr, $($arg:tt)+) => (
         if $cond {
@@ -34,7 +34,7 @@ macro_rules! info_trace {
 /// Decide whether message is debug!() or info!()
 ///
 /// The user can decide what messages are debug!() or info!() depending on what
-/// tags are being displayed
+/// IDs are being displayed
 macro_rules! info_debug {
     ($cond:expr, $($arg:tt)+) => (
         if $cond {
@@ -45,40 +45,40 @@ macro_rules! info_debug {
     );
 }
 
-/// A tree structure to track which tags are created where
+/// A tree structure to track which IDs are created where
 ///
-/// Simply store tags to connect to other Nodes which will be stored in a
+/// Simply store IDs to connect to other Nodes which will be stored in a
 /// separate HashMap
 #[derive(Debug)]
 struct Node {
-    parent: Tag,
-    tag: Tag,
-    children: HashSet<Tag>,
+    parent: Id,
+    id: Id,
+    children: HashSet<Id>,
 }
 
 impl Node {
-    fn new(parent: Tag, tag: Tag) -> Self {
+    fn new(parent: Id, id: Id) -> Self {
         Self {
             parent,
-            tag,
+            id,
             children: HashSet::new(),
         }
     }
 
     /// Add a child
-    fn add_child(&mut self, child: Tag, log_as_info: bool) {
+    fn add_child(&mut self, child: Id, log_as_info: bool) {
         self.children.insert(child);
-        info_debug!(log_as_info, "{} added child {}", self.tag, child);
+        info_debug!(log_as_info, "{} added child {}", self.id, child);
     }
 
     /// Remove a child and return whether the children are now empty
-    fn remove_child(&mut self, child: Tag, log_as_info: bool) -> bool {
+    fn remove_child(&mut self, child: Id, log_as_info: bool) -> bool {
         if self.children.remove(&child) {
-            info_debug!(log_as_info, "{} removed child {}", self.tag, child);
+            info_debug!(log_as_info, "{} removed child {}", self.id, child);
         } else {
             error!(
                 "{} attempting to remove child {} not in children",
-                self.tag, child
+                self.id, child
             );
         }
 
@@ -89,80 +89,80 @@ impl Node {
 /// The Checker is responsible for keeping track of all state and checking its
 /// correctness
 struct Checker {
-    active_tags: HashMap<Tag, Node>,
-    destroyed: HashMap<Tag, Node>,
-    info_tags: HashSet<Tag>,
+    active_ids: HashMap<Id, Node>,
+    destroyed: HashMap<Id, Node>,
+    info_ids: HashSet<Id>,
 }
 
 impl Checker {
-    fn new(info_tags: &[u64]) -> Self {
+    fn new(info_ids: &[u64]) -> Self {
         let mut checker = Self {
-            active_tags: HashMap::new(),
+            active_ids: HashMap::new(),
             destroyed: HashMap::new(),
-            info_tags: HashSet::new(),
+            info_ids: HashSet::new(),
         };
 
-        for tag in info_tags {
-            checker.info_tags.insert(Tag(*tag));
+        for id in info_ids {
+            checker.info_ids.insert(Id(*id));
         }
 
         let root = Node::new(steam_track::NO_ID, steam_track::ROOT);
         let no_id = Node::new(steam_track::NO_ID, steam_track::NO_ID);
 
         // It is always ok to use these special identifiers from steam_track
-        checker.active_tags.insert(steam_track::ROOT, root);
-        checker.active_tags.insert(steam_track::NO_ID, no_id);
+        checker.active_ids.insert(steam_track::ROOT, root);
+        checker.active_ids.insert(steam_track::NO_ID, no_id);
 
         checker
     }
 
-    fn check(&self, tag: Tag) {
-        if !self.active_tags.contains_key(&tag) {
-            error!("Location tag {tag} used when not active");
+    fn check(&self, id: Id) {
+        if !self.active_ids.contains_key(&id) {
+            error!("Location ID {id} used when not active");
         }
     }
 
-    fn create_tag(&mut self, tag: Tag, created_by: Tag) {
-        if let std::collections::hash_map::Entry::Vacant(e) = self.active_tags.entry(tag) {
-            e.insert(Node::new(created_by, tag));
-            self.add_child(created_by, tag);
+    fn create_id(&mut self, id: Id, created_by: Id) {
+        if let std::collections::hash_map::Entry::Vacant(e) = self.active_ids.entry(id) {
+            e.insert(Node::new(created_by, id));
+            self.add_child(created_by, id);
         } else {
-            error!("Attempting to create existing tag {tag}");
+            error!("Attempting to create existing ID {id}");
         }
     }
 
-    fn destroy_tag(&mut self, tag: Tag) {
-        if tag == steam_track::ROOT || tag == steam_track::NO_ID {
-            error!("Unable to destroy {tag}");
+    fn destroy_id(&mut self, id: Id) {
+        if id == steam_track::ROOT || id == steam_track::NO_ID {
+            error!("Unable to destroy {id}");
             return;
         }
 
-        if let Some(node) = self.active_tags.remove(&tag) {
-            self.remove_child(node.parent, tag);
+        if let Some(node) = self.active_ids.remove(&id) {
+            self.remove_child(node.parent, id);
 
             if !node.children.is_empty() {
-                info!("attempting to destroy obj {tag} with active children");
-                self.destroyed.insert(tag, node);
+                info!("attempting to destroy obj {id} with active children");
+                self.destroyed.insert(id, node);
             } else {
-                info_debug!(self.info_tags.contains(&tag), "{} destroyed", tag);
+                info_debug!(self.info_ids.contains(&id), "{} destroyed", id);
             }
         } else {
-            error!("attempting to destroy unknown tag {tag}");
+            error!("attempting to destroy unknown ID {id}");
         }
     }
 
-    fn add_child(&mut self, parent: Tag, child: Tag) {
+    fn add_child(&mut self, parent: Id, child: Id) {
         let log_as_info = self.log_as_info(child);
-        if let Some(node) = self.active_tags.get_mut(&parent) {
+        if let Some(node) = self.active_ids.get_mut(&parent) {
             node.add_child(child, log_as_info);
         } else {
             error!("attempting to add {child} to unknown parent {parent}");
         }
     }
 
-    fn remove_child(&mut self, parent: Tag, child: Tag) {
+    fn remove_child(&mut self, parent: Id, child: Id) {
         let log_as_info = self.log_as_info(child);
-        if let Some(parent_node) = self.active_tags.get_mut(&parent) {
+        if let Some(parent_node) = self.active_ids.get_mut(&parent) {
             parent_node.remove_child(child, log_as_info);
         } else if let Some(parent_node) = self.destroyed.get_mut(&parent) {
             let is_empty = parent_node.remove_child(child, log_as_info);
@@ -175,18 +175,18 @@ impl Checker {
         }
     }
 
-    fn log_as_info(&self, tag: Tag) -> bool {
-        self.info_tags.contains(&tag)
+    fn log_as_info(&self, id: Id) -> bool {
+        self.info_ids.contains(&id)
     }
 
     fn end_checks(&self) {
         let still_active = self
-            .active_tags
+            .active_ids
             .iter()
             .filter(|&(k, _v)| (*k != steam_track::NO_ID && *k != steam_track::ROOT));
 
         for (k, v) in still_active {
-            warn!("Tag {k} still active");
+            warn!("ID {k} still active");
             if !v.children.is_empty() {
                 warn!("  with children {:?}", v.children);
             }
@@ -195,49 +195,49 @@ impl Checker {
 }
 
 impl TraceVisitor for Checker {
-    fn log(&mut self, tag: Tag, level: log::Level, message: &str) {
+    fn log(&mut self, id: Id, level: log::Level, message: &str) {
         info_trace!(
-            self.log_as_info(tag),
+            self.log_as_info(id),
             "{}:{}: Message: {}",
-            tag,
+            id,
             level,
             message
         );
 
-        self.check(tag);
+        self.check(id);
     }
 
-    fn create(&mut self, created_by: Tag, tag: Tag, num_bytes: usize, req_type: i8, name: &str) {
+    fn create(&mut self, created_by: Id, id: Id, num_bytes: usize, req_type: i8, name: &str) {
         info_trace!(
-            self.log_as_info(tag),
+            self.log_as_info(id),
             "{}: created {}, {}, {}, {} bytes",
             created_by,
-            tag,
+            id,
             name,
             req_type,
             num_bytes,
         );
 
-        self.create_tag(tag, created_by);
-        self.check(tag);
+        self.create_id(id, created_by);
+        self.check(id);
     }
 
-    fn destroy(&mut self, tag: Tag, destroyed_by: Tag) {
-        info_trace!(self.log_as_info(tag), "{}: destroyed {}", destroyed_by, tag,);
-        self.check(tag);
-        self.destroy_tag(tag);
+    fn destroy(&mut self, id: Id, destroyed_by: Id) {
+        info_trace!(self.log_as_info(id), "{}: destroyed {}", destroyed_by, id,);
+        self.check(id);
+        self.destroy_id(id);
     }
 
-    fn enter(&mut self, tag: Tag, entered: Tag) {
-        info_trace!(self.log_as_info(tag), "{}: {} enter", tag, entered);
+    fn enter(&mut self, id: Id, entered: Id) {
+        info_trace!(self.log_as_info(id), "{}: {} enter", id, entered);
 
-        self.check(tag);
+        self.check(id);
     }
 
-    fn exit(&mut self, tag: Tag, exited: Tag) {
-        info_trace!(self.log_as_info(tag), "{}: {} exit", tag, exited);
+    fn exit(&mut self, id: Id, exited: Id) {
+        info_trace!(self.log_as_info(id), "{}: {} exit", id, exited);
 
-        self.check(tag);
+        self.check(id);
     }
 }
 
@@ -253,9 +253,9 @@ struct Settings {
     #[arg(short = 'b', long = "bin-file")]
     bin_log_file: Option<String>,
 
-    /// Tag IDs to log at INFO level
-    #[arg(long = "tags")]
-    tags: Option<Vec<u64>>,
+    /// IDs to log at INFO level
+    #[arg(long = "ids")]
+    ids: Option<Vec<u64>>,
 }
 
 impl Default for Settings {
@@ -263,7 +263,7 @@ impl Default for Settings {
         Self {
             log: Some("info".to_string()),
             bin_log_file: Some(Default::default()),
-            tags: Some(Default::default()),
+            ids: Some(Default::default()),
         }
     }
 }
@@ -294,7 +294,7 @@ fn main() {
 
     let f = File::open(settings.bin_log_file.unwrap()).unwrap();
     let mut reader = BufReader::new(f);
-    let mut checker = Checker::new(&settings.tags.unwrap());
+    let mut checker = Checker::new(&settings.ids.unwrap());
     process_capnp(&mut reader, &mut checker);
 
     checker.end_checks();
