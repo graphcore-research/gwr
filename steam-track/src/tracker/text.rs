@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 pub use log;
 
 use crate::tracker::{EntityManager, Track};
-use crate::{SharedWriter, Tag, Writer};
+use crate::{Id, SharedWriter, Writer};
 
 /// A simple text logger to output messages to a Writer.
 pub struct TextTracker {
@@ -27,54 +27,54 @@ impl TextTracker {
 
 /// Implementation for each [`Track`] event
 impl Track for TextTracker {
-    fn unique_tag(&self) -> Tag {
-        self.entity_manager.unique_tag()
+    fn unique_id(&self) -> Id {
+        self.entity_manager.unique_id()
     }
 
-    fn is_entity_enabled(&self, tag: Tag, level: log::Level) -> bool {
-        self.entity_manager.is_enabled(tag, level)
+    fn is_entity_enabled(&self, id: Id, level: log::Level) -> bool {
+        self.entity_manager.is_enabled(id, level)
     }
 
-    fn add_entity(&self, tag: Tag, entity_name: &str) {
-        self.entity_manager.add_entity(tag, entity_name);
+    fn add_entity(&self, id: Id, entity_name: &str) {
+        self.entity_manager.add_entity(id, entity_name);
     }
 
-    fn enter(&self, tag: Tag, object: Tag) {
+    fn enter(&self, id: Id, object: Id) {
         self.writer
             .lock()
             .unwrap()
-            .write_all(format!("{tag}: enter {object}\n").as_bytes())
+            .write_all(format!("{id}: enter {object}\n").as_bytes())
             .unwrap();
     }
 
-    fn exit(&self, tag: Tag, object: Tag) {
+    fn exit(&self, id: Id, object: Id) {
         self.writer
             .lock()
             .unwrap()
-            .write_all(format!("{tag}: exit {object}\n").as_bytes())
+            .write_all(format!("{id}: exit {object}\n").as_bytes())
             .unwrap();
     }
 
-    fn create(&self, created_by: Tag, tag: Tag, num_bytes: usize, req_type: i8, name: &str) {
+    fn create(&self, created_by: Id, id: Id, num_bytes: usize, req_type: i8, name: &str) {
         self.writer
             .lock()
             .unwrap()
             .write_all(
-                format!("{created_by}: created {tag}, {name}, {req_type}, {num_bytes} bytes\n")
+                format!("{created_by}: created {id}, {name}, {req_type}, {num_bytes} bytes\n")
                     .as_bytes(),
             )
             .unwrap();
     }
 
-    fn destroy(&self, destroyed_by: Tag, tag: Tag) {
+    fn destroy(&self, destroyed_by: Id, id: Id) {
         self.writer
             .lock()
             .unwrap()
-            .write_all(format!("{destroyed_by}: destroyed {tag}\n").as_bytes())
+            .write_all(format!("{destroyed_by}: destroyed {id}\n").as_bytes())
             .unwrap();
     }
 
-    fn connect(&self, connect_from: Tag, connect_to: Tag) {
+    fn connect(&self, connect_from: Id, connect_to: Id) {
         self.writer
             .lock()
             .unwrap()
@@ -82,15 +82,15 @@ impl Track for TextTracker {
             .unwrap();
     }
 
-    fn log(&self, tag: Tag, level: log::Level, msg: std::fmt::Arguments) {
+    fn log(&self, id: Id, level: log::Level, msg: std::fmt::Arguments) {
         self.writer
             .lock()
             .unwrap()
-            .write_all(format!("{tag}:{level}: {msg}\n").as_bytes())
+            .write_all(format!("{id}:{level}: {msg}\n").as_bytes())
             .unwrap();
     }
 
-    fn time(&self, set_by: Tag, time_ns: f64) {
+    fn time(&self, set_by: Id, time_ns: f64) {
         self.writer
             .lock()
             .unwrap()

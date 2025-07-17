@@ -36,7 +36,7 @@ use steam_components::store::Store;
 use steam_engine::engine::Engine;
 use steam_engine::executor::Spawner;
 use steam_engine::port::PortStateResult;
-use steam_engine::traits::SimObject;
+use steam_engine::traits::{Routable, SimObject};
 use steam_engine::types::{SimError, SimResult};
 use steam_model_builder::{EntityDisplay, Runnable};
 use steam_track::entity::Entity;
@@ -76,7 +76,7 @@ where
 #[derive(EntityDisplay, Runnable)]
 pub struct RingNode<T>
 where
-    T: SimObject,
+    T: SimObject + Routable,
 {
     pub entity: Arc<Entity>,
     rx_buffer_limiter: Rc<Limiter<T>>,
@@ -87,7 +87,7 @@ where
 
 impl<T> RingNode<T>
 where
-    T: SimObject,
+    T: SimObject + Routable,
 {
     pub fn new_and_register(
         engine: &Engine,

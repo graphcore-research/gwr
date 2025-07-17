@@ -34,7 +34,7 @@ use std::{fs, io, thread};
 use steam_config::multi_source_config;
 use steam_track::entity::{Entity, toplevel};
 use steam_track::tracker::{CapnProtoTracker, EntityManager, TextTracker, Tracker};
-use steam_track::{Writer, create_and_track_tag, debug, info, trace};
+use steam_track::{Writer, create_and_track_id, debug, info, trace};
 
 /// Command-line arguments.
 #[multi_source_config]
@@ -82,9 +82,9 @@ fn load(
     entity: &Entity,
     address: &mut u32,
     value: &mut u64,
-    tx_id: &mpsc::Sender<(u64, steam_track::Tag)>,
+    tx_id: &mpsc::Sender<(u64, steam_track::Id)>,
 ) {
-    let load_tag = create_and_track_tag!(entity);
+    let load_id = create_and_track_id!(entity);
     let load_value = *address as u64 | *value;
     let num_bytes = 64;
 
@@ -92,7 +92,7 @@ fn load(
     trace!(entity ; "Load: {}, {}, {}", num_bytes, *address, load_value);
 
     // Send to the master for processing
-    tx_id.send((load_value, load_tag)).unwrap();
+    tx_id.send((load_value, load_id)).unwrap();
 
     *address += 4;
     *value += 1;
@@ -132,8 +132,8 @@ fn main() -> io::Result<()> {
     let num_threads = 10;
     let num_words = 5;
 
-    // Create channel for loaded data and their Tags
-    let (tx_id, rx_id) = mpsc::channel::<(u64, steam_track::Tag)>();
+    // Create channel for loaded data and their ID
+    let (tx_id, rx_id) = mpsc::channel::<(u64, steam_track::Id)>();
 
     // Launch a number of workers to 'load' data and send it to the main thread
     let mut threads = Vec::new();
@@ -144,7 +144,7 @@ fn main() -> io::Result<()> {
             // Create the thread Id as a child of the simulator
             let thread = Entity::new(&top, format!("thread{n}").as_str());
             let mut address = 0x40000;
-            let mut value = thread.tag.0;
+            let mut value = thread.id.0;
 
             for _i in 0..num_words {
                 load(&thread, &mut address, &mut value, &tx_id);
@@ -155,8 +155,8 @@ fn main() -> io::Result<()> {
     // Receive and print log all loaded data
     for _i in 0..num_threads {
         for _j in 0..num_words {
-            let (value, tag) = rx_id.recv().unwrap();
-            info!(top ; "Received {:#x}, {}", value, tag);
+            let (value, id) = rx_id.recv().unwrap();
+            info!(top ; "Received {:#x}, {}", value, id);
         }
     }
 

@@ -66,7 +66,7 @@ where
         let rx = take_option!(self.rx);
         loop {
             let value = rx.get()?.await;
-            enter!(self.entity ; value.tag());
+            enter!(self.entity ; value.id());
             *self.sunk_count.borrow_mut() += 1;
         }
     }

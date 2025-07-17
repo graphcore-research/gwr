@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use steam_track::entity::{Entity, toplevel};
 use steam_track::{
-    Tag, create, create_and_track_tag, debug, destroy_tag, enter, error, exit, info, set_time,
+    Id, create, create_and_track_id, debug, destroy_id, enter, error, exit, info, set_time,
     test_helpers, test_init, trace, warn,
 };
 
@@ -19,7 +19,7 @@ macro_rules! build_with_entity {
 
             let top = toplevel(&tracker, "top");
             test_helpers::check_and_clear(&test_tracker, &["0: created 100, top, 0, 0 bytes"]);
-            assert_eq!(top.tag, Tag(100));
+            assert_eq!(top.id, Id(100));
 
             $macro!(top ; "Loc with no args");
             test_helpers::check_and_clear(&test_tracker, &[concat!("100:", $slvl, ": Loc with no args")]);
@@ -49,13 +49,13 @@ fn create_destroy() {
     let top = toplevel(&tracker, "top");
 
     test_helpers::check_and_clear(&test_tracker, &["0: created 10, top, 0, 0 bytes"]);
-    assert_eq!(top.tag, Tag(10));
+    assert_eq!(top.id, Id(10));
 
-    let tag1 = create_and_track_tag!(top);
-    test_helpers::check_and_clear(&test_tracker, &["10: created 11, tag, 0, 0 bytes"]);
-    assert_eq!(tag1, Tag(11));
+    let id1 = create_and_track_id!(top);
+    test_helpers::check_and_clear(&test_tracker, &["10: created 11, id, 0, 0 bytes"]);
+    assert_eq!(id1, Id(11));
 
-    destroy_tag!(top ; tag1);
+    destroy_id!(top ; id1);
     test_helpers::check_and_clear(&test_tracker, &["10: destroyed 11"]);
 
     drop(top);
@@ -67,13 +67,13 @@ fn enter_exit_basics() {
     let (test_tracker, tracker) = test_init!(40);
 
     let top = toplevel(&tracker, "top");
-    let obj = create_and_track_tag!(top);
+    let obj = create_and_track_id!(top);
     enter!(top ; obj);
     test_helpers::check_and_clear(
         &test_tracker,
         &[
             "0: created 40, top, 0, 0 bytes",
-            "40: created 41, tag, 0, 0 bytes",
+            "40: created 41, id, 0, 0 bytes",
             "40: 41 entered",
         ],
     );
@@ -87,19 +87,19 @@ fn enter_exit_basics() {
 
 #[derive(Debug)]
 struct Packet {
-    pub tag: Tag,
+    pub id: Id,
 }
 
 impl Packet {
     fn new(entity: &Arc<Entity>) -> Self {
-        let tag = create_and_track_tag!(entity);
-        Self { tag }
+        let id = create_and_track_id!(entity);
+        Self { id }
     }
 }
 
 impl Display for Packet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Packet {{ tag: {} }}", self.tag)
+        write!(f, "Packet {{ id: {} }}", self.id)
     }
 }
 
@@ -115,8 +115,8 @@ fn num_bytes() {
     test_helpers::check_and_clear(
         &test_tracker,
         &[
-            "121: created 122, tag, 0, 0 bytes",
-            r"121: created 122, Packet \{ tag: 122 \}, 0, 10 bytes",
+            "121: created 122, id, 0, 0 bytes",
+            r"121: created 122, Packet \{ id: 122 \}, 0, 10 bytes",
         ],
     );
 }

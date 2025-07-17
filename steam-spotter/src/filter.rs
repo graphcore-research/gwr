@@ -11,7 +11,7 @@ use crate::app::{CHUNK_SIZE, EventLine, INITIAL_SIZE};
 use crate::renderer::Renderer;
 
 pub struct Filter {
-    tag_re: Regex,
+    id_re: Regex,
 
     pub filter: String,
     pub search: String,
@@ -20,22 +20,22 @@ pub struct Filter {
 
     notify_filter: Sender<()>,
 
-    tag_to_name: Option<HashMap<u64, String>>,
-    tag_to_name_updates: Vec<HashMap<u64, String>>,
+    id_to_name: Option<HashMap<u64, String>>,
+    id_to_name_updates: Vec<HashMap<u64, String>>,
 }
 
 struct SearchState {
     use_regex: bool,
     search_re: Option<Regex>,
     search: String,
-    tag_to_name: HashMap<u64, String>,
-    filter_tag: Option<u64>,
+    id_to_name: HashMap<u64, String>,
+    filter_id: Option<u64>,
 }
 
 impl SearchState {
     fn text_matches(&self, text: &str) -> bool {
         if self.search.is_empty() {
-            return self.filter_tag.is_none();
+            return self.filter_id.is_none();
         }
 
         if self.use_regex && self.search_re.is_some() {
@@ -45,12 +45,12 @@ impl SearchState {
         }
     }
 
-    fn tag_matches(&self, tag: &u64) -> bool {
-        if let Some(filter_tag) = &self.filter_tag {
-            return filter_tag == tag;
+    fn id_matches(&self, id: &u64) -> bool {
+        if let Some(filter_id) = &self.filter_id {
+            return filter_id == id;
         }
 
-        if let Some(name) = self.tag_to_name.get(tag) {
+        if let Some(name) = self.id_to_name.get(id) {
             self.text_matches(name)
         } else {
             false
@@ -59,30 +59,30 @@ impl SearchState {
 
     pub fn search_matches(&self, line: &EventLine) -> bool {
         match line {
-            EventLine::Create { tag, time: _ } => self.tag_matches(tag),
+            EventLine::Create { id, time: _ } => self.id_matches(id),
             EventLine::Connect {
-                from_tag,
-                to_tag,
+                from_id,
+                to_id,
                 time: _,
-            } => self.tag_matches(from_tag) || self.tag_matches(to_tag),
+            } => self.id_matches(from_id) || self.id_matches(to_id),
             EventLine::Enter {
-                tag,
+                id,
                 entered,
                 fullness: _,
                 time: _,
-            } => self.tag_matches(tag) || self.tag_matches(entered),
+            } => self.id_matches(id) || self.id_matches(entered),
             EventLine::Exit {
-                tag,
+                id,
                 exited,
                 fullness: _,
                 time: _,
-            } => self.tag_matches(tag) || self.tag_matches(exited),
+            } => self.id_matches(id) || self.id_matches(exited),
             EventLine::Log {
                 level: _,
-                tag,
+                id,
                 msg,
                 time: _,
-            } => self.tag_matches(tag) || self.text_matches(msg),
+            } => self.id_matches(id) || self.text_matches(msg),
         }
     }
 }
@@ -90,11 +90,11 @@ impl SearchState {
 impl Filter {
     pub fn new(notify_filter: Sender<()>) -> Self {
         Self {
-            tag_re: Regex::new(r"tag=(?<tag>\d+)").unwrap(),
+            id_re: Regex::new(r"id=(?<id>\d+)").unwrap(),
             notify_filter,
 
-            tag_to_name: Some(HashMap::with_capacity(INITIAL_SIZE)),
-            tag_to_name_updates: Vec::new(),
+            id_to_name: Some(HashMap::with_capacity(INITIAL_SIZE)),
+            id_to_name_updates: Vec::new(),
 
             filter: String::new(),
             search: String::new(),
@@ -103,17 +103,17 @@ impl Filter {
         }
     }
 
-    /// Add tag_to_name updates.
+    /// Add id_to_name updates.
     ///
     /// They can either be applied right now, or stored to be applied when the
     /// HashMap is restored. It is taken out at times for the filter thread to
     /// use. When it is restored the updates will be applied then.
-    pub fn extend_tag_to_name(&mut self, update: HashMap<u64, String>) {
-        if let Some(tag_to_name) = &mut self.tag_to_name {
-            tag_to_name.extend(update);
+    pub fn extend_id_to_name(&mut self, update: HashMap<u64, String>) {
+        if let Some(id_to_name) = &mut self.id_to_name {
+            id_to_name.extend(update);
             self.notify_filter.send(()).unwrap();
         } else {
-            self.tag_to_name_updates.push(update);
+            self.id_to_name_updates.push(update);
         }
     }
 
@@ -192,14 +192,14 @@ impl Filter {
     }
 
     fn start_search(&mut self) -> SearchState {
-        let mut filter_tag = None;
+        let mut filter_id = None;
         let mut search = self.search.to_owned();
-        if let Some(e) = self.tag_re.captures(&self.search) {
-            let tag_str = e.name("tag").unwrap().as_str();
-            if let Ok(tag) = tag_str.parse() {
-                filter_tag = Some(tag);
+        if let Some(e) = self.id_re.captures(&self.search) {
+            let id_str = e.name("id").unwrap().as_str();
+            if let Ok(id) = id_str.parse() {
+                filter_id = Some(id);
 
-                let to_remove = format!("tag={tag_str}");
+                let to_remove = format!("id={id_str}");
                 search = search.replace(to_remove.as_str(), "");
             }
         }
@@ -214,23 +214,23 @@ impl Filter {
 
         SearchState {
             use_regex: self.use_regex,
-            filter_tag,
+            filter_id,
             search_re,
             search,
-            tag_to_name: self.tag_to_name.take().unwrap(),
+            id_to_name: self.id_to_name.take().unwrap(),
         }
     }
 
-    fn search_done(&mut self, mut tag_to_name: HashMap<u64, String>) {
-        for update in self.tag_to_name_updates.drain(..) {
-            tag_to_name.extend(update);
+    fn search_done(&mut self, mut id_to_name: HashMap<u64, String>) {
+        for update in self.id_to_name_updates.drain(..) {
+            id_to_name.extend(update);
         }
-        self.tag_to_name = Some(tag_to_name);
+        self.id_to_name = Some(id_to_name);
     }
 
-    /// Returns whether the user has specified a tag
-    pub fn tag_defined(&self) -> bool {
-        self.tag_re.captures(&self.search).is_some()
+    /// Returns whether the user has specified a ID
+    pub fn id_defined(&self) -> bool {
+        self.id_re.captures(&self.search).is_some()
     }
 }
 
@@ -288,7 +288,7 @@ pub fn start_background_filter(
                 .unwrap()
                 .set_render_indices(matching_indices);
 
-            filter.lock().unwrap().search_done(search_state.tag_to_name);
+            filter.lock().unwrap().search_done(search_state.id_to_name);
         }
     });
 }

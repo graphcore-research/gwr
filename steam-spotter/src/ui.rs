@@ -39,7 +39,7 @@ pub fn render<B: Backend>(app: &mut App, frame: &mut Frame<'_, B>) {
         render_search(app, frame, search_area);
     }
 
-    if app.filter.lock().unwrap().tag_defined() {
+    if app.filter.lock().unwrap().id_defined() {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
@@ -207,7 +207,7 @@ fn render_help<B: Backend>(_app: &mut App, frame: &mut Frame<'_, B>, area: Rect)
         "Search:",
         vec![
             "Enter a search/filter text string.",
-            "Can contain 'tag=<NUMBER>' to filter down to one unique tag",
+            "Can contain 'id=<NUMBER>' to filter down to one unique ID",
         ],
     );
     renderer.add_command_help_line("/", "enable search window");

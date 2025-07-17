@@ -22,7 +22,7 @@ struct Entity @0xbc946b85a6484339 {
   name     @3  :Text;
   reqType  @2  :Int8;
   numBytes @1  :UInt64;
-  tag      @0  :UInt64;
+  id       @0  :UInt64;
 }
 
 struct Event @0xc13b4d9cc5ead95b {
@@ -35,5 +35,5 @@ struct Event @0xc13b4d9cc5ead95b {
     create  @2  :Entity;
     log     @1  :Log;
   }
-  tag       @0 :UInt64;
+  id        @0 :UInt64;
 }

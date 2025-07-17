@@ -165,7 +165,7 @@ where
     ///
     /// There must be room before this is called.
     fn push_value(&self, value: T) -> SimResult {
-        enter!(self.entity ; value.tag());
+        enter!(self.entity ; value.id());
         if *self.error_on_overflow.borrow() {
             if self.data.borrow().len() >= self.capacity {
                 return sim_error!(format!("Overflow in {:?}", self.entity.full_name()));
@@ -185,7 +185,7 @@ where
     fn pop_value(&self) -> Result<T, SimError> {
         let value = self.data.borrow_mut().pop_front().unwrap();
         self.level_change.notify_result(self.data.borrow().len())?;
-        exit!(self.entity ; value.tag());
+        exit!(self.entity ; value.id());
         Ok(value)
     }
 }

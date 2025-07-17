@@ -4,8 +4,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::vec;
 
-use steam_components::arbiter::{
-    Arbiter, Priority, PriorityRoundRobinPolicy, RoundRobinPolicy, WeightedRoundRobinPolicy,
+use steam_components::arbiter::Arbiter;
+use steam_components::arbiter::policy::{
+    Priority, PriorityRoundRobin, RoundRobin, WeightedRoundRobin,
 };
 use steam_components::flow_controls::limiter::Limiter;
 use steam_components::sink::Sink;
@@ -28,15 +29,9 @@ fn source_sink() {
     const NUM_PUTS: usize = 25;
 
     let top = engine.top();
-    let arbiter = Arbiter::new_and_register(
-        &engine,
-        top,
-        "arb",
-        spawner,
-        3,
-        Box::new(RoundRobinPolicy::new()),
-    )
-    .unwrap();
+    let arbiter =
+        Arbiter::new_and_register(&engine, top, "arb", spawner, 3, Box::new(RoundRobin::new()))
+            .unwrap();
     let source_a =
         Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; NUM_PUTS))
             .unwrap();
@@ -69,15 +64,9 @@ fn two_active_inputs() {
     let nc = 20;
 
     let top = engine.top();
-    let arbiter = Arbiter::new_and_register(
-        &engine,
-        top,
-        "arb",
-        spawner,
-        3,
-        Box::new(RoundRobinPolicy::new()),
-    )
-    .unwrap();
+    let arbiter =
+        Arbiter::new_and_register(&engine, top, "arb", spawner, 3, Box::new(RoundRobin::new()))
+            .unwrap();
     let source_a =
         Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na)).unwrap();
     let source_b =
@@ -131,7 +120,7 @@ fn input_order() {
         "arb",
         spawner.clone(),
         3,
-        Box::new(RoundRobinPolicy::new()),
+        Box::new(RoundRobin::new()),
     )
     .unwrap();
     let source_a = Source::new_and_register(
@@ -199,7 +188,7 @@ fn more_inputs() {
         "arb",
         spawner.clone(),
         2,
-        Box::new(RoundRobinPolicy::new()),
+        Box::new(RoundRobin::new()),
     )
     .unwrap();
     let source_a =
@@ -235,7 +224,7 @@ fn no_output() {
         "arb",
         spawner.clone(),
         3,
-        Box::new(RoundRobinPolicy::new()),
+        Box::new(RoundRobin::new()),
     )
     .unwrap();
     let source_a =
@@ -286,7 +275,7 @@ fn weighted_policy() {
         file!(),
         spawner.clone(),
         num_inputs,
-        Box::new(WeightedRoundRobinPolicy::new(weights.clone(), num_inputs).unwrap()),
+        Box::new(WeightedRoundRobin::new(weights.clone(), num_inputs).unwrap()),
     )
     .unwrap();
     let source_a = Source::new_and_register(
@@ -436,9 +425,7 @@ fn panic_priority_policy() {
         "arb",
         spawner,
         num_inputs,
-        Box::new(
-            PriorityRoundRobinPolicy::from_priorities(priorities.clone(), num_inputs + 1).unwrap(),
-        ),
+        Box::new(PriorityRoundRobin::from_priorities(priorities.clone(), num_inputs + 1).unwrap()),
     )
     .unwrap();
 }

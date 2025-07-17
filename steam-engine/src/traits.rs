@@ -9,10 +9,9 @@ use std::pin::Pin;
 use std::rc::Rc;
 
 use async_trait::async_trait;
-use steam_track::tag::Tagged;
+use steam_track::id::Unique;
 
-use crate::sim_error;
-use crate::types::{AccessType, SimError, SimResult};
+use crate::types::{AccessType, SimResult};
 
 /// The `TotalBytes` trait is used to determine how many bytes an object
 /// represents
@@ -26,8 +25,8 @@ pub trait TotalBytes {
 /// The `Routable` trait provides an interface to an object to enable it to be
 /// routed
 pub trait Routable {
-    fn dest(&self) -> Result<u64, SimError>;
-    fn req_type(&self) -> Result<AccessType, SimError>;
+    fn destination(&self) -> u64;
+    fn access_type(&self) -> AccessType;
 }
 
 /// A super-trait that objects that are passed around the simulation have to
@@ -41,11 +40,11 @@ pub trait Routable {
 ///    implementation.
 ///  - Routable:    Allows routing.
 ///  - TotalBytes:  Allows rate limiting.
-///  - Tagged:      Allows for simple logging
+///  - Unique:      Allows for unique identification of `Entities`.
 ///  - 'static:     Due to the way that futures are implemented, the lifetimes
 ///    need to be `static. This means that objects may have to be placed in
 ///    `Box` to make the static.
-pub trait SimObject: Clone + Debug + Display + Routable + Tagged + TotalBytes + 'static {}
+pub trait SimObject: Clone + Debug + Display + Unique + TotalBytes + 'static {}
 
 // Implementations for basic types that can be sent around the simulation for
 // testing
@@ -58,17 +57,16 @@ impl TotalBytes for i32 {
 }
 
 impl Routable for i32 {
-    fn dest(&self) -> Result<u64, SimError> {
-        Ok(*self as u64)
+    fn destination(&self) -> u64 {
+        *self as u64
     }
-    fn req_type(&self) -> Result<AccessType, SimError> {
-        Ok(match self {
+    fn access_type(&self) -> AccessType {
+        match self {
             0 => AccessType::Read,
             1 => AccessType::Write,
             2 => AccessType::WriteNonPosted,
-            3 => AccessType::Control,
-            _ => return sim_error!(format!("Unsupported ReqType {}", self)),
-        })
+            _ => AccessType::Control,
+        }
     }
 }
 
@@ -82,17 +80,16 @@ impl TotalBytes for usize {
 }
 
 impl Routable for usize {
-    fn dest(&self) -> Result<u64, SimError> {
-        Ok(*self as u64)
+    fn destination(&self) -> u64 {
+        *self as u64
     }
-    fn req_type(&self) -> Result<AccessType, SimError> {
-        Ok(match self {
+    fn access_type(&self) -> AccessType {
+        match self {
             0 => AccessType::Read,
             1 => AccessType::Write,
             2 => AccessType::WriteNonPosted,
-            3 => AccessType::Control,
-            _ => return sim_error!(format!("Unsupported ReqType {}", self)),
-        })
+            _ => AccessType::Control,
+        }
     }
 }
 

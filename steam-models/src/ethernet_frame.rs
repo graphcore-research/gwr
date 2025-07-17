@@ -6,10 +6,10 @@ use std::fmt::Display;
 use std::sync::Arc;
 
 use steam_engine::traits::{Routable, SimObject, TotalBytes};
-use steam_engine::types::{AccessType, SimError};
+use steam_engine::types::AccessType;
 use steam_track::entity::Entity;
-use steam_track::tag::Tagged;
-use steam_track::{Tag, create, create_tag};
+use steam_track::id::Unique;
+use steam_track::{Id, create, create_id};
 
 pub const PREAMBLE_BYTES: usize = 7;
 pub const SFD_BYTES: usize = 1;
@@ -43,7 +43,7 @@ pub fn u64_to_mac(value: u64) -> [u8; DEST_MAC_BYTES] {
 #[derive(Clone, Debug)]
 pub struct EthernetFrame {
     created_by: Arc<Entity>,
-    tag: Tag,
+    id: Id,
 
     // We don't include the Preamble / SFD bytes in the frame contents
     dst_mac: [u8; DEST_MAC_BYTES],
@@ -58,13 +58,13 @@ impl EthernetFrame {
     pub fn new(created_by: &Arc<Entity>, payload_size_bytes: usize) -> Self {
         let frame = Self {
             created_by: created_by.clone(),
-            tag: create_tag!(created_by),
+            id: create_id!(created_by),
             dst_mac: [0; DEST_MAC_BYTES],
             src_mac: [0; DEST_MAC_BYTES],
             payload_size_bytes,
         };
         // Having just created the frame the req_type must be valid
-        create!(created_by ; frame, frame.total_bytes(), frame.req_type().unwrap() as i8);
+        create!(created_by ; frame, frame.total_bytes(), frame.access_type() as i8);
         frame
     }
 
@@ -109,19 +109,19 @@ impl TotalBytes for EthernetFrame {
     }
 }
 
-impl Tagged for EthernetFrame {
-    fn tag(&self) -> Tag {
-        self.tag
+impl Unique for EthernetFrame {
+    fn id(&self) -> Id {
+        self.id
     }
 }
 
 impl Routable for EthernetFrame {
-    fn dest(&self) -> Result<u64, SimError> {
-        Ok(self.get_dst())
+    fn destination(&self) -> u64 {
+        self.get_dst()
     }
 
-    fn req_type(&self) -> Result<AccessType, SimError> {
-        Ok(AccessType::Control)
+    fn access_type(&self) -> AccessType {
+        AccessType::Control
     }
 }
 
@@ -134,17 +134,17 @@ impl TotalBytes for Box<EthernetFrame> {
     }
 }
 
-impl Tagged for Box<EthernetFrame> {
-    fn tag(&self) -> steam_track::Tag {
-        self.as_ref().tag()
+impl Unique for Box<EthernetFrame> {
+    fn id(&self) -> steam_track::Id {
+        self.as_ref().id()
     }
 }
 
 impl Routable for Box<EthernetFrame> {
-    fn dest(&self) -> Result<u64, SimError> {
-        self.as_ref().dest()
+    fn destination(&self) -> u64 {
+        self.as_ref().destination()
     }
-    fn req_type(&self) -> Result<AccessType, SimError> {
-        self.as_ref().req_type()
+    fn access_type(&self) -> AccessType {
+        self.as_ref().access_type()
     }
 }

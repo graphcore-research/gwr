@@ -41,6 +41,7 @@ function sunburst(serverUrl, data) {
     .data(root.descendants().slice(1))
     .join("path")
       .attr("fill", d => { while (d.depth > 1) d = d.parent; return color(d.data.name); })
+      .attr("class", "node")
       .attr("fill-opacity", d => arcVisible(d.current) ? (d.children ? 0.6 : 0.4) : 0)
       .attr("pointer-events", d => arcVisible(d.current) ? "auto" : "none")
       .attr("d", d => arc(d.current));
@@ -48,7 +49,7 @@ function sunburst(serverUrl, data) {
   // Make them clickable if they have children.
   path.filter(d => d.children)
       .style("cursor", "pointer")
-      .on("click", clicked);
+      .on("click", (event, d) => clicked(svg, event, d));
 
   const format = d3.format(",d");
   path.append("title")
@@ -70,11 +71,15 @@ function sunburst(serverUrl, data) {
       .datum(root)
       .attr("r", radius)
       .attr("fill", "none")
+      .attr("class", "node")
       .attr("pointer-events", "all")
-      .on("click", clicked);
+      .on("click", (event, d) => clicked(svg, event, d));
 
   // Handle zoom on click.
-  function clicked(event, p) {
+  function clicked(svg, event, p) {
+    console.log(p);
+    select(svg, p.id, p.data);
+
     parent.datum(p.parent || root);
 
     root.each(d => d.target = {

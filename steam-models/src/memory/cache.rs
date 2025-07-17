@@ -1,13 +1,11 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
-//! A basic n-way associative cache model.
+//! A basic n-way set-associative cache model.
 //!
-//! This is currently just a proof of concept that the ports can be created with
-//! different names that handle the same data type. This was not possible with
-//! the multi-threaded / async-trait approach.
+//! The cache provides no memory ordering guarantees.
 //!
-//! The basic wiring of requests should be working, and the core tag / way
-//! management has simple tests.
+//! TODO: Should cache accesses return an error if they are not
+//! cache-line aligned or sized?
 //!
 //! ```text
 //!  ----------------------------
@@ -19,7 +17,7 @@
 //!  |  dev_rx          dev_tx  |
 //!  |    |               ^     |
 //!  |    |               |     |
-//!  |    |         0 response  |
+//!  |    |        0  response  |
 //!  |    +--delay--> arbiter   |
 //!  |    |               ^     |
 //!  |  delay             | 1   |
@@ -38,7 +36,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use steam_components::arbiter::{Arbiter, RoundRobinPolicy};
+use steam_components::arbiter::Arbiter;
+use steam_components::arbiter::policy::RoundRobin;
 use steam_components::delay::Delay;
 use steam_components::{connect_tx, port_rx, take_option};
 use steam_engine::engine::Engine;
@@ -52,15 +51,18 @@ use steam_model_builder::EntityDisplay;
 use steam_track::entity::Entity;
 use steam_track::trace;
 
-use crate::memory::{AccessMemory, MemoryRead};
+#[cfg(test)]
+use crate::memory::memory_access::MemoryAccess;
+use crate::memory::traits::{AccessMemory, ReadMemory};
 
 type Tag = u64;
+type Index = usize;
 
 #[derive(Clone)]
 pub struct CacheConfig {
     line_size_bytes: usize,
     bw_bytes_per_cycle: usize,
-    num_lines: usize,
+    num_sets: usize,
     num_ways: usize,
     delay_ticks: usize,
 }
@@ -70,14 +72,14 @@ impl CacheConfig {
     pub fn new(
         line_size_bytes: usize,
         bw_bytes_per_cycle: usize,
-        num_lines: usize,
+        num_sets: usize,
         num_ways: usize,
         delay_ticks: usize,
     ) -> Self {
         Self {
             line_size_bytes,
             bw_bytes_per_cycle,
-            num_lines,
+            num_sets,
             num_ways,
             delay_ticks,
         }
@@ -86,84 +88,163 @@ impl CacheConfig {
 
 #[derive(Clone, Default)]
 struct CacheMetrics {
-    bytes_read: usize,
-    bytes_written: usize,
+    payload_bytes_read: usize,
+    payload_bytes_written: usize,
     num_hits: usize,
     num_misses: usize,
 }
 
-type TagWays = Vec<Tag>;
-type TagEntries = Vec<TagWays>;
-type ValidWays = Vec<bool>;
-type ValidEntries = Vec<ValidWays>;
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+enum EntryState {
+    #[default]
+    Available,
+    Allocated,
+    ValidData,
+}
 
-struct CacheContents {
-    num_entries: usize,
+#[derive(Default, Clone)]
+struct CacheEntry {
+    state: EntryState,
+    tag: Tag,
+}
+
+// Cache structure:
+//  A set comprises N-ways
+type Set = Vec<CacheEntry>;
+//  The cache comprises M-sets
+type Sets = Vec<Set>;
+
+struct CacheContents<T>
+where
+    T: SimObject + AccessMemory,
+{
     config: CacheConfig,
-    valid: ValidEntries,
-    tags: TagEntries,
+    sets: Sets,
+    waiting_for_response: Vec<(Tag, Index, T)>,
     lru_indices: Vec<usize>,
 }
 
-impl CacheContents {
+impl<T> CacheContents<T>
+where
+    T: SimObject + AccessMemory,
+{
     fn new(config: CacheConfig) -> Self {
-        let num_entries = config.num_lines / config.num_ways;
-        let valid = vec![vec![false; config.num_ways]; num_entries];
-        let tags = vec![vec![0; config.num_ways]; num_entries];
-        let lru_indices = vec![0; num_entries];
+        let sets = vec![vec![CacheEntry::default(); config.num_ways]; config.num_sets];
+        let lru_indices = vec![0; config.num_sets];
         Self {
-            num_entries,
             config,
-            valid,
-            tags,
+            sets,
+            waiting_for_response: Vec::new(),
             lru_indices,
         }
     }
 
-    fn entry_for(&self, addr: u64) -> (Tag, usize) {
-        let tag = addr / self.config.line_size_bytes as Tag;
-        (tag, tag as usize % self.num_entries)
+    /// Split up an address into its component parts:
+    ///
+    ///  msb                  lsb
+    ///  +-----+-------+--------+
+    ///  | tag | index | offset |
+    ///  +-----+-------+--------+
+    ///
+    /// Where:
+    ///  - offset within a cache line
+    ///  - index is the part of the address used to select a cache set (n-ways)
+    ///  - tag contains the rest of the address that is compared to determine
+    ///    address matches
+    fn tag_and_index_for_addr(&self, addr: u64) -> (Tag, Index) {
+        let index = (addr as usize / self.config.line_size_bytes) % self.config.num_sets;
+        let tag = addr / self.config.line_size_bytes as u64 / self.config.num_sets as u64;
+        (tag, index)
     }
 
-    fn contains(&self, addr: u64) -> bool {
-        let (tag, index) = self.entry_for(addr);
+    fn state_for(&self, addr: u64) -> Option<EntryState> {
+        let (tag, index) = self.tag_and_index_for_addr(addr);
         for i in 0..self.config.num_ways {
-            if self.valid[index][i] && self.tags[index][i] == tag {
-                return true;
+            if (self.sets[index][i].state != EntryState::Available)
+                && self.sets[index][i].tag == tag
+            {
+                return Some(self.sets[index][i].state);
             }
         }
-        false
+        None
     }
 
-    fn insert(&mut self, addr: u64) {
-        let (tag, index) = self.entry_for(addr);
+    fn allocate(&mut self, addr: u64) {
+        let (tag, index) = self.tag_and_index_for_addr(addr);
 
         let insert_index = self.lru_indices[index];
         self.lru_indices[index] = (self.lru_indices[index] + 1) % self.config.num_ways;
 
-        self.tags[index][insert_index] = tag;
-        self.valid[index][insert_index] = true;
+        self.sets[index][insert_index].tag = tag;
+        self.sets[index][insert_index].state = EntryState::Allocated;
     }
 
-    fn invalidate(&mut self, addr: u64) {
-        let (tag, index) = self.entry_for(addr);
+    fn set_data_valid(&mut self, addr: u64) {
+        let (tag, index) = self.tag_and_index_for_addr(addr);
+
         for i in 0..self.config.num_ways {
-            if self.tags[index][i] == tag {
-                self.valid[index][i] = false;
-                self.tags[index][i] = 0;
+            if (self.sets[index][i].state != EntryState::Available)
+                && self.sets[index][i].tag == tag
+            {
+                self.sets[index][i].state = EntryState::ValidData;
                 break;
             }
         }
     }
+
+    fn invalidate(&mut self, addr: u64) {
+        let (tag, index) = self.tag_and_index_for_addr(addr);
+
+        for i in 0..self.config.num_ways {
+            if self.sets[index][i].tag == tag {
+                self.sets[index][i].state = EntryState::Available;
+                self.sets[index][i].tag = 0;
+                break;
+            }
+        }
+    }
+
+    fn add_waiting_for_response(&mut self, request: T) {
+        let (tag, index) = self.tag_and_index_for_addr(request.destination());
+        self.waiting_for_response.push((tag, index, request));
+    }
+
+    fn get_requests_waiting_for_response(&mut self, response: &T) -> Option<Vec<T>> {
+        // The `source` on the response is the original `destination`
+        let (response_tag, response_index) = self.tag_and_index_for_addr(response.source());
+
+        // If there are any requests waiting for this response then return matching sets
+        if self
+            .waiting_for_response
+            .iter()
+            .any(|(tag, index, _x)| *tag == response_tag && *index == response_index)
+        {
+            let all: Vec<(Tag, Index, T)> = self.waiting_for_response.drain(..).collect();
+            let (matching, not_matching) = all
+                .into_iter()
+                .partition(|(tag, index, _x)| *tag == response_tag && *index == response_index);
+            self.waiting_for_response = not_matching;
+            let matching = matching.into_iter().map(|(_, _, x)| x).collect();
+            Some(matching)
+        } else {
+            None
+        }
+    }
 }
 
-impl MemoryRead for CacheContents {
+impl<T> ReadMemory for CacheContents<T>
+where
+    T: SimObject + AccessMemory,
+{
     fn read(&self) -> Vec<u8> {
         Vec::new()
     }
 }
 
-impl MemoryRead for RefCell<CacheContents> {
+impl<T> ReadMemory for RefCell<CacheContents<T>>
+where
+    T: SimObject + AccessMemory,
+{
     fn read(&self) -> Vec<u8> {
         Vec::new()
     }
@@ -179,7 +260,7 @@ where
     clock: Clock,
     spawner: Spawner,
     metrics: Rc<RefCell<CacheMetrics>>,
-    contents: Rc<RefCell<CacheContents>>,
+    contents: Rc<RefCell<CacheContents<T>>>,
 
     response_arbiter: RefCell<Option<Rc<Arbiter<T>>>>,
 
@@ -212,7 +293,7 @@ where
         let bw_bytes_per_cycle = config.bw_bytes_per_cycle;
         let entity = Arc::new(Entity::new(parent, name));
 
-        let policy = Box::new(RoundRobinPolicy::new());
+        let policy = Box::new(RoundRobin::new());
         let response_arbiter =
             Arbiter::new_and_register(engine, &entity, "rsp_arb", spawner.clone(), 2, policy)?;
 
@@ -286,13 +367,13 @@ where
     }
 
     #[must_use]
-    pub fn bytes_written(&self) -> usize {
-        self.metrics.borrow().bytes_written
+    pub fn payload_bytes_read(&self) -> usize {
+        self.metrics.borrow().payload_bytes_read
     }
 
     #[must_use]
-    pub fn bytes_read(&self) -> usize {
-        self.metrics.borrow().bytes_read
+    pub fn payload_bytes_written(&self) -> usize {
+        self.metrics.borrow().payload_bytes_written
     }
 
     #[must_use]
@@ -313,7 +394,7 @@ where
     entity: Arc<Entity>,
     rx: InPort<T>,
     clock: Clock,
-    contents: Rc<RefCell<CacheContents>>,
+    contents: Rc<RefCell<CacheContents<T>>>,
     metrics: Rc<RefCell<CacheMetrics>>,
     bw_bytes_per_cycle: usize,
 }
@@ -365,9 +446,9 @@ where
     loop {
         let request = state.rx.get()?.await;
         trace!(state.entity ; "Device request {}", request);
-        let access_bytes = request.num_bytes();
+        let total_bytes = request.total_bytes();
         handle_request(state, &req, &rsp_arb_1, request).await?;
-        let ticks = access_bytes.div_ceil(state.bw_bytes_per_cycle);
+        let ticks = total_bytes.div_ceil(state.bw_bytes_per_cycle);
         state.clock.wait_ticks(ticks as u64).await;
     }
 }
@@ -381,32 +462,39 @@ async fn handle_request<T>(
 where
     T: SimObject + AccessMemory,
 {
-    let addr = request.dst_addr();
-    let access_bytes = request.num_bytes();
-    match request.req_type()? {
+    let addr = request.destination();
+    match request.access_type() {
         AccessType::Control => {
             state.contents.borrow_mut().invalidate(addr);
         }
         AccessType::Read => {
-            state.metrics.borrow_mut().bytes_read += access_bytes;
-            if state.contents.borrow().contains(addr) {
-                let response = request.to_response(state.contents.as_ref());
-                rsp_arb_1.put(response)?.await;
-                state.metrics.borrow_mut().num_hits += 1;
-            } else {
-                req.put(request)?.await;
-                state.metrics.borrow_mut().num_misses += 1;
-            }
-        }
-        AccessType::Write | AccessType::WriteNonPosted => {
-            state.metrics.borrow_mut().bytes_written += access_bytes;
-            {
-                let mut contents = state.contents.borrow_mut();
-                if contents.contains(addr) {
-                    // Write hits in cache - flush contents
-                    contents.invalidate(addr);
+            state.metrics.borrow_mut().payload_bytes_read += request.access_size_bytes();
+            let line_state = state.contents.borrow().state_for(addr);
+            match line_state {
+                Some(EntryState::ValidData) => {
+                    let response = request.to_response(state.contents.as_ref());
+                    rsp_arb_1.put(response)?.await;
+                    state.metrics.borrow_mut().num_hits += 1;
+                }
+                Some(EntryState::Allocated) => {
+                    // There is an outstanding request to memory for this address already
+                    state
+                        .contents
+                        .borrow_mut()
+                        .add_waiting_for_response(request);
+                    state.metrics.borrow_mut().num_hits += 1;
+                }
+                Some(EntryState::Available) | None => {
+                    state.contents.borrow_mut().allocate(addr);
+                    req.put(request)?.await;
+                    state.metrics.borrow_mut().num_misses += 1;
                 }
             }
+        }
+
+        AccessType::Write | AccessType::WriteNonPosted => {
+            state.metrics.borrow_mut().payload_bytes_written += request.access_size_bytes();
+            state.contents.borrow_mut().invalidate(addr);
             req.put(request)?.await;
         }
     }
@@ -421,9 +509,9 @@ where
     loop {
         let response = state.rx.get()?.await;
         trace!(state.entity ; "Memory response {}", response);
-        let access_bytes = response.num_bytes();
+        let total_bytes = response.total_bytes();
         handle_response(state, &rsp_arb_0, response).await?;
-        let ticks = access_bytes.div_ceil(state.bw_bytes_per_cycle);
+        let ticks = total_bytes.div_ceil(state.bw_bytes_per_cycle);
         state.clock.wait_ticks(ticks as u64).await;
     }
 }
@@ -436,7 +524,7 @@ async fn handle_response<T>(
 where
     T: SimObject + AccessMemory,
 {
-    match access.req_type()? {
+    match access.access_type() {
         AccessType::Control => {
             // Drop and ignore for now
         }
@@ -444,9 +532,22 @@ where
             return sim_error!(format!("{}: read on response port", state.entity));
         }
         AccessType::Write => {
-            // Store with the source address that it is handling
-            state.contents.borrow_mut().insert(access.src_addr());
+            state.contents.borrow_mut().set_data_valid(access.source());
+            let matching = state
+                .contents
+                .borrow_mut()
+                .get_requests_waiting_for_response(&access);
+
+            // Forward this response back to the memory (via the arbiter)
             rsp_arb_0.put(access)?.await;
+
+            // Forward on
+            if let Some(m) = matching {
+                for x in m {
+                    let response = x.to_response(state.contents.as_ref());
+                    rsp_arb_0.put(response)?.await;
+                }
+            }
         }
         AccessType::WriteNonPosted => {
             return sim_error!(format!(
@@ -463,31 +564,31 @@ where
 fn basic_ways() {
     let line_size_bytes = 32;
     let bw_bytes_per_cycle = 32;
-    let num_lines = 1024;
+    let num_sets = 1024;
     let num_ways = 4;
-    let config = CacheConfig::new(line_size_bytes, bw_bytes_per_cycle, num_lines, num_ways, 8);
-    let mut state = CacheContents::new(config);
+    let config = CacheConfig::new(line_size_bytes, bw_bytes_per_cycle, num_sets, num_ways, 8);
+    let mut state: CacheContents<MemoryAccess> = CacheContents::new(config);
 
     let mut addrs = Vec::new();
     let mut addr = 0x1000000;
     for _ in 0..num_ways + 1 {
         addrs.push(addr);
-        addr += (line_size_bytes * (num_lines / num_ways)) as u64;
+        addr += (line_size_bytes * num_sets * num_ways) as u64;
     }
 
     for addr in addrs.iter().take(num_ways) {
-        assert!(!state.contains(*addr));
-        state.insert(*addr);
-        assert!(state.contains(*addr));
+        assert_eq!(state.state_for(*addr), None);
+        state.allocate(*addr);
+        assert_eq!(state.state_for(*addr), Some(EntryState::Allocated));
     }
 
-    state.insert(addrs[num_ways]);
+    state.allocate(addrs[num_ways]);
 
     // Should have been evicted
-    assert!(!state.contains(addrs[0]));
+    assert_eq!(state.state_for(addrs[0]), None);
     for i in 0..num_ways {
         // While all the rest remain
-        assert!(state.contains(addrs[i + 1]));
+        assert_eq!(state.state_for(addrs[i + 1]), Some(EntryState::Allocated));
     }
 }
 
@@ -495,11 +596,11 @@ fn basic_ways() {
 fn invalidate() {
     let num_ways = 4;
     let config = CacheConfig::new(32, 32, 1024, num_ways, 8);
-    let mut state = CacheContents::new(config);
+    let mut state: CacheContents<MemoryAccess> = CacheContents::new(config);
 
     let addr = 0x40000;
-    state.insert(addr);
-    assert!(state.contains(addr));
+    state.allocate(addr);
+    assert_eq!(state.state_for(addr), Some(EntryState::Allocated));
     state.invalidate(addr);
-    assert!(!state.contains(addr));
+    assert_eq!(state.state_for(addr), None);
 }

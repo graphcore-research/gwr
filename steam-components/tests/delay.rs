@@ -93,7 +93,7 @@ fn source_sink() {
 
 #[test]
 #[should_panic(expected = "top::delay delay output stalled")]
-fn blocked_output() {
+fn error_on_output_stall() {
     // Cause the delay to raise an assertion because it will find the buffer full
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
@@ -109,6 +109,7 @@ fn blocked_output() {
     let delay =
         Delay::new_and_register(&engine, top, "delay", clock.clone(), spawner.clone(), DELAY)
             .unwrap();
+    delay.set_error_on_output_stall();
     let store = Store::new_and_register(&engine, top, "store", spawner, 1).unwrap();
 
     connect_port!(source, tx => delay, rx).unwrap();

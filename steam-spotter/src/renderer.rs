@@ -7,7 +7,7 @@ use crate::app::{CHUNK_SIZE, EventLine, INITIAL_SIZE, ToFullness, ToTime};
 const UNKNOWN: &str = "???";
 
 pub struct Renderer {
-    tag_to_name: HashMap<u64, String>,
+    id_to_name: HashMap<u64, String>,
 
     /// Current location within the file
     render_index: usize,
@@ -35,7 +35,7 @@ pub struct Renderer {
 impl Renderer {
     pub fn new() -> Self {
         Self {
-            tag_to_name: HashMap::with_capacity(INITIAL_SIZE),
+            id_to_name: HashMap::with_capacity(INITIAL_SIZE),
             blocks: Vec::with_capacity(INITIAL_SIZE),
             render_indices: None,
             num_render_lines: 0,
@@ -76,17 +76,17 @@ impl Renderer {
         self.blocks[block_index] = chunk;
     }
 
-    fn name_tag<'a>(&'a self, tag: &u64, tmp: &'a mut String) -> &'a str {
+    fn name_id<'a>(&'a self, id: &u64, tmp: &'a mut String) -> &'a str {
         tmp.clear();
-        tmp.push_str(tag.to_string().as_str());
+        tmp.push_str(id.to_string().as_str());
 
         if self.print_names {
             tmp.push_str(": ");
-            match tag {
+            match id {
                 0 => {
                     tmp.push_str("root");
                 }
-                _ => match self.tag_to_name.get(tag) {
+                _ => match self.id_to_name.get(id) {
                     Some(name) => tmp.push_str(name),
                     None => tmp.push_str(UNKNOWN),
                 },
@@ -96,15 +96,15 @@ impl Renderer {
         tmp.as_str()
     }
 
-    fn packet_tag<'a>(&'a self, tag: &u64, tmp: &'a mut String) -> &'a str {
+    fn packet_id<'a>(&'a self, id: &u64, tmp: &'a mut String) -> &'a str {
         tmp.clear();
-        tmp.push_str(tag.to_string().as_str());
+        tmp.push_str(id.to_string().as_str());
 
         if self.print_packets {
             tmp.push_str(": ");
-            match tag {
+            match id {
                 0 => tmp.push_str("root"),
-                _ => match self.tag_to_name.get(tag) {
+                _ => match self.id_to_name.get(id) {
                     Some(name) => tmp.push_str(name),
                     None => tmp.push_str(UNKNOWN),
                 },
@@ -152,49 +152,49 @@ impl Renderer {
         let mut tmp1 = String::new();
         let (mut line, time) = match event_line {
             EventLine::Enter {
-                tag,
+                id,
                 entered,
                 fullness,
                 time,
             } => {
-                let name = self.name_tag(tag, &mut tmp0);
-                let packet = self.packet_tag(entered, &mut tmp1);
+                let name = self.name_id(id, &mut tmp0);
+                let packet = self.packet_id(entered, &mut tmp1);
                 (format!("{name}: <= {packet} ({fullness})").to_owned(), time)
             }
 
             EventLine::Exit {
-                tag,
+                id,
                 exited,
                 fullness,
                 time,
             } => {
-                let name = self.name_tag(tag, &mut tmp0);
-                let packet = self.packet_tag(exited, &mut tmp1);
+                let name = self.name_id(id, &mut tmp0);
+                let packet = self.packet_id(exited, &mut tmp1);
                 (format!("{name}: => {packet} ({fullness})").to_owned(), time)
             }
 
             EventLine::Log {
                 level: _,
-                tag,
+                id,
                 msg,
                 time,
             } => {
-                let name = self.name_tag(tag, &mut tmp0);
+                let name = self.name_id(id, &mut tmp0);
                 (format!("{name}: {msg}").to_owned(), time)
             }
 
-            EventLine::Create { tag, time } => {
-                let name = self.name_tag(tag, &mut tmp0);
+            EventLine::Create { id, time } => {
+                let name = self.name_id(id, &mut tmp0);
                 (format!("{name}: created").to_owned(), time)
             }
 
             EventLine::Connect {
-                from_tag,
-                to_tag,
+                from_id,
+                to_id,
                 time,
             } => {
-                let from_name = self.name_tag(from_tag, &mut tmp0);
-                let to_name = self.name_tag(to_tag, &mut tmp1);
+                let from_name = self.name_id(from_id, &mut tmp0);
+                let to_name = self.name_id(to_id, &mut tmp1);
                 (
                     format!("{from_name}: connect to {to_name}").to_owned(),
                     time,
@@ -214,8 +214,8 @@ impl Renderer {
         self.blocks.push(Some(lines));
     }
 
-    pub fn extend_tag_to_name(&mut self, tag_to_name: HashMap<u64, String>) {
-        self.tag_to_name.extend(tag_to_name);
+    pub fn extend_id_to_name(&mut self, id_to_name: HashMap<u64, String>) {
+        self.id_to_name.extend(id_to_name);
     }
 
     fn render_index_to_absolute_index(&self, line: usize) -> usize {

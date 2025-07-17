@@ -2,7 +2,8 @@
 
 /// Benchmark basic component usage.
 use criterion::{BatchSize, Criterion, criterion_group};
-use steam_components::arbiter::{Arbiter, Priority, RoundRobinPolicy};
+use steam_components::arbiter::Arbiter;
+use steam_components::arbiter::policy::{Priority, RoundRobin};
 use steam_components::delay::Delay;
 use steam_components::flow_controls::limiter::Limiter;
 use steam_components::sink::Sink;
@@ -115,7 +116,7 @@ fn spawn_larger_simulation() -> Engine {
         "arb",
         spawner,
         num_sources,
-        Box::new(RoundRobinPolicy::new()),
+        Box::new(RoundRobin::new()),
     )
     .unwrap();
     let sink_limiter = Limiter::new_and_register(&engine, top, "limit_sink", rate_limiter).unwrap();

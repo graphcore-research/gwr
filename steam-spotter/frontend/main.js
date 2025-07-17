@@ -1,7 +1,7 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
 // Add an entity within a hierarchical tree of nodes
-function add_entity(depth, nodes, path_remaining, full_name, tag) {
+function add_entity(depth, nodes, path_remaining, full_name, id) {
   if (path_remaining.length == 0) {
     return nodes;
   }
@@ -22,7 +22,7 @@ function add_entity(depth, nodes, path_remaining, full_name, tag) {
       name: name,
       full_name: full_name,
       depth: depth,
-      tag: tag,
+      id: id,
     }
     nodes.push(node);
   }
@@ -32,7 +32,7 @@ function add_entity(depth, nodes, path_remaining, full_name, tag) {
   } else {
     children = [];
   }
-  children = add_entity(depth + 1, children, path_remaining, full_name, tag);
+  children = add_entity(depth + 1, children, path_remaining, full_name, id);
 
   if (children.length > 0) {
     node.children = children;
@@ -43,15 +43,15 @@ function add_entity(depth, nodes, path_remaining, full_name, tag) {
 }
 
 // Parse create messages of the form:
-//   hierarchical::name=tag
+//   hierarchical::name=id
 function parse_entities(text, entities) {
   const lines = text.split("\n")
   let max_depth = 0;
   lines.forEach(function(line) {
-    const [name, tag] = line.split("=");
+    const [name, id] = line.split("=");
     const name_path = name.split("::");
     max_depth = Math.max(max_depth, name_path.length);
-    add_entity(0, entities, name_path, name, tag);
+    add_entity(0, entities, name_path, name, id);
   });
   return max_depth - 1;
 }
@@ -61,13 +61,13 @@ function add_connection(connections, line_data) {
     console.log("Ignoring line:");
     console.log(line_data);
   }
-  const from_tag = line_data[0].trim();
-  const to_tag = line_data[1].trim();
-  connections.push([from_tag, to_tag]);
+  const from_id = line_data[0].trim();
+  const to_id = line_data[1].trim();
+  connections.push([from_id, to_id]);
 }
 
 // Parse connect messages of the form:
-//  from_tag->to_tag
+//  from_id->to_id
 function parse_connections(text) {
   let connections = [];
   const lines = text.split("\n")

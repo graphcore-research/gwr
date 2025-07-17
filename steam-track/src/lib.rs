@@ -24,7 +24,7 @@ use std::sync::{Arc, Mutex};
 pub use log;
 
 pub mod entity;
-pub mod tag;
+pub mod id;
 
 /// Include the trackers.
 pub mod tracker;
@@ -45,32 +45,32 @@ pub fn str_to_level(lvl: &str) -> log::Level {
     }
 }
 
-/// Type used for unique tags
+/// Type used for unique IDs
 ///
-/// Each _log_/_trace_ event within the application is given a unique tag to
-/// identify it. There are two reserved tag values: [NO_ID](constant.NO_ID.html)
+/// Each _log_/_trace_ event within the application is given a unique ID to
+/// identify it. There are two reserved ID values: [NO_ID](constant.NO_ID.html)
 /// and [ROOT](constant.ROOT.html)
-pub use tag::Tag;
+pub use id::Id;
 
 pub mod test_helpers;
 pub mod trace_visitor;
 
-/// Tag value which indicates where there is no valid tag
-pub const NO_ID: Tag = tag::Tag(0);
+/// ID value which indicates where there is no valid ID
+pub const NO_ID: Id = id::Id(0);
 
-/// The root tag from which all other tags are derived
-pub const ROOT: Tag = tag::Tag(1);
+/// The root ID from which all other IDs are derived
+pub const ROOT: Id = id::Id(1);
 
 // Track an enter event.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! enter {
-    ($entity:expr ; $enter_tag:expr) => {
+    ($entity:expr ; $enter_id:expr) => {
         if $entity
             .tracker
-            .is_entity_enabled($entity.tag, log::Level::Trace)
+            .is_entity_enabled($entity.id, log::Level::Trace)
         {
-            $entity.tracker.enter($entity.tag, $enter_tag);
+            $entity.tracker.enter($entity.id, $enter_id);
         }
     };
 }
@@ -79,62 +79,62 @@ macro_rules! enter {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! exit {
-    ($entity:expr ; $exit_tag:expr) => {
+    ($entity:expr ; $exit_id:expr) => {
         if $entity
             .tracker
-            .is_entity_enabled($entity.tag, log::Level::Trace)
+            .is_entity_enabled($entity.id, log::Level::Trace)
         {
-            $entity.tracker.exit($entity.tag, $exit_tag);
+            $entity.tracker.exit($entity.id, $exit_id);
         }
     };
 }
 
-/// Create a unique tag for tracking.
+/// Create a unique ID for tracking.
 ///
-/// The user must specify an entity with a [`Tracker`] to create the tag.
+/// The user must specify an entity with a [`Tracker`] to create the ID.
 ///
 /// **Note:** this macro should be used when the object being assigned the
-///           [`Tag`] will have its creation tracked with [`create`].
+///           [`Id`] will have its creation tracked with [`create`].
 #[macro_export]
-macro_rules! create_tag {
-    ($entity:expr) => {{ $entity.tracker.unique_tag() }};
+macro_rules! create_id {
+    ($entity:expr) => {{ $entity.tracker.unique_id() }};
 }
 
-/// Create a unique tag for tracking and track the creation.
+/// Create a unique ID for tracking and track the creation.
 ///
-/// The user must specify an entity with a [`Tracker`] to create the tag.
+/// The user must specify an entity with a [`Tracker`] to create the ID.
 /// The creation event will be tracked if the entity has trace enabled.
 ///
 /// **Note:** this macro should only be used if the object being assigned the
-///           [`Tag`] will not have its creation tracked with [`create`].
+///           [`Id`] will not have its creation tracked with [`create`].
 #[macro_export]
-macro_rules! create_and_track_tag {
+macro_rules! create_and_track_id {
     ($entity:expr) => {{
-        let tag = $entity.tracker.unique_tag();
+        let id = $entity.tracker.unique_id();
         if $entity
             .tracker
-            .is_entity_enabled($entity.tag, log::Level::Trace)
+            .is_entity_enabled($entity.id, log::Level::Trace)
         {
-            $entity.tracker.create($entity.tag, tag, 0, 0, "tag");
+            $entity.tracker.create($entity.id, id, 0, 0, "id");
         }
-        tag
+        id
     }};
 }
 
-/// Destroy a tag
+/// Destroy an ID
 ///
-/// Destroying a tag indicates to the logging system that this tag is finished
+/// Destroying an ID indicates to the logging system that this ID is finished
 /// with and should therefore not be used any more. This is not enforced at
 /// runtime, and therefore will not cause any errors to be reported if it is
 /// used.
 #[macro_export]
-macro_rules! destroy_tag {
-    ($entity:expr ; $tag:expr) => {{
+macro_rules! destroy_id {
+    ($entity:expr ; $id:expr) => {{
         if $entity
             .tracker
-            .is_entity_enabled($entity.tag, log::Level::Trace)
+            .is_entity_enabled($entity.id, log::Level::Trace)
         {
-            $entity.tracker.destroy($entity.tag, $tag);
+            $entity.tracker.destroy($entity.id, $id);
         }
     }};
 }
@@ -145,25 +145,25 @@ macro_rules! create {
     ($entity:expr) => {{
         if $entity
             .tracker
-            .is_entity_enabled($entity.tag, log::Level::Trace)
+            .is_entity_enabled($entity.id, log::Level::Trace)
         {
-            let parent_tag = match &$entity.parent {
-                Some(parent) => parent.tag,
+            let parent_id = match &$entity.parent {
+                Some(parent) => parent.id,
                 None => $crate::NO_ID,
             };
             $entity
                 .tracker
-                .create(parent_tag, $entity.tag, 0, 0, $entity.full_name().as_str());
+                .create(parent_id, $entity.id, 0, 0, $entity.full_name().as_str());
         }
     }};
     ($entity:expr ; $created:expr, $num_bytes:expr, $req_type:expr) => {{
         if $entity
             .tracker
-            .is_entity_enabled($entity.tag, log::Level::Trace)
+            .is_entity_enabled($entity.id, log::Level::Trace)
         {
             $entity.tracker.create(
-                $entity.tag,
-                $created.tag,
+                $entity.id,
+                $created.id,
                 $num_bytes,
                 $req_type,
                 format!("{}", $created).as_str(),
@@ -178,11 +178,11 @@ macro_rules! destroy {
     ($entity:expr) => {{
         if $entity
             .tracker
-            .is_entity_enabled($entity.tag, log::Level::Trace)
+            .is_entity_enabled($entity.id, log::Level::Trace)
         {
             match &$entity.parent {
-                Some(parent) => $entity.tracker.destroy($entity.tag, parent.tag),
-                None => $entity.tracker.destroy($entity.tag, $crate::NO_ID),
+                Some(parent) => $entity.tracker.destroy($entity.id, parent.id),
+                None => $entity.tracker.destroy($entity.id, $crate::NO_ID),
             };
         }
     }};
@@ -194,11 +194,9 @@ macro_rules! connect {
     ($from_entity:expr ; $to_entity:expr) => {{
         if $from_entity
             .tracker
-            .is_entity_enabled($from_entity.tag, log::Level::Trace)
+            .is_entity_enabled($from_entity.id, log::Level::Trace)
         {
-            $from_entity
-                .tracker
-                .connect($from_entity.tag, $to_entity.tag);
+            $from_entity.tracker.connect($from_entity.id, $to_entity.id);
         }
     }};
 }
@@ -209,9 +207,9 @@ macro_rules! set_time {
     ($entity:expr ; $time_ns:expr) => {{
         if $entity
             .tracker
-            .is_entity_enabled($entity.tag, log::Level::Trace)
+            .is_entity_enabled($entity.id, log::Level::Trace)
         {
-            $entity.tracker.time($entity.tag, $time_ns);
+            $entity.tracker.time($entity.id, $time_ns);
         }
     }};
 }
@@ -225,8 +223,8 @@ macro_rules! set_time {
 #[macro_export]
 macro_rules! log_base {
     ($entity:expr ; $lvl:expr, $($arg:tt)+) => (
-        if $entity.tracker.is_entity_enabled($entity.tag, $lvl) {
-            $entity.tracker.log($entity.tag, $lvl, format_args!($($arg)+));
+        if $entity.tracker.is_entity_enabled($entity.id, $lvl) {
+            $entity.tracker.log($entity.id, $lvl, format_args!($($arg)+));
         }
     );
 }

@@ -5,7 +5,7 @@ use rocket::fairing::{Fairing, Info, Kind};
 use rocket::http::Header;
 use rocket::request::FromParam;
 use rocket::{Request, Response, get, launch, routes};
-use steam_track::Tag;
+use steam_track::Id;
 
 pub struct SharedState {
     pub entity_names: Vec<String>,
@@ -25,24 +25,24 @@ impl SharedState {
 
 pub static SHARED_STATE: Mutex<SharedState> = Mutex::new(SharedState::new());
 
-struct RocketTag(Tag);
+struct RocketId(Id);
 
-/// Error raised when failing to create a Tag by parsing a string
+/// Error raised when failing to create a ID by parsing a string
 ///
-/// Need to create a local type wrapping the Tag in order to implement the
+/// Need to create a local type wrapping the ID in order to implement the
 /// FromStr trait
 #[derive(Debug, PartialEq, Eq)]
-pub struct ParseTagError;
+pub struct ParseIdError;
 
-/// Implementation that ensures the Tag passed to `select()` is valid
-impl<'a> FromParam<'a> for RocketTag {
+/// Implementation that ensures the ID passed to `select()` is valid
+impl<'a> FromParam<'a> for RocketId {
     type Error = &'a str;
 
     fn from_param(param: &'a str) -> Result<Self, Self::Error> {
         param
             .chars()
             .all(|c| c.is_numeric())
-            .then(|| RocketTag(param.into()))
+            .then(|| RocketId(param.into()))
             .ok_or(param)
     }
 }
@@ -81,10 +81,10 @@ fn connections() -> String {
     SHARED_STATE.lock().unwrap().connections.join("\n")
 }
 
-#[get("/select/<tag>")]
-async fn select(tag: RocketTag) -> String {
-    SHARED_STATE.lock().unwrap().command = Some(format!("tag={}", tag.0).to_string());
-    format!("{} selected", tag.0)
+#[get("/select/<id>")]
+async fn select(id: RocketId) -> String {
+    SHARED_STATE.lock().unwrap().command = Some(format!("id={}", id.0).to_string());
+    format!("{} selected", id.0)
 }
 
 #[launch]

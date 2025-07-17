@@ -43,10 +43,10 @@ function force_tree(serverUrl, data, connections, max_depth) {
   const links = root.links();
   const nodes = root.descendants();
 
-  // Create a map of tag -> node in the hierarchy.
-  let entities_by_tag = new Map();
+  // Create a map of IDs -> node in the hierarchy.
+  let entities_by_id = new Map();
   nodes.forEach(function(node) {
-    entities_by_tag.set(node.data.tag, node);
+    entities_by_id.set(node.data.id, node);
 
     // Compute a radius depending on depth in hierarchy.
     node.r = min_circle_r + (max_depth - node.data.depth) / max_depth * circle_r_range;
@@ -76,8 +76,8 @@ function force_tree(serverUrl, data, connections, max_depth) {
   for (const pair of connections) {
     const [from, to] = pair;
     links.push({
-      source: entities_by_tag.get(from),
-      target: entities_by_tag.get(to),
+      source: entities_by_id.get(from),
+      target: entities_by_id.get(to),
       strength: max_depth/5,
       color: "#000",
       lineEnd: "url(#arrow)"
@@ -136,24 +136,7 @@ function force_tree(serverUrl, data, connections, max_depth) {
       .text(d => d.data.full_name);
 
   // When clicking on a block highlight it by setting the "selected" class
-  node.on("click", function(d) {
-      // Remove all currently selected nodes
-      svg.selectAll(".selected").classed("selected", false);
-
-      // Add the selected class to the selected node
-      svg.selectAll(`#${d.target.id}`).classed("selected", true);
-
-      // Reference to the original data element built up by 'parse_entities()'
-      const data = d.target.__data__.data;
-
-      // Select the node on the server
-      d3.text(serverUrl + "/select/" + data.tag).then(function(text) {
-        // console.log(text);
-      })
-      .catch(function(error) {
-        console.log(error);
-      });
-  });
+  node.on("click", d => select(svg, d.target.id, d.target.__data__.data));
 
   simulation.on("tick", () => {
     link

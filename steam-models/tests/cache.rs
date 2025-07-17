@@ -9,28 +9,32 @@ use steam_engine::engine::Engine;
 use steam_engine::port::{InPort, OutPort};
 use steam_engine::run_simulation;
 use steam_engine::test_helpers::start_test;
-use steam_engine::traits::SimObject;
+use steam_engine::traits::{Routable, SimObject};
 use steam_engine::types::AccessType;
-use steam_models::cache::{Cache, CacheConfig};
-use steam_models::memory::{AccessMemory, Memory, MemoryConfig, MemoryRead};
-use steam_models::memory_access::MemoryAccess;
+use steam_models::memory::cache::{Cache, CacheConfig};
+use steam_models::memory::memory_access::MemoryAccess;
+use steam_models::memory::traits::{AccessMemory, ReadMemory};
+use steam_models::memory::{Memory, MemoryConfig};
 use steam_models::test_helpers::{create_read, create_write};
 
 const BASE_ADDRESS: u64 = 0x80000;
 const DST_ADDR: u64 = BASE_ADDRESS;
 const SRC_ADDR: u64 = BASE_ADDRESS + 0x1000;
-const CACHE_CAPACITY_BYTES: usize = 0x40000;
-const ACCESS_BYTES: usize = 128;
 
-const LINE_SIZE_BYTES: usize = 32;
 const BW_BYTES_PER_CYCLE: usize = 8;
-const NUM_LINES: usize = 1024;
+const LINE_SIZE_BYTES: usize = 32;
+const NUM_SETS: usize = 1024;
 const NUM_WAYS: usize = 4;
+
+const ACCESS_SIZE_BYTES: usize = LINE_SIZE_BYTES;
+// A realistic number of overhead bytes for a memory access (src/dst/control)
+const OVERHEAD_SIZE_BYTES: usize = 16;
+const CACHE_CAPACITY_BYTES: usize = NUM_SETS * NUM_WAYS * LINE_SIZE_BYTES;
 const DELAY_TICKS: usize = 20;
 
 struct TestMemory {}
 
-impl MemoryRead for TestMemory {
+impl ReadMemory for TestMemory {
     fn read(&self) -> Vec<u8> {
         Vec::new()
     }
@@ -69,33 +73,42 @@ fn cache_dev_read_goes_to_mem() {
 
     let top = engine.top();
     let source = Source::new_and_register(&engine, top, "source", None).unwrap();
-    let to_put = create_read(&source.entity, ACCESS_BYTES, DST_ADDR, SRC_ADDR);
+    let to_put = create_read(
+        &source.entity,
+        ACCESS_SIZE_BYTES,
+        DST_ADDR,
+        SRC_ADDR,
+        OVERHEAD_SIZE_BYTES,
+    );
     source.set_generator(option_box_repeat!(to_put ; num_accesses));
 
     let config = CacheConfig::new(
         LINE_SIZE_BYTES,
         BW_BYTES_PER_CYCLE,
-        NUM_LINES,
+        NUM_SETS,
         NUM_WAYS,
         DELAY_TICKS,
     );
     let cache = Cache::new_and_register(&engine, top, "cache", clock, spawner, config).unwrap();
-    let dev_sink = Sink::new_and_register(&engine, top, "dev_sink").unwrap();
-    let req_sink = Sink::new_and_register(&engine, top, "req_sink").unwrap();
+    let dev_req_sink = Sink::new_and_register(&engine, top, "dev_req_sink").unwrap();
+    let mem_req_sink = Sink::new_and_register(&engine, top, "mem_req_sink").unwrap();
 
     connect_port!(source, tx => cache, dev_rx).unwrap();
-    connect_port!(cache, dev_tx => dev_sink, rx).unwrap();
-    connect_port!(cache, mem_tx => req_sink, rx).unwrap();
+    connect_port!(cache, dev_tx => dev_req_sink, rx).unwrap();
+    connect_port!(cache, mem_tx => mem_req_sink, rx).unwrap();
 
     // Even though we are not driving it we need to connect it.
     let mut mem_rx_driver = OutPort::new(&top, "mem_rx_driver");
     mem_rx_driver.connect(cache.port_mem_rx()).unwrap();
 
     run_simulation!(engine);
-    assert_eq!(dev_sink.num_sunk(), 0);
-    assert_eq!(req_sink.num_sunk(), num_accesses);
-    assert_eq!(cache.bytes_read(), num_accesses * ACCESS_BYTES);
-    assert_eq!(cache.bytes_written(), 0);
+    assert_eq!(dev_req_sink.num_sunk(), 0);
+
+    // All accesses are to the same address, so only the first should be passed
+    // through
+    assert_eq!(mem_req_sink.num_sunk(), 1);
+    assert_eq!(cache.payload_bytes_read(), num_accesses * ACCESS_SIZE_BYTES);
+    assert_eq!(cache.payload_bytes_written(), 0);
 }
 
 /// Helper to build a cache and four ports to drive it.
@@ -114,7 +127,7 @@ fn build_cache_and_all_ports() -> (
     let config = CacheConfig::new(
         LINE_SIZE_BYTES,
         BW_BYTES_PER_CYCLE,
-        NUM_LINES,
+        NUM_SETS,
         NUM_WAYS,
         DELAY_TICKS,
     );
@@ -155,13 +168,19 @@ fn cache() {
         let dst_addr = DST_ADDR + 0x40;
 
         // Make a device request
-        let read = create_read(&dev_rx_driver.entity, ACCESS_BYTES, dst_addr, SRC_ADDR);
+        let read = create_read(
+            &dev_rx_driver.entity,
+            ACCESS_SIZE_BYTES,
+            dst_addr,
+            SRC_ADDR,
+            OVERHEAD_SIZE_BYTES,
+        );
         dev_rx_driver.put(read)?.await;
 
         // Request passed on to memory
         let mem_req = mem_tx_recv.get()?.await;
-        assert_eq!(mem_req.dst_addr(), dst_addr);
-        assert_eq!(mem_req.src_addr(), SRC_ADDR);
+        assert_eq!(mem_req.destination(), dst_addr);
+        assert_eq!(mem_req.source(), SRC_ADDR);
 
         clock.wait_ticks(memory_latency_ticks).await;
 
@@ -171,13 +190,19 @@ fn cache() {
 
         // Response back to device
         let response_to_dev = dev_tx_recv.get()?.await;
-        assert_eq!(response_to_dev.dst_addr(), SRC_ADDR);
-        assert_eq!(response_to_dev.src_addr(), dst_addr);
+        assert_eq!(response_to_dev.destination(), SRC_ADDR);
+        assert_eq!(response_to_dev.source(), dst_addr);
         assert_eq!(response_to_dev.access_type(), AccessType::Write);
 
         // Make a second device request to the same address - expecting response without
         // need to go to memory
-        let read = create_read(&dev_rx_driver.entity, ACCESS_BYTES, dst_addr, SRC_ADDR);
+        let read = create_read(
+            &dev_rx_driver.entity,
+            ACCESS_SIZE_BYTES,
+            dst_addr,
+            SRC_ADDR,
+            OVERHEAD_SIZE_BYTES,
+        );
         dev_rx_driver.put(read)?.await;
 
         let mut mem_req = mem_tx_recv.get()?;
@@ -188,7 +213,7 @@ fn cache() {
                 assert!(false, "No request should be made to memory");
             }
             response = response_to_dev => {
-                assert_eq!(response.dst_addr(), SRC_ADDR);
+                assert_eq!(response.destination(), SRC_ADDR);
                 assert_eq!(response.access_type(), AccessType::Write);
             }
         }
@@ -198,8 +223,8 @@ fn cache() {
 
     run_simulation!(engine);
 
-    assert_eq!(cache.bytes_read(), 2 * ACCESS_BYTES);
-    assert_eq!(cache.bytes_written(), 0);
+    assert_eq!(cache.payload_bytes_read(), 2 * ACCESS_SIZE_BYTES);
+    assert_eq!(cache.payload_bytes_written(), 0);
     assert_eq!(cache.num_misses(), 1);
     assert_eq!(cache.num_hits(), 1);
 }
@@ -218,7 +243,7 @@ fn build_cache_and_dev_ports() -> (
     let config = CacheConfig::new(
         LINE_SIZE_BYTES,
         BW_BYTES_PER_CYCLE,
-        NUM_LINES,
+        NUM_SETS,
         NUM_WAYS,
         DELAY_TICKS,
     );
@@ -246,23 +271,35 @@ fn cache_plus_mem() {
         let dst_addr = DST_ADDR + 0x40;
 
         // Make a device request
-        let read = create_read(&dev_rx_driver.entity, ACCESS_BYTES, dst_addr, SRC_ADDR);
+        let read = create_read(
+            &dev_rx_driver.entity,
+            ACCESS_SIZE_BYTES,
+            dst_addr,
+            SRC_ADDR,
+            OVERHEAD_SIZE_BYTES,
+        );
         dev_rx_driver.put(read)?.await;
 
         // Expect the memory to have provided a response to the cache
         let response_to_dev = dev_tx_recv.get()?.await;
-        assert_eq!(response_to_dev.dst_addr(), SRC_ADDR);
+        assert_eq!(response_to_dev.destination(), SRC_ADDR);
         assert_eq!(response_to_dev.access_type(), AccessType::Write);
 
         for _ in 0..num_rereads {
             // Make a second device request to the same address - expecting response without
             // need to go to memory
-            let read = create_read(&dev_rx_driver.entity, ACCESS_BYTES, dst_addr, SRC_ADDR);
+            let read = create_read(
+                &dev_rx_driver.entity,
+                ACCESS_SIZE_BYTES,
+                dst_addr,
+                SRC_ADDR,
+                OVERHEAD_SIZE_BYTES,
+            );
             dev_rx_driver.put(read)?.await;
 
             // Expect the memory to have provided a response to the cache
             let response_to_dev = dev_tx_recv.get()?.await;
-            assert_eq!(response_to_dev.dst_addr(), SRC_ADDR);
+            assert_eq!(response_to_dev.destination(), SRC_ADDR);
         }
 
         Ok(())
@@ -270,12 +307,15 @@ fn cache_plus_mem() {
 
     run_simulation!(engine);
 
-    assert_eq!(cache.bytes_read(), (num_rereads + 1) * ACCESS_BYTES);
-    assert_eq!(cache.bytes_written(), 0);
+    assert_eq!(
+        cache.payload_bytes_read(),
+        (num_rereads + 1) * ACCESS_SIZE_BYTES
+    );
+    assert_eq!(cache.payload_bytes_written(), 0);
     assert_eq!(cache.num_misses(), 1);
     assert_eq!(cache.num_hits(), num_rereads);
 
-    assert_eq!(memory.bytes_read(), ACCESS_BYTES);
+    assert_eq!(memory.bytes_read(), ACCESS_SIZE_BYTES);
     assert_eq!(memory.bytes_written(), 0);
 }
 
@@ -293,12 +333,18 @@ fn cache_ways() {
                 let dst_addr = DST_ADDR + (i * CACHE_CAPACITY_BYTES / NUM_WAYS) as u64;
 
                 // Make a device request
-                let read = create_read(&dev_rx_driver.entity, ACCESS_BYTES, dst_addr, SRC_ADDR);
+                let read = create_read(
+                    &dev_rx_driver.entity,
+                    ACCESS_SIZE_BYTES,
+                    dst_addr,
+                    SRC_ADDR,
+                    OVERHEAD_SIZE_BYTES,
+                );
                 dev_rx_driver.put(read)?.await;
 
                 // Expect the memory to have provided a response to the cache
                 let response_to_dev = dev_tx_recv.get()?.await;
-                assert_eq!(response_to_dev.dst_addr(), SRC_ADDR);
+                assert_eq!(response_to_dev.destination(), SRC_ADDR);
                 assert_eq!(response_to_dev.access_type(), AccessType::Write);
             }
         }
@@ -309,12 +355,12 @@ fn cache_ways() {
     run_simulation!(engine);
 
     let num_accesses = num_iterations * NUM_WAYS;
-    assert_eq!(cache.bytes_read(), num_accesses * ACCESS_BYTES);
-    assert_eq!(cache.bytes_written(), 0);
+    assert_eq!(cache.payload_bytes_read(), num_accesses * ACCESS_SIZE_BYTES);
+    assert_eq!(cache.payload_bytes_written(), 0);
     assert_eq!(cache.num_misses(), NUM_WAYS);
     assert_eq!(cache.num_hits(), num_accesses - NUM_WAYS);
 
-    assert_eq!(memory.bytes_read(), NUM_WAYS * ACCESS_BYTES);
+    assert_eq!(memory.bytes_read(), NUM_WAYS * ACCESS_SIZE_BYTES);
     assert_eq!(memory.bytes_written(), 0);
 }
 
@@ -332,12 +378,18 @@ fn cache_ways_overflow() {
                 let dst_addr = DST_ADDR + (i * CACHE_CAPACITY_BYTES / NUM_WAYS) as u64;
 
                 // Make a device request
-                let read = create_read(&dev_rx_driver.entity, ACCESS_BYTES, dst_addr, SRC_ADDR);
+                let read = create_read(
+                    &dev_rx_driver.entity,
+                    ACCESS_SIZE_BYTES,
+                    dst_addr,
+                    SRC_ADDR,
+                    OVERHEAD_SIZE_BYTES,
+                );
                 dev_rx_driver.put(read)?.await;
 
                 // Expect the memory to have provided a response to the cache
                 let response_to_dev = dev_tx_recv.get()?.await;
-                assert_eq!(response_to_dev.dst_addr(), SRC_ADDR);
+                assert_eq!(response_to_dev.destination(), SRC_ADDR);
                 assert_eq!(response_to_dev.access_type(), AccessType::Write);
             }
         }
@@ -348,11 +400,11 @@ fn cache_ways_overflow() {
     run_simulation!(engine);
 
     let num_accesses = num_iterations * (NUM_WAYS + 1);
-    assert_eq!(cache.bytes_read(), num_accesses * ACCESS_BYTES);
-    assert_eq!(cache.bytes_written(), 0);
+    assert_eq!(cache.payload_bytes_read(), num_accesses * ACCESS_SIZE_BYTES);
+    assert_eq!(cache.payload_bytes_written(), 0);
     assert_eq!(cache.num_misses(), num_accesses);
     assert_eq!(cache.num_hits(), 0);
-    assert_eq!(memory.bytes_read(), num_accesses * ACCESS_BYTES);
+    assert_eq!(memory.bytes_read(), num_accesses * ACCESS_SIZE_BYTES);
 }
 
 /// Ensure that a write causes a cache line to be flushed
@@ -367,27 +419,45 @@ fn cache_write_flushes_line() {
 
         // Make a couple of reads to the same address
         for _ in 0..num_rereads {
-            let read = create_read(&dev_rx_driver.entity, ACCESS_BYTES, dst_addr, SRC_ADDR);
+            let read = create_read(
+                &dev_rx_driver.entity,
+                ACCESS_SIZE_BYTES,
+                dst_addr,
+                SRC_ADDR,
+                OVERHEAD_SIZE_BYTES,
+            );
             dev_rx_driver.put(read)?.await;
 
             // Handle response
             let response_to_dev = dev_tx_recv.get()?.await;
-            assert_eq!(response_to_dev.dst_addr(), SRC_ADDR);
+            assert_eq!(response_to_dev.destination(), SRC_ADDR);
             assert_eq!(response_to_dev.access_type(), AccessType::Write);
         }
 
         // Write to address to cause cache flush
-        let write = create_write(&dev_rx_driver.entity, ACCESS_BYTES, dst_addr, SRC_ADDR);
+        let write = create_write(
+            &dev_rx_driver.entity,
+            ACCESS_SIZE_BYTES,
+            dst_addr,
+            SRC_ADDR,
+            OVERHEAD_SIZE_BYTES,
+        );
         dev_rx_driver.put(write)?.await;
 
         // Read the memory again
         for _ in 0..num_rereads {
-            let read = create_read(&dev_rx_driver.entity, ACCESS_BYTES, dst_addr, SRC_ADDR);
+            let read = create_read(
+                &dev_rx_driver.entity,
+                ACCESS_SIZE_BYTES,
+                dst_addr,
+                SRC_ADDR,
+                OVERHEAD_SIZE_BYTES,
+            );
             dev_rx_driver.put(read)?.await;
 
             // Handle response
             let response_to_dev = dev_tx_recv.get()?.await;
-            assert_eq!(response_to_dev.dst_addr(), SRC_ADDR);
+            assert_eq!(response_to_dev.destination(), SRC_ADDR);
             assert_eq!(response_to_dev.access_type(), AccessType::Write);
         }
 
@@ -396,12 +466,15 @@ fn cache_write_flushes_line() {
 
     run_simulation!(engine);
 
-    assert_eq!(cache.bytes_read(), num_rereads * 2 * ACCESS_BYTES);
-    assert_eq!(cache.bytes_written(), ACCESS_BYTES);
+    assert_eq!(
+        cache.payload_bytes_read(),
+        num_rereads * 2 * ACCESS_SIZE_BYTES
+    );
+    assert_eq!(cache.payload_bytes_written(), ACCESS_SIZE_BYTES);
     assert_eq!(cache.num_misses(), 2);
     assert_eq!(cache.num_hits(), (num_rereads * 2) - 2);
 
     // Should have been read once before and once after write
-    assert_eq!(memory.bytes_read(), 2 * ACCESS_BYTES);
-    assert_eq!(memory.bytes_written(), ACCESS_BYTES);
+    assert_eq!(memory.bytes_read(), 2 * ACCESS_SIZE_BYTES);
+    assert_eq!(memory.bytes_written(), ACCESS_SIZE_BYTES);
 }

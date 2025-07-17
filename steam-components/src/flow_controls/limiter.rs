@@ -85,13 +85,13 @@ where
             // Get the value but without letting the OutPort complete
             let value = rx.start_get()?.await;
 
-            let value_tag = value.tag();
+            let value_id = value.id();
             let ticks = limiter.ticks(&value);
-            enter!(self.entity ; value_tag);
+            enter!(self.entity ; value_id);
 
             tx.put(value)?.await;
             limiter.delay_ticks(ticks).await;
-            exit!(self.entity ; value_tag);
+            exit!(self.entity ; value_id);
 
             // Allow the OutPort to complete
             rx.finish_get();

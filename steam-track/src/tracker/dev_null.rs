@@ -2,7 +2,7 @@
 
 use std::str::FromStr;
 
-use crate::Tag;
+use crate::Id;
 use crate::tracker::Track;
 
 /// A tracker that does nothing.
@@ -11,21 +11,21 @@ use crate::tracker::Track;
 pub struct DevNullTracker;
 
 impl Track for DevNullTracker {
-    fn unique_tag(&self) -> Tag {
-        Tag(0)
+    fn unique_id(&self) -> Id {
+        Id(0)
     }
 
-    fn is_entity_enabled(&self, _tag: Tag, _level: log::Level) -> bool {
+    fn is_entity_enabled(&self, _id: Id, _level: log::Level) -> bool {
         false
     }
-    fn add_entity(&self, _tag: Tag, _entity_name: &str) {}
-    fn enter(&self, _tag: Tag, _obj: Tag) {}
-    fn exit(&self, _tag: Tag, _obj: Tag) {}
-    fn create(&self, _tag: Tag, _obj: Tag, _num_bytes: usize, _req_type: i8, _name: &str) {}
-    fn destroy(&self, _tag: Tag, _obj: Tag) {}
-    fn connect(&self, _connect_from: Tag, _connect_to: Tag) {}
-    fn log(&self, _tag: Tag, _level: log::Level, _msg: std::fmt::Arguments) {}
-    fn time(&self, _set_by: Tag, _time_ns: f64) {}
+    fn add_entity(&self, _id: Id, _entity_name: &str) {}
+    fn enter(&self, _id: Id, _obj: Id) {}
+    fn exit(&self, _id: Id, _obj: Id) {}
+    fn create(&self, _id: Id, _obj: Id, _num_bytes: usize, _req_type: i8, _name: &str) {}
+    fn destroy(&self, _id: Id, _obj: Id) {}
+    fn connect(&self, _connect_from: Id, _connect_to: Id) {}
+    fn log(&self, _id: Id, _level: log::Level, _msg: std::fmt::Arguments) {}
+    fn time(&self, _set_by: Id, _time_ns: f64) {}
     fn shutdown(&self) {}
 }
 
