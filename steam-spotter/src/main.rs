@@ -1,5 +1,6 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
+use std::path::PathBuf;
 use std::{io, thread};
 
 use clap::Parser;
@@ -19,11 +20,11 @@ use tui::backend::CrosstermBackend;
 struct Cli {
     /// Provide a textual log file to be parsed
     #[arg(long)]
-    log: Option<String>,
+    log: Option<PathBuf>,
 
     /// Provide a capnp-based binary trace
     #[arg(long)]
-    bin: Option<String>,
+    bin: Option<PathBuf>,
 }
 
 fn spawn_rocket() {

@@ -1,6 +1,7 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
 use std::error;
+use std::path::PathBuf;
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 
@@ -142,20 +143,20 @@ pub struct App {
 impl App {
     /// Constructs a new instance of [`App`].
     #[must_use]
-    pub fn new(log_file_path: Option<String>, bin_file_path: Option<String>) -> Self {
+    pub fn new(log_file_path: Option<PathBuf>, bin_file_path: Option<PathBuf>) -> Self {
         let (tx, rx) = channel();
         let renderer = Arc::new(Mutex::new(Renderer::new()));
         let filter = Arc::new(Mutex::new(Filter::new(tx)));
 
         if let Some(log_file_path) = log_file_path {
             log_parser::start_background_load(
-                log_file_path.as_str(),
+                log_file_path.as_path(),
                 renderer.clone(),
                 filter.clone(),
             );
         } else {
             bin_loader::start_background_load(
-                bin_file_path.unwrap().as_str(),
+                bin_file_path.unwrap().as_path(),
                 renderer.clone(),
                 filter.clone(),
             );
