@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -180,7 +181,7 @@ impl TraceVisitor for BinLoader {
 }
 
 pub fn start_background_load(
-    bin_file_path: &str,
+    bin_file_path: &Path,
     renderer: Arc<Mutex<Renderer>>,
     filter: Arc<Mutex<Filter>>,
 ) {
