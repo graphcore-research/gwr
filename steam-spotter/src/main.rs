@@ -1,30 +1,48 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
 use std::path::PathBuf;
+#[cfg(feature = "perfetto")]
+use std::process::exit;
 use std::{io, thread};
 
-use clap::Parser;
+use clap::{Args, Parser};
 use steam_spotter::app::{App, AppResult};
 use steam_spotter::event::{Event, EventHandler};
 use steam_spotter::handler::handle_key_events;
+#[cfg(feature = "perfetto")]
+use steam_spotter::perfetto;
 use steam_spotter::rocket::rocket;
 use steam_spotter::tui::Tui;
 use tokio::runtime::Runtime;
 use tui::Terminal;
 use tui::backend::CrosstermBackend;
 
-/// Command-line arguments.
-#[derive(Parser)]
-#[command(about = "STEAM log/binary trace viewer")]
+/// Input subcommand arguments.
+#[derive(Args)]
 #[group(required = true, multiple = false)]
-struct Cli {
+struct InputOptions {
     /// Provide a textual log file to be parsed
     #[arg(long)]
     log: Option<PathBuf>,
 
     /// Provide a capnp-based binary trace
-    #[arg(long)]
+    #[arg(long, group = "perfetto_compat")]
     bin: Option<PathBuf>,
+}
+
+/// Command-line arguments.
+#[derive(Parser)]
+#[command(about = "STEAM log/binary trace viewer")]
+struct Cli {
+    #[command(flatten)]
+    input: InputOptions,
+
+    #[cfg(feature = "perfetto")]
+    /// Generate Perfetto output from STEAM binary trace with this name
+    ///
+    /// steam-spotter will exit having produced the Perfetto trace.
+    #[arg(long, requires = "perfetto_compat")]
+    perfetto: Option<PathBuf>,
 }
 
 fn spawn_rocket() {
@@ -42,12 +60,21 @@ fn spawn_rocket() {
 
 #[rocket::main]
 async fn main() -> AppResult<()> {
-    spawn_rocket();
-
     let args = Cli::parse();
 
+    #[cfg(feature = "perfetto")]
+    if let Some(perfetto_trace_output) = args.perfetto {
+        perfetto::generate_perfetto_trace(
+            args.input.bin.unwrap().as_path(),
+            perfetto_trace_output.as_path(),
+        );
+        exit(0);
+    }
+
+    spawn_rocket();
+
     // Create an application.
-    let mut app = App::new(args.log, args.bin);
+    let mut app = App::new(args.input.log, args.input.bin);
 
     // Initialize the terminal user interface.
     let backend = CrosstermBackend::new(io::stderr());
