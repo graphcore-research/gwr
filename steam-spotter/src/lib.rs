@@ -21,3 +21,7 @@ pub mod tui;
 pub mod handler;
 
 pub mod rocket;
+
+#[cfg(feature = "perfetto")]
+/// Perfetto output generator.
+pub mod perfetto;

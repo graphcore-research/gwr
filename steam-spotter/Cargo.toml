@@ -29,3 +29,7 @@ rocket = "0.5.1"
 steam-track = { path = "../steam-track" }
 tokio = "1.45.1"
 tui = { package = "ratatui", version = "0.23.0" }
+
+[features]
+default = ["perfetto"]
+perfetto = ["steam-track/perfetto"]
