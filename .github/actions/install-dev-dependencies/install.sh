@@ -23,6 +23,6 @@ rustup toolchain install --profile minimal --component rustfmt nightly
 cargo install --locked        \
   cargo-about@0.7.1           \
   cargo-deny@0.18.3           \
-  cargo-semver-checks@0.41.0  \
-  release-plz@0.3.136
+  cargo-semver-checks@0.42.0  \
+  release-plz@0.3.139
 cargo install --locked --bin cog cocogitto@6.3.0
