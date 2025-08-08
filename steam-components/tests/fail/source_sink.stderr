@@ -4,6 +4,6 @@ error[E0599]: no method named `port_invalid_rx` found for struct `Rc<steam_compo
 16 |     connect_port!(source, tx => sink, invalid_rx).unwrap();
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |     |
-   |     method not found in `Rc<Sink<_>>`
+   |     method not found in `Rc<steam_components::sink::Sink<_>>`
    |
    = note: this error originates in the macro `connect_port` (in Nightly builds, run with -Z macro-backtrace for more info)
