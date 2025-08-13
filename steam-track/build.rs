@@ -18,7 +18,7 @@ fn get_schemas_root() -> PathBuf {
 fn watch_tree(root_dir: &Path) {
     for entry in WalkDir::new(root_dir) {
         match entry {
-            Ok(entry) => println!("cargo:rerun-if-changed={}", entry.path().display()),
+            Ok(entry) => println!("cargo::rerun-if-changed={}", entry.path().display()),
             Err(error) => panic!(
                 "Failed to access entry '{}'",
                 error.path().unwrap_or_else(|| Path::new("")).display()
@@ -27,14 +27,14 @@ fn watch_tree(root_dir: &Path) {
     }
 }
 
-fn add_file_triggers() {
+fn add_file_build_triggers() {
     let schemas_root = get_schemas_root();
     watch_tree(&schemas_root);
 }
 
-fn add_env_triggers() {
-    println!("cargo:rerun-if-env-changed={CAPNP_BIN_ENV_VAR}");
-    println!("cargo:rerun-if-env-changed={CAPNP_INC_DIR_ENV_VAR}");
+fn add_env_build_triggers() {
+    println!("cargo::rerun-if-env-changed={CAPNP_BIN_ENV_VAR}");
+    println!("cargo::rerun-if-env-changed={CAPNP_INC_DIR_ENV_VAR}");
 }
 
 fn get_schemas() -> Vec<PathBuf> {
@@ -129,8 +129,8 @@ fn compile_schemas(schemas: &[PathBuf]) {
 }
 
 fn main() {
-    add_file_triggers();
-    add_env_triggers();
+    add_file_build_triggers();
+    add_env_build_triggers();
 
     let schemas = get_schemas();
     compile_schemas(&schemas);
