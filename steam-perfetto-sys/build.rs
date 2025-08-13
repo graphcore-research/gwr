@@ -13,19 +13,32 @@
 
 use std::process::exit;
 
+const STEAM_DOCS_ONLY_ENV_VAR: &str = "STEAM_DOCS_ONLY";
+const DOCS_RS_ENV_VAR: &str = "DOCS_RS";
+
 #[cfg(feature = "_perfetto_src")]
-mod consts {
+mod perfetto_consts {
     pub const PERFETTO_REPO_URL: &str = "https://github.com/google/perfetto";
     pub const PERFETTO_REPO_REFSPEC: &str = "v50.1";
 
     pub const PERFETTO_SYMLINK: &str = "./perfetto";
 }
 
-fn main() {
+fn add_file_build_triggers() {
     println!("cargo::rerun-if-changed=build.rs");
     println!("cargo::rerun-if-changed=src/lib.rs");
+}
 
-    if std::env::var("STEAM_DOCS_ONLY").is_ok() || std::env::var("DOCS_RS").is_ok() {
+fn add_env_build_triggers() {
+    println!("cargo::rerun-if-env-changed={STEAM_DOCS_ONLY_ENV_VAR}");
+    println!("cargo::rerun-if-env-changed={DOCS_RS_ENV_VAR}");
+}
+
+fn main() {
+    add_file_build_triggers();
+    add_env_build_triggers();
+
+    if std::env::var(STEAM_DOCS_ONLY_ENV_VAR).is_ok() || std::env::var(DOCS_RS_ENV_VAR).is_ok() {
         // Do not attempt to download or build Perfetto if a documentation only
         // build is occuring, regardless of the features enabled. This is useful
         // as it allows the `--all-features` flag to be passed to rustdoc
@@ -56,8 +69,8 @@ fn main() {
             .args(["-C", &out_dir])
             .arg("fetch")
             .args(["--depth", "1"])
-            .arg(consts::PERFETTO_REPO_URL)
-            .arg(consts::PERFETTO_REPO_REFSPEC)
+            .arg(perfetto_consts::PERFETTO_REPO_URL)
+            .arg(perfetto_consts::PERFETTO_REPO_REFSPEC)
             .output()
             .expect("Failed to fetch Perfetto source repo");
 
@@ -73,7 +86,7 @@ fn main() {
             .arg("-F")
             .arg("-h")
             .arg(&out_dir)
-            .arg(consts::PERFETTO_SYMLINK)
+            .arg(perfetto_consts::PERFETTO_SYMLINK)
             .output()
             .expect("Failed to create symlink to Perfetto source repo");
 
