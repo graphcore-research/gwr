@@ -1,5 +1,5 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
-//
+
 //! Simulate a device comprising ring nodes.
 //!
 //! The model is constructed with as many ring nodes as specified by
@@ -19,12 +19,12 @@
 //!
 //! Running a ring node that will lock up:
 //! ```rust
-//! ./target/release/sim-ring --kb-to-send 1024 --stdout
+//! cargo run --bin sim-ring --release -- --kb-to-send 1024 --stdout
 //! ```
 //!
 //! But with increased ring priority the same model will pass:
 //! ```rust
-//! ./target/release/sim-ring --kb-to-send 1024 --ring-priority 10 --stdout
+//! cargo run --bin sim-ring --release -- --kb-to-send 1024 --ring-priority 10 --stdout
 //! ```
 //!
 //! # Diagram

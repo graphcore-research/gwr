@@ -12,12 +12,12 @@
 //!
 //! Generate textual output to the console using:
 //! ```
-//!   ./target/debug/log_test --log-level debug --enable-trace --log-file -
+//!   cargo run --example log_test -- --log-level debug --enable-trace true --log-file -
 //! ```
 //!
 //! Or create a Cap'n Proto output using:
 //! ```
-//!   ./target/debug/log_test --log-level trace --enable-trace --trace-file trace.bin
+//!   cargo run --example log_test -- --log-level trace --enable-trace true --trace-file trace.bin
 //! ```
 //!
 //! And the output Cap'n Proto file created can be inspected using:
