@@ -285,6 +285,5 @@ pub mod steam_track_capnp {
     #![allow(missing_docs)]
     #![allow(clippy::all)]
     #![allow(clippy::pedantic)]
-
     include!(concat!(env!("OUT_DIR"), "/steam_track_capnp.rs"));
 }
