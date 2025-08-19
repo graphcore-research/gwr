@@ -2178,6 +2178,7 @@ dependencies = [
  "futures",
  "log",
  "paste",
+ "rand",
  "steam-components",
  "steam-engine",
  "steam-model-builder",
