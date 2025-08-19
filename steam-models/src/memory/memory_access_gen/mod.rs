@@ -30,6 +30,7 @@ use steam_track::entity::Entity;
 
 use crate::memory::traits::AccessMemory;
 
+pub mod random;
 pub mod strided;
 
 #[derive(EntityDisplay)]
