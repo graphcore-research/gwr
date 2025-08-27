@@ -23,7 +23,6 @@ name = "bench_models"
 harness = false
 
 [dependencies]
-async-std.workspace = true
 async-trait.workspace = true
 futures.workspace = true
 log.workspace = true
