@@ -19,7 +19,6 @@ publish.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-async-std.workspace = true
 async-trait.workspace = true
 clap.workspace = true
 event-listener.workspace = true

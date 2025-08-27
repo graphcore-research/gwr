@@ -23,7 +23,6 @@ name = "benchmarks_main"
 harness = false
 
 [dependencies]
-async-std.workspace = true
 async-trait.workspace = true
 atomic_float = "0.1.0"
 log.workspace = true
