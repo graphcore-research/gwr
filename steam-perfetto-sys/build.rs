@@ -11,8 +11,6 @@
 //! Currently just enough is installed and built to support the use of the
 //! Perfetto UI.
 
-use std::process::exit;
-
 const STEAM_DOCS_ONLY_ENV_VAR: &str = "STEAM_DOCS_ONLY";
 const DOCS_RS_ENV_VAR: &str = "DOCS_RS";
 
@@ -37,20 +35,6 @@ fn add_env_build_triggers() {
 fn main() {
     add_file_build_triggers();
     add_env_build_triggers();
-
-    if std::env::var(STEAM_DOCS_ONLY_ENV_VAR).is_ok() || std::env::var(DOCS_RS_ENV_VAR).is_ok() {
-        // Do not attempt to download or build Perfetto if a documentation only
-        // build is occuring, regardless of the features enabled. This is useful
-        // as it allows the `--all-features` flag to be passed to rustdoc
-        // without incurring the time penalty of the Perfetto build.
-        //
-        // `DOCS_RS` is also supported as it is the defacto-standard mechanism
-        // used, due to a lack of support for detecting documentation builds in
-        // Cargo, see https://docs.rs/about/builds#detecting-docsrs.
-        // However as the build of the Rocket crate fails when `DOCS_RS` is set,
-        // within the STEAM infrastructure only `STEAM_DOCS_ONLY` is used.
-        exit(0);
-    }
 
     #[cfg(feature = "_perfetto_src")]
     {
@@ -90,18 +74,38 @@ fn main() {
             .output()
             .expect("Failed to create symlink to Perfetto source repo");
 
-        #[cfg(feature = "_perfetto_ui")]
+        if std::env::var(STEAM_DOCS_ONLY_ENV_VAR).is_err()
+            && std::env::var(DOCS_RS_ENV_VAR).is_err()
         {
-            Command::new(format!("{}/tools/install-build-deps", &out_dir))
-                .arg("--ui")
-                .output()
-                .expect("Failed to install build dependencies");
-            println!("cargo::rerun-if-changed=perfetto/buildtools");
-            println!("cargo::rerun-if-changed=perfetto/third_party");
+            // Only allow the build of Perfetto when a regular build is
+            // occuring. Perfetto will not be built during documentation-only
+            // builds, regardless of the features enabled.
+            //
+            // This is useful as it allows the `--all-features` flag to be
+            // passed to rustdoc without incurring the time penalty of the
+            // Perfetto build.
+            //
+            // `DOCS_RS` is also supported as it is the defacto-standard
+            // mechanism used, due to a lack of support for detecting
+            // documentation builds in Cargo, see
+            // https://docs.rs/about/builds#detecting-docsrs.
+            // However as the build of the Rocket crate fails when `DOCS_RS` is
+            // set, within the STEAM infrastructure only `STEAM_DOCS_ONLY` is
+            // used.
 
-            Command::new(format!("{}/ui/build", &out_dir))
-                .output()
-                .expect("Failed to build Perfetto UI");
+            #[cfg(feature = "_perfetto_ui")]
+            {
+                Command::new(format!("{}/tools/install-build-deps", &out_dir))
+                    .arg("--ui")
+                    .output()
+                    .expect("Failed to install build dependencies");
+                println!("cargo::rerun-if-changed=perfetto/buildtools");
+                println!("cargo::rerun-if-changed=perfetto/third_party");
+
+                Command::new(format!("{}/ui/build", &out_dir))
+                    .output()
+                    .expect("Failed to build Perfetto UI");
+            }
         }
     }
 }
