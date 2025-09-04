@@ -43,36 +43,56 @@ fn main() {
 
         let out_dir = env::var("OUT_DIR").unwrap();
 
-        Command::new("git")
+        let output = Command::new("git")
             .arg("init")
             .arg(&out_dir)
             .output()
-            .expect("Failed to init repo for Perfetto source");
+            .expect("git command failed to start");
+        assert!(
+            output.status.success(),
+            "Failed to init repo for Perfetto source:\n{}",
+            str::from_utf8(&output.stderr).unwrap_or_default()
+        );
 
-        Command::new("git")
+        let output = Command::new("git")
             .args(["-C", &out_dir])
             .arg("fetch")
             .args(["--depth", "1"])
             .arg(perfetto_consts::PERFETTO_REPO_URL)
             .arg(perfetto_consts::PERFETTO_REPO_REFSPEC)
             .output()
-            .expect("Failed to fetch Perfetto source repo");
+            .expect("git command failed to start");
+        assert!(
+            output.status.success(),
+            "Failed to fetch Perfetto source repo:\n{}",
+            str::from_utf8(&output.stderr).unwrap_or_default()
+        );
 
-        Command::new("git")
+        let output = Command::new("git")
             .args(["-C", &out_dir])
             .arg("checkout")
             .arg("FETCH_HEAD")
             .output()
-            .expect("Failed to checkout Perfetto source repo");
+            .expect("git command failed to start");
+        assert!(
+            output.status.success(),
+            "Failed to checkout Perfetto source repo:\n{}",
+            str::from_utf8(&output.stderr).unwrap_or_default()
+        );
 
-        Command::new("ln")
+        let output = Command::new("ln")
             .arg("-s")
             .arg("-F")
             .arg("-h")
             .arg(&out_dir)
             .arg(perfetto_consts::PERFETTO_SYMLINK)
             .output()
-            .expect("Failed to create symlink to Perfetto source repo");
+            .expect("ln command failed to start");
+        assert!(
+            output.status.success(),
+            "Failed to create symlink to Perfetto source repo:\n{}",
+            str::from_utf8(&output.stderr).unwrap_or_default()
+        );
 
         if std::env::var(STEAM_DOCS_ONLY_ENV_VAR).is_err()
             && std::env::var(DOCS_RS_ENV_VAR).is_err()
@@ -95,16 +115,27 @@ fn main() {
 
             #[cfg(feature = "_perfetto_ui")]
             {
-                Command::new(format!("{}/tools/install-build-deps", &out_dir))
+                let output = Command::new(format!("{}/tools/install-build-deps", &out_dir))
                     .arg("--ui")
                     .output()
-                    .expect("Failed to install build dependencies");
+                    .expect("install-build-deps command failed to start");
+                assert!(
+                    output.status.success(),
+                    "Failed to install build dependencies:\n{}",
+                    str::from_utf8(&output.stderr).unwrap_or_default()
+                );
+
                 println!("cargo::rerun-if-changed=perfetto/buildtools");
                 println!("cargo::rerun-if-changed=perfetto/third_party");
 
-                Command::new(format!("{}/ui/build", &out_dir))
+                let output = Command::new(format!("{}/ui/build", &out_dir))
                     .output()
-                    .expect("Failed to build Perfetto UI");
+                    .expect("build command failed to start");
+                assert!(
+                    output.status.success(),
+                    "Failed to build Perfetto UI:\n{}",
+                    str::from_utf8(&output.stderr).unwrap_or_default()
+                );
             }
         }
     }
