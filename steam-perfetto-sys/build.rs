@@ -83,7 +83,7 @@ fn main() {
         let output = Command::new("ln")
             .arg("-s")
             .arg("-F")
-            .arg("-h")
+            .arg("-n")
             .arg(&out_dir)
             .arg(perfetto_consts::PERFETTO_SYMLINK)
             .output()
