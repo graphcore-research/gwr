@@ -5,8 +5,19 @@
 //! to give users of this package constant paths to tools and schema.
 //!
 //! Due to the Perfetto build system performing an in tree build we deliberately
-//! avoid letting Cargo watch the perfetto/out directory to ensure that
+//! avoid letting Cargo watch the PERFETTO_SYMLINK/out directory to ensure that
 //! incremental Cargo builds remain fast.
+//!
+//! Ideally we would however have Cargo watch the PERFETTO_SYMLINK itself such
+//! that it would be recreate if deleted so that downsteam builds that depend
+//! on this package do not fail unexpectedly. Unfortunately this is not possible
+//! as there appears to be no way to prevent the (mtime) check performed by
+//! Cargo following the symlink. Instead, as a compromise, we explicitly watch
+//! the PERFETTO_SYMLINK/protos directory (when the _perfetto_src feature is
+//! enabled) as this is not expected to be changed by the build system once the
+//! Perfetto source has been downloaded (i.e. mtime check will be stable after
+//! the first rebuild attempt), and it allows us to detect if the symlink
+//! is removed.
 //!
 //! Currently just enough is installed and built to support the use of the
 //! Perfetto UI.
@@ -19,11 +30,10 @@ mod perfetto_consts {
     pub const PERFETTO_REPO_URL: &str = "https://github.com/google/perfetto";
     pub const PERFETTO_REPO_REFSPEC: &str = "v50.1";
 
-    pub const PERFETTO_SYMLINK: &str = "./perfetto";
+    pub const PERFETTO_SYMLINK: &str = "perfetto";
 }
 
 fn add_file_build_triggers() {
-    println!("cargo::rerun-if-changed=build.rs");
     println!("cargo::rerun-if-changed=src/lib.rs");
 }
 
@@ -94,6 +104,11 @@ fn main() {
             str::from_utf8(&output.stderr).unwrap_or_default()
         );
 
+        println!(
+            "cargo::rerun-if-changed={}/protos",
+            perfetto_consts::PERFETTO_SYMLINK
+        );
+
         if std::env::var(STEAM_DOCS_ONLY_ENV_VAR).is_err()
             && std::env::var(DOCS_RS_ENV_VAR).is_err()
         {
@@ -125,8 +140,14 @@ fn main() {
                     str::from_utf8(&output.stderr).unwrap_or_default()
                 );
 
-                println!("cargo::rerun-if-changed=perfetto/buildtools");
-                println!("cargo::rerun-if-changed=perfetto/third_party");
+                println!(
+                    "cargo::rerun-if-changed={}/buildtools",
+                    perfetto_consts::PERFETTO_SYMLINK
+                );
+                println!(
+                    "cargo::rerun-if-changed={}/third_party",
+                    perfetto_consts::PERFETTO_SYMLINK
+                );
 
                 let output = Command::new(format!("{}/ui/build", &out_dir))
                     .output()
