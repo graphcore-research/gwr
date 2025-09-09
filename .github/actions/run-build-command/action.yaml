@@ -1,0 +1,50 @@
+# Copyright (c) 2025 Graphcore Ltd. All rights reserved.
+
+name: Run a command with cached build files
+description: >
+  Run a build or test command.
+  Any cached files will first be restored and, if the Action is running on a
+  commit to the main branch, updates will be stored in the cache afterwards.
+
+inputs:
+  command:
+    description: The command to call.
+    required: true
+  cache-name:
+    description: The name for the build cache.
+    required: true
+  paths:
+    description: >
+      Newline-seperated list of paths to cache.
+      Defaults to caching the entire target directory if not specified.
+    default: |
+      target/
+
+runs:
+  using: composite
+  steps:
+    - name: Get cache access key
+      id: get-cache-key
+      uses: ./.github/actions/cached-build-key
+      with:
+        name: ${{ inputs.cache-name }}
+
+    - name: Restore cached build files
+      id: restore-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ inputs.paths }}
+        key: ${{ steps.get-cache-key.outputs.key }}
+
+    - name: Run command
+      id: run-command
+      run: ${{ inputs.command }}
+      shell: bash
+
+    - name: Save build files to cache
+      id: save-cache
+      if: github.ref == 'refs/heads/main'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ inputs.paths }}
+        key: ${{ steps.get-cache-key.outputs.key }}

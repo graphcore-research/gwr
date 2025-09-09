@@ -1,0 +1,22 @@
+# Copyright (c) 2025 Graphcore Ltd. All rights reserved.
+
+name: Cached build key
+description: The build directory paths and key to be used when caching.
+
+inputs:
+  name:
+    description: The name of the job/action calling this action.
+    required: true
+
+outputs:
+  key:
+    description: The generated cached build key.
+    value: ${{ steps.generate-key.outputs.cached-build-key }}
+
+runs:
+  using: composite
+  steps:
+    - name: Generate key for cache entry
+      id: generate-key
+      run: echo "cached-build-key=${{ runner.os }}-cargo-steam-${{ inputs.name }}-${{ hashFiles('**/Cargo.lock') }}" >> $GITHUB_OUTPUT
+      shell: bash
