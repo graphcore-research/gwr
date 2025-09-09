@@ -34,29 +34,16 @@ jobs:
           fetch-depth: 0  # Required to cause the main branch to also be fetched
       - uses: ./.github/actions/install-build-dependencies
       - uses: ./.github/actions/install-dev-dependencies
-
-      - name: Get cache access variables
-        id: cache-vars
-        uses: ./.github/actions/cached-semver-access
-
-      - name: Restore cached build files
-        uses: actions/cache/restore@v4
+      - uses: ./.github/actions/run-build-command
         with:
-          path: ${{ steps.cache-vars.outputs.paths }}
-          key: ${{ steps.cache-vars.outputs.key }}
+          command: pre-commit run --hook-stage manual --all-files cargo-semver-checks
+          cache-name: semver
+          paths: |
+            target/semver-checks/
 
-      - name: Run cargo semver-checks
-        run: pre-commit run --hook-stage manual --all-files cargo-semver-checks
-
-      - name: Save build files to cache
-        if: github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ steps.cache-vars.outputs.paths }}
-          key: ${{ steps.cache-vars.outputs.key }}
-
-  build-and-test:
+  build:
     strategy:
+      fail-fast: true
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
@@ -66,29 +53,45 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/install-build-dependencies
-
-      - name: Get cache access variables
-        id: cache-vars
-        uses: ./.github/actions/cached-build-access
-
-      - name: Restore cached build files
-        uses: actions/cache/restore@v4
+      - uses: ./.github/actions/run-build-command
         with:
-          path: ${{ steps.cache-vars.outputs.paths }}
-          key: ${{ steps.cache-vars.outputs.key }}
+          command: cargo build --all-features --verbose
+          cache-name: ${{ github.job }}
 
-      - name: Build
-        run: cargo build --all-features --verbose
+  test:
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      RUSTFLAGS: -D warnings
 
-      - name: Run tests
-        run: cargo test --all-features --verbose
-
-      - name: Run benchmarks
-        run: cargo bench --all-features --verbose
-
-      - name: Save build files to cache
-        if: github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/install-build-dependencies
+      - uses: ./.github/actions/run-build-command
         with:
-          path: ${{ steps.cache-vars.outputs.paths }}
-          key: ${{ steps.cache-vars.outputs.key }}
+          command: cargo test --all-features --verbose
+          cache-name: ${{ github.job }}
+          paths: |
+            target/
+            steam-developer-guide/doctest_cache/
+            steam-developer-guide/rustdoc_cache/
+
+  benchmark:
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      RUSTFLAGS: -D warnings
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/install-build-dependencies
+      - uses: ./.github/actions/run-build-command
+        with:
+          command: cargo bench --all-features --verbose
+          cache-name: ${{ github.job }}
