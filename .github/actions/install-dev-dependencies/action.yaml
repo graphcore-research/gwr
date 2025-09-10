@@ -22,5 +22,6 @@ runs:
           ${{ runner.os }}-cargo-build-deps-
 
     - name: Run install.sh
+      id: run-install
       run: ./.github/actions/install-dev-dependencies/install.sh
       shell: bash
