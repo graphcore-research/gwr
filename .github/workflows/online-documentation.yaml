@@ -36,12 +36,14 @@ jobs:
         uses: actions/configure-pages@v5
 
       - name: Build with mdBook
+        id: build-book
         run: |
           mdbook build
           cat rustdoc_build.log
         working-directory: ./steam-developer-guide
 
       - name: Generate top-level index.html
+        id: generate-index
         run: echo "<meta http-equiv=\"refresh\" content=\"0; url=html/index.html\">" > index.html
         working-directory: ./steam-developer-guide/book
 
