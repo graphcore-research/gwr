@@ -12,8 +12,30 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  warm-build-deps-cache:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/install-build-dependencies
+
+  warm-dev-deps-cache:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    needs: warm-build-deps-cache
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/install-dev-dependencies
+
   lint:
     runs-on: ubuntu-latest
+    needs: [warm-build-deps-cache, warm-dev-deps-cache]
     env:
       RUSTFLAGS: -D warnings
 
@@ -27,6 +49,7 @@ jobs:
 
   check-semantic-versioning:
     runs-on: macos-latest
+    needs: [warm-build-deps-cache, warm-dev-deps-cache]
 
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +70,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    needs: warm-build-deps-cache
     env:
       RUSTFLAGS: -D warnings
 
@@ -64,6 +88,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    needs: warm-build-deps-cache
     env:
       RUSTFLAGS: -D warnings
 
@@ -85,6 +110,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    needs: warm-build-deps-cache
     env:
       RUSTFLAGS: -D warnings
 
