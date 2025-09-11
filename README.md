@@ -57,9 +57,9 @@ executable model. Where appropriate sections of specification and the reference
 model for that part of the specification can reside within the same source file
 if desired.
 
-Continuous integration is run on both Linux and macOS to ensure ongoing
-compatibly with whichever platform developers wish to use. A robust release
-process is also defined to guarantee semantic versioning of packages and
+Continuous integration is run on both Linux (Ubuntu LTS) and macOS to ensure
+ongoing compatibly with whichever platform developers wish to use. A robust
+release process is also defined to guarantee semantic versioning of packages and
 automated generation of release notes ensuring user upgrade processes are as
 smooth as possible.
 
@@ -78,36 +78,32 @@ included in the [Rust chapter] of the developer guide.
 
 <!-- ANCHOR: tooling_bootstrap -->
 
-## Rust Tools
+## Tooling
 
-A Rust toolchain is required to build both models and documentation.
+All of the required tooling to build and use, and to develop STEAM can be
+installed using the scripts included within the repo. These scripts are designed
+to be used by both users and the CI system.
 
-Rust toolchains can be [installed] and managed using the [`rustup`] tool.
+Dependencies will be installed using package managers where possible, with [APT]
+being used on Linux and [Homebrew] on macOS ([Homebrew] itself will be installed
+as required if not already avaliable). Various cross-platform package managers
+are also used, including [rustup], [Cargo], and [npm].
 
-To install rustup on Linux:
+See the [Using STEAM Packages](#using-steam-packages) and
+[Developing STEAM Packages](#developing-steam-packages) sections for further
+details on these install scripts.
 
-```bash
-sudo apt install rustup
-```
+### Rust Tools
 
-To install rustup on macOS:
+The correct Rust toolchain will automatically be selected and used by [rustup]
+when commands are executed from within the STEAM directory (or below). This
+behaviour is controlled by the the `rust-toolchain.toml` file.
 
-```bash
-brew install rustup
-```
-
-It may also be necessary to add rustup to the PATH, as indicated by `brew`.
-
-Or alternatively, rustup can be installed directly with:
-
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-Once installed, it can be used to install the required Rust toolchain(s).
-
-[installed]: https://www.rust-lang.org/tools/install
-[`rustup`]: https://rust-lang.github.io/rustup/
+[APT]: https://wiki.debian.org/AptCLI
+[Cargo]: https://doc.rust-lang.org/stable/cargo
+[Homebrew]: https://brew.sh
+[npm]: https://www.npmjs.com
+[rustup]: https://rust-lang.github.io/rustup
 
 <!-- ANCHOR_END: tooling_bootstrap -->
 
@@ -123,9 +119,26 @@ required build dependencies can be installed by running:
 ./.github/actions/install-build-dependencies/install.sh
 ```
 
+<!-- prettier-ignore-start -->
+
+> [!IMPORTANT]
+> To ensure that the correct Rust toolchain is used the script must be executed
+> from within the STEAM directory.
+
+> [!Tip]
+> Although the script is interactive, selecting the default option
+> (<kbd>Enter</kbd>) at every step is a reasonable choice and will result in a
+> working environment.
+
+> [!NOTE]
+> Some of the actions taken by the script may request elevated permissions via
+> `sudo`.
+
+<!-- prettier-ignore-end -->
+
 [Asciidoctor]: https://asciidoctor.org
-[Cap'n Proto]: https://capnproto.org/
-[mdBook]: https://rust-lang.github.io/mdBook/
+[Cap'n Proto]: https://capnproto.org
+[mdBook]: https://rust-lang.github.io/mdBook
 
 <!-- ANCHOR_END: package_users -->
 
@@ -142,11 +155,27 @@ All of the required development dependencies can be installed by running:
 ./.github/actions/install-dev-dependencies/install.sh
 ```
 
+<!-- prettier-ignore-start -->
+
+> [!IMPORTANT]
+> To ensure that the correct Rust toolchain is used the script must be executed
+> from within the STEAM directory.
+
+> [!Tip]
+> Although the script is interactive, selecting the default option
+> (<kbd>Enter</kbd>) at every step is a reasonable choice and will result in a
+> working environment.
+
+> [!NOTE]
+> Some of the actions taken by the script may request elevated permissions via
+> `sudo`.
+
+<!-- prettier-ignore-end -->
+
 Finally the pre-commit hooks need to be installed within the cloned copy of the
 STEAM repo:
 
 ```bash
-cd steam
 pre-commit install
 ```
 
@@ -257,7 +286,7 @@ updated package, and automatically publishes the updated packages using
   https://github.com/graphcore-research/steam/actions/workflows/ci.yaml
 [clippy]: https://doc.rust-lang.org/clippy
 [Cocogitto]: https://docs.cocogitto.io
-[Conventional Commits]: https://www.conventionalcommits.org/en/v1.0.0/
+[Conventional Commits]: https://www.conventionalcommits.org/en/v1.0.0
 [pre-commit]: https://pre-commit.com
 [pre-commit-hooks]: https://github.com/pre-commit/pre-commit-hooks
 [Prettier]: https://prettier.io

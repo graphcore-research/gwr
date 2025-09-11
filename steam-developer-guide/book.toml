@@ -7,6 +7,10 @@ description = "The Simulation Technology for Evaluation and Architecture Modelli
 src = "md_src"
 language = "en"
 
+[preprocessor.alerts]
+after = [ "links" ]
+renderers = ["html", "linkcheck"]
+
 [preprocessor.cmdrun]
 
 [preprocessor.keeper]

@@ -5,6 +5,19 @@
 set -e
 echo "Installing dev dependencies"
 
+if [[ $GITHUB_ACTIONS != "true" ]]; then
+  if [[ $OSTYPE == "linux"* ]]; then
+    sudo apt-get update
+    sudo apt install npm
+  elif [[ $OSTYPE == "darwin"* ]]; then
+    brew update
+    brew install npm
+  else
+    echo "Installing dev dependencies on $OSTYPE is unsupported"
+    exit 1
+  fi
+fi
+
 if [[ $OSTYPE == "linux"* ]]; then
   sudo apt-get update
   sudo apt install pre-commit
