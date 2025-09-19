@@ -3,25 +3,24 @@
 use std::cmp::max;
 use std::vec;
 
-use tui::Frame;
-use tui::backend::Backend;
-use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use tui::style::{Color, Modifier, Style};
-use tui::text::{Line, Span};
-use tui::widgets::{BarChart, Block, BorderType, Borders, Paragraph};
+use ratatui::Frame;
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{BarChart, Block, BorderType, Borders, Paragraph};
 
 use crate::app::{App, InputState};
 use crate::handler::TOGGLE_RE;
 
 /// Renders the user interface widgets.
-pub fn render<B: Backend>(app: &mut App, frame: &mut Frame<'_, B>) {
+pub fn render(app: &mut App, frame: &mut Frame) {
     // This is where you add new widgets.
     // See the following resources:
     // - https://docs.rs/ratatui/latest/ratatui/widgets/index.html
     // - https://github.com/ratatui-org/ratatui/tree/master/examples
 
     // Default is to use the entire area to render the log.
-    let mut log_area = frame.size();
+    let mut log_area = frame.area();
 
     if app.state() == InputState::Help {
         render_help(app, frame, log_area);
@@ -60,7 +59,7 @@ fn get_search_and_cursor(app: &App) -> (String, usize) {
     (search, guard.search_cursor_pos)
 }
 
-fn render_search<B: Backend>(app: &mut App, frame: &mut Frame<'_, B>, area: Rect) {
+fn render_search(app: &mut App, frame: &mut Frame, area: Rect) {
     let title = "Search";
     let re = format!("Regex ({TOGGLE_RE:?})")
         .replace('(', "")
@@ -102,7 +101,7 @@ fn render_search<B: Backend>(app: &mut App, frame: &mut Frame<'_, B>, area: Rect
     );
 }
 
-fn render_log<B: Backend>(app: &mut App, frame: &mut Frame<'_, B>, area: Rect) {
+fn render_log(app: &mut App, frame: &mut Frame, area: Rect) {
     // Update the renderer with the current frame size.
     app.set_frame_size(area.height as usize);
 
@@ -199,7 +198,7 @@ impl<'a> HelpRender<'a> {
     }
 }
 
-fn render_help<B: Backend>(_app: &mut App, frame: &mut Frame<'_, B>, area: Rect) {
+fn render_help(_app: &mut App, frame: &mut Frame, area: Rect) {
     let mut renderer = HelpRender::new();
 
     let re = format!("{TOGGLE_RE:?}").replace('(', "").replace(')', "");
@@ -215,7 +214,6 @@ fn render_help<B: Backend>(_app: &mut App, frame: &mut Frame<'_, B>, area: Rect)
     renderer.add_command_help_line("left-arrow", "move left in search text");
     renderer.add_command_help_line("right-arrow", "move right in search text");
     renderer.add_command_help_line("ctrl+a", "move to start of search text");
-    renderer.add_command_help_line("ctrl+e", "move to end of search text");
     renderer.add_command_help_line("ctrl+e", "move to end of search text");
     renderer.add_command_help_line(re.as_str(), "toggle regular-expression mode");
 
@@ -255,7 +253,7 @@ fn render_help<B: Backend>(_app: &mut App, frame: &mut Frame<'_, B>, area: Rect)
     );
 }
 
-fn render_chart<B: Backend>(app: &mut App, frame: &mut Frame<'_, B>, area: Rect) {
+fn render_chart(app: &mut App, frame: &mut Frame, area: Rect) {
     let renderer = app.renderer.lock().unwrap();
     let plot_fullness = renderer.plot_fullness;
     let mut data = Vec::new();

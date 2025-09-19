@@ -1,15 +1,14 @@
-// Copyright (c) 2023 Graphcore Ltd. All rights reserved.
+// Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
 use std::{io, panic};
 
+use color_eyre::Result;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::Terminal;
 use ratatui::backend::Backend;
 
-use crate::app::{App, AppResult};
-use crate::event::EventHandler;
-use crate::ui;
+use crate::Draw;
 
 /// Representation of a terminal user interface.
 ///
@@ -19,20 +18,18 @@ use crate::ui;
 pub struct Tui<B: Backend> {
     /// Interface to the Terminal.
     terminal: Terminal<B>,
-    /// Terminal event handler.
-    pub events: EventHandler,
 }
 
 impl<B: Backend> Tui<B> {
     /// Constructs a new instance of [`Tui`].
-    pub fn new(terminal: Terminal<B>, events: EventHandler) -> Self {
-        Self { terminal, events }
+    pub fn new(terminal: Terminal<B>) -> Self {
+        Self { terminal }
     }
 
     /// Initializes the terminal interface.
     ///
     /// It enables the raw mode and sets terminal properties.
-    pub fn init(&mut self) -> AppResult<()> {
+    pub fn init(&mut self) -> Result<()> {
         terminal::enable_raw_mode()?;
         crossterm::execute!(io::stderr(), EnterAlternateScreen, EnableMouseCapture)?;
 
@@ -50,12 +47,12 @@ impl<B: Backend> Tui<B> {
         Ok(())
     }
 
-    /// [`Draw`] the terminal interface by [`rendering`] the widgets.
+    /// [`Draw`] the terminal interface by rendering the widgets.
     ///
     /// [`Draw`]: ratatui::Terminal::draw
-    /// [`rendering`]: crate::ui::render
-    pub fn draw(&mut self, app: &mut App) -> AppResult<()> {
-        self.terminal.draw(|frame| ui::render(app, frame))?;
+    pub fn draw(&mut self, app: &mut impl Draw) -> Result<()> {
+        // self.terminal.draw(|frame| ui::render(app, frame))?;
+        self.terminal.draw(|frame| app.draw(frame))?;
         Ok(())
     }
 
@@ -63,7 +60,7 @@ impl<B: Backend> Tui<B> {
     ///
     /// This function is also used for the panic hook to revert
     /// the terminal properties if unexpected errors occur.
-    fn reset() -> AppResult<()> {
+    fn reset() -> Result<()> {
         terminal::disable_raw_mode()?;
         crossterm::execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
         Ok(())
@@ -72,7 +69,7 @@ impl<B: Backend> Tui<B> {
     /// Exits the terminal interface.
     ///
     /// It disables the raw mode and reverts back the terminal properties.
-    pub fn exit(&mut self) -> AppResult<()> {
+    pub fn exit(&mut self) -> Result<()> {
         Self::reset()?;
         self.terminal.show_cursor()?;
         Ok(())

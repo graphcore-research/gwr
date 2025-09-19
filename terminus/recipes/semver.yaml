@@ -1,0 +1,6 @@
+# Copyright (c) 2025 Graphcore Ltd. All rights reserved.
+description: Run cargo semver checks
+arguments: []
+ingredients:
+  - comment: ""
+    command: pre-commit run --hook-stage manual --all-files cargo-semver-checks

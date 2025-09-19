@@ -6,6 +6,8 @@ use std::process::exit;
 use std::{io, thread};
 
 use clap::{Args, Parser};
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 use steam_spotter::app::{App, AppResult};
 use steam_spotter::event::{Event, EventHandler};
 use steam_spotter::handler::handle_key_events;
@@ -14,8 +16,6 @@ use steam_spotter::perfetto;
 use steam_spotter::rocket::rocket;
 use steam_spotter::tui::Tui;
 use tokio::runtime::Runtime;
-use tui::Terminal;
-use tui::backend::CrosstermBackend;
 
 /// Input subcommand arguments.
 #[derive(Args)]

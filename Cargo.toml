@@ -1,7 +1,6 @@
 # Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
 [workspace]
-resolver = "2"
 members = [
     "check-copyright",
     "examples/flaky-component",
@@ -21,36 +20,39 @@ members = [
     "steam-protocols",
     "steam-resources",
     "steam-spotter",
-    "steam-track"
+    "steam-track",
+    "terminus",
 ]
+resolver = "2"
 
 [workspace.package]
 authors = ["The Silicon Architecture team"]
-edition = "2024"
-rust-version = "1.87"
 description = "The Simulation Technology for Evaluation and Architecture Modelling (STEAM) workspace"
+homepage = "https://github.com/graphcore-research/steam"
 documentation = "https://graphcore-research.github.io/steam"
 readme = "README.md"
-homepage = "https://github.com/graphcore-research/steam"
-repository = "https://github.com/graphcore-research/steam"
+keywords = ["steam"]
+categories = [
+    "asynchronous",
+    "simulation",
+]
 license = "MIT"
 license-file = "LICENSE"
-keywords = ["steam"]
-categories = ["asynchronous", "simulation"]
+repository = "https://github.com/graphcore-research/steam"
 publish = ["kellnr"]
+edition = "2024"
+rust-version = "1.87"
 
 [workspace.dependencies]
 approx = "0.5.1"
 async-trait = "0.1.88"
 capnp = "0.21.1"
 capnpc = "0.21.0"
-clap = { version = "4.4.6", features = ["derive"] }
 criterion = "0.6.0"
+crossterm = "0.28.1"
 event-listener = "3.0.0"
-figment = { version = "0.10.19", features = ["env", "toml"] }
 futures = "0.3.28"
 itertools = "0.11.0"
-log = { version = "0.4.20", features = ["std", "serde"] }
 num = "0.4.1"
 num-derive = "0.4.1"
 num-traits = "0.2"
@@ -60,9 +62,38 @@ prost = "0.14.1"
 prost-build = "0.14.1"
 quote = "1.0.33"
 rand = "0.8.5"
+ratatui = "0.29.0"
 regex = "1.9.6"
-serde = { version = "1.0.188", features = ["derive"] }
 serial_test = "3.2.0"
-syn = { version = "1.0.41", features = ["parsing", "full", "extra-traits"] }
 tempfile = "3.19.0"
 trybuild = "1.0.103"
+
+[workspace.dependencies.clap]
+version = "4.4.6"
+features = ["derive"]
+
+[workspace.dependencies.figment]
+version = "0.10.19"
+features = [
+    "env",
+    "toml",
+]
+
+[workspace.dependencies.log]
+version = "0.4.20"
+features = [
+    "std",
+    "serde",
+]
+
+[workspace.dependencies.serde]
+version = "1.0.188"
+features = ["derive"]
+
+[workspace.dependencies.syn]
+version = "1.0.41"
+features = [
+    "parsing",
+    "full",
+    "extra-traits",
+]
