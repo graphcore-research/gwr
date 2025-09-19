@@ -1,0 +1,22 @@
+# Copyright (c) 2025 Graphcore Ltd. All rights reserved.
+
+[package]
+name = "terminus"
+version = "0.1.0"
+description = "Command-line assistant for STEAM"
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+keywords = ["steam", "commands", "utility", "assistant"]
+categories = ["command-line-utilities", "command-line-interface", "development-tools"]
+
+[dependencies]
+clap.workspace = true
+color-eyre = "0.6.3"
+crossterm.workspace = true
+env_logger = "0.11.8"
+log.workspace = true
+ratatui.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_yaml_ng = "0.10.0"

@@ -1,7 +1,6 @@
 # Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
 [workspace]
-resolver = "2"
 members = [
     "check-copyright",
     "examples/flaky-component",
@@ -21,22 +20,27 @@ members = [
     "steam-protocols",
     "steam-resources",
     "steam-spotter",
-    "steam-track"
+    "steam-track",
+    "terminus",
 ]
+resolver = "2"
 
 [workspace.package]
 authors = ["The Silicon Architecture team"]
 edition = "2024"
 rust-version = "1.90"
 description = "The Simulation Technology for Evaluation and Architecture Modelling (STEAM) workspace"
+homepage = "https://github.com/graphcore-research/steam"
 documentation = "https://graphcore-research.github.io/steam"
 readme = "README.md"
-homepage = "https://github.com/graphcore-research/steam"
-repository = "https://github.com/graphcore-research/steam"
+keywords = ["steam"]
+categories = [
+    "asynchronous",
+    "simulation",
+]
 license = "MIT"
 license-file = "LICENSE"
-keywords = ["steam"]
-categories = ["asynchronous", "simulation"]
+repository = "https://github.com/graphcore-research/steam"
 publish = ["kellnr"]
 
 [workspace.dependencies]
@@ -46,6 +50,8 @@ capnp = "0.21.1"
 capnpc = "0.21.0"
 clap = { version = "4.4.6", features = ["derive"] }
 criterion = "0.7.0"
+crossterm = "0.29.0"
+event-listener = "3.0.0"
 figment = { version = "0.10.19", features = ["env", "toml"] }
 futures = "0.3.28"
 itertools = "0.14.0"
@@ -59,6 +65,7 @@ prost = "0.14.1"
 prost-build = "0.14.1"
 quote = "1.0.33"
 rand = "0.9.2"
+ratatui = "0.29.0"
 regex = "1.9.6"
 serde = { version = "1.0.188", features = ["derive"] }
 serial_test = "3.2.0"
