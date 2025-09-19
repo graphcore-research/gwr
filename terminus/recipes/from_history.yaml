@@ -1,0 +1,28 @@
+# Copyright (c) 2025 Graphcore Ltd. All rights reserved.
+description:
+  Create a recipe from the last N of your history. This works best if you have
+  done 'setopt share_history'.
+arguments:
+  - name: N
+    default: 10
+    comment: Size of history file to create (the last N)
+  - name: HIST_TMP
+    default: .hist.txt
+    comment: Name of temp file to write history to
+  - name: SELECT
+    default: s*
+    comment: Selection rule to use. Default is select all
+  - name: RECIPE
+    default: recipe_out.yaml
+    comment: Name of recipe file to write
+ingredients:
+  - comment: Show all the arguments
+    command: echo "Write last ${N} ${HIST_TMP} ${SELECT} ${RECIPE}"
+  - comment: Write the history file
+    command: fc -l -${N} > ${HIST_TMP}
+  - comment: Create the recipe
+    command:
+      cargo run --bin terminus -- write --history ${HIST_TMP} --select
+      "${SELECT}" --recipe ${RECIPE}
+  - comment: Clean up
+    command: rm ${HIST_TMP}

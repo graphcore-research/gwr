@@ -2,7 +2,7 @@
 
 [package]
 name = "steam-spotter"
-version = "0.3.0"
+version = "0.4.0"
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -21,14 +21,14 @@ publish.workspace = true
 [dependencies]
 capnp.workspace = true
 clap.workspace = true
-crossterm = "0.29.0"
+crossterm.workspace = true
 itertools.workspace = true
 log.workspace = true
+ratatui.workspace = true
 regex.workspace = true
 rocket = "0.5.1"
 steam-track = { path = "../steam-track" }
 tokio = "1.45.1"
-tui = { package = "ratatui", version = "0.23.0" }
 
 [features]
 default = ["perfetto"]
