@@ -21,9 +21,7 @@ publish.workspace = true
 [dependencies]
 async-trait.workspace = true
 clap.workspace = true
-event-listener.workspace = true
 futures.workspace = true
-itertools.workspace = true
 log.workspace = true
 steam-track = { path = "../steam-track" }
 

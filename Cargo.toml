@@ -46,7 +46,6 @@ capnp = "0.21.1"
 capnpc = "0.21.0"
 clap = { version = "4.4.6", features = ["derive"] }
 criterion = "0.6.0"
-event-listener = "3.0.0"
 figment = { version = "0.10.19", features = ["env", "toml"] }
 futures = "0.3.28"
 itertools = "0.11.0"
