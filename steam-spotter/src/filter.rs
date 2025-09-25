@@ -206,10 +206,10 @@ impl Filter {
         search = search.trim().to_owned();
 
         let mut search_re = None;
-        if self.use_regex {
-            if let Ok(re) = Regex::new(search.as_str()) {
-                search_re = Some(re);
-            }
+        if self.use_regex
+            && let Ok(re) = Regex::new(search.as_str())
+        {
+            search_re = Some(re);
         }
 
         SearchState {
