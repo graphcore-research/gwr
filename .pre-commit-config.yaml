@@ -62,7 +62,7 @@ repos:
         language: system
         types_or: [rust, toml]
         entry:
-          cargo about generate --offline --workspace --all-features --fail
+          cargo about generate --locked --workspace --all-features --fail
           --config about.toml --output-file licenses.html about.hbs
         pass_filenames: false
         stages: [pre-commit, pre-merge-commit, pre-push, manual]
