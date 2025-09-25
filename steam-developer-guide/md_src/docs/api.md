@@ -3,7 +3,7 @@
 # API Documentation
 
 <!-- cmdrun bash -x -c "cargo clean --doc --target-dir ../../rustdoc_cache" > ../../rustdoc_build.log 2>&1 -->
-<!-- cmdrun bash -x -c "STEAM_DOCS_ONLY=1 cargo doc-steam --target-dir ../../rustdoc_cache" >> ../../rustdoc_build.log 2>&1 -->
+<!-- cmdrun bash -x -c "cargo doc-steam --target-dir ../../rustdoc_cache" >> ../../rustdoc_build.log 2>&1 -->
 <!-- cmdrun bash -x -c "rm -rfv ../../book/rustdoc" >> ../../rustdoc_build.log 2>&1 -->
 <!-- cmdrun bash -x -c "mkdir -pv ../../book/rustdoc" >> ../../rustdoc_build.log 2>&1 -->
 <!-- cmdrun bash -x -c "cp -rv ../../rustdoc_cache/doc/. ../../book/rustdoc" >> ../../rustdoc_build.log 2>&1 -->

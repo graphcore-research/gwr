@@ -2039,7 +2039,7 @@ dependencies = [
 
 [[package]]
 name = "steam-perfetto"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "prost",
  "prost-build",
@@ -2048,7 +2048,7 @@ dependencies = [
 
 [[package]]
 name = "steam-perfetto-sys"
-version = "1.0.0"
+version = "2.0.0"
 
 [[package]]
 name = "steam-protocols"
