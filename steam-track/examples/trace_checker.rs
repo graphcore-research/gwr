@@ -183,7 +183,7 @@ impl Checker {
         let still_active = self
             .active_ids
             .iter()
-            .filter(|&(k, _v)| (*k != steam_track::NO_ID && *k != steam_track::ROOT));
+            .filter(|&(k, _v)| *k != steam_track::NO_ID && *k != steam_track::ROOT);
 
         for (k, v) in still_active {
             warn!("ID {k} still active");

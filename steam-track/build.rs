@@ -46,10 +46,10 @@ fn get_capnp_schemas() -> Vec<PathBuf> {
         match entry {
             Ok(entry) => {
                 let filename = PathBuf::from(entry.file_name());
-                if let Some(extension) = filename.extension() {
-                    if extension == "capnp" {
-                        schemas.push(entry.path());
-                    }
+                if let Some(extension) = filename.extension()
+                    && extension == "capnp"
+                {
+                    schemas.push(entry.path());
                 }
             }
             Err(error) => panic!("{}", error),

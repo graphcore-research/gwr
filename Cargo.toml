@@ -27,7 +27,7 @@ members = [
 [workspace.package]
 authors = ["The Silicon Architecture team"]
 edition = "2024"
-rust-version = "1.87"
+rust-version = "1.90"
 description = "The Simulation Technology for Evaluation and Architecture Modelling (STEAM) workspace"
 documentation = "https://graphcore-research.github.io/steam"
 readme = "README.md"

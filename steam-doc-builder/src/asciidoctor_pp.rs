@@ -81,12 +81,12 @@ impl AsciiDoctorPreProcessor {
         if heading_depth > 0 {
             // Ensure the next character is a space
             let next_char = line.chars().nth(heading_depth);
-            if let Some(ch) = next_char {
-                if ch == ' ' {
-                    let (_old_heading, rest) = line.split_at(heading_depth);
-                    let new_depth = heading_depth + depth - 2;
-                    return format!("{}{}", "=".repeat(new_depth), rest).to_owned();
-                }
+            if let Some(ch) = next_char
+                && ch == ' '
+            {
+                let (_old_heading, rest) = line.split_at(heading_depth);
+                let new_depth = heading_depth + depth - 2;
+                return format!("{}{}", "=".repeat(new_depth), rest).to_owned();
             }
         }
         line
