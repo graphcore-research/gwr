@@ -22,7 +22,7 @@ export BINSTALL_VERSION=1.15.5
 curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 
 cargo binstall --disable-telemetry --no-confirm --locked   \
-  cargo-expand@1.0.114                                     \
+  cargo-expand@1.0.116                                     \
   mdbook@0.4.52                                            \
   mdbook-cmdrun@0.7.1                                      \
   mdbook-keeper@0.5.0                                      \
