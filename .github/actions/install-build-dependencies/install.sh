@@ -18,7 +18,7 @@ fi
 
 rustup show  # Cause toolchain specified in rust-toolchain.toml to be installed
 
-export BINSTALL_VERSION=1.15.4
+export BINSTALL_VERSION=1.15.5
 curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 
 cargo binstall --disable-telemetry --no-confirm --locked   \
