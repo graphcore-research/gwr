@@ -28,7 +28,7 @@ const DOCS_RS_ENV_VAR: &str = "DOCS_RS";
 #[cfg(feature = "_perfetto_src")]
 mod perfetto_consts {
     pub const PERFETTO_REPO_URL: &str = "https://github.com/google/perfetto";
-    pub const PERFETTO_REPO_REFSPEC: &str = "v50.1";
+    pub const PERFETTO_REPO_REFSPEC: &str = "v52.0";
 
     pub const PERFETTO_SYMLINK: &str = "perfetto";
 }
