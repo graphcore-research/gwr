@@ -21,7 +21,7 @@ publish.workspace = true
 [dependencies]
 capnp.workspace = true
 clap.workspace = true
-crossterm = "0.27.0"
+crossterm = "0.29.0"
 itertools.workspace = true
 log.workspace = true
 regex.workspace = true

@@ -25,7 +25,7 @@ proc-macro = true
 proc-macro2.workspace = true
 quote.workspace = true
 regex.workspace = true
-syn = { version = "2.0.90", features = ["derive", "extra-traits", "full"] }
+syn = { version = "2.0.106", features = ["derive", "extra-traits", "full"] }
 
 [dev-dependencies]
 clap.workspace = true
