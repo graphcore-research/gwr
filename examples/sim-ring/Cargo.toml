@@ -21,7 +21,7 @@ publish.workspace = true
 [dependencies]
 clap.workspace = true
 log.workspace = true
-indicatif = "0.17.11"
+indicatif = "0.18.0"
 steam-components = { path = "../../steam-components" }
 steam-engine = { path = "../../steam-engine" }
 steam-models = { path = "../../steam-models" }
