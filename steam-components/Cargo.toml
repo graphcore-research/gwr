@@ -24,7 +24,6 @@ harness = false
 
 [dependencies]
 async-trait.workspace = true
-atomic_float = "0.1.0"
 log.workspace = true
 futures.workspace = true
 paste.workspace = true

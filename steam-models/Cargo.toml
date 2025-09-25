@@ -32,7 +32,6 @@ steam-components = { path = "../steam-components" }
 steam-model-builder = { path = "../steam-model-builder" }
 steam-engine = { path = "../steam-engine" }
 steam-track = { path = "../steam-track" }
-trait-variant = "0.0.1"
 
 [dev-dependencies]
 criterion.workspace = true
