@@ -1,163 +1,86 @@
 // Copyright (c) 2024 Graphcore Ltd. All rights reserved.
 
-//! All Perfetto's dependencies will be downloaded and built, and a symlink
+//! Perfetto's source will be downloaded and a symlink
 //! (see the PERFETTO_SYMLINK const) created in the source tree of this package
 //! to give users of this package constant paths to tools and schema.
 //!
-//! Due to the Perfetto build system performing an in tree build we deliberately
-//! avoid letting Cargo watch the PERFETTO_SYMLINK/out directory to ensure that
-//! incremental Cargo builds remain fast.
-//!
-//! Ideally we would however have Cargo watch the PERFETTO_SYMLINK itself such
-//! that it would be recreate if deleted so that downsteam builds that depend
-//! on this package do not fail unexpectedly. Unfortunately this is not possible
-//! as there appears to be no way to prevent the (mtime) check performed by
-//! Cargo following the symlink. Instead, as a compromise, we explicitly watch
-//! the PERFETTO_SYMLINK/protos directory (when the _perfetto_src feature is
-//! enabled) as this is not expected to be changed by the build system once the
+//! Ideally we would have Cargo watch the PERFETTO_SYMLINK itself such that it
+//! would be recreate if deleted so that downsteam builds that depend on this
+//! package do not fail unexpectedly. Unfortunately this is not possible as
+//! there appears to be no way to prevent the (mtime) check performed by Cargo
+//! following the symlink. Instead, as a compromise, we explicitly watch the
+//! PERFETTO_SYMLINK/protos directory as this is not expected to change once the
 //! Perfetto source has been downloaded (i.e. mtime check will be stable after
-//! the first rebuild attempt), and it allows us to detect if the symlink
-//! is removed.
-//!
-//! Currently just enough is installed and built to support the use of the
-//! Perfetto UI.
+//! the first rebuild attempt), and it allows us to detect if the symlink is
+//! removed.
 
-const STEAM_DOCS_ONLY_ENV_VAR: &str = "STEAM_DOCS_ONLY";
-const DOCS_RS_ENV_VAR: &str = "DOCS_RS";
+use std::env;
+use std::process::Command;
 
-#[cfg(feature = "_perfetto_src")]
-mod perfetto_consts {
-    pub const PERFETTO_REPO_URL: &str = "https://github.com/google/perfetto";
-    pub const PERFETTO_REPO_REFSPEC: &str = "v52.0";
+pub const PERFETTO_REPO_URL: &str = "https://github.com/google/perfetto";
+pub const PERFETTO_REPO_REFSPEC: &str = "v52.0";
 
-    pub const PERFETTO_SYMLINK: &str = "perfetto";
-}
+pub const PERFETTO_SYMLINK: &str = "perfetto";
 
 fn add_file_build_triggers() {
     println!("cargo::rerun-if-changed=src/lib.rs");
 }
 
-fn add_env_build_triggers() {
-    println!("cargo::rerun-if-env-changed={STEAM_DOCS_ONLY_ENV_VAR}");
-    println!("cargo::rerun-if-env-changed={DOCS_RS_ENV_VAR}");
-}
-
 fn main() {
     add_file_build_triggers();
-    add_env_build_triggers();
 
-    #[cfg(feature = "_perfetto_src")]
-    {
-        use std::env;
-        use std::process::Command;
+    let out_dir = env::var("OUT_DIR").unwrap();
 
-        let out_dir = env::var("OUT_DIR").unwrap();
+    let output = Command::new("git")
+        .arg("init")
+        .arg(&out_dir)
+        .output()
+        .expect("git command failed to start");
+    assert!(
+        output.status.success(),
+        "Failed to init repo for Perfetto source:\n{}",
+        str::from_utf8(&output.stderr).unwrap_or_default()
+    );
 
-        let output = Command::new("git")
-            .arg("init")
-            .arg(&out_dir)
-            .output()
-            .expect("git command failed to start");
-        assert!(
-            output.status.success(),
-            "Failed to init repo for Perfetto source:\n{}",
-            str::from_utf8(&output.stderr).unwrap_or_default()
-        );
+    let output = Command::new("git")
+        .args(["-C", &out_dir])
+        .arg("fetch")
+        .args(["--depth", "1"])
+        .arg(PERFETTO_REPO_URL)
+        .arg(PERFETTO_REPO_REFSPEC)
+        .output()
+        .expect("git command failed to start");
+    assert!(
+        output.status.success(),
+        "Failed to fetch Perfetto source repo:\n{}",
+        str::from_utf8(&output.stderr).unwrap_or_default()
+    );
 
-        let output = Command::new("git")
-            .args(["-C", &out_dir])
-            .arg("fetch")
-            .args(["--depth", "1"])
-            .arg(perfetto_consts::PERFETTO_REPO_URL)
-            .arg(perfetto_consts::PERFETTO_REPO_REFSPEC)
-            .output()
-            .expect("git command failed to start");
-        assert!(
-            output.status.success(),
-            "Failed to fetch Perfetto source repo:\n{}",
-            str::from_utf8(&output.stderr).unwrap_or_default()
-        );
+    let output = Command::new("git")
+        .args(["-C", &out_dir])
+        .arg("checkout")
+        .arg("FETCH_HEAD")
+        .output()
+        .expect("git command failed to start");
+    assert!(
+        output.status.success(),
+        "Failed to checkout Perfetto source repo:\n{}",
+        str::from_utf8(&output.stderr).unwrap_or_default()
+    );
 
-        let output = Command::new("git")
-            .args(["-C", &out_dir])
-            .arg("checkout")
-            .arg("FETCH_HEAD")
-            .output()
-            .expect("git command failed to start");
-        assert!(
-            output.status.success(),
-            "Failed to checkout Perfetto source repo:\n{}",
-            str::from_utf8(&output.stderr).unwrap_or_default()
-        );
+    let output = Command::new("ln")
+        .arg("-s")
+        .arg("-f")
+        .arg("-n")
+        .arg(&out_dir)
+        .arg(PERFETTO_SYMLINK)
+        .output()
+        .expect("ln command failed to start");
+    assert!(
+        output.status.success(),
+        "Failed to create symlink to Perfetto source repo:\n{}",
+        str::from_utf8(&output.stderr).unwrap_or_default()
+    );
 
-        let output = Command::new("ln")
-            .arg("-s")
-            .arg("-f")
-            .arg("-n")
-            .arg(&out_dir)
-            .arg(perfetto_consts::PERFETTO_SYMLINK)
-            .output()
-            .expect("ln command failed to start");
-        assert!(
-            output.status.success(),
-            "Failed to create symlink to Perfetto source repo:\n{}",
-            str::from_utf8(&output.stderr).unwrap_or_default()
-        );
-
-        println!(
-            "cargo::rerun-if-changed={}/protos",
-            perfetto_consts::PERFETTO_SYMLINK
-        );
-
-        if std::env::var(STEAM_DOCS_ONLY_ENV_VAR).is_err()
-            && std::env::var(DOCS_RS_ENV_VAR).is_err()
-        {
-            // Only allow the build of Perfetto when a regular build is
-            // occuring. Perfetto will not be built during documentation-only
-            // builds, regardless of the features enabled.
-            //
-            // This is useful as it allows the `--all-features` flag to be
-            // passed to rustdoc without incurring the time penalty of the
-            // Perfetto build.
-            //
-            // `DOCS_RS` is also supported as it is the defacto-standard
-            // mechanism used, due to a lack of support for detecting
-            // documentation builds in Cargo, see
-            // https://docs.rs/about/builds#detecting-docsrs.
-            // However as the build of the Rocket crate fails when `DOCS_RS` is
-            // set, within the STEAM infrastructure only `STEAM_DOCS_ONLY` is
-            // used.
-
-            #[cfg(feature = "_perfetto_ui")]
-            {
-                let output = Command::new(format!("{}/tools/install-build-deps", &out_dir))
-                    .arg("--ui")
-                    .output()
-                    .expect("install-build-deps command failed to start");
-                assert!(
-                    output.status.success(),
-                    "Failed to install build dependencies:\n{}",
-                    str::from_utf8(&output.stderr).unwrap_or_default()
-                );
-
-                println!(
-                    "cargo::rerun-if-changed={}/buildtools",
-                    perfetto_consts::PERFETTO_SYMLINK
-                );
-                println!(
-                    "cargo::rerun-if-changed={}/third_party",
-                    perfetto_consts::PERFETTO_SYMLINK
-                );
-
-                let output = Command::new(format!("{}/ui/build", &out_dir))
-                    .output()
-                    .expect("build command failed to start");
-                assert!(
-                    output.status.success(),
-                    "Failed to build Perfetto UI:\n{}",
-                    str::from_utf8(&output.stderr).unwrap_or_default()
-                );
-            }
-        }
-    }
+    println!("cargo::rerun-if-changed={PERFETTO_SYMLINK}/protos");
 }

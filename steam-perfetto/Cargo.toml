@@ -2,7 +2,7 @@
 
 [package]
 name = "steam-perfetto"
-version = "0.2.0"
+version = "0.3.0"
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -21,7 +21,4 @@ prost.workspace = true
 
 [build-dependencies]
 prost-build.workspace = true
-steam-perfetto-sys = { path = "../steam-perfetto-sys", features = ["_perfetto_src"] }
-
-[features]
-_perfetto-protoc = ["steam-perfetto-sys/_perfetto_ui"]
+steam-perfetto-sys = { path = "../steam-perfetto-sys" }
