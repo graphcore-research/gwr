@@ -35,9 +35,9 @@ pub struct Config {
     pub num_send_packets: usize,
 }
 
-struct Router(usize);
+struct RoutingAlgorithm(usize);
 
-impl<T> Route<T> for Router
+impl<T> Route<T> for RoutingAlgorithm
 where
     T: Routable,
 {
@@ -68,7 +68,7 @@ pub fn build_ring_nodes(engine: &mut Engine, config: &Config) -> Nodes {
                 format!("node{i}").as_str(),
                 spawner.clone(),
                 &ring_config,
-                Box::new(Router(i)),
+                Box::new(RoutingAlgorithm(i)),
                 Box::new(WeightedRoundRobin::new(weights, 2).unwrap()),
             )
             .unwrap()

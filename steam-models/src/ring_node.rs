@@ -95,7 +95,7 @@ where
         name: &str,
         spawner: Spawner,
         config: &RingConfig<T>,
-        route_fn: Box<dyn Route<T>>,
+        routing_algorithm: Box<dyn Route<T>>,
         policy: Box<dyn Arbitrate<T>>,
     ) -> Result<Rc<Self>, SimError> {
         let entity = Arc::new(Entity::new(parent, name));
@@ -122,7 +122,7 @@ where
         )?;
         connect_port!(tx_buffer_limiter, tx => tx_buffer, rx)?;
 
-        let router = Router::new_and_register(engine, &entity, "router", 2, route_fn)?;
+        let router = Router::new_and_register(engine, &entity, "router", 2, routing_algorithm)?;
         connect_port!(rx_buffer, tx => router, rx)?;
 
         let arbiter = Arbiter::new_and_register(engine, &entity, "arb", spawner, 2, policy)?;

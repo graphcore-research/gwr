@@ -1,7 +1,7 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
 use steam_components::connect_port;
-use steam_components::router::{DefaultRouter, Router};
+use steam_components::router::{DefaultAlgorithm, Router};
 use steam_components::sink::Sink;
 use steam_components::source::Source;
 use steam_engine::run_simulation;
@@ -17,7 +17,7 @@ fn router() {
     let top = engine.top();
     let source = Source::new_and_register(&engine, top, "source", Some(iter)).unwrap();
     let router =
-        Router::new_and_register(&engine, top, "router", 2, Box::new(DefaultRouter {})).unwrap();
+        Router::new_and_register(&engine, top, "router", 2, Box::new(DefaultAlgorithm {})).unwrap();
     let sink_a = Sink::new_and_register(&engine, top, "sink_a").unwrap();
     let sink_b = Sink::new_and_register(&engine, top, "sink_b").unwrap();
 
