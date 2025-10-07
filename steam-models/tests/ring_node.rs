@@ -16,9 +16,9 @@ use steam_engine::types::SimError;
 use steam_models::ethernet_frame::{EthernetFrame, SRC_MAC_BYTES, mac_to_u64};
 use steam_models::ring_node::{IO_INDEX, RING_INDEX, RingConfig, RingNode};
 
-struct TestRouter(u64);
+struct TestAlgorithm(u64);
 
-impl<T> Route<T> for TestRouter
+impl<T> Route<T> for TestAlgorithm
 where
     T: Routable,
 {
@@ -120,7 +120,7 @@ fn ring_to_io() {
         io_frames.push(frame);
     }
 
-    let router = Box::new(TestRouter(mac_to_u64(&io_dest)));
+    let router = Box::new(TestAlgorithm(mac_to_u64(&io_dest)));
     let (ring_sink, io_sink, _) = run_test(engine, ring_frames, io_frames, weights, router);
 
     // The ring packets should have come from the IO TX
@@ -164,7 +164,7 @@ fn all_to_ring() {
         io_frames.push(frame);
     }
 
-    let router = Box::new(TestRouter(mac_to_u64(&io_dest)));
+    let router = Box::new(TestAlgorithm(mac_to_u64(&io_dest)));
     let (ring_sink, io_sink, _) = run_test(engine, ring_frames, io_frames, weights, router);
 
     // All packets should be sent along the ring

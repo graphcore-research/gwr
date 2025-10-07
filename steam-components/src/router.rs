@@ -2,12 +2,55 @@
 
 //! Perform routing between an input interface and a number number of outputs.
 //!
+//! The [Router] is passed an algorithm that makes the decision about which
+//! egress port to send each routed object to.
+//!
 //! # Ports
 //!
 //! This component has the following ports:
 //!  - One [input port](steam_engine::port::InPort): `rx`
 //!  - N [output ports](steam_engine::port::OutPort): `tx[i]` for `i in [0,
 //!    N-1]`
+
+//! # Function
+//!
+//! The [Router] will take objects from the single input and send them to the
+//! correct output. A simplified summary of its functionality is:
+//!
+//! ```rust
+//! # use std::sync::Arc;
+//! # use async_trait::async_trait;
+//! # use steam_components::router::Route;
+//! # use steam_engine::port::{InPort, OutPort};
+//! # use steam_engine::sim_error;
+//! # use steam_engine::time::clock::Clock;
+//! # use steam_engine::traits::{Routable, SimObject};
+//! # use steam_engine::types::SimResult;
+//! # use steam_track::entity::Entity;
+//! #
+//! # async fn run<T>(
+//! #     tx: Vec<OutPort<T>>,
+//! #     rx: InPort<T>,
+//! #     routing_algorithm: Box<dyn Route<T>>
+//! # ) -> SimResult
+//! # where
+//! #     T: SimObject + Routable
+//! # {
+//! loop {
+//!     let value = rx.get()?.await;
+//!     let tx_index = routing_algorithm.route(&value)?;
+//!
+//!     match tx.get(tx_index) {
+//!         None => {
+//!             // Report error
+//!         }
+//!         Some(tx) => {
+//!             tx.put(value)?.await;
+//!         }
+//!     }
+//! }
+//! # }
+//! ```
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -25,19 +68,23 @@ use steam_track::{enter, exit, trace};
 
 use crate::take_option;
 
+/// Trait required for routing algorithms to implement.
 pub trait Route<T>
 where
     T: Routable,
 {
+    /// Given an object, return the index of the egress port to map the object
+    /// to.
     fn route(&self, object: &T) -> Result<usize, SimError>;
 }
 
-pub struct DefaultRouter {}
+pub struct DefaultAlgorithm {}
 
-impl<T> Route<T> for DefaultRouter
+impl<T> Route<T> for DefaultAlgorithm
 where
     T: Routable,
 {
+    /// Determine route by taking the object destination as an index.
     fn route(&self, obj_to_route: &T) -> Result<usize, SimError> {
         Ok(obj_to_route.destination() as usize)
     }
@@ -51,7 +98,7 @@ where
     pub entity: Arc<Entity>,
     rx: RefCell<Option<InPort<T>>>,
     tx: RefCell<Vec<OutPort<T>>>,
-    router: Box<dyn Route<T>>,
+    algorithm: Box<dyn Route<T>>,
 }
 
 impl<T> Router<T>
@@ -63,7 +110,7 @@ where
         parent: &Arc<Entity>,
         name: &str,
         num_egress: usize,
-        router: Box<dyn Route<T>>,
+        algorithm: Box<dyn Route<T>>,
     ) -> Result<Rc<Self>, SimError> {
         let entity = Arc::new(Entity::new(parent, name));
         let rx = InPort::new(&entity, "rx");
@@ -75,7 +122,7 @@ where
             entity,
             rx: RefCell::new(Some(rx)),
             tx: RefCell::new(tx),
-            router,
+            algorithm,
         });
         engine.register(rc_self.clone());
         Ok(rc_self)
@@ -103,13 +150,13 @@ where
     async fn run(&self) -> SimResult {
         let tx: Vec<OutPort<T>> = self.tx.borrow_mut().drain(..).collect();
         let rx = take_option!(self.rx);
-        let router = &self.router;
+        let algorithm = &self.algorithm;
 
         loop {
             let value = rx.get()?.await;
             enter!(self.entity ; value.id());
 
-            let tx_index = router.route(&value)?;
+            let tx_index = algorithm.route(&value)?;
             trace!(self.entity ; "Route {} to {}", value, tx_index);
 
             match tx.get(tx_index) {
