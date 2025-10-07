@@ -7,7 +7,7 @@
 //!
 //! # Ports
 //!
-//! This component has one port:
+//! This component has:
 //!  - One [output port](steam_engine::port::OutPort): `tx`
 
 use std::cell::RefCell;

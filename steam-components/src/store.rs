@@ -1,9 +1,13 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
-//! A data store
+//! A data store.
 //!
 //! The [Store] is a component that can hold a number of items defined by its
-//! capacity. The [Store] has two ports:
+//! capacity.
+//!
+//! # Ports
+//!
+//! This component has the following ports:
 //!   - The `rx` port [InPort] which is used to put data into the store.
 //!   - The `tx` port [OutPort] which is used to get data out of the store.
 //!

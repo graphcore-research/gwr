@@ -4,7 +4,7 @@
 //!
 //! # Ports
 //!
-//! This component has three ports:
+//! This component has the following ports:
 //!  - Two [input ports](steam_engine::port::InPort): `rx`, `credit_rx`
 //!  - One [output port](steam_engine::port::OutPort): `tx`
 

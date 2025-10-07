@@ -9,10 +9,186 @@
 //!
 //! # Ports
 //!
-//! This component has two ports:
-//!  - One [output port](steam_engine::port::OutPort): `rx`
-//!  - One [input port](steam_engine::port::InPort): `tx`
+//! This component has the following ports:
+//!  - One [input port](steam_engine::port::InPort): `rx`
+//!  - One [output port](steam_engine::port::OutPort): `tx`
 
+//! # Function
+//!
+//! Fundamentally the [Delay]'s functionality is to:
+//!
+//! ```rust
+//! # use std::sync::Arc;
+//! # use async_trait::async_trait;
+//! # use steam_engine::port::{InPort, OutPort};
+//! # use steam_engine::sim_error;
+//! # use steam_engine::time::clock::Clock;
+//! # use steam_engine::traits::SimObject;
+//! # use steam_engine::types::SimResult;
+//! # use steam_track::entity::Entity;
+//! #
+//! # async fn run_tx<T>(
+//! #     entity: Arc<Entity>,
+//! #     tx: OutPort<T>,
+//! #     clock: Clock,
+//! #     rx: InPort<T>,
+//! #     delay_ticks: u64,
+//! # ) -> SimResult
+//! # where
+//! #     T: SimObject,
+//! # {
+//! loop {
+//!     let value = rx.get()?.await;
+//!     clock.wait_ticks(delay_ticks).await;
+//!     tx.put(value)?.await;
+//! }
+//! # }
+//! ```
+//!
+//! However, the problem with this is that the input ends up being blocked if
+//! the output does not instantly consume the value. Therefore the [Delay] is
+//! actually split into two halves that manage the ports independently.
+//!
+//! ## Input
+//!
+//! A simplified view of how the input side works is:
+//!
+//! ```rust
+//! # use std::cell::RefCell;
+//! # use std::collections::VecDeque;
+//! # use std::rc::Rc;
+//! # use std::sync::Arc;
+//! # use async_trait::async_trait;
+//! # use steam_engine::events::repeated::Repeated;
+//! # use steam_engine::port::{InPort, OutPort};
+//! # use steam_engine::sim_error;
+//! # use steam_engine::time::clock::{Clock, ClockTick};
+//! # use steam_engine::traits::SimObject;
+//! # use steam_engine::types::SimResult;
+//! # use steam_track::entity::Entity;
+//! #
+//! # async fn run_rx<T>(
+//! #     entity: Arc<Entity>,
+//! #     rx: InPort<T>,
+//! #     clock: Clock,
+//! #     pending: Rc<RefCell<VecDeque<(T, ClockTick)>>>,
+//! #     pending_changed: Repeated<usize>,
+//! #     delay_ticks: u64,
+//! # ) -> SimResult
+//! # where
+//! #     T: SimObject,
+//! # {
+//! loop {
+//!     // Receive value from input
+//!     let value = rx.get()?.await;
+//!
+//!     // Compute time at which it should leave Delay
+//!     let mut tick = clock.tick_now();
+//!     tick.set_tick(tick.tick() + delay_ticks as u64);
+//!
+//!     // Send to the output side
+//!     pending.borrow_mut().push_back((value, tick));
+//!
+//!     // Wake up output if required
+//!     pending_changed.notify()?;
+//! }
+//!  # }
+//! ```
+
+//!
+//! ## Output
+//!
+//! A simplified view of how the output side works is:
+//!
+//! ```rust
+//! # use std::cell::RefCell;
+//! # use std::collections::VecDeque;
+//! # use std::rc::Rc;
+//! # use std::sync::Arc;
+//! # use async_trait::async_trait;
+//! # use steam_engine::events::repeated::Repeated;
+//! # use steam_engine::port::{InPort, OutPort};
+//! # use steam_engine::sim_error;
+//! # use steam_engine::time::clock::{Clock, ClockTick};
+//! # use steam_engine::traits::{Event, SimObject};
+//! # use steam_engine::types::SimResult;
+//! # use steam_track::entity::Entity;
+//! #
+//! # async fn run_tx<T>(
+//! #     entity: Arc<Entity>,
+//! #     tx: OutPort<T>,
+//! #     clock: Clock,
+//! #     pending: Rc<RefCell<VecDeque<(T, ClockTick)>>>,
+//! #     pending_changed: Repeated<usize>,
+//! # ) -> SimResult
+//! # where
+//! #     T: SimObject,
+//! # {
+//! loop {
+//!     // Get next value and tick at which to send value
+//!     if let Some((value, tick)) = pending.borrow_mut().pop_front() {
+//!         // Wait for correct time
+//!         let tick_now = clock.tick_now();
+//!         clock.wait_ticks(tick.tick() - tick_now.tick()).await;
+//!
+//!         // Send value
+//!         tx.put(value)?.await;
+//!     } else {
+//!         // Wait to be notified of new data
+//!         pending_changed.listen().await;
+//!     }
+//! }
+//! # }
+//! ```
+//!
+//! ## Using a [Delay]
+//!
+//! A [Delay] simply needs to be created with the latency through it and
+//! connected between components.
+//!
+//! ```rust
+//! # use std::cell::RefCell;
+//! # use std::rc::Rc;
+//! #
+//! # use steam_components::delay::Delay;
+//! # use steam_components::sink::Sink;
+//! # use steam_components::source::Source;
+//! # use steam_components::store::Store;
+//! # use steam_components::{connect_port, option_box_repeat};
+//! # use steam_engine::engine::Engine;
+//! # use steam_engine::port::{InPort, OutPort};
+//! # use steam_engine::run_simulation;
+//! # use steam_engine::test_helpers::start_test;
+//! # use steam_engine::time::clock::Clock;
+//! # use steam_engine::traits::SimObject;
+//! # use steam_engine::types::SimResult;
+//! #
+//! # fn source_sink() -> SimResult {
+//! #     let mut engine = start_test(file!());
+//! #     let clock = engine.default_clock();
+//! #     let spawner = engine.spawner();
+//! #
+//! #     let delay_ticks = 3;
+//! #     let num_puts = delay_ticks * 10;
+//! #
+//! #     let top = engine.top();
+//! #     let to_send: Option<Box<dyn Iterator<Item = _>>> = option_box_repeat!(500 ; num_puts);
+//!     // Create the components
+//!     let source = Source::new_and_register(&engine, top, "source", to_send)?;
+//!     let delay = Delay::new_and_register(&engine, top, "delay", clock, spawner, delay_ticks)?;
+//!     let sink = Sink::new_and_register(&engine, top, "sink")?;
+//!
+//!     // Connect the ports
+//!     connect_port!(source, tx => delay, rx)?;
+//!     connect_port!(delay, tx => sink, rx)?;
+//!
+//!     run_simulation!(engine);
+//! #
+//! #     let num_sunk = sink.num_sunk();
+//! #     assert_eq!(num_sunk, num_puts);
+//! #     Ok(())
+//! # }
+//! ```
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
