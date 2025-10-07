@@ -1,6 +1,14 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
-//! Sink components.
+//! A data sink.
+//!
+//! A [Sink] is an object that will accept and count all the data that
+//! is received on its input port.
+//!
+//! # Ports
+//!
+//! This component has:
+//!  - One [input port](steam_engine::port::InPort): `rx`
 
 use std::cell::RefCell;
 use std::rc::Rc;

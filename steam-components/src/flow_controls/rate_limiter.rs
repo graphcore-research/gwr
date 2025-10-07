@@ -11,6 +11,12 @@
 //! [TotalBytes] trait so that the number of bits of the object can be
 //! determined.
 //!
+//! # Ports
+//!
+//! This component has the following ports:
+//!  - One [input port](steam_engine::port::InPort): `rx`
+//!  - One [output port](steam_engine::port::OutPort): `tx`
+//!
 //! # Creating a Rate Limiter
 //!
 //! [RateLimiter]s should normally be constructed using the

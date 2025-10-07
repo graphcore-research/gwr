@@ -4,7 +4,7 @@
 //!
 //! # Ports
 //!
-//! This component has `N`-input ports and one output:
+//! This component has the following ports:
 //!  - N [input ports](steam_engine::port::InPort): `rx[i]` for `i in [0, N-1]`
 //!  - One [output port](steam_engine::port::OutPort): `tx`
 
