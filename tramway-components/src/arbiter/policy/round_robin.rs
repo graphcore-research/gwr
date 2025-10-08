@@ -30,11 +30,15 @@ impl<T> Arbitrate<T> for RoundRobin
 where
     T: SimObject,
 {
-    fn arbitrate(&mut self, _entity: &Arc<Entity>, inputs: &mut [Option<T>]) -> Option<(usize, T)> {
-        let num_inputs = inputs.len();
+    fn arbitrate(
+        &mut self,
+        _entity: &Arc<Entity>,
+        input_values: &mut [Option<T>],
+    ) -> Option<(usize, T)> {
+        let num_inputs = input_values.len();
         for i in 0..num_inputs {
             let index = (i + self.candidate) % num_inputs;
-            if let Some(value) = inputs[index].take() {
+            if let Some(value) = input_values[index].take() {
                 self.candidate = (index + 1) % num_inputs;
                 return Some((index, value));
             }
