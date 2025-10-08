@@ -6,10 +6,10 @@ use std::io::BufWriter;
 use std::sync::Arc;
 use std::{fs, io};
 
-use steam_track::tracker::multi_tracker::MultiTracker;
-use steam_track::tracker::perfetto::PerfettoTracker;
-use steam_track::tracker::{CapnProtoTracker, EntityManager, TextTracker, TrackConfigError};
-use steam_track::{Tracker, Writer};
+use tramway_track::tracker::multi_tracker::MultiTracker;
+use tramway_track::tracker::perfetto::PerfettoTracker;
+use tramway_track::tracker::{CapnProtoTracker, EntityManager, TextTracker, TrackConfigError};
+use tramway_track::{Tracker, Writer};
 
 /// Create a tracker that prints to stdout
 ///
@@ -55,7 +55,7 @@ fn build_binary_tracker(
 
 /// This tracker will produce a Perfetto trace file, which unlike the other
 /// tracker options can be viewed using the Perfetto UI, rather than
-/// steam-spotter.
+/// tramway-spotter.
 fn build_perfetto_tracker(
     level: log::Level,
     filter_regex: &str,

@@ -12,7 +12,7 @@ readme.workspace = true
 homepage.workspace = true
 repository.workspace = true
 license.workspace = true
-keywords = ["example", "steam"]
+keywords = ["example", "tramway"]
 categories = ["asynchronous", "command-line-utilities", "simulation"]
 publish.workspace = true
 
@@ -22,7 +22,7 @@ publish.workspace = true
 async-trait.workspace = true
 clap.workspace = true
 rand.workspace = true
-steam-components = { path = "../../steam-components" }
-steam-engine = { path = "../../steam-engine" }
-steam-model-builder = { path = "../../steam-model-builder" }
-steam-track = { path = "../../steam-track" }
+tramway-components = { path = "../../tramway-components" }
+tramway-engine = { path = "../../tramway-engine" }
+tramway-model-builder = { path = "../../tramway-model-builder" }
+tramway-track = { path = "../../tramway-track" }

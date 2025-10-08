@@ -12,7 +12,7 @@ readme.workspace = true
 homepage.workspace = true
 repository.workspace = true
 license.workspace = true
-keywords = ["example", "steam"]
+keywords = ["example", "tramway"]
 categories = ["asynchronous", "command-line-utilities", "simulation"]
 publish.workspace = true
 
@@ -22,8 +22,8 @@ publish.workspace = true
 clap.workspace = true
 log.workspace = true
 indicatif = "0.18.0"
-steam-components = { path = "../../steam-components" }
-steam-engine = { path = "../../steam-engine" }
-steam-models = { path = "../../steam-models" }
-steam-model-builder = { path = "../../steam-model-builder" }
-steam-track = { path = "../../steam-track", features = ["perfetto"] }
+tramway-components = { path = "../../tramway-components" }
+tramway-engine = { path = "../../tramway-engine" }
+tramway-models = { path = "../../tramway-models" }
+tramway-model-builder = { path = "../../tramway-model-builder" }
+tramway-track = { path = "../../tramway-track", features = ["perfetto"] }

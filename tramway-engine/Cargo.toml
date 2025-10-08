@@ -1,0 +1,31 @@
+# Copyright (c) 2023 Graphcore Ltd. All rights reserved.
+
+[package]
+name = "tramway-engine"
+version = "0.4.0"
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Simulation engine which executes event driven asynchronous components and models"
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-trait.workspace = true
+clap.workspace = true
+futures.workspace = true
+log.workspace = true
+tramway-track = { path = "../tramway-track" }
+
+[dev-dependencies]
+arc-swap = "1.6.0"
+criterion.workspace = true
+tramway-components = { path = "../tramway-components" }

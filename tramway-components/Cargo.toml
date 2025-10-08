@@ -1,0 +1,39 @@
+# Copyright (c) 2023 Graphcore Ltd. All rights reserved.
+
+[package]
+name = "tramway-components"
+version = "0.5.0"
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Collection of connectable component primitives to be used when building models"
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bench]]
+name = "benchmarks_main"
+harness = false
+
+[dependencies]
+async-trait.workspace = true
+log.workspace = true
+futures.workspace = true
+paste.workspace = true
+tramway-engine = { path = "../tramway-engine" }
+tramway-model-builder = { path = "../tramway-model-builder" }
+tramway-resources = { path = "../tramway-resources" }
+tramway-track = { path = "../tramway-track" }
+
+[dev-dependencies]
+clap.workspace = true
+criterion.workspace = true
+rand.workspace = true
+trybuild.workspace = true

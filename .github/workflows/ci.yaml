@@ -5,7 +5,7 @@ name: CI
 on:
   push:
     branches-ignore:
-      - 'pr/**'
+      - "pr/**"
   pull_request:
 
 env:
@@ -51,7 +51,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Required to cause the main branch to also be fetched
+          fetch-depth: 0 # Required to cause the main branch to also be fetched
       - uses: ./.github/actions/install-build-dependencies
       - uses: ./.github/actions/install-dev-dependencies
       - uses: ./.github/actions/run-build-command
@@ -98,8 +98,8 @@ jobs:
           cache-name: ${{ github.job }}
           paths: |
             target/
-            steam-developer-guide/doctest_cache/
-            steam-developer-guide/rustdoc_cache/
+            tramway-developer-guide/doctest_cache/
+            tramway-developer-guide/rustdoc_cache/
 
   benchmark:
     strategy:

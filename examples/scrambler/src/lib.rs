@@ -7,21 +7,21 @@
 //! # Ports
 //!
 //! This component has four ports
-//!  - Two [input port](steam_engine::port::InPort): `rx_a`, `rx_b`
-//!  - Two [output port](steam_engine::port::OutPort): `tx_a`, `tx_b`
+//!  - Two [input port](tramway_engine::port::InPort): `rx_a`, `rx_b`
+//!  - Two [output port](tramway_engine::port::OutPort): `tx_a`, `tx_b`
 
 use std::rc::Rc;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use steam_components::store::Store;
-use steam_engine::engine::Engine;
-use steam_engine::executor::Spawner;
-use steam_engine::port::PortStateResult;
-use steam_engine::traits::SimObject;
-use steam_engine::types::{SimError, SimResult};
-use steam_model_builder::{EntityDisplay, Runnable};
-use steam_track::entity::Entity;
+use tramway_components::store::Store;
+use tramway_engine::engine::Engine;
+use tramway_engine::executor::Spawner;
+use tramway_engine::port::PortStateResult;
+use tramway_engine::traits::SimObject;
+use tramway_engine::types::{SimError, SimResult};
+use tramway_model_builder::{EntityDisplay, Runnable};
+use tramway_track::entity::Entity;
 
 #[derive(EntityDisplay, Runnable)]
 pub struct Scrambler<T>

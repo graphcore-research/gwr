@@ -1,12 +1,12 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
 use flaky_component::Flaky;
-use steam_components::sink::Sink;
-use steam_components::source::Source;
-use steam_components::{connect_port, option_box_repeat};
-use steam_engine::engine::Engine;
-use steam_engine::run_simulation;
-use steam_engine::test_helpers::create_tracker;
+use tramway_components::sink::Sink;
+use tramway_components::source::Source;
+use tramway_components::{connect_port, option_box_repeat};
+use tramway_engine::engine::Engine;
+use tramway_engine::run_simulation;
+use tramway_engine::test_helpers::create_tracker;
 
 /// Command-line arguments.
 #[test]

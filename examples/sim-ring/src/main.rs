@@ -68,14 +68,14 @@ use sim_ring::ring_builder::{
     Config, Sinks, build_limiters, build_pipes, build_ring_nodes, build_source_sinks,
 };
 use sim_ring::tracker_builder::setup_trackers;
-use steam_components::connect_port;
-use steam_engine::engine::Engine;
-use steam_engine::executor::Spawner;
-use steam_engine::time::clock::Clock;
-use steam_engine::types::SimError;
-use steam_engine::{run_simulation, sim_error};
-use steam_models::ethernet_frame::PACKET_OVERHEAD_BYTES;
-use steam_track::{error, info};
+use tramway_components::connect_port;
+use tramway_engine::engine::Engine;
+use tramway_engine::executor::Spawner;
+use tramway_engine::time::clock::Clock;
+use tramway_engine::types::SimError;
+use tramway_engine::{run_simulation, sim_error};
+use tramway_models::ethernet_frame::PACKET_OVERHEAD_BYTES;
+use tramway_track::{error, info};
 
 // Define the standard Ethernet data rate
 const ETHERNET_GBPS: usize = 100;
@@ -97,7 +97,7 @@ struct Cli {
     #[arg(long, default_value = "")]
     stdout_filter_regex: String,
 
-    /// Enable logging to binary file used by `steam-spotter`.
+    /// Enable logging to binary file used by `tramway-spotter`.
     #[arg(long, default_value = "false")]
     binary: bool,
 
@@ -115,7 +115,7 @@ struct Cli {
     #[arg(long, default_value = "trace.bin")]
     binary_file: String,
 
-    /// Enable logging to Perfetto file used by `steam-spotter`.
+    /// Enable logging to Perfetto file used by `tramway-spotter`.
     #[arg(long, default_value = "false")]
     perfetto: bool,
 
