@@ -91,7 +91,11 @@ where
     T: SimObject,
     P: Copy + Default + Ord,
 {
-    fn arbitrate(&mut self, _entity: &Arc<Entity>, inputs: &mut [Option<T>]) -> Option<(usize, T)> {
+    fn arbitrate(
+        &mut self,
+        _entity: &Arc<Entity>,
+        input_values: &mut [Option<T>],
+    ) -> Option<(usize, T)> {
         if self.priority_map.is_none() {
             self.create_map();
         }
@@ -102,7 +106,7 @@ where
             for i in 0..num_inputs {
                 let priority_index = (i + priority_level.current_candidate_index) % num_inputs;
                 let input_index = priority_vec[priority_index];
-                if let Some(value) = inputs[input_index].take() {
+                if let Some(value) = input_values[input_index].take() {
                     priority_level.current_candidate_index = (priority_index + 1) % num_inputs;
                     return Some((input_index, value));
                 }

@@ -33,14 +33,14 @@ impl WeightedRoundRobin {
 }
 
 impl WeightedRoundRobin {
-    pub fn state_str<T>(&self, inputs: &[Option<T>]) -> String
+    pub fn state_str<T>(&self, input_values: &[Option<T>]) -> String
     where
         T: SimObject,
     {
         let mut s = String::new();
         s.push_str(format!("{}: ", self.candidate).as_str());
         for (i, grant) in self.grants.iter().enumerate() {
-            let req = if inputs[i].is_some() { "r" } else { "-" };
+            let req = if input_values[i].is_some() { "r" } else { "-" };
             s.push_str(format!("{}/{}/{}, ", req, grant, self.weights[i]).as_str());
         }
         s
@@ -51,14 +51,18 @@ impl<T> Arbitrate<T> for WeightedRoundRobin
 where
     T: SimObject,
 {
-    fn arbitrate(&mut self, entity: &Arc<Entity>, inputs: &mut [Option<T>]) -> Option<(usize, T)> {
-        trace!(entity ; "wrr: arbitrate {}", self.state_str(inputs));
+    fn arbitrate(
+        &mut self,
+        entity: &Arc<Entity>,
+        input_values: &mut [Option<T>],
+    ) -> Option<(usize, T)> {
+        trace!(entity ; "wrr: arbitrate {}", self.state_str(input_values));
 
-        let num_inputs = inputs.len();
+        let num_inputs = input_values.len();
         let mut selected_candidate = None;
         for i in 0..num_inputs {
             let index = (i + self.candidate) % num_inputs;
-            if inputs[index].is_none() {
+            if input_values[index].is_none() {
                 continue;
             }
             if self.weights[index] > self.grants[index] {
@@ -74,7 +78,7 @@ where
             }
             self.grants[index] += 1;
 
-            let value = inputs[index].take().unwrap();
+            let value = input_values[index].take().unwrap();
             self.candidate = (index + 1) % num_inputs;
             Some((index, value))
         } else {

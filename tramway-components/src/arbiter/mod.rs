@@ -30,7 +30,7 @@ pub mod policy;
 
 #[derive(Default)]
 struct ArbiterSharedState<T> {
-    active: RefCell<Vec<Option<T>>>,
+    input_values: RefCell<Vec<Option<T>>>,
     arbiter_event: RefCell<Option<Once<()>>>,
     waiting_put: Vec<RefCell<Option<Once<()>>>>,
 }
@@ -38,7 +38,7 @@ struct ArbiterSharedState<T> {
 impl<T> ArbiterSharedState<T> {
     fn new(capacity: usize) -> Self {
         Self {
-            active: RefCell::new((0..capacity).map(|_| None).collect()),
+            input_values: RefCell::new((0..capacity).map(|_| None).collect()),
             arbiter_event: RefCell::new(None),
             waiting_put: (0..capacity).map(|_| RefCell::new(None)).collect(),
         }
@@ -49,7 +49,11 @@ pub trait Arbitrate<T>
 where
     T: SimObject,
 {
-    fn arbitrate(&mut self, entity: &Arc<Entity>, inputs: &mut [Option<T>]) -> Option<(usize, T)>;
+    fn arbitrate(
+        &mut self,
+        entity: &Arc<Entity>,
+        input_values: &mut [Option<T>],
+    ) -> Option<(usize, T)>;
 }
 
 #[derive(EntityDisplay)]
@@ -122,16 +126,15 @@ where
         let tx = take_option!(self.tx);
         let mut policy = take_option!(self.policy);
 
+        // Drive the output
         loop {
             let wait_event;
             loop {
                 let value;
                 let wake_event;
                 {
-                    // Need to hold the guard for the entire arbitration until the wake_event has
-                    // been taken
-                    let mut active = self.shared_state.active.borrow_mut();
-                    let t = policy.arbitrate(&self.entity, &mut active);
+                    let mut input_values = self.shared_state.input_values.borrow_mut();
+                    let t = policy.arbitrate(&self.entity, &mut input_values);
                     match t {
                         Some((i, t)) => {
                             trace!(self.entity ; "grant {}: {}", i, t);
@@ -170,24 +173,24 @@ async fn run_input<T: SimObject>(
         enter!(entity ; value.id());
 
         // Check if this input needs to wait for the previous value to be handled
-        let wait_event = match shared_state.active.borrow()[input_idx].as_ref() {
+        let wait_for_space = match shared_state.input_values.borrow()[input_idx].as_ref() {
             Some(_) => {
-                let once = Once::default();
-                *shared_state.waiting_put[input_idx].borrow_mut() = Some(once.clone());
-                Some(once)
+                let wait_for_space = Once::default();
+                *shared_state.waiting_put[input_idx].borrow_mut() = Some(wait_for_space.clone());
+                Some(wait_for_space)
             }
             None => None,
         };
-        if let Some(once) = wait_event {
-            once.listen().await;
+        if let Some(wait_event) = wait_for_space {
+            wait_event.listen().await;
         }
 
         // Set the value for this input
-        shared_state.active.borrow_mut()[input_idx] = Some(value);
+        shared_state.input_values.borrow_mut()[input_idx] = Some(value);
 
         // Wake up the arbiter if it has paused on an event
-        if let Some(once) = shared_state.arbiter_event.borrow_mut().take() {
-            once.notify().unwrap();
+        if let Some(arbiter_event) = shared_state.arbiter_event.borrow_mut().take() {
+            arbiter_event.notify().unwrap();
         }
     }
 }
