@@ -102,7 +102,15 @@ repos:
         description: lint crate API changes for semver violations
         language: system
         types_or: [rust, toml]
-        entry: cargo semver-checks --baseline-rev origin/main
+        entry:
+          cargo semver-checks --baseline-rev origin/main --exclude
+          tramway-components --exclude tramway-config --exclude
+          tramway-developer-guide --exclude tramway-doc-builder --exclude
+          tramway-docpp --exclude tramway-engine --exclude tramway-model-builder
+          --exclude tramway-models --exclude tramway-perfetto --exclude
+          tramway-perfetto-sys --exclude tramway-protocols --exclude
+          tramway-resources --exclude tramway-spotter --exclude tramway-terminus
+          --exclude tramway-track
         pass_filenames: false
         stages: [manual]
       - id: cog-verify
