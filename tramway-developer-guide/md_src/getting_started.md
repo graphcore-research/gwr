@@ -1,5 +1,9 @@
 <!-- Copyright (c) 2023 Graphcore Ltd. All rights reserved. -->
 
+<div align="center">
+  <img src="tramway.png" alt="Tramway is Rust Async Modelling for hardWare Architecture and sYstems" style="border-radius:50%">
+</div>
+
 # Getting Started
 
 {{#include ../../README.md:intro}}
