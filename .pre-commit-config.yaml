@@ -31,7 +31,8 @@ repos:
             ^Cargo.lock|
             .*\.stderr$|
             d3.*.js|
-            jquery.*.js
+            jquery.*.js|
+            .*\.png
           )
         stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: prettier-markdown

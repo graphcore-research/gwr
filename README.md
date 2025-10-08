@@ -3,8 +3,17 @@
 [![CI](https://github.com/graphcore-research/tramway/actions/workflows/ci.yaml/badge.svg)](https://github.com/graphcore-research/tramway/actions/workflows/ci.yaml)
 [![Online documentation](https://github.com/graphcore-research/tramway/actions/workflows/online-documentation.yaml/badge.svg)](https://github.com/graphcore-research/tramway/actions/workflows/online-documentation.yaml)
 
-[Developer guide](https://graphcore-research.github.io/tramway) |
-[API documentation](https://graphcore-research.github.io/tramway/rustdoc/tramway_engine/index.html)
+<div align="center">
+
+<img src="tramway-developer-guide/md_src/tramway.png" alt="Tramway is Rust Async Modelling for hardWare Architecture and sYstems" style="border-radius:50%">
+
+[Developer guide] | [API documentation]
+
+</div>
+
+[Developer guide]: https://graphcore-research.github.io/tramway
+[API documentation]:
+  https://graphcore-research.github.io/tramway/rustdoc/tramway_engine/index.html
 
 # TRAMWAY
 
