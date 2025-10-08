@@ -33,40 +33,34 @@ function force_tree(serverUrl, data, connections, max_depth) {
   // Specify the chart’s dimensions.
   const width = 1600;
   const height = 1200;
-
-  const max_circle_r = 12;
-  const min_circle_r = 3;
-  const circle_r_range = max_circle_r - min_circle_r;
+  const min_r = 3;
 
   // Convert the structure tree to a d3 hierarchy.
   const root = d3.hierarchy(data);
-  const links = root.links();
   const nodes = root.descendants();
+  let links = root.links();
 
   // Create a map of IDs -> node in the hierarchy.
   let entities_by_id = new Map();
   nodes.forEach(function(node) {
     entities_by_id.set(node.data.id, node);
 
-    // Compute a radius depending on depth in hierarchy.
-    node.r = min_circle_r + (max_depth - node.data.depth) / max_depth * circle_r_range;
+    // Compute a radius depending on the number of children a node has.
+    node.r = (node.data.num_children + 1) * min_r;
+
+    // Assign the x,y to their pre-computed initial values.
+    node.x = node.data.initial_x;
+    node.y = node.data.initial_y;
   });
+
+  // Remove the links between top and top-level nodes.
+  links = links.filter(link => Math.min(link.source.data.depth, link.target.data.depth) > 0);
 
   // Assign some properties to the links depending on their depth in the hierarchy.
   links.forEach(function(link) {
     const min_depth = Math.min(link.source.data.depth, link.target.data.depth);
-    if (min_depth > 0) {
-      link.strength = 2/(max_depth - min_depth);
-    } else {
-      link.strength = 0;
-    }
-
-    if (min_depth == 0) {
-      // Make the top-level hierarchy links disappear.
-      link.color = "#fff";
-    } else {
-      link.color = "#282";
-    }
+    link.strength = 2 / (max_depth - min_depth);
+    link.color = "#282";
 
     // No arrow heads on the strcuture links.
     link.lineEnd = "";
@@ -87,10 +81,10 @@ function force_tree(serverUrl, data, connections, max_depth) {
   // Create the force simulation.
   const simulation = d3.forceSimulation(nodes)
       .force("link", d3.forceLink(links).id(d => d.id).distance(0).strength(d => d.strength))
-      .force("charge", d3.forceManyBody().strength(-50))
+      .force("charge", d3.forceManyBody().strength(-30))
       .force("x", d3.forceX())
       .force("y", d3.forceY())
-      .force("collide", d3.forceCollide().radius(d => d.r + 4));
+      .alphaDecay(0.005);
 
   // Add an SVG element to the #chart node of the HTML.
   const svg = d3.select("#chart")
@@ -101,16 +95,6 @@ function force_tree(serverUrl, data, connections, max_depth) {
       .attr("style", "max-width: 100%; height: auto;");
 
   define_arrow(svg);
-
-  // Append links using the color and line ending defined above.
-  const link = svg.append("g")
-      .attr("stroke", "#999")
-      .attr("stroke-opacity", 0.8)
-    .selectAll("line")
-    .data(links)
-    .join("line")
-      .attr("stroke", d => d.color)
-      .attr("marker-end", d => d.lineEnd);
 
   // Function to create unique IDs for each element in order to be able to select them easily
   var uniqueId = 0;
@@ -136,7 +120,17 @@ function force_tree(serverUrl, data, connections, max_depth) {
       .text(d => d.data.full_name);
 
   // When clicking on a block highlight it by setting the "selected" class
-  node.on("click", d => select(svg, d.target.id, d.target.__data__.data));
+  node.on("click", d => select_and_send(serverUrl, svg, d.target.id, d.target.__data__.data));
+
+  // Append links using the color and line ending defined above.
+  const link = svg.append("g")
+      .attr("stroke", "#999")
+      .attr("stroke-opacity", 0.8)
+    .selectAll("line")
+    .data(links)
+    .join("line")
+      .attr("stroke", d => d.color)
+      .attr("marker-end", d => d.lineEnd);
 
   simulation.on("tick", () => {
     link
@@ -155,7 +149,7 @@ function force_tree(serverUrl, data, connections, max_depth) {
 
 function drag(simulation) {
   function dragstarted(event, d) {
-    if (!event.active) simulation.alphaTarget(0.3).restart();
+    if (!event.active) simulation.alphaTarget(0.8).restart();
     d.fx = d.x;
     d.fy = d.y;
   }

@@ -45,7 +45,7 @@ function tree_map(serverUrl, data) {
     .data(d => d[1])
     .join("g")
       .attr("transform", d => `translate(${d.x0},${d.y0})`)
-      .on("click", (event, d) => select(svg, d.id.id, d.data));
+      .on("click", (event, d) => select_and_send(serverUrl, svg, d.id.id, d.data));
 
   const format = d3.format(",d");
   node.append("title")
