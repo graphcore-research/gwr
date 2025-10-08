@@ -77,8 +77,8 @@ function sunburst(serverUrl, data) {
 
   // Handle zoom on click.
   function clicked(svg, event, p) {
-    console.log(p);
-    select(svg, p.id, p.data);
+    // Pass undefined as the ID because we don't need to add "selected" class to any nodes
+    select_and_send(serverUrl, svg, undefined, p.data);
 
     parent.datum(p.parent || root);
 
