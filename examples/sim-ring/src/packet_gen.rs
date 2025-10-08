@@ -2,8 +2,8 @@
 //
 use std::sync::Arc;
 
-use steam_models::ethernet_frame::{DEST_MAC_BYTES, EthernetFrame, u64_to_mac};
-use steam_track::entity::Entity;
+use tramway_models::ethernet_frame::{DEST_MAC_BYTES, EthernetFrame, u64_to_mac};
+use tramway_track::entity::Entity;
 
 /// A Packet Generator that can be used by the `Source` to produce packets on
 /// the fly.

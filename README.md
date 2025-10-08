@@ -1,18 +1,19 @@
 <!-- Copyright (c) 2023 Graphcore Ltd. All rights reserved. -->
 
-[![CI](https://github.com/graphcore-research/steam/actions/workflows/ci.yaml/badge.svg)](https://github.com/graphcore-research/steam/actions/workflows/ci.yaml)
-[![Online documentation](https://github.com/graphcore-research/steam/actions/workflows/online-documentation.yaml/badge.svg)](https://github.com/graphcore-research/steam/actions/workflows/online-documentation.yaml)
+[![CI](https://github.com/graphcore-research/tramway/actions/workflows/ci.yaml/badge.svg)](https://github.com/graphcore-research/tramway/actions/workflows/ci.yaml)
+[![Online documentation](https://github.com/graphcore-research/tramway/actions/workflows/online-documentation.yaml/badge.svg)](https://github.com/graphcore-research/tramway/actions/workflows/online-documentation.yaml)
 
-[Developer guide](https://graphcore-research.github.io/steam) |
-[API documentation](https://graphcore-research.github.io/steam/rustdoc/steam_engine/index.html)
+[Developer guide](https://graphcore-research.github.io/tramway) |
+[API documentation](https://graphcore-research.github.io/tramway/rustdoc/tramway_engine/index.html)
 
-# STEAM
+# TRAMWAY
 
 <!-- ANCHOR: intro -->
 
-Welcome to the STEAM (Simulation Technology for Evaluation and Architecture
-Modelling) project. The core STEAM packages are provided as a monorepo, which
-together provide the following functionality:
+Welcome to the TRAMWAY project. The name TRAMWAY is a recursive acronym for
+"Tramway is Rust Async Modelling for hardWare Architecture and sYstems". The
+core TRAMWAY packages are provided as a monorepo, which together provide the
+following functionality:
 
 - An event-driven [simulation engine].
 - [Logging] and [log viewing] system.
@@ -22,30 +23,30 @@ together provide the following functionality:
 
 <!-- ANCHOR_END: intro -->
 
-[components]: steam-developer-guide/md_src/components/chapter.md
-[log viewing]: steam-developer-guide/md_src/steam_spotter/chapter.md
-[Logging]: steam-developer-guide/md_src/steam_track/chapter.md
-[models]: steam-developer-guide/md_src/models/chapter.md
-[simulation engine]: steam-developer-guide/md_src/steam_engine/chapter.md
+[components]: tramway-developer-guide/md_src/components/chapter.md
+[log viewing]: tramway-developer-guide/md_src/tramway_spotter/chapter.md
+[Logging]: tramway-developer-guide/md_src/tramway_track/chapter.md
+[models]: tramway-developer-guide/md_src/models/chapter.md
+[simulation engine]: tramway-developer-guide/md_src/tramway_engine/chapter.md
 
-<!-- ANCHOR: why_steam -->
+<!-- ANCHOR: why_tramway -->
 
-## Why STEAM?
+## Why TRAMWAY?
 
-STEAM aims to provide a complete modelling workflow, supporting projects from
+TRAMWAY aims to provide a complete modelling workflow, supporting projects from
 the initial exploration phase, through more detailed evaluations, and finally to
 a full specification and golden reference quality model.
 
 Async language features are utilised to allow expressive description of physical
 world parallism. An asynchronous runtime executor is included within the
-steam-engine package for this purpose, which supports both event-driven and
+tramway-engine package for this purpose, which supports both event-driven and
 clocked modelling.
 
-STEAM is designed with scalability in mind, with the aim being to enable both
+TRAMWAY is designed with scalability in mind, with the aim being to enable both
 high accuracy/detailed simulations and large scale simulations in a tractable
 timeframe. To meet this goal it is therefore important that both the development
-of models using STEAM, as well as the execution of these models is efficient. A
-developer guide covering the use of the STEAM for modelling, as well as API
+of models using TRAMWAY, as well as the execution of these models is efficient.
+A developer guide covering the use of the TRAMWAY for modelling, as well as API
 documentation for each package is included. The general philosophy adopted is to
 raise errors as early as possible for developers, so as many as possible will be
 at compile time rather than run time, as well as to guard against common errors
@@ -63,7 +64,7 @@ release process is also defined to guarantee semantic versioning of packages and
 automated generation of release notes ensuring user upgrade processes are as
 smooth as possible.
 
-STEAM is written in [Rust] and takes advantage of a number of the features it
+TRAMWAY is written in [Rust] and takes advantage of a number of the features it
 offers. In brief summary these are the strong typing system and emphasis on
 correctness in Rust, excellent and easy to use tooling and build system, and
 excellent runtime performance (which we have found to be on a par with C++).
@@ -72,15 +73,15 @@ included in the [Rust chapter] of the developer guide.
 
 [Rust]: https://www.rust-lang.org
 
-<!-- ANCHOR_END: why_steam -->
+<!-- ANCHOR_END: why_tramway -->
 
-[Rust chapter]: steam-developer-guide/md_src/rust/chapter.md
+[Rust chapter]: tramway-developer-guide/md_src/rust/chapter.md
 
 <!-- ANCHOR: tooling_bootstrap -->
 
 ## Tooling
 
-All of the required tooling to build and use, and to develop STEAM can be
+All of the required tooling to build and use, and to develop TRAMWAY can be
 installed using the scripts included within the repo. These scripts are designed
 to be used by both users and the CI system.
 
@@ -89,14 +90,14 @@ being used on Linux and [Homebrew] on macOS ([Homebrew] itself will be installed
 as required if not already avaliable). Various cross-platform package managers
 are also used, including [rustup], [Cargo], and [npm].
 
-See the [Using STEAM Packages](#using-steam-packages) and
-[Developing STEAM Packages](#developing-steam-packages) sections for further
+See the [Using TRAMWAY Packages](#using-tramway-packages) and
+[Developing TRAMWAY Packages](#developing-tramway-packages) sections for further
 details on these install scripts.
 
 ### Rust Tools
 
 The correct Rust toolchain will automatically be selected and used by [rustup]
-when commands are executed from within the STEAM directory (or below). This
+when commands are executed from within the TRAMWAY directory (or below). This
 behaviour is controlled by the the `rust-toolchain.toml` file.
 
 [APT]: https://wiki.debian.org/AptCLI
@@ -109,9 +110,9 @@ behaviour is controlled by the the `rust-toolchain.toml` file.
 
 <!-- ANCHOR: package_users -->
 
-## Using STEAM Packages
+## Using TRAMWAY Packages
 
-For users of the STEAM packages a `stable` Rust toolchain is required, as well
+For users of the TRAMWAY packages a `stable` Rust toolchain is required, as well
 as external tools such as [Asciidoctor], [Cap'n Proto], and [mdBook]. All of the
 required build dependencies can be installed by running:
 
@@ -123,7 +124,7 @@ required build dependencies can be installed by running:
 
 > [!IMPORTANT]
 > To ensure that the correct Rust toolchain is used the script must be executed
-> from within the STEAM directory.
+> from within the TRAMWAY directory.
 
 > [!Tip]
 > Although the script is interactive, selecting the default option
@@ -144,12 +145,13 @@ required build dependencies can be installed by running:
 
 <!-- ANCHOR: package_developers -->
 
-## Developing STEAM Packages
+## Developing TRAMWAY Packages
 
-For developers of the STEAM packages both `stable` and `nightly` Rust toolchains
-are required, as well external tools such as [cargo-deny], [cargo-about]
-[cargo-semver-checks], [Cocogitto], [pre-commit], [Prettier], and [Release-plz].
-All of the required development dependencies can be installed by running:
+For developers of the TRAMWAY packages both `stable` and `nightly` Rust
+toolchains are required, as well external tools such as [cargo-deny],
+[cargo-about] [cargo-semver-checks], [Cocogitto], [pre-commit], [Prettier], and
+[Release-plz]. All of the required development dependencies can be installed by
+running:
 
 ```bash
 ./.github/actions/install-dev-dependencies/install.sh
@@ -159,7 +161,7 @@ All of the required development dependencies can be installed by running:
 
 > [!IMPORTANT]
 > To ensure that the correct Rust toolchain is used the script must be executed
-> from within the STEAM directory.
+> from within the TRAMWAY directory.
 
 > [!Tip]
 > Although the script is interactive, selecting the default option
@@ -173,7 +175,7 @@ All of the required development dependencies can be installed by running:
 <!-- prettier-ignore-end -->
 
 Finally the pre-commit hooks need to be installed within the cloned copy of the
-STEAM repo:
+TRAMWAY repo:
 
 ```bash
 pre-commit install
@@ -181,7 +183,7 @@ pre-commit install
 
 ### Branching the Repo
 
-Changes to STEAM packages are developed on branches separate to `main` (the
+Changes to TRAMWAY packages are developed on branches separate to `main` (the
 default) branch of the repo, and then incorporated when complete via a pull
 request. Long running or collaborative development will likely benefit from
 having the branch pushed to the `origin` well in advance of when a pull request
@@ -196,8 +198,8 @@ the point they are merged.
 
 ### Committing a Change
 
-All commits made to the STEAM repo must follow the [Conventional Commits] 1.0.0
-specification. This allows the automatic generation of both a top-level
+All commits made to the TRAMWAY repo must follow the [Conventional Commits]
+1.0.0 specification. This allows the automatic generation of both a top-level
 changelog covering the whole workspace as well as an individual changelog for
 each package within the workspace.
 
@@ -211,13 +213,13 @@ When writing a commmit message in this form:
   For example:
 
   ```text
-  fix(steam-developer-guide): check for panic when running mdBook tests
+  fix(tramway-developer-guide): check for panic when running mdBook tests
   ```
 
   - If the change applied to multiple, but not all packages, the names should be
     comma seperated. For example:
     ```text
-    feat(steam-track,steam-spotter): capnp binary file support
+    feat(tramway-track,tramway-spotter): capnp binary file support
     ```
   - If the change applies to all Rust packages, infrastructure, CI, or general
     configuration the scope can be omitted. For example:
@@ -253,7 +255,7 @@ During the commit process a number of different hooks will be invoked by
 
 ### Making a Release
 
-The release process for all packages within the STEAM workspace is handled by
+The release process for all packages within the TRAMWAY workspace is handled by
 the [Release-plz] tool.
 
 To start the release process, run:
@@ -283,7 +285,7 @@ updated package, and automatically publishes the updated packages using
 [cargo-deny]: https://github.com/EmbarkStudios/cargo-deny
 [cargo-semver-checks]: https://github.com/obi1kenobi/cargo-semver-checks
 [CI system]:
-  https://github.com/graphcore-research/steam/actions/workflows/ci.yaml
+  https://github.com/graphcore-research/tramway/actions/workflows/ci.yaml
 [clippy]: https://doc.rust-lang.org/clippy
 [Cocogitto]: https://docs.cocogitto.io
 [Conventional Commits]: https://www.conventionalcommits.org/en/v1.0.0
@@ -294,7 +296,7 @@ updated package, and automatically publishes the updated packages using
 
 <!-- ANCHOR_END: package_developers -->
 
-[licenses.html]: https://graphcore-research.github.io/steam/licenses.html
+[licenses.html]: https://graphcore-research.github.io/tramway/licenses.html
 
 <!-- ANCHOR: dev_docs -->
 
@@ -310,7 +312,7 @@ necessary to first install the development dependencies by running:
 and then build and open the user guide with:
 
 ```bash
-cd steam-developer-guide/
+cd tramway-developer-guide/
 mdbook build --open
 ```
 
@@ -328,22 +330,22 @@ mdbook serve --open
 
 ## API Documentation
 
-Documentation within the STEAM source is done using [`rustdoc`] formatting such
-that APIs are documented and any code snippets are compiled and run.
+Documentation within the TRAMWAY source is done using [`rustdoc`] formatting
+such that APIs are documented and any code snippets are compiled and run.
 
 This documentation can be generated by running:
 
 <!-- ANCHOR: api_docs_cmd -->
 
 ```bash
-cargo doc-steam --open
+cargo doc-tramway --open
 ```
 
 The documentation can also be generated to include private items, which can be
-useful when developing STEAM packages, by running:
+useful when developing TRAMWAY packages, by running:
 
 ```bash
-cargo doc-steam-dev --open
+cargo doc-tramway-dev --open
 ```
 
 <!-- ANCHOR_END: api_docs_cmd -->

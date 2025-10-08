@@ -7,21 +7,21 @@ members = [
     "examples/flaky-with-delay",
     "examples/scrambler",
     "examples/sim-ring",
-    "steam-components",
-    "steam-config",
-    "steam-developer-guide",
-    "steam-doc-builder",
-    "steam-docpp",
-    "steam-engine",
-    "steam-model-builder",
-    "steam-models",
-    "steam-perfetto",
-    "steam-perfetto-sys",
-    "steam-protocols",
-    "steam-resources",
-    "steam-spotter",
-    "steam-track",
-    "terminus",
+    "tramway-components",
+    "tramway-config",
+    "tramway-developer-guide",
+    "tramway-doc-builder",
+    "tramway-docpp",
+    "tramway-engine",
+    "tramway-model-builder",
+    "tramway-models",
+    "tramway-perfetto-sys",
+    "tramway-perfetto",
+    "tramway-protocols",
+    "tramway-resources",
+    "tramway-spotter",
+    "tramway-terminus",
+    "tramway-track",
 ]
 resolver = "2"
 
@@ -29,18 +29,18 @@ resolver = "2"
 authors = ["The Silicon Architecture team"]
 edition = "2024"
 rust-version = "1.90"
-description = "The Simulation Technology for Evaluation and Architecture Modelling (STEAM) workspace"
-homepage = "https://github.com/graphcore-research/steam"
-documentation = "https://graphcore-research.github.io/steam"
+description = "Tramway is Rust Async Modelling for hardWare Architecture and sYstems (TRAMWAY)"
+homepage = "https://github.com/graphcore-research/tramway"
+documentation = "https://graphcore-research.github.io/tramway"
 readme = "README.md"
-keywords = ["steam"]
+keywords = ["tramway"]
 categories = [
     "asynchronous",
     "simulation",
 ]
 license = "MIT"
 license-file = "LICENSE"
-repository = "https://github.com/graphcore-research/steam"
+repository = "https://github.com/graphcore-research/tramway"
 publish = ["kellnr"]
 
 [workspace.dependencies]

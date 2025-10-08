@@ -9,8 +9,8 @@
 //! # Ports
 //!
 //! This component has two ports
-//!  - One [input port](steam_engine::port::InPort): `rx`
-//!  - One [output port](steam_engine::port::OutPort): `tx`
+//!  - One [input port](tramway_engine::port::InPort): `rx`
+//!  - One [output port](tramway_engine::port::OutPort): `tx`
 
 /// First need to `use` all types and traits that are used.
 use std::cell::RefCell;
@@ -26,24 +26,24 @@ use async_trait::async_trait;
 /// decisions.
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
-use steam_components::delay::Delay;
-use steam_components::store::Store;
-/// The steam components crate provides many connectable building blocks.
+use tramway_components::delay::Delay;
+use tramway_components::store::Store;
+/// The tramway components crate provides many connectable building blocks.
 /// Component traits and types are provided along with the components
 /// themselves.
-use steam_components::{connect_tx, port_rx, take_option};
-use steam_engine::engine::Engine;
-/// The steam engine core provides the traits and types required to be
+use tramway_components::{connect_tx, port_rx, take_option};
+use tramway_engine::engine::Engine;
+/// The tramway engine core provides the traits and types required to be
 /// implemented by a component.
-use steam_engine::executor::Spawner;
-use steam_engine::port::{InPort, OutPort, PortStateResult};
-use steam_engine::time::clock::Clock;
-use steam_engine::traits::{Runnable, SimObject};
-use steam_engine::types::{SimError, SimResult};
-use steam_model_builder::EntityDisplay;
-/// The steam_track library provides tracing/logging features.
-use steam_track::entity::Entity;
-use steam_track::trace;
+use tramway_engine::executor::Spawner;
+use tramway_engine::port::{InPort, OutPort, PortStateResult};
+use tramway_engine::time::clock::Clock;
+use tramway_engine::traits::{Runnable, SimObject};
+use tramway_engine::types::{SimError, SimResult};
+use tramway_model_builder::EntityDisplay;
+/// The tramway_track library provides tracing/logging features.
+use tramway_track::entity::Entity;
+use tramway_track::trace;
 
 /// A struct containing configuration options
 pub struct Config {
