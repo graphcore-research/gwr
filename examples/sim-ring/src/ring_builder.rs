@@ -1,6 +1,6 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 //
-//! Library functions to build parts of the SimRing application.
+//! Library functions to build parts of the sim-ring application.
 
 use std::rc::Rc;
 

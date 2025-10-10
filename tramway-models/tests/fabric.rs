@@ -3,32 +3,15 @@
 use std::rc::Rc;
 
 use tramway_components::connect_port;
-use tramway_components::router::Route;
 use tramway_components::sink::Sink;
 use tramway_components::source::Source;
 use tramway_engine::engine::Engine;
 use tramway_engine::run_simulation;
 use tramway_engine::test_helpers::start_test;
-use tramway_engine::traits::{Routable, TotalBytes};
-use tramway_engine::types::SimError;
+use tramway_engine::traits::TotalBytes;
 use tramway_models::ethernet_frame::{EthernetFrame, SRC_MAC_BYTES, u64_to_mac};
 use tramway_models::fabric::FabricConfig;
 use tramway_models::fabric::functional::Fabric;
-
-/// Routing algorithm for test
-///
-/// Simply route to the destination of the object
-struct TestAlgorithm;
-
-impl<T> Route<T> for TestAlgorithm
-where
-    T: Routable,
-{
-    fn route(&self, obj: &T) -> Result<usize, SimError> {
-        let dest = obj.destination() as usize;
-        Ok(dest)
-    }
-}
 
 trait ToDest {
     fn to_dest(&self, source_index: usize, frame_index: usize) -> [u8; SRC_MAC_BYTES];
@@ -87,17 +70,8 @@ fn run_test(
     let spawner = engine.spawner();
     let top = engine.top();
 
-    let routing_algorithm = Box::new(TestAlgorithm {});
-    let fabric = Fabric::new_and_register(
-        &engine,
-        top,
-        "fabric",
-        clock,
-        spawner,
-        config.clone(),
-        routing_algorithm,
-    )
-    .unwrap();
+    let fabric =
+        Fabric::new_and_register(&engine, top, "fabric", clock, spawner, config.clone()).unwrap();
 
     let num_ports = config.num_ports();
     let mut sources = Vec::with_capacity(num_ports);
@@ -191,7 +165,6 @@ fn latency() {
     let spawner = engine.spawner();
     let top = engine.top();
 
-    let routing_algorithm = Box::new(TestAlgorithm {});
     let fabric = Fabric::new_and_register(
         &engine,
         top,
@@ -199,7 +172,6 @@ fn latency() {
         clock.clone(),
         spawner,
         config.clone(),
-        routing_algorithm,
     )
     .unwrap();
 
