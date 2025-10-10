@@ -8,6 +8,7 @@
 
 pub mod ethernet_frame;
 pub mod ethernet_link;
+pub mod fabric;
 pub mod fc_pipeline;
 pub mod memory;
 pub mod registers;
