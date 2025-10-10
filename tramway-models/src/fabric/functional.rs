@@ -26,7 +26,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tramway_components::flow_controls::limiter::Limiter;
-use tramway_components::router::Route;
+use tramway_components::router::{DefaultAlgorithm, Route};
 use tramway_components::store::Store;
 use tramway_components::{connect_port, rc_limiter};
 use tramway_engine::engine::Engine;
@@ -70,7 +70,6 @@ where
     internal_rx: RefCell<Vec<InPort<T>>>,
     tx_buffers: Vec<Rc<Store<T>>>,
     internal_tx: RefCell<Vec<OutPort<T>>>,
-    routing_algorithm: Rc<Box<dyn Route<T>>>,
     config: Rc<FabricConfig>,
     clock: Clock,
     spawner: Spawner,
@@ -87,7 +86,6 @@ where
         clock: Clock,
         spawner: Spawner,
         config: Rc<FabricConfig>,
-        routing_algorithm: Box<dyn Route<T>>,
     ) -> Result<Rc<Self>, SimError> {
         let entity = Arc::new(Entity::new(parent, name));
 
@@ -157,7 +155,6 @@ where
             internal_rx: RefCell::new(internal_rx),
             tx_buffers,
             internal_tx: RefCell::new(internal_tx),
-            routing_algorithm: Rc::new(routing_algorithm),
             config,
             clock,
             spawner,
@@ -192,11 +189,13 @@ where
         }
         let port_states = Rc::new(port_states);
 
+        let routing_algorithm: Rc<Box<dyn Route<T>>> = Rc::new(Box::new(DefaultAlgorithm {}));
+
         for (i, internal_rx) in self.internal_rx.borrow_mut().drain(..).enumerate() {
             let entity = self.entity.clone();
             let clock = self.clock.clone();
             let port_states = port_states.clone();
-            let routing_algorithm = self.routing_algorithm.clone();
+            let routing_algorithm = routing_algorithm.clone();
             let config = self.config.clone();
 
             self.spawner.spawn(async move {

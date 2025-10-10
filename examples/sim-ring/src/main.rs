@@ -290,7 +290,7 @@ fn main() -> Result<(), SimError> {
         let total_expected_packets = config.num_send_packets * config.ring_size;
         let sinks = sinks.to_owned();
         start_packet_dump(
-            &spawner.clone(),
+            &spawner,
             clock.clone(),
             args.progress_ticks,
             total_expected_packets,
