@@ -106,7 +106,7 @@ fn ring_to_io() {
     let engine = start_test(file!());
     let mut ring_frames = Vec::with_capacity(num_ring_tx);
     for i in 0..num_ring_tx {
-        let frame = Box::new(EthernetFrame::new(engine.top(), ring_tx_payload_size_bytes))
+        let frame = EthernetFrame::new(engine.top(), ring_tx_payload_size_bytes)
             .set_dest(io_dest)
             .set_src([i as u8; SRC_MAC_BYTES]);
         ring_frames.push(frame);
@@ -114,7 +114,7 @@ fn ring_to_io() {
 
     let mut io_frames = Vec::with_capacity(num_io_tx);
     for i in 0..num_io_tx {
-        let frame = Box::new(EthernetFrame::new(engine.top(), io_tx_payload_size_bytes))
+        let frame = EthernetFrame::new(engine.top(), io_tx_payload_size_bytes)
             .set_dest(ring_dest)
             .set_src([!i as u8; SRC_MAC_BYTES]);
         io_frames.push(frame);
@@ -150,7 +150,7 @@ fn all_to_ring() {
     let engine = start_test(file!());
     let mut ring_frames = Vec::with_capacity(num_ring_tx);
     for i in 0..num_ring_tx {
-        let frame = Box::new(EthernetFrame::new(engine.top(), ring_tx_payload_size_bytes))
+        let frame = EthernetFrame::new(engine.top(), ring_tx_payload_size_bytes)
             .set_dest(ring_dest)
             .set_src([i as u8; SRC_MAC_BYTES]);
         ring_frames.push(frame);
@@ -158,7 +158,7 @@ fn all_to_ring() {
 
     let mut io_frames = Vec::with_capacity(num_io_tx);
     for i in 0..num_io_tx {
-        let frame = Box::new(EthernetFrame::new(engine.top(), io_tx_payload_size_bytes))
+        let frame = EthernetFrame::new(engine.top(), io_tx_payload_size_bytes)
             .set_dest(ring_dest)
             .set_src([!i as u8; SRC_MAC_BYTES]);
         io_frames.push(frame);

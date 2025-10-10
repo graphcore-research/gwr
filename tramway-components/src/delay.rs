@@ -222,8 +222,8 @@ where
 
     rx: RefCell<Option<InPort<T>>>,
     pending: Rc<RefCell<VecDeque<(T, ClockTick)>>>,
-    pending_changed: Repeated<usize>,
-    output_changed: Repeated<usize>,
+    pending_changed: Repeated<()>,
+    output_changed: Repeated<()>,
     tx: RefCell<Option<OutPort<T>>>,
 
     error_on_output_stall: RefCell<bool>,
@@ -251,8 +251,8 @@ where
             delay_ticks: RefCell::new(delay_ticks),
             rx: RefCell::new(Some(rx)),
             pending: Rc::new(RefCell::new(VecDeque::new())),
-            pending_changed: Repeated::new(usize::default()),
-            output_changed: Repeated::new(usize::default()),
+            pending_changed: Repeated::default(),
+            output_changed: Repeated::default(),
             tx: RefCell::new(Some(tx)),
             error_on_output_stall: RefCell::new(false),
         });
@@ -340,8 +340,8 @@ async fn run_tx<T>(
     tx: OutPort<T>,
     clock: Clock,
     pending: Rc<RefCell<VecDeque<(T, ClockTick)>>>,
-    pending_changed: Repeated<usize>,
-    output_changed: Repeated<usize>,
+    pending_changed: Repeated<()>,
+    output_changed: Repeated<()>,
     error_on_output_stall: bool,
 ) -> SimResult
 where

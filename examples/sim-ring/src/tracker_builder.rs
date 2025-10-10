@@ -77,7 +77,7 @@ fn build_perfetto_tracker(
 
 /// Set up stdout/binary/Perfetto trackers according the the command-line
 /// arguments
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn setup_trackers(
     enable_stdout: bool,
     stdout_level: log::Level,
