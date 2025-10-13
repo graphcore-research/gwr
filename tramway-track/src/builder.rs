@@ -6,10 +6,11 @@ use std::io::BufWriter;
 use std::sync::Arc;
 use std::{fs, io};
 
-use tramway_track::tracker::multi_tracker::MultiTracker;
-use tramway_track::tracker::perfetto::PerfettoTracker;
-use tramway_track::tracker::{CapnProtoTracker, EntityManager, TextTracker, TrackConfigError};
-use tramway_track::{Tracker, Writer};
+use crate::tracker::multi_tracker::MultiTracker;
+#[cfg(feature = "perfetto")]
+use crate::tracker::perfetto::PerfettoTracker;
+use crate::tracker::{CapnProtoTracker, EntityManager, TextTracker, TrackConfigError};
+use crate::{Tracker, Writer};
 
 /// Create a tracker that prints to stdout
 ///
@@ -56,6 +57,7 @@ fn build_binary_tracker(
 /// This tracker will produce a Perfetto trace file, which unlike the other
 /// tracker options can be viewed using the Perfetto UI, rather than
 /// tramway-spotter.
+#[cfg(feature = "perfetto")]
 fn build_perfetto_tracker(
     level: log::Level,
     filter_regex: &str,
@@ -75,10 +77,21 @@ fn build_perfetto_tracker(
     Ok(Arc::new(PerfettoTracker::new(entity_manager, bin_writer)))
 }
 
+#[cfg(not(feature = "perfetto"))]
+/// Simply have this here to make it easier to write the `setup_trackers`
+/// function
+fn build_perfetto_tracker(
+    _level: log::Level,
+    _filter_regex: &str,
+    _trace_file: &str,
+) -> Result<Tracker, TrackConfigError> {
+    panic!("Cannot build perfetto tracker without feature");
+}
+
 /// Set up stdout/binary/Perfetto trackers according the the command-line
 /// arguments
 #[expect(clippy::too_many_arguments)]
-pub fn setup_trackers(
+fn setup_trackers(
     enable_stdout: bool,
     stdout_level: log::Level,
     stdout_filter_regex: &str,
@@ -125,4 +138,63 @@ pub fn setup_trackers(
     } else {
         build_stdout_tracker(log::Level::Warn, "")
     }
+}
+
+/// Set up stdout and binary trackers according the the command-line arguments
+pub fn setup_stdout_binary_trackers(
+    enable_stdout: bool,
+    stdout_level: log::Level,
+    stdout_filter_regex: &str,
+    enable_binary: bool,
+    binary_level: log::Level,
+    binary_filter_regex: &str,
+    binary_file: &str,
+) -> Result<Tracker, TrackConfigError> {
+    setup_trackers(
+        enable_stdout,
+        stdout_level,
+        stdout_filter_regex,
+        enable_binary,
+        binary_level,
+        binary_filter_regex,
+        binary_file,
+        false,
+        log::Level::Error,
+        "",
+        "",
+    )
+}
+
+/// Set up stdout/binary/Perfetto trackers according the the command-line
+/// arguments
+///
+/// Only available if building with the prefetto feature enabled.
+#[expect(clippy::too_many_arguments)]
+#[cfg(feature = "perfetto")]
+pub fn setup_all_trackers(
+    enable_stdout: bool,
+    stdout_level: log::Level,
+    stdout_filter_regex: &str,
+    enable_binary: bool,
+    binary_level: log::Level,
+    binary_filter_regex: &str,
+    binary_file: &str,
+    enable_perfetto: bool,
+    perfetto_level: log::Level,
+    perfetto_filter_regex: &str,
+    perfetto_file: &str,
+) -> Result<Tracker, TrackConfigError> {
+    setup_trackers(
+        enable_stdout,
+        stdout_level,
+        stdout_filter_regex,
+        enable_binary,
+        binary_level,
+        binary_filter_regex,
+        binary_file,
+        enable_perfetto,
+        perfetto_level,
+        perfetto_filter_regex,
+        perfetto_file,
+    )
 }

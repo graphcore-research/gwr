@@ -67,7 +67,6 @@ use indicatif::ProgressBar;
 use sim_ring::ring_builder::{
     Config, Sinks, build_limiters, build_pipes, build_ring_nodes, build_source_sinks,
 };
-use sim_ring::tracker_builder::setup_trackers;
 use tramway_components::connect_port;
 use tramway_engine::engine::Engine;
 use tramway_engine::executor::Spawner;
@@ -75,6 +74,7 @@ use tramway_engine::time::clock::Clock;
 use tramway_engine::types::SimError;
 use tramway_engine::{run_simulation, sim_error};
 use tramway_models::ethernet_frame::PACKET_OVERHEAD_BYTES;
+use tramway_track::builder::setup_all_trackers;
 use tramway_track::{error, info};
 
 // Define the standard Ethernet data rate
@@ -212,7 +212,7 @@ fn start_packet_dump(
 fn main() -> Result<(), SimError> {
     let args = Cli::parse();
 
-    let tracker = setup_trackers(
+    let tracker = setup_all_trackers(
         args.stdout,
         args.stdout_level,
         args.stdout_filter_regex.as_str(),

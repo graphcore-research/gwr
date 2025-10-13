@@ -16,7 +16,6 @@
 //! ```
 
 // TODO: wire up the active_sources
-// TODO: move tracker_builder to shared location with sim-ring
 
 use std::rc::Rc;
 
@@ -24,7 +23,6 @@ use clap::Parser;
 use indicatif::ProgressBar;
 use sim_fabric::packet_gen::TrafficPattern;
 use sim_fabric::source_sink_builder::{Sinks, build_source_sinks};
-use sim_fabric::tracker_builder::setup_trackers;
 use tramway_components::connect_port;
 use tramway_engine::engine::Engine;
 use tramway_engine::executor::Spawner;
@@ -33,6 +31,7 @@ use tramway_engine::types::SimError;
 use tramway_engine::{run_simulation, sim_error};
 use tramway_models::fabric::FabricConfig;
 use tramway_models::fabric::functional::Fabric;
+use tramway_track::builder::setup_all_trackers;
 use tramway_track::{error, info};
 
 /// Command-line arguments.
@@ -195,7 +194,7 @@ fn start_packet_dump(
 fn main() -> Result<(), SimError> {
     let args = Cli::parse();
 
-    let tracker = setup_trackers(
+    let tracker = setup_all_trackers(
         args.stdout,
         args.stdout_level,
         args.stdout_filter_regex.as_str(),
@@ -234,7 +233,7 @@ fn main() -> Result<(), SimError> {
 
     let top = engine.top().clone();
     info!(top ;
-        "Fabric of {}x{}x{} sources, each sending {} packets ({}kB) with buffers {}/{} packets. Seed {}",
+        "Fabric of {}x{}x{} sources, each sending {} packets ({}kB) with buffers {}/{} packets.",
         config.num_columns(),
         config.num_rows(),
         config.num_ports_per_node(),
@@ -242,8 +241,8 @@ fn main() -> Result<(), SimError> {
         args.kb_to_send,
         args.rx_buffer_entries,
         args.tx_buffer_entries,
-        args.seed,
     );
+    info!(top ; "Using traffic pattern {}. Random seed {}", args.traffic_pattern, args.seed);
 
     let fabric = Fabric::new_and_register(
         &engine,
