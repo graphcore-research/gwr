@@ -25,6 +25,7 @@ use std::sync::{Arc, Mutex};
 
 pub use log;
 
+pub mod builder;
 pub mod entity;
 pub mod id;
 

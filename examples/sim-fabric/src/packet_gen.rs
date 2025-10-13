@@ -1,5 +1,6 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 //
+use std::fmt;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -29,6 +30,12 @@ pub enum TrafficPattern {
 
     /// All sources will send to to all other destinations in sequence
     AllToAllRandom,
+}
+
+impl fmt::Display for TrafficPattern {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{self:?}")
+    }
 }
 
 /// A Packet Generator that can be used by the `Source` to produce packets on
