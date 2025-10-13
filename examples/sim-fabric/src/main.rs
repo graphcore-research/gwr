@@ -11,17 +11,32 @@
 //! # Examples
 //!
 //! Running a basic all-to-all simulation
-//! ```rust
-//! cargo run --bin sim-fabric --release -- --kb-to-send 1024 --stdout
+//! ```text
+//! cargo run --bin sim-fabric --release -- --kb-to-send 1024 --stdout --traffic-pattern all-to-all-fixed
+//! ```
+//!
+//! In order to achieve the maximum throughput it is essential to make the
+//! frame sizes a multiple of the port width. For example, with a 128-bit
+//! port and the 20-byte ethernet frame overhead an ideal frame size would
+//! be something like 1484:
+//! ```text
+//! cargo run --bin sim-fabric --release -- --port-bits-per-tick 128 --frame-payload-bytes 1484 --kb-to-send 1024 --stdout
+//! ```
+//!
+//! This achieves the peak bandwith at one port of 14.9GB/s and if run with
+//! a balanced communcation pattern it can achieve that at each port (357.6GB/s
+//! for the default 24-port fabric):
+//! ```text
+//! cargo run --bin sim-fabric --release -- --port-bits-per-tick 128 --frame-payload-bytes 1484 --kb-to-send 1024 --traffic-pattern all-to-all-fixed --stdout
 //! ```
 
-// TODO: wire up the active_sources
-
 use std::rc::Rc;
+use std::sync::Arc;
 
+use byte_unit::{AdjustedByte, Byte, UnitType};
 use clap::Parser;
 use indicatif::ProgressBar;
-use sim_fabric::packet_gen::TrafficPattern;
+use sim_fabric::frame_gen::TrafficPattern;
 use sim_fabric::source_sink_builder::{Sinks, build_source_sinks};
 use tramway_components::connect_port;
 use tramway_engine::engine::Engine;
@@ -29,14 +44,16 @@ use tramway_engine::executor::Spawner;
 use tramway_engine::time::clock::Clock;
 use tramway_engine::types::SimError;
 use tramway_engine::{run_simulation, sim_error};
+use tramway_models::ethernet_frame::FRAME_OVERHEAD_BYTES;
 use tramway_models::fabric::FabricConfig;
 use tramway_models::fabric::functional::Fabric;
 use tramway_track::builder::setup_all_trackers;
-use tramway_track::{error, info};
+use tramway_track::entity::Entity;
+use tramway_track::{Track, error, info};
 
 /// Command-line arguments.
 #[derive(Parser)]
-#[command(about = "Ring deadlock test")]
+#[command(about = "Fabric evaluation application")]
 struct Cli {
     /// Enable logging to the console.
     #[arg(long, default_value = "false")]
@@ -88,8 +105,7 @@ struct Cli {
     perfetto_file: String,
 
     /// Show a progress bar for the received frame count (updated at the rate
-    /// defined by `progress_ticks`). NOTE: with the progress bar enabled
-    /// the simulation will not finish if it deadlocks.
+    /// defined by `progress_ticks`).
     #[arg(long)]
     progress: bool,
 
@@ -119,11 +135,11 @@ struct Cli {
     #[arg(long, default_value = "100")]
     kb_to_send: usize,
 
-    /// Set the number of packets each fabric TX port can hold.
+    /// Set the number of frames each fabric TX port can hold.
     #[arg(long, default_value = "32")]
     tx_buffer_entries: usize,
 
-    /// Set the number of packets each fabric RX port can hold.
+    /// Set the number of frames each fabric RX port can hold.
     #[arg(long, default_value = "32")]
     rx_buffer_entries: usize,
 
@@ -131,15 +147,15 @@ struct Cli {
     #[arg(long, default_value = "128")]
     port_bits_per_tick: usize,
 
-    /// Set the default packet payload bytes.
+    /// Set the default frame payload bytes.
     #[arg(long, default_value = "256")]
-    packet_payload_bytes: usize,
+    frame_payload_bytes: usize,
 
     /// Set the clock ticks required to move one hop in the fabric.
     #[arg(long, default_value = "1")]
     ticks_per_hop: usize,
 
-    /// An extra overhead for every packet passing through the fabric.
+    /// An extra overhead for every frame passing through the fabric.
     #[arg(long, default_value = "1")]
     ticks_overhead: usize,
 
@@ -165,25 +181,25 @@ fn finish_at(spawner: &Spawner, clock: Clock, run_ticks: usize) {
 }
 
 /// Spawn a background task to display regular updates of the total number of
-/// packets received so far.
-fn start_packet_dump(
+/// frames received so far.
+fn start_frame_dump(
     spawner: &Spawner,
     clock: Clock,
     progress_ticks: usize,
-    total_expected_packets: usize,
+    total_expected_frames: usize,
     sinks: Sinks,
 ) {
     spawner.spawn(async move {
-        let pb = ProgressBar::new(total_expected_packets as u64);
-        let mut seen_packets = 0;
+        let pb = ProgressBar::new(total_expected_frames as u64);
+        let mut seen_frames = 0;
         loop {
             // Use the `background` wait to indicate that the simulation can end if this is
             // the only task still active.
             clock.wait_ticks_or_exit(progress_ticks as u64).await;
-            let num_packets: usize = sinks.iter().map(|s| s.num_sunk()).sum();
-            pb.inc((num_packets - seen_packets) as u64);
-            seen_packets = num_packets;
-            if num_packets == total_expected_packets {
+            let num_frames: usize = sinks.iter().map(|s| s.num_sunk()).sum();
+            pb.inc((num_frames - seen_frames) as u64);
+            seen_frames = num_frames;
+            if num_frames == total_expected_frames {
                 break;
             }
         }
@@ -191,10 +207,8 @@ fn start_packet_dump(
     });
 }
 
-fn main() -> Result<(), SimError> {
-    let args = Cli::parse();
-
-    let tracker = setup_all_trackers(
+fn setup_trackers(args: &Cli) -> Arc<dyn Track + Send + Sync> {
+    setup_all_trackers(
         args.stdout,
         args.stdout_level,
         args.stdout_filter_regex.as_str(),
@@ -207,7 +221,12 @@ fn main() -> Result<(), SimError> {
         &args.perfetto_filter_regex,
         &args.perfetto_file,
     )
-    .unwrap();
+    .unwrap()
+}
+
+fn main() -> Result<(), SimError> {
+    let args = Cli::parse();
+    let tracker = setup_trackers(&args);
 
     let mut engine = Engine::new(&tracker);
     let spawner = engine.spawner();
@@ -228,16 +247,16 @@ fn main() -> Result<(), SimError> {
 
     let num_payload_bytes_to_send = args.kb_to_send * 1024;
 
-    // Size of max-sized EthernetFrame packets
-    let num_send_packets = num_payload_bytes_to_send / args.packet_payload_bytes;
+    // Size of max-sized frames
+    let num_send_frames = num_payload_bytes_to_send / args.frame_payload_bytes;
 
     let top = engine.top().clone();
     info!(top ;
-        "Fabric of {}x{}x{} sources, each sending {} packets ({}kB) with buffers {}/{} packets.",
+        "Fabric of {}x{}x{} sources, each sending {} frames ({}kB) with buffers {}/{} frames.",
         config.num_columns(),
         config.num_rows(),
         config.num_ports_per_node(),
-        num_send_packets,
+        num_send_frames,
         args.kb_to_send,
         args.rx_buffer_entries,
         args.tx_buffer_entries,
@@ -252,13 +271,21 @@ fn main() -> Result<(), SimError> {
         spawner.clone(),
         config.clone(),
     )?;
+
+    // By default enable all ports unless the user has constrained the generators
+    let num_active_sources = match args.active_sources {
+        Some(num_active_sources) => num_active_sources,
+        None => config.num_ports(),
+    };
+
     let (sources, sinks) = build_source_sinks(
         &mut engine,
         &config,
         args.traffic_pattern,
-        args.packet_payload_bytes,
-        num_send_packets,
+        args.frame_payload_bytes,
+        num_send_frames,
         args.seed,
+        num_active_sources,
     );
 
     for i in 0..num_ports {
@@ -269,13 +296,13 @@ fn main() -> Result<(), SimError> {
     info!(top ; "Platform built and connected");
 
     if args.progress {
-        let total_expected_packets = num_send_packets * num_ports;
+        let total_expected_frames = num_send_frames * num_ports;
         let sinks = sinks.to_owned();
-        start_packet_dump(
+        start_frame_dump(
             &spawner,
             clock.clone(),
             args.progress_ticks,
-            total_expected_packets,
+            total_expected_frames,
             sinks,
         );
     }
@@ -286,20 +313,55 @@ fn main() -> Result<(), SimError> {
 
     run_simulation!(engine);
 
-    let mut total_sunk = 0;
+    let mut total_sunk_frames = 0;
     for sink in &sinks {
-        total_sunk += sink.num_sunk();
+        total_sunk_frames += sink.num_sunk();
     }
 
-    let total_expected = num_send_packets * config.num_ports();
-    if total_sunk != total_expected {
-        error!(top ; "{}/{} packets received", total_sunk, total_expected);
+    let total_expected_frames = num_send_frames * num_active_sources;
+    if total_sunk_frames != total_expected_frames {
+        error!(top ; "{}/{} frames received", total_sunk_frames, total_expected_frames);
         error!(top ; "Deadlock detected at {:.2}ns", clock.time_now_ns());
 
         tracker.shutdown();
         return sim_error!("Deadlock");
     }
 
-    info!(top ; "Pass ({:.2}ns)", clock.time_now_ns());
+    print_summary(
+        &top,
+        clock.time_now_ns(),
+        total_sunk_frames,
+        args.frame_payload_bytes,
+    );
     Ok(())
+}
+
+fn print_summary(
+    top: &Arc<Entity>,
+    time_now_ns: f64,
+    total_sunk_frames: usize,
+    frame_payload_bytes: usize,
+) {
+    let time_now_s = time_now_ns / (1000.0 * 1000.0 * 1000.0);
+
+    let payload_bytes = (total_sunk_frames * frame_payload_bytes) as u64;
+    let (payload_value, payload_per_second) =
+        compute_adjusted_value_and_rate(time_now_s, payload_bytes);
+
+    let total_bytes = payload_bytes + (total_sunk_frames * FRAME_OVERHEAD_BYTES) as u64;
+    let (total_value, total_per_second) = compute_adjusted_value_and_rate(time_now_s, total_bytes);
+
+    info!(top ; "Pass: Sent {total_sunk_frames} in {time_now_ns:.2}ns.");
+    info!(top ; "Payload: {payload_value:.2} ({payload_per_second:.2}/s). Total: {total_value:.2} ({total_per_second:.2}/s).");
+}
+
+fn compute_adjusted_value_and_rate(
+    time_now_s: f64,
+    num_bytes: u64,
+) -> (AdjustedByte, AdjustedByte) {
+    // Convert to a binary-only unit (KiB, MiB, etc)
+    let count = Byte::from_u64(num_bytes).get_appropriate_unit(UnitType::Binary);
+    let per_second = Byte::from_f64(num_bytes as f64 / time_now_s).unwrap();
+    let count_per_second = per_second.get_appropriate_unit(UnitType::Binary);
+    (count, count_per_second)
 }

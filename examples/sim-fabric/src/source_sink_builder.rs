@@ -13,7 +13,7 @@ use tramway_engine::engine::Engine;
 use tramway_models::ethernet_frame::EthernetFrame;
 use tramway_models::fabric::FabricConfig;
 
-use crate::packet_gen::{PacketGen, TrafficPattern};
+use crate::frame_gen::{FrameGen, TrafficPattern};
 
 // Define some types to aid readability
 pub type Sources = Vec<Rc<Source<EthernetFrame>>>;
@@ -26,6 +26,7 @@ pub fn build_source_sinks(
     packet_payload_bytes: usize,
     num_send_packets: usize,
     seed: u64,
+    num_active_sources: usize,
 ) -> (Sources, Sinks) {
     let top = engine.top();
 
@@ -33,6 +34,14 @@ pub fn build_source_sinks(
     let mut sources = Vec::with_capacity(num_ports);
 
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+
+    // Create random set of sources that will be active
+    let mut all_port_indices: Vec<usize> = (0..num_ports).collect();
+    all_port_indices.shuffle(&mut rng);
+    let active_port_indices: Vec<usize> = all_port_indices
+        .into_iter()
+        .take(num_active_sources)
+        .collect();
 
     // Create an random set of initial assigments
     let mut dest_indices: Vec<usize> = (0..num_ports).collect();
@@ -47,12 +56,9 @@ pub fn build_source_sinks(
         } else {
             dest_index
         };
-        sources.push(
-            Source::new_and_register(
-                engine,
-                top,
-                format!("source{i}").as_str(),
-                Some(Box::new(PacketGen::new(
+        let data_generator: std::option::Option<Box<dyn Iterator<Item = EthernetFrame>>> =
+            if active_port_indices.contains(&i) {
+                Some(Box::new(FrameGen::new(
                     top,
                     config,
                     i,
@@ -61,9 +67,13 @@ pub fn build_source_sinks(
                     packet_payload_bytes,
                     num_send_packets,
                     seed,
-                ))),
-            )
-            .unwrap(),
+                )))
+            } else {
+                None
+            };
+        sources.push(
+            Source::new_and_register(engine, top, format!("source{i}").as_str(), data_generator)
+                .unwrap(),
         );
     }
 
