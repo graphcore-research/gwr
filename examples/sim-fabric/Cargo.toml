@@ -19,6 +19,7 @@ publish.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+byte-unit.workspace = true
 clap.workspace = true
 log.workspace = true
 indicatif = "0.18.0"

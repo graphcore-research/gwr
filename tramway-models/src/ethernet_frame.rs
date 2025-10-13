@@ -15,8 +15,7 @@ pub const PREAMBLE_BYTES: usize = 7;
 pub const SFD_BYTES: usize = 1;
 pub const DEST_MAC_BYTES: usize = 6;
 pub const SRC_MAC_BYTES: usize = 6;
-pub const PACKET_OVERHEAD_BYTES: usize =
-    PREAMBLE_BYTES + SFD_BYTES + DEST_MAC_BYTES + SRC_MAC_BYTES;
+pub const FRAME_OVERHEAD_BYTES: usize = PREAMBLE_BYTES + SFD_BYTES + DEST_MAC_BYTES + SRC_MAC_BYTES;
 
 #[must_use]
 pub fn mac_to_u64(mac: &[u8; DEST_MAC_BYTES]) -> u64 {

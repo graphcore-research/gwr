@@ -8,7 +8,7 @@ use tramway_components::{connect_port, option_box_repeat};
 use tramway_engine::run_simulation;
 use tramway_engine::test_helpers::start_test;
 use tramway_engine::time::clock::Clock;
-use tramway_models::ethernet_frame::{EthernetFrame, PACKET_OVERHEAD_BYTES};
+use tramway_models::ethernet_frame::{EthernetFrame, FRAME_OVERHEAD_BYTES};
 use tramway_models::ethernet_link::{self, EthernetLink};
 
 fn run_test(
@@ -88,13 +88,13 @@ fn throughput() {
     assert_eq!(num_sunk, num_puts_b);
 
     let latency = ethernet_link::DELAY_TICKS as f64;
-    let packet_bits = (payload_bytes + PACKET_OVERHEAD_BYTES) * 8;
-    let packet_ticks = packet_bits.div_ceil(ethernet_link::BITS_PER_TICK);
+    let frame_bits = (payload_bytes + FRAME_OVERHEAD_BYTES) * 8;
+    let frame_ticks = frame_bits.div_ceil(ethernet_link::BITS_PER_TICK);
 
     // Assume each tick is 1ns (1GHz clock) and that the throughput of the last
-    // packet doesn't need to be counted
-    let packets_time = (packet_ticks * (num_puts_a - 1)) as f64;
-    assert_eq!(clock.time_now_ns(), (latency + packets_time));
+    // frame doesn't need to be counted
+    let frames_time = (frame_ticks * (num_puts_a - 1)) as f64;
+    assert_eq!(clock.time_now_ns(), (latency + frames_time));
 }
 
 #[test]

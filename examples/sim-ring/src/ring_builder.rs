@@ -17,7 +17,7 @@ use tramway_models::ethernet_frame::{EthernetFrame, u64_to_mac};
 use tramway_models::fc_pipeline::{FcPipeline, FcPipelineConfig};
 use tramway_models::ring_node::{IO_INDEX, RING_INDEX, RingConfig, RingNode};
 
-use crate::packet_gen::PacketGen;
+use crate::frame_gen::FrameGen;
 
 // Define some types to aid readability
 pub type Limiters = Vec<Rc<Limiter<EthernetFrame>>>;
@@ -31,8 +31,8 @@ pub struct Config {
     pub ring_priority: usize,
     pub rx_buffer_frames: usize,
     pub tx_buffer_frames: usize,
-    pub packet_payload_bytes: usize,
-    pub num_send_packets: usize,
+    pub frame_payload_bytes: usize,
+    pub num_send_frames: usize,
 }
 
 struct RoutingAlgorithm(usize);
@@ -89,11 +89,11 @@ pub fn build_source_sinks(engine: &mut Engine, config: &Config) -> (Sources, Sin
                 engine,
                 top,
                 format!("source{i}").as_str(),
-                Some(Box::new(PacketGen::new(
+                Some(Box::new(FrameGen::new(
                     top,
                     u64_to_mac(neighbour_left as u64),
-                    config.packet_payload_bytes,
-                    config.num_send_packets,
+                    config.frame_payload_bytes,
+                    config.num_send_frames,
                 ))),
             )
             .unwrap(),

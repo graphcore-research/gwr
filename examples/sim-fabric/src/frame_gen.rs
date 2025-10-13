@@ -38,25 +38,25 @@ impl fmt::Display for TrafficPattern {
     }
 }
 
-/// A Packet Generator that can be used by the `Source` to produce packets on
+/// A frame Generator that can be used by the `Source` to produce frames on
 /// the fly.
 ///
-/// This allows each packet being created to be unique which aids debug of the
+/// This allows each frame being created to be unique which aids debug of the
 /// system.
-pub struct PacketGen {
+pub struct FrameGen {
     pub entity: Arc<Entity>,
     config: Rc<FabricConfig>,
     source_index: usize,
     dest_index: usize,
     traffic_pattern: TrafficPattern,
     payload_bytes: usize,
-    num_send_packets: usize,
-    num_sent_packets: usize,
+    num_send_frames: usize,
+    num_sent_frames: usize,
     rng: Xoshiro256PlusPlus,
     next_dests: Vec<usize>,
 }
 
-impl PacketGen {
+impl FrameGen {
     #[expect(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
@@ -66,7 +66,7 @@ impl PacketGen {
         initial_dest_index: usize,
         traffic_pattern: TrafficPattern,
         payload_bytes: usize,
-        num_send_packets: usize,
+        num_send_frames: usize,
         seed: u64,
     ) -> Self {
         // Create a local RNG which is different per source
@@ -91,24 +91,24 @@ impl PacketGen {
             dest_index,
             traffic_pattern,
             payload_bytes,
-            num_send_packets,
-            num_sent_packets: 0,
+            num_send_frames,
+            num_sent_frames: 0,
             rng,
             next_dests,
         }
     }
 }
 
-impl Iterator for PacketGen {
+impl Iterator for FrameGen {
     type Item = EthernetFrame;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.num_sent_packets < self.num_send_packets {
-            let mut label = u64_to_mac(self.num_sent_packets as u64);
+        if self.num_sent_frames < self.num_send_frames {
+            let mut label = u64_to_mac(self.num_sent_frames as u64);
             label[5] = self.source_index as u8;
-            self.num_sent_packets += 1;
+            self.num_sent_frames += 1;
 
             // Send to the correct `dest`, but set `src` to a unique value to aid debug
-            // (packet count).
+            // (frame count).
             let frame = Some(
                 EthernetFrame::new(&self.entity, self.payload_bytes)
                     .set_dest(u64_to_mac(self.dest_index as u64))

@@ -10,8 +10,8 @@
 //! Limiters and flow control pipes are added to model actual hardware
 //! limitations.
 //!
-//! The ring node contains an arbiter used to decide which packet to
-//! grant next; the next ring packet or a new packet from the source.
+//! The ring node contains an arbiter used to decide which frame to
+//! grant next; the next ring frame or a new frame from the source.
 //! The ring priority can be configured to demonstrate that incorrect
 //! priority will lead to deadlock.
 //!
@@ -73,7 +73,7 @@ use tramway_engine::executor::Spawner;
 use tramway_engine::time::clock::Clock;
 use tramway_engine::types::SimError;
 use tramway_engine::{run_simulation, sim_error};
-use tramway_models::ethernet_frame::PACKET_OVERHEAD_BYTES;
+use tramway_models::ethernet_frame::FRAME_OVERHEAD_BYTES;
 use tramway_track::builder::setup_all_trackers;
 use tramway_track::{error, info};
 
@@ -82,7 +82,7 @@ const ETHERNET_GBPS: usize = 100;
 
 /// Command-line arguments.
 #[derive(Parser)]
-#[command(about = "Ring deadlock test")]
+#[command(about = "Ring deadlock application")]
 struct Cli {
     /// Enable logging to the console.
     #[arg(long, default_value = "false")]
@@ -134,8 +134,7 @@ struct Cli {
     perfetto_file: String,
 
     /// Show a progress bar for the received frame count (updated at the rate
-    /// defined by `progress_ticks`). NOTE: with the progress bar enabled
-    /// the simulation will not finish if it deadlocks.
+    /// defined by `progress_ticks`).
     #[arg(long)]
     progress: bool,
 
@@ -169,9 +168,9 @@ struct Cli {
     #[arg(long, default_value = "32")]
     rx_buffer_kb: usize,
 
-    /// Override the default packet payload bytes.
+    /// Override the default frame payload bytes.
     #[arg(long, default_value = "256")]
-    packet_payload_bytes: usize,
+    frame_payload_bytes: usize,
 }
 
 /// Install an event to terminate the simulation at the clock tick defined.
@@ -183,25 +182,25 @@ fn finish_at(spawner: &Spawner, clock: Clock, run_ticks: usize) {
 }
 
 /// Spawn a background task to display regular updates of the total number of
-/// packets received so far.
-fn start_packet_dump(
+/// frames received so far.
+fn start_frame_dump(
     spawner: &Spawner,
     clock: Clock,
     progress_ticks: usize,
-    total_expected_packets: usize,
+    total_expected_frames: usize,
     sinks: Sinks,
 ) {
     spawner.spawn(async move {
-        let pb = ProgressBar::new(total_expected_packets as u64);
-        let mut seen_packets = 0;
+        let pb = ProgressBar::new(total_expected_frames as u64);
+        let mut seen_frames = 0;
         loop {
             // Use the `background` wait to indicate that the simulation can end if this is
             // the only task still active.
             clock.wait_ticks_or_exit(progress_ticks as u64).await;
-            let num_packets: usize = sinks.iter().map(|s| s.num_sunk()).sum();
-            pb.inc((num_packets - seen_packets) as u64);
-            seen_packets = num_packets;
-            if num_packets == total_expected_packets {
+            let num_frames: usize = sinks.iter().map(|s| s.num_sunk()).sum();
+            pb.inc((num_frames - seen_frames) as u64);
+            seen_frames = num_frames;
+            if num_frames == total_expected_frames {
                 break;
             }
         }
@@ -235,24 +234,24 @@ fn main() -> Result<(), SimError> {
     let rx_buffer_bytes = args.rx_buffer_kb * 1024;
     let num_payload_bytes_to_send = args.kb_to_send * 1024;
 
-    // Size of max-sized EthernetFrame packets
-    let packet_bytes = args.packet_payload_bytes + PACKET_OVERHEAD_BYTES;
+    // Size of max-sized frames
+    let frame_bytes = args.frame_payload_bytes + FRAME_OVERHEAD_BYTES;
 
     let config = Config {
         ring_size: args.ring_size,
         ring_priority: args.ring_priority,
-        rx_buffer_frames: rx_buffer_bytes / packet_bytes,
-        tx_buffer_frames: tx_buffer_bytes / packet_bytes,
-        packet_payload_bytes: args.packet_payload_bytes,
-        num_send_packets: num_payload_bytes_to_send / args.packet_payload_bytes,
+        rx_buffer_frames: rx_buffer_bytes / frame_bytes,
+        tx_buffer_frames: tx_buffer_bytes / frame_bytes,
+        frame_payload_bytes: args.frame_payload_bytes,
+        num_send_frames: num_payload_bytes_to_send / args.frame_payload_bytes,
     };
 
     let top = engine.top().clone();
     info!(top ;
-        "Ring of {} sources, priority {}, each sending {} packets ({}kB) with buffers {}/{} packets.",
+        "Ring of {} sources, priority {}, each sending {} frames ({}kB) with buffers {}/{} frames.",
         config.ring_size,
         config.ring_priority,
-        config.num_send_packets,
+        config.num_send_frames,
         args.kb_to_send,
         config.rx_buffer_frames,
         config.tx_buffer_frames
@@ -287,13 +286,13 @@ fn main() -> Result<(), SimError> {
     info!(top ; "Platform built and connected");
 
     if args.progress {
-        let total_expected_packets = config.num_send_packets * config.ring_size;
+        let total_expected_frames = config.num_send_frames * config.ring_size;
         let sinks = sinks.to_owned();
-        start_packet_dump(
+        start_frame_dump(
             &spawner,
             clock.clone(),
             args.progress_ticks,
-            total_expected_packets,
+            total_expected_frames,
             sinks,
         );
     }
@@ -305,8 +304,8 @@ fn main() -> Result<(), SimError> {
     run_simulation!(engine);
 
     for sink in &sinks {
-        if sink.num_sunk() != config.num_send_packets {
-            error!(top ; "{}/{} packets received", sink.num_sunk(), config.num_send_packets);
+        if sink.num_sunk() != config.num_send_frames {
+            error!(top ; "{}/{} frames received", sink.num_sunk(), config.num_send_frames);
             error!(top ; "Deadlock detected at {:.2}ns", clock.time_now_ns());
 
             tracker.shutdown();
