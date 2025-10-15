@@ -12,7 +12,6 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use tramway_engine::engine::Engine;
@@ -31,7 +30,7 @@ pub struct CreditIssuer<T>
 where
     T: SimObject,
 {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     tx: RefCell<Option<OutPort<T>>>,
     credit_tx: RefCell<Option<OutPort<Credit>>>,
     rx: RefCell<Option<InPort<T>>>,
@@ -41,8 +40,8 @@ impl<T> CreditIssuer<T>
 where
     T: SimObject,
 {
-    pub fn new_and_register(engine: &Engine, parent: &Arc<Entity>) -> Result<Rc<Self>, SimError> {
-        let entity = Arc::new(Entity::new(parent, "credit_issue"));
+    pub fn new_and_register(engine: &Engine, parent: &Rc<Entity>) -> Result<Rc<Self>, SimError> {
+        let entity = Rc::new(Entity::new(parent, "credit_issue"));
         let tx = OutPort::new(&entity, "tx");
         let credit_tx = OutPort::new(&entity, "credit_tx");
         let rx = InPort::new(&entity, "rx");

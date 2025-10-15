@@ -7,11 +7,11 @@ that define the component.
 
 All components should contain an `Entity` which is used to configure the logging
 and also to give a unique location within the model hierarchy. The `Entity` will
-be wrapped in [`sync::Arc`].
+be wrapped in [`std::rc::Rc`] so that it can be shared.
 
 ```rust,no_run
 # use std::marker::PhantomData;
-# use std::sync::Arc;
+# use std::rc::Rc;
 # use tramway_engine::traits::SimObject;
 # use tramway_model_builder::EntityDisplay;
 # use tramway_track::entity::Entity;
@@ -22,7 +22,7 @@ struct MyComponent<T>
 where
     T: SimObject
 {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
 
     // Any component-specific state
 #   phantom: PhantomData<T>
@@ -30,4 +30,4 @@ where
 # fn main() {}
 ```
 
-[`sync::Arc`]: https://doc.rust-lang.org/std/sync/struct.Arc.html
+[`std::rc::Rc`]: https://doc.rust-lang.org/std/rc/struct.Rc.html

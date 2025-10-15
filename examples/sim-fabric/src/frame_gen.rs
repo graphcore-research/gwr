@@ -2,7 +2,6 @@
 //
 use std::fmt;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use rand::SeedableRng;
 use rand::seq::{IteratorRandom, SliceRandom};
@@ -44,7 +43,7 @@ impl fmt::Display for TrafficPattern {
 /// This allows each frame being created to be unique which aids debug of the
 /// system.
 pub struct FrameGen {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     config: Rc<FabricConfig>,
     source_index: usize,
     dest_index: usize,
@@ -60,7 +59,7 @@ impl FrameGen {
     #[expect(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         config: Rc<FabricConfig>,
         source_index: usize,
         initial_dest_index: usize,
@@ -85,7 +84,7 @@ impl FrameGen {
         next_dests.shuffle(&mut rng);
 
         Self {
-            entity: Arc::new(Entity::new(parent, format!("gen{source_index}").as_str())),
+            entity: Rc::new(Entity::new(parent, format!("gen{source_index}").as_str())),
             config,
             source_index,
             dest_index,

@@ -12,7 +12,6 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use tramway_engine::engine::Engine;
@@ -44,7 +43,7 @@ pub struct Source<T>
 where
     T: SimObject,
 {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     data_generator: RefCell<Option<DataGenerator<T>>>,
     tx: RefCell<Option<OutPort<T>>>,
 }
@@ -55,11 +54,11 @@ where
 {
     pub fn new_and_register(
         engine: &Engine,
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         name: &str,
         data_generator: Option<DataGenerator<T>>,
     ) -> Result<Rc<Self>, SimError> {
-        let entity = Arc::new(Entity::new(parent, name));
+        let entity = Rc::new(Entity::new(parent, name));
         let tx = OutPort::new(&entity, "tx");
         let rc_self = Rc::new(Self {
             entity,
@@ -71,7 +70,7 @@ where
     }
 
     #[must_use]
-    pub fn entity(&self) -> &Arc<Entity> {
+    pub fn entity(&self) -> &Rc<Entity> {
         &self.entity
     }
 

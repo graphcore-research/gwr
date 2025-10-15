@@ -19,10 +19,10 @@ pub mod types;
 /// Include the multi-tracker.
 pub mod multi_tracker;
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::rc::Rc;
 
 pub use capnp::CapnProtoTracker;
 pub use dev_null::DevNullTracker;
@@ -74,21 +74,21 @@ pub trait Track {
 }
 
 /// The type of a [`Tracker`] that is shared across entities.
-pub type Tracker = Arc<dyn Track + Send + Sync>;
+pub type Tracker = Rc<dyn Track>;
 
 /// Create a [`Tracker`] that prints all track events to `stdout`.
 #[must_use]
 pub fn stdout_tracker(level: log::Level) -> Tracker {
     let entity_manger = EntityManager::new(level);
     let stdout_writer = Box::new(std::io::BufWriter::new(io::stdout()));
-    let tracker: Tracker = Arc::new(TextTracker::new(entity_manger, stdout_writer));
+    let tracker: Tracker = Rc::new(TextTracker::new(entity_manger, stdout_writer));
     tracker
 }
 
 /// Create a [`Tracker`] that suppresses all track events.
 #[must_use]
 pub fn dev_null_tracker() -> Tracker {
-    let tracer: Tracker = Arc::new(DevNullTracker {});
+    let tracer: Tracker = Rc::new(DevNullTracker {});
     tracer
 }
 
@@ -108,14 +108,14 @@ pub struct EntityManager {
     regex_to_entity_level: Vec<(Regex, log::Level)>,
 
     /// Used to assign unique IDs.
-    unique_id: AtomicU64,
+    unique_id: RefCell<u64>,
 
     /// Keep track of the current time.
-    current_time: Mutex<f64>,
+    current_time: RefCell<f64>,
 
     /// Keep track of entities that have trace enable/log levels different to
     /// the default
-    entity_lookup: Mutex<HashMap<Id, log::Level>>,
+    entity_lookup: RefCell<HashMap<Id, log::Level>>,
 }
 
 impl EntityManager {
@@ -125,19 +125,21 @@ impl EntityManager {
         Self {
             default_entity_level,
             regex_to_entity_level: Vec::new(),
-            unique_id: AtomicU64::new(ROOT.0 + 1),
-            current_time: Mutex::new(0.0),
-            entity_lookup: Mutex::new(HashMap::new()),
+            unique_id: RefCell::new(ROOT.0 + 1),
+            current_time: RefCell::new(0.0),
+            entity_lookup: RefCell::new(HashMap::new()),
         }
     }
 
     fn unique_id(&self) -> Id {
-        let id = self.unique_id.fetch_add(1, Ordering::SeqCst);
+        let mut guard = self.unique_id.borrow_mut();
+        let id = *guard;
+        *guard += 1;
         Id(id)
     }
 
     fn is_enabled(&self, id: Id, level: log::Level) -> bool {
-        match self.entity_lookup.lock().unwrap().get(&id) {
+        match self.entity_lookup.borrow().get(&id) {
             None => level <= self.default_entity_level,
             Some(entity_level) => level <= *entity_level,
         }
@@ -148,8 +150,7 @@ impl EntityManager {
         if entity_level != self.default_entity_level
             && self
                 .entity_lookup
-                .lock()
-                .unwrap()
+                .borrow_mut()
                 .insert(id, entity_level)
                 .is_some()
         {
@@ -193,11 +194,11 @@ impl EntityManager {
     }
 
     fn time(&self) -> f64 {
-        *self.current_time.lock().unwrap()
+        *self.current_time.borrow()
     }
 
     fn set_time(&self, new_time: f64) {
-        let mut time_guard = self.current_time.lock().unwrap();
+        let mut time_guard = self.current_time.borrow_mut();
         assert!(new_time >= *time_guard);
         *time_guard = new_time;
     }

@@ -17,9 +17,6 @@ use std::cell::RefCell;
 /// The `Rc` and `RefCell` libraries provide single-threaded sharing and
 /// mutating of state.
 use std::rc::Rc;
-/// The `sync` part of the standard library brings in types used for thread
-/// synchronisation.
-use std::sync::Arc;
 
 use async_trait::async_trait;
 /// Random library is just used by this component to implement its drop
@@ -82,7 +79,7 @@ where
     /// Every component should include an Entity that defines where in the
     /// overall simulation hierarchy it is. The Entity is also used to
     /// filter logging.
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
 
     /// This component has an `rx` port that it uses to handle incoming data.
     ///
@@ -124,7 +121,7 @@ where
     /// with the `Engine`.
     pub fn new_and_register(
         engine: &Engine,
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         name: &str,
         clock: Clock,
         spawner: Spawner,
@@ -135,7 +132,7 @@ where
         let entity = Entity::new(parent, name);
 
         // Because it is shared it needs to be wrapped in an Arc
-        let entity = Arc::new(entity);
+        let entity = Rc::new(entity);
 
         let delay = Delay::new_and_register(
             engine,

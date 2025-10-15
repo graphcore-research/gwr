@@ -20,8 +20,9 @@
 // Enable warnings for missing documentation
 #![warn(missing_docs)]
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
 
 pub use log;
 
@@ -37,10 +38,8 @@ pub mod tracker;
 pub use tracker::{Track, Tracker};
 
 /// A type alias for objects that receive _log_ / _trace_ events.
-///
-/// The writer must implement Send in order to be shared between threads.
-pub type Writer = Box<dyn std::io::Write + Send>;
-type SharedWriter = Arc<Mutex<Writer>>;
+pub type Writer = Box<dyn std::io::Write>;
+type SharedWriter = Rc<RefCell<Writer>>;
 
 /// Take the command-line string and convert it to a Level
 #[must_use]

@@ -22,7 +22,6 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use tramway_components::flow_controls::limiter::Limiter;
@@ -65,7 +64,7 @@ pub struct Fabric<T>
 where
     T: SimObject + Routable,
 {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     rx_buffer_limiters: Vec<Rc<Limiter<T>>>,
     internal_rx: RefCell<Vec<InPort<T>>>,
     tx_buffers: Vec<Rc<Store<T>>>,
@@ -81,13 +80,13 @@ where
 {
     pub fn new_and_register(
         engine: &Engine,
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         name: &str,
         clock: Clock,
         spawner: Spawner,
         config: Rc<FabricConfig>,
     ) -> Result<Rc<Self>, SimError> {
-        let entity = Arc::new(Entity::new(parent, name));
+        let entity = Rc::new(Entity::new(parent, name));
 
         let num_ports = config.num_columns * config.num_rows * config.num_ports_per_node;
         if num_ports == 0 {
@@ -247,7 +246,7 @@ impl<T> Default for PortState<T> {
 }
 
 async fn run_rx<T>(
-    entity: Arc<Entity>,
+    entity: Rc<Entity>,
     clock: Clock,
     port_index: usize,
     internal_rx: InPort<T>,
@@ -283,7 +282,7 @@ where
 }
 
 async fn run_tx<T>(
-    entity: Arc<Entity>,
+    entity: Rc<Entity>,
     clock: Clock,
     port_index: usize,
     internal_tx: OutPort<T>,

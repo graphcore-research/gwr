@@ -28,7 +28,7 @@ macro_rules! build_packet_type {
         #[derive(Clone)]
         pub struct [< $packet_type  >] {
             /// The entity responsible for the logging control of this packet.
-            pub entity: std::sync::Arc<Entity>,
+            pub entity: std::rc::Rc<Entity>,
 
             /// The unique id used for logging this packet.
             pub id: tramway_track::Id,
@@ -40,7 +40,7 @@ macro_rules! build_packet_type {
         }
         impl [< $packet_type  >] {
             #[doc=concat!("Create a new ", stringify!($packet_type), " packet.")]
-            pub fn new(created_by: &std::sync::Arc<tramway_track::entity::Entity>, cfg: &[< $packet_type Cfg >]) -> Self {
+            pub fn new(created_by: &std::rc::Rc<tramway_track::entity::Entity>, cfg: &[< $packet_type Cfg >]) -> Self {
                 let pkt = Self {
                     entity: created_by.clone(),
                     pkt_type: $types::$pkt_type,

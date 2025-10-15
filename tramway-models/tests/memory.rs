@@ -2,7 +2,6 @@
 
 use std::cmp::max;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use tramway_components::sink::Sink;
 use tramway_components::source::Source;
@@ -43,7 +42,7 @@ where
 
 fn setup_system(
     num_accesses: usize,
-    create_fn: fn(&Arc<Entity>, usize, u64, u64, usize) -> MemoryAccess,
+    create_fn: fn(&Rc<Entity>, usize, u64, u64, usize) -> MemoryAccess,
 ) -> (Engine, Rc<Sink<MemoryAccess>>, Rc<Memory<MemoryAccess>>) {
     let mut engine = start_test(file!());
     let memory = create_memory(&mut engine);

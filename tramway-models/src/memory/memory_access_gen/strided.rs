@@ -1,6 +1,6 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
-use std::sync::Arc;
+use std::rc::Rc;
 
 use tramway_engine::types::AccessType;
 use tramway_track::entity::Entity;
@@ -11,7 +11,7 @@ use crate::memory::memory_access::MemoryAccess;
 ///
 /// Will emit memory accesses in the range [base, end)
 pub struct Strided {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     // Configuration
     src_addr: u64,
     base_addr: u64,
@@ -30,7 +30,7 @@ impl Strided {
     #[expect(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         name: &str,
         src_addr: u64,
         base_addr: u64,
@@ -41,7 +41,7 @@ impl Strided {
         num_to_send: usize,
     ) -> Self {
         Self {
-            entity: Arc::new(Entity::new(parent, name)),
+            entity: Rc::new(Entity::new(parent, name)),
             src_addr,
             base_addr,
             end_addr,

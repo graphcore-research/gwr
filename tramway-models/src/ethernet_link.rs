@@ -11,7 +11,6 @@
 //!  - Two [active put ports](tramway_engine::port::OutPort): `tx_a`, `tx_b`,
 
 use std::rc::Rc;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use tramway_components::delay::Delay;
@@ -35,7 +34,7 @@ pub struct EthernetLink<T>
 where
     T: SimObject,
 {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     limiter_a: Rc<Limiter<T>>,
     delay_a: Rc<Delay<T>>,
     limiter_b: Rc<Limiter<T>>,
@@ -48,12 +47,12 @@ where
 {
     pub fn new_and_register(
         engine: &Engine,
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         name: &str,
         clock: Clock,
         spawner: Spawner,
     ) -> Result<Rc<Self>, SimError> {
-        let entity = Arc::new(Entity::new(parent, name));
+        let entity = Rc::new(Entity::new(parent, name));
         let limiter = rc_limiter!(clock.clone(), BITS_PER_TICK);
         let limiter_a = Limiter::new_and_register(engine, &entity, "limit_a", limiter.clone())?;
         let delay_a = Delay::new_and_register(

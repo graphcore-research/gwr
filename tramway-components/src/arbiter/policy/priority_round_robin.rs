@@ -3,7 +3,7 @@
 //! Priority Round Robin arbitration policy
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use tramway_engine::sim_error;
 use tramway_engine::traits::SimObject;
@@ -93,7 +93,7 @@ where
 {
     fn arbitrate(
         &mut self,
-        _entity: &Arc<Entity>,
+        _entity: &Rc<Entity>,
         input_values: &mut [Option<T>],
     ) -> Option<(usize, T)> {
         if self.priority_map.is_none() {

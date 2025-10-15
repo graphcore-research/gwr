@@ -18,7 +18,7 @@
 //! Fundamentally the [Delay]'s functionality is to:
 //!
 //! ```rust
-//! # use std::sync::Arc;
+//! # use std::rc::Rc;
 //! # use async_trait::async_trait;
 //! # use tramway_engine::port::{InPort, OutPort};
 //! # use tramway_engine::sim_error;
@@ -28,7 +28,7 @@
 //! # use tramway_track::entity::Entity;
 //! #
 //! # async fn run_tx<T>(
-//! #     entity: Arc<Entity>,
+//! #     entity: Rc<Entity>,
 //! #     tx: OutPort<T>,
 //! #     clock: Clock,
 //! #     rx: InPort<T>,
@@ -57,7 +57,6 @@
 //! # use std::cell::RefCell;
 //! # use std::collections::VecDeque;
 //! # use std::rc::Rc;
-//! # use std::sync::Arc;
 //! # use async_trait::async_trait;
 //! # use tramway_engine::events::repeated::Repeated;
 //! # use tramway_engine::port::{InPort, OutPort};
@@ -68,7 +67,7 @@
 //! # use tramway_track::entity::Entity;
 //! #
 //! # async fn run_rx<T>(
-//! #     entity: Arc<Entity>,
+//! #     entity: Rc<Entity>,
 //! #     rx: InPort<T>,
 //! #     clock: Clock,
 //! #     pending: Rc<RefCell<VecDeque<(T, ClockTick)>>>,
@@ -104,7 +103,6 @@
 //! # use std::cell::RefCell;
 //! # use std::collections::VecDeque;
 //! # use std::rc::Rc;
-//! # use std::sync::Arc;
 //! # use async_trait::async_trait;
 //! # use tramway_engine::events::repeated::Repeated;
 //! # use tramway_engine::port::{InPort, OutPort};
@@ -115,7 +113,7 @@
 //! # use tramway_track::entity::Entity;
 //! #
 //! # async fn run_tx<T>(
-//! #     entity: Arc<Entity>,
+//! #     entity: Rc<Entity>,
 //! #     tx: OutPort<T>,
 //! #     clock: Clock,
 //! #     pending: Rc<RefCell<VecDeque<(T, ClockTick)>>>,
@@ -193,7 +191,6 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use tramway_engine::engine::Engine;
@@ -215,7 +212,7 @@ pub struct Delay<T>
 where
     T: SimObject,
 {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     spawner: Spawner,
     clock: Clock,
     delay_ticks: RefCell<usize>,
@@ -235,13 +232,13 @@ where
 {
     pub fn new_and_register(
         engine: &Engine,
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         name: &str,
         clock: Clock,
         spawner: Spawner,
         delay_ticks: usize,
     ) -> Result<Rc<Self>, SimError> {
-        let entity = Arc::new(Entity::new(parent, name));
+        let entity = Rc::new(Entity::new(parent, name));
         let tx = OutPort::new(&entity, "tx");
         let rx = InPort::new(&entity, "rx");
         let rc_self = Rc::new(Self {
@@ -336,7 +333,7 @@ where
 }
 
 async fn run_tx<T>(
-    entity: Arc<Entity>,
+    entity: Rc<Entity>,
     tx: OutPort<T>,
     clock: Clock,
     pending: Rc<RefCell<VecDeque<(T, ClockTick)>>>,

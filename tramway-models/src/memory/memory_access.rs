@@ -1,7 +1,7 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
 use std::fmt::Display;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use tramway_engine::traits::{Routable, SimObject, TotalBytes};
 use tramway_engine::types::AccessType;
@@ -14,7 +14,7 @@ use crate::memory::traits::{AccessMemory, ReadMemory};
 
 #[derive(Clone, Debug)]
 pub struct MemoryAccess {
-    created_by: Arc<Entity>,
+    created_by: Rc<Entity>,
     id: Id,
     access_type: AccessType,
     access_size_bytes: usize,
@@ -92,7 +92,7 @@ impl Routable for MemoryAccess {
 impl MemoryAccess {
     #[must_use]
     pub fn new(
-        created_by: &Arc<Entity>,
+        created_by: &Rc<Entity>,
         access_type: AccessType,
         access_size_bytes: usize,
         dst_addr: u64,

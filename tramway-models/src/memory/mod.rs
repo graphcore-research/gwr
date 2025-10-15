@@ -2,7 +2,6 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use tramway_components::delay::Delay;
@@ -75,7 +74,7 @@ pub struct Memory<T>
 where
     T: SimObject + AccessMemory,
 {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     clock: Clock,
     config: MemoryConfig,
     metrics: RefCell<MemoryMetrics>,
@@ -91,13 +90,13 @@ where
 {
     pub fn new_and_register(
         engine: &Engine,
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         name: &str,
         clock: Clock,
         spawner: Spawner,
         config: MemoryConfig,
     ) -> Result<Rc<Self>, SimError> {
-        let entity = Arc::new(Entity::new(parent, name));
+        let entity = Rc::new(Entity::new(parent, name));
 
         let rx = InPort::new(&entity, "rx");
 

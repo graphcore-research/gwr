@@ -2,7 +2,7 @@
 
 //! Round Robin arbitration policy
 
-use std::sync::Arc;
+use std::rc::Rc;
 
 use tramway_engine::traits::SimObject;
 use tramway_track::entity::Entity;
@@ -32,7 +32,7 @@ where
 {
     fn arbitrate(
         &mut self,
-        _entity: &Arc<Entity>,
+        _entity: &Rc<Entity>,
         input_values: &mut [Option<T>],
     ) -> Option<(usize, T)> {
         let num_inputs = input_values.len();

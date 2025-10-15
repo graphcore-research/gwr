@@ -3,7 +3,7 @@
 //! The EthernetFrame provides an implementation of a standard Ethernet frame
 
 use std::fmt::Display;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use tramway_engine::traits::{Routable, SimObject, TotalBytes};
 use tramway_engine::types::AccessType;
@@ -41,7 +41,7 @@ pub fn u64_to_mac(value: u64) -> [u8; DEST_MAC_BYTES] {
 
 #[derive(Clone, Debug)]
 pub struct EthernetFrame {
-    created_by: Arc<Entity>,
+    created_by: Rc<Entity>,
     id: Id,
 
     // We don't include the Preamble / SFD bytes in the frame contents
@@ -54,7 +54,7 @@ pub struct EthernetFrame {
 
 impl EthernetFrame {
     #[must_use]
-    pub fn new(created_by: &Arc<Entity>, payload_size_bytes: usize) -> Self {
+    pub fn new(created_by: &Rc<Entity>, payload_size_bytes: usize) -> Self {
         let frame = Self {
             created_by: created_by.clone(),
             id: create_id!(created_by),

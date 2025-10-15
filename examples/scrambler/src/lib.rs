@@ -11,7 +11,6 @@
 //!  - Two [output port](tramway_engine::port::OutPort): `tx_a`, `tx_b`
 
 use std::rc::Rc;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use tramway_components::store::Store;
@@ -28,7 +27,7 @@ pub struct Scrambler<T>
 where
     T: SimObject,
 {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     scramble: bool,
     buffer_a: Rc<Store<T>>,
     buffer_b: Rc<Store<T>>,
@@ -40,12 +39,12 @@ where
 {
     pub fn new_and_register(
         engine: &Engine,
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         name: &str,
         spawner: Spawner,
         scramble: bool,
     ) -> Result<Rc<Self>, SimError> {
-        let entity = Arc::new(Entity::new(parent, name));
+        let entity = Rc::new(Entity::new(parent, name));
         let buffer_a = Store::new_and_register(engine, &entity, "buffer_a", spawner.clone(), 1)?;
         let buffer_b = Store::new_and_register(engine, &entity, "buffer_b", spawner, 1)?;
 

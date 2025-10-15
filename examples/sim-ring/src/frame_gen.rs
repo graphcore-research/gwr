@@ -1,6 +1,6 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 //
-use std::sync::Arc;
+use std::rc::Rc;
 
 use tramway_models::ethernet_frame::{DEST_MAC_BYTES, EthernetFrame, u64_to_mac};
 use tramway_track::entity::Entity;
@@ -11,7 +11,7 @@ use tramway_track::entity::Entity;
 /// This allows each frame being created to be unique which aids debug of the
 /// system.
 pub struct FrameGen {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     dest: [u8; DEST_MAC_BYTES],
     payload_bytes: usize,
     num_send_frames: usize,
@@ -21,13 +21,13 @@ pub struct FrameGen {
 impl FrameGen {
     #[must_use]
     pub fn new(
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         dest: [u8; DEST_MAC_BYTES],
         payload_bytes: usize,
         num_send_frames: usize,
     ) -> Self {
         Self {
-            entity: Arc::new(Entity::new(parent, format!("gen{dest:?}").as_str())),
+            entity: Rc::new(Entity::new(parent, format!("gen{dest:?}").as_str())),
             dest,
             payload_bytes,
             num_send_frames,

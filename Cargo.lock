@@ -2350,7 +2350,7 @@ dependencies = [
 
 [[package]]
 name = "sim-ring"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "clap",
  "indicatif",
@@ -2888,7 +2888,7 @@ dependencies = [
 
 [[package]]
 name = "tramway-engine"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -2913,7 +2913,7 @@ dependencies = [
 
 [[package]]
 name = "tramway-models"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "criterion",
@@ -2991,7 +2991,7 @@ dependencies = [
 
 [[package]]
 name = "tramway-track"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "capnp",
  "capnpc",

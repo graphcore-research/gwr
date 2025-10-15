@@ -19,8 +19,6 @@ use std::cell::RefCell;
 /// The `Rc` part of the standard library brings in types used for thread
 /// synchronisation.
 use std::rc::Rc;
-/// Required by the shared Entities
-use std::sync::Arc;
 
 use async_trait::async_trait;
 /// Random library is just used by this component to implement its drop
@@ -58,7 +56,7 @@ where
     /// Every component should include an Entity that defines where in the
     /// overall simulation hierarchy it is. The Entity is also used to
     /// filter logging.
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
 
     /// Store the ratio at which packets should be dropped.
     drop_ratio: f64,
@@ -96,7 +94,7 @@ where
     /// parameters provided.
     pub fn new_and_register(
         engine: &Engine,
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         name: &str,
         drop_ratio: f64,
         seed: u64,
@@ -106,7 +104,7 @@ where
         let entity = Entity::new(parent, name);
 
         // Because it is shared it needs to be wrapped in an Arc
-        let entity = Arc::new(entity);
+        let entity = Rc::new(entity);
 
         let rx = InPort::new(&entity, "rx");
         let tx = OutPort::new(&entity, "tx");

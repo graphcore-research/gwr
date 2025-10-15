@@ -33,7 +33,6 @@
 //! ```
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use tramway_components::arbiter::Arbiter;
@@ -255,7 +254,7 @@ pub struct Cache<T>
 where
     T: SimObject + AccessMemory,
 {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
 
     clock: Clock,
     spawner: Spawner,
@@ -284,14 +283,14 @@ where
     /// Create an instance of the cache and register it with the Engine.
     pub fn new_and_register(
         engine: &Engine,
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         name: &str,
         clock: Clock,
         spawner: Spawner,
         config: CacheConfig,
     ) -> Result<Rc<Self>, SimError> {
         let bw_bytes_per_cycle = config.bw_bytes_per_cycle;
-        let entity = Arc::new(Entity::new(parent, name));
+        let entity = Rc::new(Entity::new(parent, name));
 
         let policy = Box::new(RoundRobin::new());
         let response_arbiter =
@@ -391,7 +390,7 @@ struct RxHandlingState<T>
 where
     T: SimObject + AccessMemory,
 {
-    entity: Arc<Entity>,
+    entity: Rc<Entity>,
     rx: InPort<T>,
     clock: Clock,
     contents: Rc<RefCell<CacheContents<T>>>,

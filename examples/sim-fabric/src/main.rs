@@ -31,7 +31,6 @@
 //! ```
 
 use std::rc::Rc;
-use std::sync::Arc;
 
 use byte_unit::{AdjustedByte, Byte, UnitType};
 use clap::Parser;
@@ -207,7 +206,7 @@ fn start_frame_dump(
     });
 }
 
-fn setup_trackers(args: &Cli) -> Arc<dyn Track + Send + Sync> {
+fn setup_trackers(args: &Cli) -> Rc<dyn Track> {
     setup_all_trackers(
         args.stdout,
         args.stdout_level,
@@ -343,7 +342,7 @@ fn main() -> Result<(), SimError> {
 }
 
 fn print_summary(
-    top: &Arc<Entity>,
+    top: &Rc<Entity>,
     time_now_ns: f64,
     total_sunk_frames: usize,
     frame_payload_bytes: usize,
