@@ -189,16 +189,16 @@ fn start_frame_dump(
     progress_ticks: usize,
     total_expected_frames: usize,
     sinks: Sinks,
+    progress_bar: ProgressBar,
 ) {
     spawner.spawn(async move {
-        let pb = ProgressBar::new(total_expected_frames as u64);
         let mut seen_frames = 0;
         loop {
             // Use the `background` wait to indicate that the simulation can end if this is
             // the only task still active.
             clock.wait_ticks_or_exit(progress_ticks as u64).await;
             let num_frames: usize = sinks.iter().map(|s| s.num_sunk()).sum();
-            pb.inc((num_frames - seen_frames) as u64);
+            progress_bar.inc((num_frames - seen_frames) as u64);
             seen_frames = num_frames;
             if num_frames == total_expected_frames {
                 break;
@@ -285,8 +285,9 @@ fn main() -> Result<(), SimError> {
 
     info!(top ; "Platform built and connected");
 
+    let total_expected_frames = config.num_send_frames * config.ring_size;
+    let progress_bar = ProgressBar::new(total_expected_frames as u64);
     if args.progress {
-        let total_expected_frames = config.num_send_frames * config.ring_size;
         let sinks = sinks.to_owned();
         start_frame_dump(
             &spawner,
@@ -294,6 +295,7 @@ fn main() -> Result<(), SimError> {
             args.progress_ticks,
             total_expected_frames,
             sinks,
+            progress_bar.clone(),
         );
     }
 
@@ -311,6 +313,9 @@ fn main() -> Result<(), SimError> {
             tracker.shutdown();
             return sim_error!("Deadlock");
         }
+    }
+    if args.progress {
+        progress_bar.finish();
     }
     info!(top ; "Pass ({:.2}ns)", clock.time_now_ns());
     Ok(())
