@@ -9,6 +9,7 @@ use regex::Regex;
 
 use crate::app::{CHUNK_SIZE, EventLine, INITIAL_SIZE};
 use crate::renderer::Renderer;
+use crate::rocket::SHARED_STATE;
 
 pub struct Filter {
     id_re: Regex,
@@ -144,7 +145,6 @@ impl Filter {
     }
 
     pub fn set(&mut self, new_filter_string: &str) {
-        self.search = self.search[self.search_cursor_pos..].to_owned();
         self.search_cursor_pos = 0;
         self.search = new_filter_string.to_owned();
         self.notify_filter.send(()).unwrap();
@@ -198,6 +198,9 @@ impl Filter {
             let id_str = e.name("id").unwrap().as_str();
             if let Ok(id) = id_str.parse() {
                 filter_id = Some(id);
+
+                // Keep track in the shared state web clients will see
+                SHARED_STATE.lock().unwrap().selected = Some(id);
 
                 let to_remove = format!("id={id_str}");
                 search = search.replace(to_remove.as_str(), "");

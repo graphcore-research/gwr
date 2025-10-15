@@ -31,8 +31,10 @@ function define_arrow(svg) {
 // From https://observablehq.com/@d3/force-directed-tree
 function force_tree(serverUrl, data, connections, max_depth) {
   // Specify the chart’s dimensions.
-  const width = 1600;
-  const height = 1200;
+  var chartDiv = document.getElementById(chartElement);
+  var width = Math.max(600, chartDiv.clientWidth);
+  var height = Math.max(400, chartDiv.clientHeight - buttonBarPadding);
+
   const min_r = 3;
 
   // Convert the structure tree to a d3 hierarchy.
@@ -86,8 +88,8 @@ function force_tree(serverUrl, data, connections, max_depth) {
       .force("y", d3.forceY())
       .alphaDecay(0.005);
 
-  // Add an SVG element to the #chart node of the HTML.
-  const svg = d3.select("#chart")
+  // Add an SVG element to the chart node of the HTML.
+  const svg = d3.select(`#${chartElement}`)
       .append("svg")
       .attr("width", width)
       .attr("height", height)
@@ -95,10 +97,6 @@ function force_tree(serverUrl, data, connections, max_depth) {
       .attr("style", "max-width: 100%; height: auto;");
 
   define_arrow(svg);
-
-  // Function to create unique IDs for each element in order to be able to select them easily
-  var uniqueId = 0;
-  const unique = prefix => `${prefix}_${uniqueId++}`;
 
   // Append nodes with radius defined above.
   const node = svg.append("g")
@@ -108,7 +106,7 @@ function force_tree(serverUrl, data, connections, max_depth) {
     .selectAll("circle")
     .data(nodes)
     .join("circle")
-      .each(d => d.id = unique("node"))
+      .each(d => d.id = `node_${d.data.id}`)
       .attr("id", d => d.id)
       .attr("class", "node")
       .attr("fill", d => d.children ? null : "#000")
@@ -120,7 +118,7 @@ function force_tree(serverUrl, data, connections, max_depth) {
       .text(d => d.data.full_name);
 
   // When clicking on a block highlight it by setting the "selected" class
-  node.on("click", d => select_and_send(serverUrl, svg, d.target.id, d.target.__data__.data));
+  node.on("click", d => select_and_send(serverUrl, svg, d.target.id, d.target.__data__.data.id));
 
   // Append links using the color and line ending defined above.
   const link = svg.append("g")
@@ -144,6 +142,7 @@ function force_tree(serverUrl, data, connections, max_depth) {
         .attr("cy", d => d.y);
   });
 
+  get_selected(serverUrl, svg);
   return simulation;
 }
 

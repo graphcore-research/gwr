@@ -4,9 +4,10 @@
 // From https://observablehq.com/@d3/zoomable-sunburst
 function sunburst(serverUrl, data) {
   // Specify the chart’s dimensions.
-  const width = 800;
-  const height = width;
-  const radius = width / 6;
+  var chartDiv = document.getElementById(chartElement);
+  var width = Math.max(600, chartDiv.clientWidth);
+  var height = Math.max(400, chartDiv.clientHeight - buttonBarPadding);
+  const radius = Math.min(height, width) / 6;
 
   // Create the color scale.
   const color = d3.scaleOrdinal(d3.quantize(d3.interpolateRainbow, data.children.length + 1));
@@ -30,7 +31,7 @@ function sunburst(serverUrl, data) {
       .outerRadius(d => Math.max(d.y0 * radius, d.y1 * radius - 1))
 
   // Create the SVG container.
-  const svg = d3.select("#chart")
+  const svg = d3.select(`#${chartElement}`)
       .append("svg")
       .attr("viewBox", [-width / 2, -height / 2, width, width])
       .style("font", "10px sans-serif");
@@ -75,11 +76,16 @@ function sunburst(serverUrl, data) {
       .attr("pointer-events", "all")
       .on("click", (event, d) => clicked(svg, event, d));
 
-  // Handle zoom on click.
+  // Handle click events.
   function clicked(svg, event, p) {
-    // Pass undefined as the ID because we don't need to add "selected" class to any nodes
-    select_and_send(serverUrl, svg, undefined, p.data);
+    // Let the server know the new selected node ID.
+    send_select(serverUrl, p.data.id);
 
+    let slow = event.altKey;
+    select(svg, slow, p);
+  }
+
+  function select(svg, slow, p) {
     parent.datum(p.parent || root);
 
     root.each(d => d.target = {
@@ -89,7 +95,7 @@ function sunburst(serverUrl, data) {
       y1: Math.max(0, d.y1 - p.depth)
     });
 
-    const t = svg.transition().duration(event.altKey ? 7500 : 750);
+    const t = svg.transition().duration(slow ? 7500 : 750);
 
     // Transition the data on all arcs, even the ones that aren’t visible,
     // so that if this transition is interrupted, entering arcs will start
@@ -127,4 +133,33 @@ function sunburst(serverUrl, data) {
     const y = (d.y0 + d.y1) / 2 * radius;
     return `rotate(${x - 90}) translate(${y},0) rotate(${x < 180 ? 0 : 180})`;
   }
+
+  // Find the node in the sunburst that matches the given ID
+  function get_matching_d(id) {
+    let matching;
+    root.each(d => {
+      if (d.data.id == id) {
+        matching = d;
+      }
+    });
+    return matching;
+  }
+
+  // Ask the server for the current selected node ID
+  d3.text(serverUrl + "/selected")
+    .then(function (text) {
+      let words = text.split(" ");
+      if (words[1] == "selected") {
+        // If one is selected, find the sunburst element with that ID
+        let node_id = Number(words[0]);
+        let d = get_matching_d(node_id);
+        if (d != undefined) {
+          // And update the selection
+          select(svg, false, d);
+        }
+      }
+    })
+    .catch(function (error) {
+      console.log(error);
+    });
 }

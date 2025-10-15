@@ -3,9 +3,10 @@
 //---------------------------------------------------------------------------------------
 // From https://observablehq.com/@d3/nested-treemap
 function tree_map(serverUrl, data) {
-  // Specify the chart’s dimensions.
-  const width = 1200;
-  const height = 1060;
+  var chartDiv = document.getElementById(chartElement);
+  var width = Math.max(600, chartDiv.clientWidth);
+  var height = Math.max(400, chartDiv.clientHeight - buttonBarPadding);
+
   const color = d3.scaleSequential([0, 8], d3.interpolateGnBu);
 
   // Create the treemap layout.
@@ -21,17 +22,18 @@ function tree_map(serverUrl, data) {
   const root = treemap(data);
 
   // Create the SVG container.
-  const svg = d3.select("#chart")
+  const svg = d3.select(`#${chartElement}`)
       .append("svg")
       .attr("width", width)
       .attr("height", height)
       .attr("viewBox", [0, 0, width, height])
       .attr("style", "max-width: 100%; height: auto; overflow: visible; font: 10px sans-serif;");
 
-  const shadow = uid("shadow");
+  // Unique ID for shadow
+  const shadow = "shadow-0";
 
   svg.append("filter")
-      .attr("id", shadow.id)
+      .attr("id", shadow)
     .append("feDropShadow")
       .attr("flood-opacity", 0.3)
       .attr("dx", 0)
@@ -40,31 +42,31 @@ function tree_map(serverUrl, data) {
   const node = svg.selectAll("g")
     .data(d3.group(root, d => d.height))
     .join("g")
-      .attr("filter", shadow)
+      .attr("filter", url(shadow))
     .selectAll("g")
     .data(d => d[1])
     .join("g")
       .attr("transform", d => `translate(${d.x0},${d.y0})`)
-      .on("click", (event, d) => select_and_send(serverUrl, svg, d.id.id, d.data));
+      .on("click", (event, d) => select_and_send(serverUrl, svg, d.id, d.data.id));
 
   const format = d3.format(",d");
   node.append("title")
       .text(d => d.data.full_name);
 
   node.append("rect")
-      .attr("id", d => (d.id = uid("node")).id)
+      .attr("id", d => (d.id = `node_${d.data.id}`))
       .attr("class", "node")
       .attr("fill", d => color(d.height))
       .attr("width", d => d.x1 - d.x0)
       .attr("height", d => d.y1 - d.y0);
 
   node.append("clipPath")
-      .attr("id", d => (d.clipUid = uid("clip")).id)
+      .attr("id", d => (d.clipUid = `clip_${d.data.id}`))
     .append("use")
-      .attr("xlink:href", d => d.id.href);
+      .attr("xlink:href", d => href(d.clipUid));
 
   node.append("text")
-      .attr("clip-path", d => d.clipUid)
+      .attr("clip-path", d => url(d.clipUid))
     .selectAll("tspan")
     .data(d => d.data.name.split(/(?=[A-Z][^A-Z])/g).concat(format(d.value)))
     .join("tspan")
@@ -79,4 +81,5 @@ function tree_map(serverUrl, data) {
       .attr("x", 3)
       .attr("y", (d, i, nodes) => `${(i === nodes.length - 1) * 0.3 + 1.1 + i * 0.9}em`);
 
+  get_selected(serverUrl, svg);
 }

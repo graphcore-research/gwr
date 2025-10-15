@@ -86,6 +86,11 @@ $('.menu-btn').click(function() {
    * Constants
    */
   const serverUrl = "http://localhost:8000";
+  const chartElement = "chart"
+
+  // Remove some of the boundary so that it is fully visible when taking into account
+  // the offset caused by the button
+  const buttonBarPadding = 100;
 
   /***********************************************************************
    * Renderer

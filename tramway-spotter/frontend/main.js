@@ -129,22 +129,13 @@ function parse_connections(text) {
 }
 
 //---------------------------------------------------------------------------------------
-// From https://github.com/observablehq/stdlib/blob/main/src/dom/uid.js
-var count = 0;
-
-function uid(name) {
-  return new Id("O-" + (name == null ? "" : name + "-") + ++count);
+function href(id) {
+  return new URL(`#${id}`, location) + "";
 }
 
-function Id(id) {
-  this.id = id;
-  this.href = new URL(`#${id}`, location) + "";
-}
-
-Id.prototype.toString = function() {
-  return "url(" + this.href + ")";
+function url(id) {
+  return "url(" + href(id) + ")";
 };
-
 
 class Renderer {
   constructor(serverUrl) {
@@ -206,7 +197,7 @@ class Renderer {
     }
 
     // Remove any current render
-    d3.select("#chart").selectAll("svg").remove();
+    d3.select(`#${chartElement}`).selectAll("svg").remove();
     if (this.simulation != null) {
       this.simulation.stop();
       this.simulation = null;
