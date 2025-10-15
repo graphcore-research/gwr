@@ -24,7 +24,6 @@
 //! ```
 
 use std::rc::Rc;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use tramway_components::arbiter::{Arbiter, Arbitrate};
@@ -78,7 +77,7 @@ pub struct RingNode<T>
 where
     T: SimObject + Routable,
 {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     rx_buffer_limiter: Rc<Limiter<T>>,
     tx_buffer: Rc<Store<T>>,
     arbiter: Rc<Arbiter<T>>,
@@ -91,14 +90,14 @@ where
 {
     pub fn new_and_register(
         engine: &Engine,
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         name: &str,
         spawner: Spawner,
         config: &RingConfig<T>,
         routing_algorithm: Box<dyn Route<T>>,
         policy: Box<dyn Arbitrate<T>>,
     ) -> Result<Rc<Self>, SimError> {
-        let entity = Arc::new(Entity::new(parent, name));
+        let entity = Rc::new(Entity::new(parent, name));
 
         let rx_buffer_limiter =
             Limiter::new_and_register(engine, &entity, "limit_rx", config.write_limiter.clone())?;

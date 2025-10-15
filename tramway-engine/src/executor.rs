@@ -4,9 +4,6 @@ use std::cell::RefCell;
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering::Acquire;
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use tramway_track::entity::Entity;
@@ -77,7 +74,7 @@ struct ExecutorState {
 }
 
 impl ExecutorState {
-    pub fn new(top: &Arc<Entity>) -> Self {
+    pub fn new(top: &Rc<Entity>) -> Self {
         Self {
             task_queue: RefCell::new(Vec::new()),
             new_tasks: RefCell::new(Vec::new()),
@@ -96,15 +93,15 @@ impl ExecutorState {
 /// [module documentation]: index.html
 #[derive(Clone)]
 pub struct Executor {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     state: Rc<ExecutorState>,
 }
 
 impl Executor {
-    pub fn run(&self, finished: &Rc<AtomicBool>) -> SimResult {
+    pub fn run(&self, finished: &Rc<RefCell<bool>>) -> SimResult {
         loop {
             self.step(finished)?;
-            if finished.load(Acquire) {
+            if *finished.borrow() {
                 break;
             }
 
@@ -126,7 +123,7 @@ impl Executor {
         Ok(())
     }
 
-    pub fn step(&self, finished: &Rc<AtomicBool>) -> SimResult {
+    pub fn step(&self, finished: &Rc<RefCell<bool>>) -> SimResult {
         // Append new tasks created since the last step into the task queue
         let mut task_queue = self.state.task_queue.borrow_mut();
         task_queue.append(&mut self.state.new_tasks.borrow_mut());
@@ -134,7 +131,7 @@ impl Executor {
         // Loop over all tasks, polling them. If a task is not ready, add it to the
         // pending tasks.
         for task in task_queue.drain(..) {
-            if finished.load(Acquire) {
+            if *finished.borrow() {
                 break;
             }
 
@@ -185,9 +182,9 @@ impl Spawner {
 }
 
 #[must_use]
-pub fn new_executor_and_spawner(top: &Arc<Entity>) -> (Executor, Spawner) {
+pub fn new_executor_and_spawner(top: &Rc<Entity>) -> (Executor, Spawner) {
     let state = Rc::new(ExecutorState::new(top));
-    let entity = Arc::new(Entity::new(top, "executor"));
+    let entity = Rc::new(Entity::new(top, "executor"));
     (
         Executor {
             entity,

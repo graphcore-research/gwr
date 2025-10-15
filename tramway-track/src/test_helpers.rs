@@ -9,9 +9,7 @@
 //! the logger involves shared global state that will otherwise give
 //! unpredictable results.
 
-use core::sync::atomic::Ordering;
-use std::sync::Mutex;
-use std::sync::atomic::AtomicU64;
+use std::cell::RefCell;
 
 use regex::Regex;
 
@@ -19,9 +17,9 @@ use crate::{Id, Track};
 
 /// A tracker that keeps track events.
 pub struct TestTracker {
-    events: Mutex<Vec<String>>,
+    events: RefCell<Vec<String>>,
 
-    unique_id: AtomicU64,
+    unique_id: RefCell<u64>,
 }
 
 impl TestTracker {
@@ -31,21 +29,23 @@ impl TestTracker {
     #[must_use]
     pub fn new(initial_id: u64) -> Self {
         Self {
-            events: Mutex::new(Vec::new()),
-            unique_id: AtomicU64::new(initial_id),
+            events: RefCell::new(Vec::new()),
+            unique_id: RefCell::new(initial_id),
         }
     }
 
     fn add_event(&self, event: String) {
         println!("{event}");
-        let mut events = self.events.lock().unwrap();
+        let mut events = self.events.borrow_mut();
         events.push(event);
     }
 }
 
 impl Track for TestTracker {
     fn unique_id(&self) -> Id {
-        let id = self.unique_id.fetch_add(1, Ordering::SeqCst);
+        let mut guard = self.unique_id.borrow_mut();
+        let id = *guard;
+        *guard += 1;
         Id(id)
     }
 
@@ -123,7 +123,7 @@ impl Track for TestTracker {
 #[macro_export]
 macro_rules! test_init {
     ($start_id:expr) => {{
-        let test_tracker = std::sync::Arc::new($crate::test_helpers::TestTracker::new($start_id));
+        let test_tracker = std::rc::Rc::new($crate::test_helpers::TestTracker::new($start_id));
         let tracker: $crate::Tracker = test_tracker.clone();
         (test_tracker, tracker)
     }};
@@ -163,7 +163,7 @@ macro_rules! test_init {
 /// }
 /// ```
 pub fn check_and_clear(tracker: &TestTracker, expected: &[&str]) {
-    let mut log_contents_ref = tracker.events.lock().unwrap();
+    let mut log_contents_ref = tracker.events.borrow_mut();
 
     println!("Checking {:?} matches {:?}", expected, *log_contents_ref);
 

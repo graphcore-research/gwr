@@ -1,7 +1,6 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
 use std::rc::Rc;
-use std::sync::Arc;
 use std::vec;
 
 use tramway_components::arbiter::Arbiter;
@@ -156,7 +155,7 @@ fn input_order() {
     connect_port!(arbiter, tx => store_limiter, rx).unwrap();
     connect_port!(store_limiter, tx => store, rx).unwrap();
 
-    let port = InPort::new(&Arc::new(Entity::new(engine.top(), "port")), "test_rx");
+    let port = InPort::new(&Rc::new(Entity::new(engine.top(), "port")), "test_rx");
     store.connect_port_tx(port.state()).unwrap();
     engine.spawn(async move {
         let mut store_get = vec![0; total_count];
@@ -301,7 +300,7 @@ fn weighted_policy() {
     connect_port!(arbiter, tx => store_limiter, rx).unwrap();
     connect_port!(store_limiter, tx => store, rx).unwrap();
 
-    let port = InPort::new(&Arc::new(Entity::new(engine.top(), "port")), "test_rx");
+    let port = InPort::new(&Rc::new(Entity::new(engine.top(), "port")), "test_rx");
     store.connect_port_tx(port.state()).unwrap();
     engine.spawn(async move {
         let mut store_get = vec![0; total_count];

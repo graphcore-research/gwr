@@ -4,7 +4,7 @@
 //!
 //! Time is made up of a cycle count and a phase.
 
-use std::sync::Arc;
+use std::rc::Rc;
 
 use tramway_track::entity::Entity;
 use tramway_track::set_time;
@@ -17,7 +17,7 @@ use crate::time::clock::TaskWaker;
 /// Contains all Clocks and the current simulation time in ns.
 #[derive(Clone)]
 pub struct SimTime {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
 
     current_ns: f64,
 
@@ -30,9 +30,9 @@ pub struct SimTime {
 
 impl SimTime {
     #[must_use]
-    pub fn new(parent: &Arc<Entity>) -> Self {
+    pub fn new(parent: &Rc<Entity>) -> Self {
         Self {
-            entity: Arc::new(Entity::new(parent, "time")),
+            entity: Rc::new(Entity::new(parent, "time")),
             current_ns: 0.0,
             clocks: Vec::new(),
         }

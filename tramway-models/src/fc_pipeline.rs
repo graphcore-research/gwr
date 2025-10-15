@@ -17,7 +17,6 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use tramway_components::delay::Delay;
@@ -59,7 +58,7 @@ pub struct FcPipeline<T>
 where
     T: SimObject,
 {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     credit_limiter: RefCell<Option<Rc<CreditLimiter<T>>>>,
     credit_delay: RefCell<Option<Rc<Delay<Credit>>>>,
     credit_issuer: RefCell<Option<Rc<CreditIssuer<T>>>>,
@@ -72,13 +71,13 @@ where
 {
     pub fn new_and_register(
         engine: &Engine,
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         name: &str,
         clock: Clock,
         spawner: Spawner,
         config: &FcPipelineConfig,
     ) -> Result<Rc<Self>, SimError> {
-        let entity = Arc::new(Entity::new(parent, name));
+        let entity = Rc::new(Entity::new(parent, name));
 
         let credit_limiter =
             CreditLimiter::new_and_register(engine, &entity, spawner.clone(), config.buffer_size)?;

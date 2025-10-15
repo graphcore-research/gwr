@@ -6,7 +6,6 @@ use std::cell::RefCell;
 use std::fmt;
 use std::pin::Pin;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
 use futures::Future;
@@ -31,14 +30,14 @@ where
     value: RefCell<Option<T>>,
     waiting_get: RefCell<Option<Waker>>,
     waiting_put: RefCell<Option<Waker>>,
-    pub in_port_entity: Arc<Entity>,
+    pub in_port_entity: Rc<Entity>,
 }
 
 impl<T> PortState<T>
 where
     T: SimObject,
 {
-    fn new(in_port_entity: Arc<Entity>) -> Self {
+    fn new(in_port_entity: Rc<Entity>) -> Self {
         Self {
             value: RefCell::new(None),
             waiting_get: RefCell::new(None),
@@ -52,7 +51,7 @@ pub struct InPort<T>
 where
     T: SimObject,
 {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     state: Rc<PortState<T>>,
     connected: RefCell<bool>,
 }
@@ -71,8 +70,8 @@ where
     T: SimObject,
 {
     #[must_use]
-    pub fn new(parent: &Arc<Entity>, name: &str) -> Self {
-        let entity = Arc::new(Entity::new(parent, name));
+    pub fn new(parent: &Rc<Entity>, name: &str) -> Self {
+        let entity = Rc::new(Entity::new(parent, name));
         Self {
             entity: entity.clone(),
             state: Rc::new(PortState::new(entity)),
@@ -126,7 +125,7 @@ pub struct OutPort<T>
 where
     T: SimObject,
 {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     state: Option<Rc<PortState<T>>>,
 }
 
@@ -144,8 +143,8 @@ where
     T: SimObject,
 {
     #[must_use]
-    pub fn new(parent: &Arc<Entity>, name: &str) -> Self {
-        let entity = Arc::new(Entity::new(parent, name));
+    pub fn new(parent: &Rc<Entity>, name: &str) -> Self {
+        let entity = Rc::new(Entity::new(parent, name));
         Self {
             entity,
             state: None,

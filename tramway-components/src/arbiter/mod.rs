@@ -11,7 +11,6 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use tramway_engine::engine::Engine;
@@ -51,7 +50,7 @@ where
 {
     fn arbitrate(
         &mut self,
-        entity: &Arc<Entity>,
+        entity: &Rc<Entity>,
         input_values: &mut [Option<T>],
     ) -> Option<(usize, T)>;
 }
@@ -61,7 +60,7 @@ pub struct Arbiter<T>
 where
     T: SimObject,
 {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     rx: RefCell<Vec<Option<InPort<T>>>>,
     tx: RefCell<Option<OutPort<T>>>,
     policy: RefCell<Option<Box<dyn Arbitrate<T>>>>,
@@ -75,13 +74,13 @@ where
 {
     pub fn new_and_register(
         engine: &Engine,
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         name: &str,
         spawner: Spawner,
         num_rx: usize,
         policy: Box<dyn Arbitrate<T>>,
     ) -> Result<Rc<Self>, SimError> {
-        let entity = Arc::new(Entity::new(parent, name));
+        let entity = Rc::new(Entity::new(parent, name));
         let shared_state = Rc::new(ArbiterSharedState::new(num_rx));
         let rx = (0..num_rx)
             .map(|i| Some(InPort::new(&entity, format!("rx{i}").as_str())))
@@ -163,7 +162,7 @@ where
 }
 
 async fn run_input<T: SimObject>(
-    entity: Arc<Entity>,
+    entity: Rc<Entity>,
     rx: InPort<T>,
     input_idx: usize,
     shared_state: Rc<ArbiterSharedState<T>>,

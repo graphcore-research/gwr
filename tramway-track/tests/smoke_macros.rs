@@ -3,7 +3,7 @@
 //! Ensure that all version of each macro can be used
 
 use std::fmt::Display;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use tramway_track::entity::{Entity, toplevel};
 use tramway_track::{
@@ -91,7 +91,7 @@ struct Packet {
 }
 
 impl Packet {
-    fn new(entity: &Arc<Entity>) -> Self {
+    fn new(entity: &Rc<Entity>) -> Self {
         let id = create_and_track_id!(entity);
         Self { id }
     }

@@ -1,6 +1,7 @@
 // Copyright (c) 2020 Graphcore Ltd. All rights reserved.
 
-use std::sync::{Arc, Mutex};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use capnp::serialize_packed;
 
@@ -20,7 +21,7 @@ impl CapnProtoTracker {
     pub fn new(entity_manager: EntityManager, writer: Writer) -> Self {
         Self {
             entity_manager,
-            writer: Arc::new(Mutex::new(writer)),
+            writer: Rc::new(RefCell::new(writer)),
         }
     }
 
@@ -46,7 +47,7 @@ impl CapnProtoTracker {
         }
 
         // Write out the event to the file
-        let mut writer_ref = self.writer.lock().unwrap();
+        let mut writer_ref = self.writer.borrow_mut();
         serialize_packed::write_message(&mut *writer_ref, &builder).unwrap();
     }
 }
@@ -120,7 +121,7 @@ impl Track for CapnProtoTracker {
     }
 
     fn shutdown(&self) {
-        self.writer.lock().unwrap().flush().unwrap();
+        self.writer.borrow_mut().flush().unwrap();
     }
 }
 

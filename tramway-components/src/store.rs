@@ -23,14 +23,13 @@
 //!
 //! ```rust
 //! use std::rc::Rc;
-//! use std::sync::Arc;
 //!
 //! use tramway_components::store::Store;
 //! use tramway_engine::engine::Engine;
 //! use tramway_engine::executor::Spawner;
 //! use tramway_track::entity::Entity;
 //!
-//! fn build_store(engine: &Engine, parent: &Arc<Entity>, spawner: Spawner) -> Rc<Store<i32>> {
+//! fn build_store(engine: &Engine, parent: &Rc<Entity>, spawner: Spawner) -> Rc<Store<i32>> {
 //!     // Create a store. It is passed:
 //!     //   - a parent entity which provides its location within the simulation.
 //!     //   - a name which should be unique within the parent.
@@ -49,7 +48,6 @@
 //!
 //! ```rust
 //! use std::rc::Rc;
-//! use std::sync::Arc;
 //!
 //! use tramway_components::store::Store;
 //! use tramway_engine::engine::Engine;
@@ -58,7 +56,7 @@
 //!
 //! fn build_store_with_panic(
 //!     engine: &Engine,
-//!     parent: &Arc<Entity>,
+//!     parent: &Rc<Entity>,
 //!     spawner: Spawner,
 //! ) -> Rc<Store<i32>> {
 //!     // Create a store that panics on overflow. Use `new_and_register()` as before,
@@ -77,7 +75,7 @@
 //! [Sink](crate::sink::Sink) to take the data out of the store.
 //!
 //! ```rust
-//! use std::sync::Arc;
+//! use std::rc::Rc;
 //! use tramway_components::sink::Sink;
 //! use tramway_components::source::Source;
 //! use tramway_components::store::Store;
@@ -122,7 +120,6 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use tramway_engine::engine::Engine;
@@ -143,7 +140,7 @@ struct State<T>
 where
     T: SimObject,
 {
-    entity: Arc<Entity>,
+    entity: Rc<Entity>,
     capacity: usize,
     data: RefCell<VecDeque<T>>,
     error_on_overflow: RefCell<bool>,
@@ -155,7 +152,7 @@ where
     T: SimObject,
 {
     /// Create a new store
-    fn new(entity: &Arc<Entity>, capacity: usize) -> Self {
+    fn new(entity: &Rc<Entity>, capacity: usize) -> Self {
         Self {
             entity: entity.clone(),
             capacity,
@@ -202,7 +199,7 @@ pub struct Store<T>
 where
     T: SimObject,
 {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     spawner: Spawner,
     state: Rc<State<T>>,
 
@@ -219,7 +216,7 @@ where
     /// Returns a `SimError` if `capacity` is 0.
     pub fn new_and_register(
         engine: &Engine,
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         name: &str,
         spawner: Spawner,
         capacity: usize,
@@ -227,7 +224,7 @@ where
         if capacity == 0 {
             return sim_error!("Unsupported Store with 0 capacity");
         }
-        let entity = Arc::new(Entity::new(parent, name));
+        let entity = Rc::new(Entity::new(parent, name));
         let state = Rc::new(State::new(&entity, capacity));
         let tx = OutPort::new(&entity, "tx");
         let rx = InPort::new(&entity, "rx");

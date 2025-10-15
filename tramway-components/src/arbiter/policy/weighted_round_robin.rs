@@ -2,7 +2,7 @@
 
 //! Weighted Round Robin policy
 
-use std::sync::Arc;
+use std::rc::Rc;
 
 use tramway_engine::sim_error;
 use tramway_engine::traits::SimObject;
@@ -53,7 +53,7 @@ where
 {
     fn arbitrate(
         &mut self,
-        entity: &Arc<Entity>,
+        entity: &Rc<Entity>,
         input_values: &mut [Option<T>],
     ) -> Option<(usize, T)> {
         trace!(entity ; "wrr: arbitrate {}", self.state_str(input_values));

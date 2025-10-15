@@ -3,7 +3,7 @@
 use std::fs;
 use std::io::BufWriter;
 use std::path::Path;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use tramway_track::tracker::{CapnProtoTracker, EntityManager};
 use tramway_track::{Tracker, Writer};
@@ -29,7 +29,7 @@ pub fn create_tracker(full_filepath: &str) -> Tracker {
 
     let default_log_level = log::Level::Trace;
     let entity_manger = EntityManager::new(default_log_level);
-    let tracker: Tracker = Arc::new(CapnProtoTracker::new(entity_manger, bin_writer));
+    let tracker: Tracker = Rc::new(CapnProtoTracker::new(entity_manger, bin_writer));
     tracker
 }
 

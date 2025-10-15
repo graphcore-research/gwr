@@ -3,9 +3,6 @@
 use std::cell::RefCell;
 use std::future::Future;
 use std::rc::Rc;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering::Release;
 
 use tramway_track::entity::{Entity, toplevel};
 use tramway_track::tracker::stdout_tracker;
@@ -19,14 +16,14 @@ use crate::types::{Component, Eventable, SimResult};
 const DEFAULT_CLOCK_MHZ: f64 = 1000.0;
 
 pub struct Registry {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     components: RefCell<Vec<Component>>,
 }
 
 impl Registry {
-    fn new(parent: &Arc<Entity>) -> Self {
+    fn new(parent: &Rc<Entity>) -> Self {
         Self {
-            entity: Arc::new(Entity::new(parent, "registry")),
+            entity: Rc::new(Entity::new(parent, "registry")),
             components: RefCell::new(Vec::new()),
         }
     }
@@ -50,7 +47,7 @@ impl Registry {
 pub struct Engine {
     pub executor: Executor,
     spawner: Spawner,
-    toplevel: Arc<Entity>,
+    toplevel: Rc<Entity>,
     tracker: Tracker,
     registry: Registry,
 }
@@ -79,7 +76,7 @@ impl Engine {
         self.registry.spawn_components(&self.spawner);
 
         // Pass an atomic bool that will never be set to true
-        let finished = Rc::new(AtomicBool::new(false));
+        let finished = Rc::new(RefCell::new(false));
         self.executor.run(&finished)
     }
 
@@ -87,12 +84,12 @@ impl Engine {
         self.registry.spawn_components(&self.spawner);
 
         // Create an atomic bool that is set to true as soon as the event fires.
-        let finished = Rc::new(AtomicBool::new(false));
+        let finished = Rc::new(RefCell::new(false));
         {
             let finished = finished.clone();
             self.spawner.spawn(async move {
                 event.listen().await;
-                finished.store(true, Release);
+                *finished.borrow_mut() = true;
                 Ok(())
             });
         }
@@ -130,7 +127,7 @@ impl Engine {
     }
 
     #[must_use]
-    pub fn top(&self) -> &Arc<Entity> {
+    pub fn top(&self) -> &Rc<Entity> {
         &self.toplevel
     }
 

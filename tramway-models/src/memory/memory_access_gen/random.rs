@@ -1,6 +1,6 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
-use std::sync::Arc;
+use std::rc::Rc;
 
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
@@ -13,7 +13,7 @@ use crate::memory::memory_access::MemoryAccess;
 ///
 /// Will emit memory accesses in the range [base, end)
 pub struct Random {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     // Configuration
     src_addr: u64,
     base_addr: u64,
@@ -32,7 +32,7 @@ impl Random {
     #[expect(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         name: &str,
         seed: u64,
         src_addr: u64,
@@ -45,7 +45,7 @@ impl Random {
     ) -> Self {
         let rng = StdRng::seed_from_u64(seed);
         Self {
-            entity: Arc::new(Entity::new(parent, name)),
+            entity: Rc::new(Entity::new(parent, name)),
             src_addr,
             base_addr,
             addr_range: end_addr - base_addr,

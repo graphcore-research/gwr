@@ -3,7 +3,7 @@
 //! Library functions to build trackers as defined by the user.
 
 use std::io::BufWriter;
-use std::sync::Arc;
+use std::rc::Rc;
 use std::{fs, io};
 
 use crate::tracker::multi_tracker::MultiTracker;
@@ -30,7 +30,7 @@ fn build_stdout_tracker(
         entity_manager.add_entity_level_filter(filter_regex, level)?;
     }
     let stdout_writer = Box::new(std::io::BufWriter::new(io::stdout()));
-    Ok(Arc::new(TextTracker::new(entity_manager, stdout_writer)))
+    Ok(Rc::new(TextTracker::new(entity_manager, stdout_writer)))
 }
 
 /// Same as the text tracker (see build_stdout_tracker) except will generate a
@@ -51,7 +51,7 @@ fn build_binary_tracker(
     }
 
     let bin_writer: Writer = Box::new(BufWriter::new(fs::File::create(trace_file).unwrap()));
-    Ok(Arc::new(CapnProtoTracker::new(entity_manager, bin_writer)))
+    Ok(Rc::new(CapnProtoTracker::new(entity_manager, bin_writer)))
 }
 
 /// This tracker will produce a Perfetto trace file, which unlike the other
@@ -74,7 +74,7 @@ fn build_perfetto_tracker(
     }
 
     let bin_writer: Writer = Box::new(BufWriter::new(fs::File::create(trace_file).unwrap()));
-    Ok(Arc::new(PerfettoTracker::new(entity_manager, bin_writer)))
+    Ok(Rc::new(PerfettoTracker::new(entity_manager, bin_writer)))
 }
 
 #[cfg(not(feature = "perfetto"))]
@@ -128,7 +128,7 @@ fn setup_trackers(
             tracker.add_tracker(perfetto_tracker);
         }
 
-        Ok(Arc::new(tracker))
+        Ok(Rc::new(tracker))
     } else if enable_stdout {
         build_stdout_tracker(stdout_level, stdout_filter_regex)
     } else if enable_binary {

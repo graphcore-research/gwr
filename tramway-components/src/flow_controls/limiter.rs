@@ -11,7 +11,6 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use tramway_engine::engine::Engine;
@@ -34,7 +33,7 @@ pub struct Limiter<T>
 where
     T: SimObject,
 {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     limiter: Rc<RateLimiter<T>>,
     tx: RefCell<Option<OutPort<T>>>,
     rx: RefCell<Option<InPort<T>>>,
@@ -46,11 +45,11 @@ where
 {
     pub fn new_and_register(
         engine: &Engine,
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         name: &str,
         limiter: Rc<RateLimiter<T>>,
     ) -> Result<Rc<Self>, SimError> {
-        let entity = Arc::new(Entity::new(parent, name));
+        let entity = Rc::new(Entity::new(parent, name));
         let tx = OutPort::new(&entity, "tx");
         let rx = InPort::new(&entity, "rx");
         let rc_self = Rc::new(Self {

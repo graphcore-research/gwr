@@ -2,7 +2,7 @@
 
 use std::cmp::min;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use tramway_engine::engine::Engine;
 use tramway_engine::port::InPort;
@@ -119,7 +119,7 @@ pub fn priority_policy_test_core(engine: &mut Engine, inputs: &[ArbiterInputData
     }
     connect_port!(arbiter, tx => store_limiter, rx).unwrap();
 
-    let port = InPort::new(&Arc::new(Entity::new(engine.top(), "port")), "test_rx");
+    let port = InPort::new(&Rc::new(Entity::new(engine.top(), "port")), "test_rx");
     store.connect_port_tx(port.state()).unwrap();
 
     let check_inputs = inputs.to_owned();

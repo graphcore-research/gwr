@@ -10,7 +10,6 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use tramway_engine::engine::Engine;
@@ -29,14 +28,14 @@ use crate::{connect_tx, port_rx, take_option};
 
 #[derive(EntityDisplay)]
 struct PortCredit {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     credit: Resource,
     rx: RefCell<Option<InPort<Credit>>>,
 }
 
 impl PortCredit {
-    pub fn new(parent: &Arc<Entity>, name: &str, credit: Resource) -> Self {
-        let entity = Arc::new(Entity::new(parent, name));
+    pub fn new(parent: &Rc<Entity>, name: &str, credit: Resource) -> Self {
+        let entity = Rc::new(Entity::new(parent, name));
         let rx = InPort::new(&entity, "rx");
         Self {
             entity,
@@ -68,7 +67,7 @@ pub struct CreditLimiter<T>
 where
     T: SimObject,
 {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     spawner: Spawner,
     credit: Resource,
 
@@ -83,11 +82,11 @@ where
 {
     pub fn new_and_register(
         engine: &Engine,
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         spawner: Spawner,
         num_credits: usize,
     ) -> Result<Rc<Self>, SimError> {
-        let entity = Arc::new(Entity::new(parent, "credit"));
+        let entity = Rc::new(Entity::new(parent, "credit"));
         let credit = Resource::new(num_credits);
         let credit_rx = PortCredit::new(&entity, "credit_rx", credit.clone());
         let tx = OutPort::new(&entity, "tx");

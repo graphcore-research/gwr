@@ -7,7 +7,7 @@
 //! for tracing.
 
 use std::fmt;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use crate::{Id, Tracker, create, destroy};
 
@@ -24,7 +24,7 @@ pub struct Entity {
     pub name: String,
 
     /// Optional parent entity (only the top-level should be None).
-    pub parent: Option<Arc<Entity>>,
+    pub parent: Option<Rc<Entity>>,
 
     /// Unique simulation identifier used for bin/log messages.
     pub id: Id,
@@ -38,7 +38,7 @@ static JOIN: &str = "::";
 impl Entity {
     /// Create a new entity.
     #[must_use]
-    pub fn new(parent: &Arc<Entity>, name: &str) -> Self {
+    pub fn new(parent: &Rc<Entity>, name: &str) -> Self {
         let mut full_name = parent.full_name();
         full_name.push_str(JOIN);
         full_name.push_str(name);
@@ -103,10 +103,10 @@ impl fmt::Display for Entity {
 
 /// Create the top-level entity. This should be the only entity without a
 /// parent.
-pub fn toplevel(tracker: &Tracker, name: &str) -> Arc<Entity> {
+pub fn toplevel(tracker: &Tracker, name: &str) -> Rc<Entity> {
     let id = tracker.unique_id();
     tracker.add_entity(id, name);
-    let top = Arc::new(Entity {
+    let top = Rc::new(Entity {
         parent: None,
         name: String::from(name),
         id,

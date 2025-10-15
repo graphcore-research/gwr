@@ -12,7 +12,6 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use tramway_engine::engine::Engine;
@@ -30,7 +29,7 @@ pub struct Sink<T>
 where
     T: SimObject,
 {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     sunk_count: RefCell<usize>,
     rx: RefCell<Option<InPort<T>>>,
 }
@@ -41,10 +40,10 @@ where
 {
     pub fn new_and_register(
         engine: &Engine,
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         name: &str,
     ) -> Result<Rc<Self>, SimError> {
-        let entity = Arc::new(Entity::new(parent, name));
+        let entity = Rc::new(Entity::new(parent, name));
         let rx = InPort::new(&entity, "rx");
         let rc_self = Rc::new(Self {
             entity,

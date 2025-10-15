@@ -18,7 +18,7 @@
 //! correct output. A simplified summary of its functionality is:
 //!
 //! ```rust
-//! # use std::sync::Arc;
+//! # use std::rc::Rc;
 //! # use async_trait::async_trait;
 //! # use tramway_components::router::Route;
 //! # use tramway_engine::port::{InPort, OutPort};
@@ -54,7 +54,6 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use tramway_engine::engine::Engine;
@@ -95,7 +94,7 @@ pub struct Router<T>
 where
     T: SimObject + Routable,
 {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     rx: RefCell<Option<InPort<T>>>,
     tx: RefCell<Vec<OutPort<T>>>,
     algorithm: Box<dyn Route<T>>,
@@ -107,12 +106,12 @@ where
 {
     pub fn new_and_register(
         engine: &Engine,
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         name: &str,
         num_egress: usize,
         algorithm: Box<dyn Route<T>>,
     ) -> Result<Rc<Self>, SimError> {
-        let entity = Arc::new(Entity::new(parent, name));
+        let entity = Rc::new(Entity::new(parent, name));
         let rx = InPort::new(&entity, "rx");
         let mut tx = Vec::with_capacity(num_egress);
         for i in 0..num_egress {

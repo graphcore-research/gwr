@@ -13,7 +13,6 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use tramway_components::types::DataGenerator;
@@ -38,7 +37,7 @@ pub struct MemoryAccessGen<T>
 where
     T: SimObject + AccessMemory,
 {
-    pub entity: Arc<Entity>,
+    pub entity: Rc<Entity>,
     spawner: Spawner,
     data_generator: RefCell<Option<DataGenerator<T>>>,
     rx: RefCell<Option<InPort<T>>>,
@@ -52,11 +51,11 @@ where
 {
     pub fn new_and_register(
         engine: &Engine,
-        parent: &Arc<Entity>,
+        parent: &Rc<Entity>,
         name: &str,
         data_generator: DataGenerator<T>,
     ) -> Result<Rc<Self>, SimError> {
-        let entity = Arc::new(Entity::new(parent, name));
+        let entity = Rc::new(Entity::new(parent, name));
         let rx = InPort::new(&entity, "rx");
         let tx = OutPort::new(&entity, "tx");
         let rc_self = Rc::new(Self {
@@ -72,7 +71,7 @@ where
     }
 
     #[must_use]
-    pub fn entity(&self) -> &Arc<Entity> {
+    pub fn entity(&self) -> &Rc<Entity> {
         &self.entity
     }
 

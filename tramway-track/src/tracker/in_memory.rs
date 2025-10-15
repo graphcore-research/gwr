@@ -1,7 +1,7 @@
 // Copyright (c) 2020 Graphcore Ltd. All rights reserved.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 
 use num_traits::FromPrimitive;
 
@@ -217,23 +217,23 @@ fn gbps(start_time_ns: Option<f64>, end_time_ns: Option<f64>, total_bytes: usize
 
 /// A tracer that writes Cap'n Proto binary data
 pub struct InMemoryTracker {
-    entity_manager: Arc<EntityManager>,
-    state: Mutex<TrackedState>,
+    entity_manager: EntityManager,
+    state: RefCell<TrackedState>,
 }
 
 const INITIAL_CAPACITY: usize = 10000;
 
 impl InMemoryTracker {
     /// Create a new [`InMemoryTracker`] with an [`EntityManager`].
-    pub fn new(entity_manager: Arc<EntityManager>) -> Self {
+    pub fn new(entity_manager: EntityManager) -> Self {
         Self {
             entity_manager,
-            state: Mutex::new(TrackedState::new()),
+            state: RefCell::new(TrackedState::new()),
         }
     }
 
     fn add_event(&self, event: EventCommon) {
-        let mut state_guard = self.state.lock().unwrap();
+        let mut state_guard = self.state.borrow_mut();
         state_guard.add_event(event);
     }
 
@@ -243,25 +243,25 @@ impl InMemoryTracker {
 
     /// Get the [`Id`] for the specified simulation entity/object.
     pub fn id_for_name(&self, name: &str) -> Option<Id> {
-        let state_guard = self.state.lock().unwrap();
+        let state_guard = self.state.borrow_mut();
         state_guard.id_for_name(name)
     }
 
     /// Return the number of packets that exited the entity specified by `id`.
     pub fn count_egress(&self, id: Id) -> usize {
-        let state_guard = self.state.lock().unwrap();
+        let state_guard = self.state.borrow_mut();
         state_guard.count_egress(id)
     }
 
     /// Return the number of packets that entered the entity specified by `id`.
     pub fn ingress_count(&self, id: Id) -> usize {
-        let state_guard = self.state.lock().unwrap();
+        let state_guard = self.state.borrow_mut();
         state_guard.count_ingress(id)
     }
 
     /// Return the number of packets that exited the entity specified by `id`.
     pub fn bus_turnaround(&self, id: Id) -> usize {
-        let state_guard = self.state.lock().unwrap();
+        let state_guard = self.state.borrow_mut();
         state_guard.bus_turnaround(id)
     }
 
@@ -269,7 +269,7 @@ impl InMemoryTracker {
     ///
     /// *Note*: returns None if the bandwidth cannot be calculated.
     pub fn gbps_through(&self, id: Id) -> Option<f64> {
-        let state_guard = self.state.lock().unwrap();
+        let state_guard = self.state.borrow_mut();
         state_guard.gbps_through(id)
     }
 
@@ -277,7 +277,7 @@ impl InMemoryTracker {
     ///
     /// *Note*: returns None if the bandwidth cannot be calculated.
     pub fn gbps_ingress(&self, id: Id) -> Option<f64> {
-        let state_guard = self.state.lock().unwrap();
+        let state_guard = self.state.borrow_mut();
         state_guard.gbps_ingress(id)
     }
 
@@ -285,7 +285,7 @@ impl InMemoryTracker {
     ///
     /// *Note*: returns None if the bandwidth cannot be calculated.
     pub fn egress_gbps(&self, id: Id) -> Option<f64> {
-        let state_guard = self.state.lock().unwrap();
+        let state_guard = self.state.borrow_mut();
         state_guard.gbps_egress(id)
     }
 }
@@ -322,7 +322,7 @@ impl Track for InMemoryTracker {
             num_bytes,
             req_type,
         };
-        let mut state_guard = self.state.lock().unwrap();
+        let mut state_guard = self.state.borrow_mut();
         state_guard.add_event(EventCommon::new(id, time, create));
         state_guard.add_id_to_num_bytes(id, num_bytes);
         state_guard.add_id_to_req_type(id, req_type);
