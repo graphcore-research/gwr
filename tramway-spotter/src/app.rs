@@ -173,9 +173,13 @@ impl App {
     }
 
     /// Handles the tick event of the terminal.
-    pub fn tick(&self) {
+    pub fn tick(&mut self) {
         if let Some(s) = SHARED_STATE.lock().unwrap().command.take() {
             self.filter.lock().unwrap().set(&s);
+
+            // Move to the top. Otherwise the current line index is often after
+            // the matching lines.
+            self.move_top();
         }
     }
 

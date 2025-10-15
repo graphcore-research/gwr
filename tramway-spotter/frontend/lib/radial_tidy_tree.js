@@ -3,12 +3,13 @@
 //---------------------------------------------------------------------------------------
 // From https://observablehq.com/@d3/radial-tree/2
 function radial_tidy_tree(serverUrl, data) {
-  // Specify the chart’s dimensions.
-  const width = 928;
-  const height = width;
-  const cx = width * 0.5; // adjust as needed to fit
-  const cy = height * 0.59; // adjust as needed to fit
-  const radius = Math.min(width, height) / 2 - 30;
+  var chartDiv = document.getElementById(chartElement);
+  var width = Math.max(600, chartDiv.clientWidth);
+  var height = Math.max(400, chartDiv.clientHeight - buttonBarPadding);
+
+  const cx = width * 0.5;
+  const cy = height * 0.5;
+  const radius = Math.min(width, height) / 2;
 
   // Create a radial tree layout. The layout’s first dimension (x)
   // is the angle, while the second (y) is the radius.
@@ -21,7 +22,7 @@ function radial_tidy_tree(serverUrl, data) {
       .sort((a, b) => d3.ascending(a.data.name, b.data.name)));
 
   // Creates the SVG container.
-  const svg = d3.select("#chart")
+  const svg = d3.select(`#${chartElement}`)
       .append("svg")
       .attr("width", width)
       .attr("height", height)

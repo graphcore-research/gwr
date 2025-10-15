@@ -11,6 +11,7 @@ pub struct SharedState {
     pub entity_names: Vec<String>,
     pub connections: Vec<String>,
     pub command: Option<String>,
+    pub selected: Option<u64>,
 }
 
 impl SharedState {
@@ -19,6 +20,7 @@ impl SharedState {
             entity_names: Vec::new(),
             connections: Vec::new(),
             command: None,
+            selected: None,
         }
     }
 }
@@ -83,8 +85,17 @@ fn connections() -> String {
 
 #[get("/select/<id>")]
 async fn select(id: RocketId) -> String {
-    SHARED_STATE.lock().unwrap().command = Some(format!("id={}", id.0).to_string());
+    let mut guard = SHARED_STATE.lock().unwrap();
+    guard.command = Some(format!("id={}", id.0).to_string());
     format!("{} selected", id.0)
+}
+
+#[get("/selected")]
+async fn selected() -> String {
+    match SHARED_STATE.lock().unwrap().selected {
+        Some(id) => format!("{id} selected"),
+        None => "none".to_string(),
+    }
 }
 
 #[launch]
@@ -92,5 +103,5 @@ async fn select(id: RocketId) -> String {
 pub fn rocket() -> _ {
     rocket::build()
         .attach(CORS)
-        .mount("/", routes![entities, connections, select])
+        .mount("/", routes![entities, connections, select, selected])
 }
