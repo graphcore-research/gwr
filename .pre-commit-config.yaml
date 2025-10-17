@@ -103,7 +103,8 @@ repos:
         description: lint crate API changes for semver violations
         language: system
         types_or: [rust, toml]
-        entry: cargo semver-checks --baseline-rev origin/main --exclude sim-pipe
+        entry:
+          cargo semver-checks --baseline-rev origin/main --exclude sim-fabric
         pass_filenames: false
         stages: [manual]
       - id: cog-verify
