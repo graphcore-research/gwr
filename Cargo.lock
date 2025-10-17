@@ -2349,6 +2349,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "sim-pipe"
+version = "1.0.0"
+dependencies = [
+ "byte-unit",
+ "clap",
+ "indicatif",
+ "log",
+ "serde",
+ "tramway-components",
+ "tramway-engine",
+ "tramway-model-builder",
+ "tramway-models",
+ "tramway-track",
+]
+
+[[package]]
 name = "sim-ring"
 version = "5.0.0"
 dependencies = [

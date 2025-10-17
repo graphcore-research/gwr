@@ -1,58 +1,76 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
-//! Simulate a device comprising a rectangular fabric.
+//! Simulate a flow-controlled pipeline.
 //!
-//! The model is constructed the specified fabric and traffic generators
-//! and sinks connected to all of the fabric ports.
+//! This allows the user to understand the performance impact on the pipeline
+//! of different parameters like buffer size and credit delay.
 //!
-//! The traffic generators can be configured to send different traffic
-//! patterns in order to evaluate the performance of the fabric.
+//! The simulation will create:
+//! ```text
+//!  Source -> Limiter -> FcPipeline -> Limiter -> Sink
+//! ```
 //!
 //! # Examples
 //!
-//! Running a basic all-to-all simulation
+//! Running a basic simulation
 //! ```text
-//! cargo run --bin sim-fabric --release -- --kib-to-send 1024 --stdout --traffic-pattern all-to-all-fixed
+//! cargo run --bin sim-pipe --release -- --kib-to-send 1024 --stdout
 //! ```
 //!
-//! In order to achieve the maximum throughput it is essential to make the
-//! frame sizes a multiple of the port width. For example, with a 128-bit
-//! port and the 20-byte ethernet frame overhead an ideal frame size would
-//! be something like 1484:
+//! # Impact of buffer size
+//!
+//! In order to see the impact of buffer size has on the throughput you can
+//! run with simulations with different buffer sizes.
+//!
+//! If you use the default parameters you will get a pipeline which has a
+//! bandwidth of 128-bits per cycle and frames that are 128-bit (8-byte header,
+//! 8-byte payload). So the pipe will carry an entire frame every cycle.
+//!
+//! The default pipe has a 10-entry buffer and a latency in both directions
+//! (data and credit) of 5 ticks. This results in a maximum data rate of the
+//! 14.9GiB/s.
 //! ```text
-//! cargo run --bin sim-fabric --release -- --port-bits-per-tick 128 --frame-payload-bytes 1484 --kib-to-send 1024 --stdout
+//! cargo run --bin sim-pipe --release -- --kib-to-send 1024 --stdout --progress
 //! ```
 //!
-//! This achieves the peak bandwith at one port of 14.9GB/s and if run with
-//! a balanced communcation pattern it can achieve that at each port (357.6GB/s
-//! for the default 24-port fabric):
+//! However, if you reduce the size of the buffer in the pipeline then you will
+//! see the effective data rate reduce:
 //! ```text
-//! cargo run --bin sim-fabric --release -- --port-bits-per-tick 128 --frame-payload-bytes 1484 --kib-to-send 1024 --traffic-pattern all-to-all-fixed --stdout
-//! ```
+//! cargo run --bin sim-pipe --release -- --kib-to-send 1024 --stdout --progress
+//! --pipe-buffer-entries 9 ```
+//!
+//! In order to observe the bubbles in the pipeline you can use perfetto logs:
+//! ```text
+//! cargo run --bin sim-pipe --release -- --kib-to-send 1024 --stdout --progress
+//! --pipe-buffer-entries 9 --perfetto ```
+//! Then browse to https://ui.perfetto.dev and open the `trace.pftrace` file
+//! that will have been generated. Within the `top::pipe::credit_pipe` row you
+//! will see that it drops below the maximum value.
 
 use std::rc::Rc;
 
 use byte_unit::{AdjustedByte, Byte, UnitType};
 use clap::Parser;
 use indicatif::ProgressBar;
-use sim_fabric::frame_gen::TrafficPattern;
-use sim_fabric::source_sink_builder::{Sinks, build_source_sinks};
-use tramway_components::connect_port;
+use sim_pipe::frame_gen::FrameGen;
+use tramway_components::flow_controls::limiter::Limiter;
+use tramway_components::sink::Sink;
+use tramway_components::source::Source;
+use tramway_components::{connect_port, rc_limiter};
 use tramway_engine::engine::Engine;
 use tramway_engine::executor::Spawner;
 use tramway_engine::time::clock::Clock;
 use tramway_engine::types::SimError;
 use tramway_engine::{run_simulation, sim_error};
-use tramway_models::ethernet_frame::FRAME_OVERHEAD_BYTES;
-use tramway_models::fabric::FabricConfig;
-use tramway_models::fabric::functional::Fabric;
+use tramway_models::data_frame::DataFrame;
+use tramway_models::fc_pipeline::{FcPipeline, FcPipelineConfig};
 use tramway_track::builder::setup_all_trackers;
 use tramway_track::entity::Entity;
 use tramway_track::{Track, error, info};
 
 /// Command-line arguments.
 #[derive(Parser)]
-#[command(about = "Fabric evaluation application")]
+#[command(about = "Flow controlled evaluation application")]
 struct Cli {
     /// Enable logging to the console.
     #[arg(long, default_value = "false")]
@@ -118,57 +136,39 @@ struct Cli {
     #[arg(long, default_value = "0")]
     finish_tick: usize,
 
-    /// The number of columns in the fabric.
-    #[arg(long, default_value = "4")]
-    fabric_columns: usize,
-
-    /// The number of rows in the fabric.
-    #[arg(long, default_value = "3")]
-    fabric_rows: usize,
-
-    /// The number of ports at each node of the fabric.
-    #[arg(long, default_value = "2")]
-    fabric_ports_per_node: usize,
-
     /// The number of KiB to send from each source.
     #[arg(long, default_value = "100")]
     kib_to_send: usize,
 
-    /// Set the number of frames each fabric TX port can hold.
-    #[arg(long, default_value = "32")]
-    tx_buffer_entries: usize,
+    /// Set the frame overhead (protocol) bytes.
+    #[arg(long, default_value = "8")]
+    frame_overhead_bytes: usize,
 
-    /// Set the number of frames each fabric RX port can hold.
-    #[arg(long, default_value = "32")]
-    rx_buffer_entries: usize,
-
-    /// Set many bits per clock tick the fabric TX/RX ports move.
-    #[arg(long, default_value = "128")]
-    port_bits_per_tick: usize,
-
-    /// Set the default frame payload bytes.
-    #[arg(long, default_value = "256")]
+    /// Set the frame payload bytes.
+    #[arg(long, default_value = "8")]
     frame_payload_bytes: usize,
 
-    /// Set the clock ticks required to move one hop in the fabric.
-    #[arg(long, default_value = "1")]
-    ticks_per_hop: usize,
+    /// Set many bits per clock tick the RX port can accept.
+    #[arg(long, default_value = "128")]
+    pipe_rx_bits_per_tick: usize,
 
-    /// An extra overhead for every frame passing through the fabric.
-    #[arg(long, default_value = "1")]
-    ticks_overhead: usize,
+    /// Set many bits per clock tick the TX port will send.
+    #[arg(long, default_value = "128")]
+    pipe_tx_bits_per_tick: usize,
 
-    /// What traffic pattern to use.
-    #[clap(long, default_value_t, value_enum)]
-    traffic_pattern: TrafficPattern,
+    /// Set the number of frames the pipe buffer can hold
+    #[arg(long, default_value = "10")]
+    pipe_buffer_entries: usize,
 
-    /// Number of active sources (chosen at random from possible sources).
-    #[clap(long)]
-    active_sources: Option<usize>,
+    /// Set the number of cycles it takes for data to travel through the
+    /// pipeline
+    #[arg(long, default_value = "5")]
+    pipe_data_delay: usize,
 
-    /// Seed for random number generator.
-    #[clap(long, default_value = "1")]
-    seed: u64,
+    /// Set the number of cycles it takes for credit to be returned to the start
+    /// of the pipe
+    #[arg(long, default_value = "5")]
+    pipe_credit_delay: usize,
 }
 
 /// Install an event to terminate the simulation at the clock tick defined.
@@ -186,7 +186,7 @@ fn start_frame_dump(
     clock: Clock,
     progress_ticks: usize,
     total_expected_frames: usize,
-    sinks: Sinks,
+    sink: Rc<Sink<DataFrame>>,
     progress_bar: ProgressBar,
 ) {
     spawner.spawn(async move {
@@ -195,7 +195,7 @@ fn start_frame_dump(
             // Use the `background` wait to indicate that the simulation can end if this is
             // the only task still active.
             clock.wait_ticks_or_exit(progress_ticks as u64).await;
-            let num_frames: usize = sinks.iter().map(|s| s.num_sunk()).sum();
+            let num_frames = sink.num_sunk();
             progress_bar.inc((num_frames - seen_frames) as u64);
             seen_frames = num_frames;
             if num_frames == total_expected_frames {
@@ -231,79 +231,66 @@ fn main() -> Result<(), SimError> {
     let spawner = engine.spawner();
     let clock = engine.default_clock();
 
-    let config = FabricConfig::new(
-        args.fabric_columns,
-        args.fabric_rows,
-        args.fabric_ports_per_node,
-        args.ticks_per_hop,
-        args.ticks_overhead,
-        args.rx_buffer_entries,
-        args.tx_buffer_entries,
-        args.port_bits_per_tick,
-    );
-    let config = Rc::new(config);
-    let num_ports = config.num_ports();
-
     let num_payload_bytes_to_send = args.kib_to_send * 1024;
-
-    // Size of max-sized frames
     let num_send_frames = num_payload_bytes_to_send / args.frame_payload_bytes;
+    let total_expected_frames = num_send_frames;
 
     let top = engine.top().clone();
     info!(top ;
-        "Fabric of {}x{}x{} sources, each sending {} frames ({}KiB) with buffers {}/{} frames.",
-        config.num_columns(),
-        config.num_rows(),
-        config.num_ports_per_node(),
+        "Sending {} frames ({}KiB) through pipe with: data delay={}, credit delay={}, buffer entries={}, rx={}bps, tx={}bps.",
         num_send_frames,
         args.kib_to_send,
-        args.rx_buffer_entries,
-        args.tx_buffer_entries,
+        args.pipe_data_delay,
+        args.pipe_credit_delay,
+        args.pipe_buffer_entries,
+        args.pipe_rx_bits_per_tick,
+        args.pipe_tx_bits_per_tick,
     );
-    info!(top ; "Using traffic pattern {}. Random seed {}", args.traffic_pattern, args.seed);
 
-    let fabric = Fabric::new_and_register(
-        &engine,
+    let frame_gen = FrameGen::new(
         &top,
-        "fabric",
-        clock.clone(),
-        spawner.clone(),
-        config.clone(),
-    )?;
-
-    // By default enable all ports unless the user has constrained the generators
-    let num_active_sources = match args.active_sources {
-        Some(num_active_sources) => num_active_sources,
-        None => config.num_ports(),
-    };
-
-    let (sources, sinks) = build_source_sinks(
-        &mut engine,
-        &config,
-        args.traffic_pattern,
+        args.frame_overhead_bytes,
         args.frame_payload_bytes,
         num_send_frames,
-        args.seed,
-        num_active_sources,
     );
+    let source = Source::new_and_register(&engine, &top, "source", Some(Box::new(frame_gen)))?;
+    let rx_limiter = rc_limiter!(clock.clone(), args.pipe_rx_bits_per_tick);
+    let source_limiter = Limiter::new_and_register(&engine, &top, "rx_limiter", rx_limiter)?;
 
-    for i in 0..num_ports {
-        connect_port!(sources[i], tx => fabric, rx, i)?;
-        connect_port!(fabric, tx, i => sinks[i], rx)?;
-    }
+    let pipe_config = FcPipelineConfig::new(
+        args.pipe_buffer_entries,
+        args.pipe_data_delay,
+        args.pipe_credit_delay,
+    );
+    let pipe = FcPipeline::new_and_register(
+        &engine,
+        &top,
+        "pipe",
+        clock.clone(),
+        spawner.clone(),
+        &pipe_config,
+    )?;
+    let tx_limiter = rc_limiter!(clock.clone(), args.pipe_tx_bits_per_tick);
+    let sink_limiter = Limiter::new_and_register(&engine, &top, "tx_limiter", tx_limiter)?;
+    let sink =
+        Sink::new_and_register(&engine, &top, "sink").expect("should be able to create sink");
+
+    connect_port!(source, tx => source_limiter, rx)?;
+    connect_port!(source_limiter, tx => pipe, rx)?;
+    connect_port!(pipe, tx => sink_limiter, rx)?;
+    connect_port!(sink_limiter, tx => sink, rx)?;
 
     info!(top ; "Platform built and connected");
 
-    let total_expected_frames = num_send_frames * num_ports;
-    let progress_bar = ProgressBar::new(total_expected_frames as u64);
+    let progress_bar = ProgressBar::new(num_send_frames as u64);
     if args.progress {
-        let sinks = sinks.to_owned();
+        let sink = sink.clone();
         start_frame_dump(
             &spawner,
             clock.clone(),
             args.progress_ticks,
             total_expected_frames,
-            sinks,
+            sink,
             progress_bar.clone(),
         );
     }
@@ -314,12 +301,7 @@ fn main() -> Result<(), SimError> {
 
     run_simulation!(engine);
 
-    let mut total_sunk_frames = 0;
-    for sink in &sinks {
-        total_sunk_frames += sink.num_sunk();
-    }
-
-    let total_expected_frames = num_send_frames * num_active_sources;
+    let total_sunk_frames = sink.num_sunk();
     if total_sunk_frames != total_expected_frames {
         error!(top ; "{}/{} frames received", total_sunk_frames, total_expected_frames);
         error!(top ; "Deadlock detected at {:.2}ns", clock.time_now_ns());
@@ -336,6 +318,7 @@ fn main() -> Result<(), SimError> {
         &top,
         clock.time_now_ns(),
         total_sunk_frames,
+        args.frame_overhead_bytes,
         args.frame_payload_bytes,
     );
     Ok(())
@@ -345,6 +328,7 @@ fn print_summary(
     top: &Rc<Entity>,
     time_now_ns: f64,
     total_sunk_frames: usize,
+    frame_overhead_bytes: usize,
     frame_payload_bytes: usize,
 ) {
     let time_now_s = time_now_ns / (1000.0 * 1000.0 * 1000.0);
@@ -353,7 +337,7 @@ fn print_summary(
     let (payload_value, payload_per_second) =
         compute_adjusted_value_and_rate(time_now_s, payload_bytes);
 
-    let total_bytes = payload_bytes + (total_sunk_frames * FRAME_OVERHEAD_BYTES) as u64;
+    let total_bytes = payload_bytes + (total_sunk_frames * frame_overhead_bytes) as u64;
     let (total_value, total_per_second) = compute_adjusted_value_and_rate(time_now_s, total_bytes);
 
     info!(top ; "Pass: Sent {total_sunk_frames} in {time_now_ns:.2}ns.");

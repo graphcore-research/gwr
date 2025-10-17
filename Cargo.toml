@@ -7,6 +7,7 @@ members = [
     "examples/flaky-with-delay",
     "examples/scrambler",
     "examples/sim-fabric",
+    "examples/sim-pipe",
     "examples/sim-ring",
     "tramway-components",
     "tramway-config",
