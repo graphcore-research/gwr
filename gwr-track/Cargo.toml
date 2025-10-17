@@ -1,0 +1,46 @@
+# Copyright (c) 2020 Graphcore Ltd. All rights reserved.
+
+[package]
+name = "gwr-track"
+version = "0.5.0"
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Trace system used by the GWR simulation engine and models"
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories = ["development-tools::debugging", "encoding", "simulation"]
+publish.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+capnp.workspace = true
+clap.workspace = true
+figment.workspace = true
+lazy_static = "1.4.0"
+log.workspace = true
+num-derive.workspace = true
+num-traits.workspace = true
+prost = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
+regex.workspace = true
+serde.workspace = true
+simplelog = "0.12.1"
+gwr-config = { path = "../gwr-config" }
+gwr-perfetto = { path = "../gwr-perfetto", optional = true }
+
+[build-dependencies]
+capnpc.workspace = true
+walkdir = "2.4.0"
+
+[dev-dependencies]
+serial_test.workspace = true
+
+[features]
+default = []
+perfetto = ["dep:gwr-perfetto", "dep:prost", "dep:rand"]

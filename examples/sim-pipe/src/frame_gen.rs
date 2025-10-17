@@ -2,8 +2,8 @@
 //
 use std::rc::Rc;
 
-use tramway_models::data_frame::DataFrame;
-use tramway_track::entity::Entity;
+use gwr_models::data_frame::DataFrame;
+use gwr_track::entity::Entity;
 
 /// A frame Generator that can be used by the `Source` to produce frames on
 /// the fly.

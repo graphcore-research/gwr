@@ -7,20 +7,20 @@
 //! # Ports
 //!
 //! This component has four ports
-//!  - Two [input port](tramway_engine::port::InPort): `rx_a`, `rx_b`
-//!  - Two [output port](tramway_engine::port::OutPort): `tx_a`, `tx_b`
+//!  - Two [input port](gwr_engine::port::InPort): `rx_a`, `rx_b`
+//!  - Two [output port](gwr_engine::port::OutPort): `tx_a`, `tx_b`
 
 use std::rc::Rc;
 
 use async_trait::async_trait;
-use tramway_components::store::Store;
-use tramway_engine::engine::Engine;
-use tramway_engine::executor::Spawner;
-use tramway_engine::port::PortStateResult;
-use tramway_engine::traits::SimObject;
-use tramway_engine::types::{SimError, SimResult};
-use tramway_model_builder::{EntityDisplay, Runnable};
-use tramway_track::entity::Entity;
+use gwr_components::store::Store;
+use gwr_engine::engine::Engine;
+use gwr_engine::executor::Spawner;
+use gwr_engine::port::PortStateResult;
+use gwr_engine::traits::SimObject;
+use gwr_engine::types::{SimError, SimResult};
+use gwr_model_builder::{EntityDisplay, Runnable};
+use gwr_track::entity::Entity;
 
 #[derive(EntityDisplay, Runnable)]
 pub struct Scrambler<T>

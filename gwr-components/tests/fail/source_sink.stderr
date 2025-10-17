@@ -1,0 +1,9 @@
+error[E0599]: no method named `port_invalid_rx` found for struct `Rc<gwr_components::sink::Sink<_>>` in the current scope
+  --> tests/fail/source_sink.rs:16:5
+   |
+16 |     connect_port!(source, tx => sink, invalid_rx).unwrap();
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |     |
+   |     method not found in `Rc<gwr_components::sink::Sink<_>>`
+   |
+   = note: this error originates in the macro `connect_port` (in Nightly builds, run with -Z macro-backtrace for more info)

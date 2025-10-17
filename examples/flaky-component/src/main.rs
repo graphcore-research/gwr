@@ -18,12 +18,12 @@
 
 use clap::Parser;
 use flaky_component::Flaky;
-use tramway_components::sink::Sink;
-use tramway_components::source::Source;
-use tramway_components::{connect_port, option_box_repeat};
-use tramway_engine::engine::Engine;
-use tramway_engine::run_simulation;
-use tramway_engine::types::SimResult;
+use gwr_components::sink::Sink;
+use gwr_components::source::Source;
+use gwr_components::{connect_port, option_box_repeat};
+use gwr_engine::engine::Engine;
+use gwr_engine::run_simulation;
+use gwr_engine::types::SimResult;
 
 /// Command-line arguments.
 #[derive(Parser)]

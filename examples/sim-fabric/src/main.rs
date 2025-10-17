@@ -34,21 +34,21 @@ use std::rc::Rc;
 
 use byte_unit::{AdjustedByte, Byte, UnitType};
 use clap::Parser;
+use gwr_components::connect_port;
+use gwr_engine::engine::Engine;
+use gwr_engine::executor::Spawner;
+use gwr_engine::time::clock::Clock;
+use gwr_engine::types::SimError;
+use gwr_engine::{run_simulation, sim_error};
+use gwr_models::ethernet_frame::FRAME_OVERHEAD_BYTES;
+use gwr_models::fabric::FabricConfig;
+use gwr_models::fabric::functional::Fabric;
+use gwr_track::builder::setup_all_trackers;
+use gwr_track::entity::Entity;
+use gwr_track::{Track, error, info};
 use indicatif::ProgressBar;
 use sim_fabric::frame_gen::TrafficPattern;
 use sim_fabric::source_sink_builder::{Sinks, build_source_sinks};
-use tramway_components::connect_port;
-use tramway_engine::engine::Engine;
-use tramway_engine::executor::Spawner;
-use tramway_engine::time::clock::Clock;
-use tramway_engine::types::SimError;
-use tramway_engine::{run_simulation, sim_error};
-use tramway_models::ethernet_frame::FRAME_OVERHEAD_BYTES;
-use tramway_models::fabric::FabricConfig;
-use tramway_models::fabric::functional::Fabric;
-use tramway_track::builder::setup_all_trackers;
-use tramway_track::entity::Entity;
-use tramway_track::{Track, error, info};
 
 /// Command-line arguments.
 #[derive(Parser)]
@@ -67,7 +67,7 @@ struct Cli {
     #[arg(long, default_value = "")]
     stdout_filter_regex: String,
 
-    /// Enable logging to binary file used by `tramway-spotter`.
+    /// Enable logging to binary file used by `gwr-spotter`.
     #[arg(long, default_value = "false")]
     binary: bool,
 
@@ -85,7 +85,7 @@ struct Cli {
     #[arg(long, default_value = "trace.bin")]
     binary_file: String,
 
-    /// Enable logging to Perfetto file used by `tramway-spotter`.
+    /// Enable logging to Perfetto file used by `gwr-spotter`.
     #[arg(long, default_value = "false")]
     perfetto: bool,
 

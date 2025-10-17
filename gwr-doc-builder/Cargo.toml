@@ -1,0 +1,26 @@
+# Copyright (c) 2023 Graphcore Ltd. All rights reserved.
+
+[package]
+name = "gwr-doc-builder"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Utility for Building Documentation"
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords = ["documentation", "gwr"]
+categories = ["development-tools", "text-processing"]
+publish.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap.workspace = true
+proc-macro2.workspace = true
+quote.workspace = true
+regex.workspace = true
+syn.workspace = true

@@ -39,5 +39,5 @@ name = "scrambler"
 publish = false
 
 [[package]]
-name = "tramway-developer-guide"
+name = "gwr-developer-guide"
 publish = false
