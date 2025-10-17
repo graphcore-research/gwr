@@ -51,22 +51,22 @@ use std::rc::Rc;
 
 use byte_unit::{AdjustedByte, Byte, UnitType};
 use clap::Parser;
+use gwr_components::flow_controls::limiter::Limiter;
+use gwr_components::sink::Sink;
+use gwr_components::source::Source;
+use gwr_components::{connect_port, rc_limiter};
+use gwr_engine::engine::Engine;
+use gwr_engine::executor::Spawner;
+use gwr_engine::time::clock::Clock;
+use gwr_engine::types::SimError;
+use gwr_engine::{run_simulation, sim_error};
+use gwr_models::data_frame::DataFrame;
+use gwr_models::fc_pipeline::{FcPipeline, FcPipelineConfig};
+use gwr_track::builder::setup_all_trackers;
+use gwr_track::entity::Entity;
+use gwr_track::{Track, error, info};
 use indicatif::ProgressBar;
 use sim_pipe::frame_gen::FrameGen;
-use tramway_components::flow_controls::limiter::Limiter;
-use tramway_components::sink::Sink;
-use tramway_components::source::Source;
-use tramway_components::{connect_port, rc_limiter};
-use tramway_engine::engine::Engine;
-use tramway_engine::executor::Spawner;
-use tramway_engine::time::clock::Clock;
-use tramway_engine::types::SimError;
-use tramway_engine::{run_simulation, sim_error};
-use tramway_models::data_frame::DataFrame;
-use tramway_models::fc_pipeline::{FcPipeline, FcPipelineConfig};
-use tramway_track::builder::setup_all_trackers;
-use tramway_track::entity::Entity;
-use tramway_track::{Track, error, info};
 
 /// Command-line arguments.
 #[derive(Parser)]
@@ -85,7 +85,7 @@ struct Cli {
     #[arg(long, default_value = "")]
     stdout_filter_regex: String,
 
-    /// Enable logging to binary file used by `tramway-spotter`.
+    /// Enable logging to binary file used by `gwr-spotter`.
     #[arg(long, default_value = "false")]
     binary: bool,
 
@@ -103,7 +103,7 @@ struct Cli {
     #[arg(long, default_value = "trace.bin")]
     binary_file: String,
 
-    /// Enable logging to Perfetto file used by `tramway-spotter`.
+    /// Enable logging to Perfetto file used by `gwr-spotter`.
     #[arg(long, default_value = "false")]
     perfetto: bool,
 

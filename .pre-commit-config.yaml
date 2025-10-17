@@ -90,12 +90,12 @@ repos:
         entry: env RUSTFLAGS="-D warnings" cargo clippy-strict
         pass_filenames: false
         stages: [pre-commit, pre-merge-commit, pre-push, manual]
-      - id: cargo-doc-tramway-dev
-        name: cargo doc-tramway-dev
+      - id: cargo-doc-gwr-dev
+        name: cargo doc-gwr-dev
         description: check Rust source code documentation
         language: system
         types: [rust]
-        entry: env RUSTDOCFLAGS="-D warnings" cargo doc-tramway-dev
+        entry: env RUSTDOCFLAGS="-D warnings" cargo doc-gwr-dev
         pass_filenames: false
         stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: cargo-semver-checks

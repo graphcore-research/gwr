@@ -1,0 +1,24 @@
+# Copyright (c) 2025 Graphcore Ltd. All rights reserved.
+
+[package]
+name = "gwr-perfetto"
+version = "0.3.0"
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Perfetto Trace and Track Event access functions"
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories = ["development-tools::debugging", "encoding", "simulation"]
+publish.workspace = true
+
+[dependencies]
+prost.workspace = true
+
+[build-dependencies]
+prost-build.workspace = true
+gwr-perfetto-sys = { path = "../gwr-perfetto-sys" }

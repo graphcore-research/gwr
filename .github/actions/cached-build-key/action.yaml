@@ -18,5 +18,5 @@ runs:
   steps:
     - name: Generate key for cache entry
       id: generate-key
-      run: echo "cached-build-key=${{ runner.os }}-cargo-${{ inputs.name }}-tramway-${{ hashFiles('**/Cargo.lock') }}" >> $GITHUB_OUTPUT
+      run: echo "cached-build-key=${{ runner.os }}-cargo-${{ inputs.name }}-gwr-${{ hashFiles('**/Cargo.lock') }}" >> $GITHUB_OUTPUT
       shell: bash

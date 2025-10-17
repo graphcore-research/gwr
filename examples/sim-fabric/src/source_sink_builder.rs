@@ -4,14 +4,14 @@
 
 use std::rc::Rc;
 
+use gwr_components::sink::Sink;
+use gwr_components::source::Source;
+use gwr_engine::engine::Engine;
+use gwr_models::ethernet_frame::EthernetFrame;
+use gwr_models::fabric::FabricConfig;
 use rand::SeedableRng;
 use rand::seq::SliceRandom;
 use rand_xoshiro::Xoshiro256PlusPlus;
-use tramway_components::sink::Sink;
-use tramway_components::source::Source;
-use tramway_engine::engine::Engine;
-use tramway_models::ethernet_frame::EthernetFrame;
-use tramway_models::fabric::FabricConfig;
 
 use crate::frame_gen::{FrameGen, TrafficPattern};
 

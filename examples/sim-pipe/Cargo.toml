@@ -12,7 +12,7 @@ readme.workspace = true
 homepage.workspace = true
 repository.workspace = true
 license.workspace = true
-keywords = ["example", "tramway"]
+keywords = ["example", "gwr"]
 categories = ["asynchronous", "command-line-utilities", "simulation"]
 publish.workspace = true
 
@@ -24,8 +24,8 @@ clap.workspace = true
 log.workspace = true
 indicatif = "0.18.0"
 serde.workspace = true
-tramway-components = { path = "../../tramway-components" }
-tramway-engine = { path = "../../tramway-engine" }
-tramway-models = { path = "../../tramway-models" }
-tramway-model-builder = { path = "../../tramway-model-builder" }
-tramway-track = { path = "../../tramway-track", features = ["perfetto"] }
+gwr-components = { path = "../../gwr-components" }
+gwr-engine = { path = "../../gwr-engine" }
+gwr-models = { path = "../../gwr-models" }
+gwr-model-builder = { path = "../../gwr-model-builder" }
+gwr-track = { path = "../../gwr-track", features = ["perfetto"] }

@@ -1,28 +1,26 @@
 <!-- Copyright (c) 2023 Graphcore Ltd. All rights reserved. -->
 
-[![CI](https://github.com/graphcore-research/tramway/actions/workflows/ci.yaml/badge.svg)](https://github.com/graphcore-research/tramway/actions/workflows/ci.yaml)
-[![Online documentation](https://github.com/graphcore-research/tramway/actions/workflows/online-documentation.yaml/badge.svg)](https://github.com/graphcore-research/tramway/actions/workflows/online-documentation.yaml)
+[![CI](https://github.com/graphcore-research/gwr/actions/workflows/ci.yaml/badge.svg)](https://github.com/graphcore-research/gwr/actions/workflows/ci.yaml)
+[![Online documentation](https://github.com/graphcore-research/gwr/actions/workflows/online-documentation.yaml/badge.svg)](https://github.com/graphcore-research/gwr/actions/workflows/online-documentation.yaml)
 
 <div align="center">
 
-<img src="tramway-developer-guide/md_src/tramway.png" alt="Tramway is Rust Async Modelling for hardWare Architecture and sYstems" style="border-radius:50%">
+![The Great Western Runtime](gwr-developer-guide/md_src/gwr.png)
 
 [Developer guide] | [API documentation]
 
 </div>
 
-[Developer guide]: https://graphcore-research.github.io/tramway
+[Developer guide]: https://graphcore-research.github.io/gwr
 [API documentation]:
-  https://graphcore-research.github.io/tramway/rustdoc/tramway_engine/index.html
+  https://graphcore-research.github.io/gwr/rustdoc/gwr_engine/index.html
 
-# TRAMWAY
+# GWR
 
 <!-- ANCHOR: intro -->
 
-Welcome to the TRAMWAY project. The name TRAMWAY is a recursive acronym for
-"Tramway is Rust Async Modelling for hardWare Architecture and sYstems". The
-core TRAMWAY packages are provided as a monorepo, which together provide the
-following functionality:
+Welcome to the GWR project. The core GWR packages are developed as a monorepo,
+which together provide the following functionality:
 
 - An event-driven [simulation engine].
 - [Logging] and [log viewing] system.
@@ -32,30 +30,30 @@ following functionality:
 
 <!-- ANCHOR_END: intro -->
 
-[components]: tramway-developer-guide/md_src/components/chapter.md
-[log viewing]: tramway-developer-guide/md_src/tramway_spotter/chapter.md
-[Logging]: tramway-developer-guide/md_src/tramway_track/chapter.md
-[models]: tramway-developer-guide/md_src/models/chapter.md
-[simulation engine]: tramway-developer-guide/md_src/tramway_engine/chapter.md
+[components]: gwr-developer-guide/md_src/components/chapter.md
+[log viewing]: gwr-developer-guide/md_src/gwr_spotter/chapter.md
+[Logging]: gwr-developer-guide/md_src/gwr_track/chapter.md
+[models]: gwr-developer-guide/md_src/models/chapter.md
+[simulation engine]: gwr-developer-guide/md_src/gwr_engine/chapter.md
 
-<!-- ANCHOR: why_tramway -->
+<!-- ANCHOR: why_gwr -->
 
-## Why TRAMWAY?
+## Why GWR?
 
-TRAMWAY aims to provide a complete modelling workflow, supporting projects from
-the initial exploration phase, through more detailed evaluations, and finally to
-a full specification and golden reference quality model.
+GWR aims to provide a complete modelling workflow, supporting projects from the
+initial exploration phase, through more detailed evaluations, and finally to a
+full specification and golden reference quality model.
 
 Async language features are utilised to allow expressive description of physical
 world parallism. An asynchronous runtime executor is included within the
-tramway-engine package for this purpose, which supports both event-driven and
+gwr-engine package for this purpose, which supports both event-driven and
 clocked modelling.
 
-TRAMWAY is designed with scalability in mind, with the aim being to enable both
-high accuracy/detailed simulations and large scale simulations in a tractable
+GWR is designed with scalability in mind, with the aim being to enable both high
+accuracy/detailed simulations and large scale simulations in a tractable
 timeframe. To meet this goal it is therefore important that both the development
-of models using TRAMWAY, as well as the execution of these models is efficient.
-A developer guide covering the use of the TRAMWAY for modelling, as well as API
+of models using GWR, as well as the execution of these models is efficient. A
+developer guide covering the use of the GWR for modelling, as well as API
 documentation for each package is included. The general philosophy adopted is to
 raise errors as early as possible for developers, so as many as possible will be
 at compile time rather than run time, as well as to guard against common errors
@@ -73,7 +71,7 @@ release process is also defined to guarantee semantic versioning of packages and
 automated generation of release notes ensuring user upgrade processes are as
 smooth as possible.
 
-TRAMWAY is written in [Rust] and takes advantage of a number of the features it
+GWR is written in [Rust] and takes advantage of a number of the features it
 offers. In brief summary these are the strong typing system and emphasis on
 correctness in Rust, excellent and easy to use tooling and build system, and
 excellent runtime performance (which we have found to be on a par with C++).
@@ -82,15 +80,15 @@ included in the [Rust chapter] of the developer guide.
 
 [Rust]: https://www.rust-lang.org
 
-<!-- ANCHOR_END: why_tramway -->
+<!-- ANCHOR_END: why_gwr -->
 
-[Rust chapter]: tramway-developer-guide/md_src/rust/chapter.md
+[Rust chapter]: gwr-developer-guide/md_src/rust/chapter.md
 
 <!-- ANCHOR: tooling_bootstrap -->
 
 ## Tooling
 
-All of the required tooling to build and use, and to develop TRAMWAY can be
+All of the required tooling to build and use, and to develop GWR can be
 installed using the scripts included within the repo. These scripts are designed
 to be used by both users and the CI system.
 
@@ -99,14 +97,14 @@ being used on Linux and [Homebrew] on macOS ([Homebrew] itself will be installed
 as required if not already avaliable). Various cross-platform package managers
 are also used, including [rustup], [Cargo], and [npm].
 
-See the [Using TRAMWAY Packages](#using-tramway-packages) and
-[Developing TRAMWAY Packages](#developing-tramway-packages) sections for further
-details on these install scripts.
+See the [Using GWR Packages](#using-gwr-packages) and
+[Developing GWR Packages](#developing-gwr-packages) sections for further details
+on these install scripts.
 
 ### Rust Tools
 
 The correct Rust toolchain will automatically be selected and used by [rustup]
-when commands are executed from within the TRAMWAY directory (or below). This
+when commands are executed from within the GWR directory (or below). This
 behaviour is controlled by the the `rust-toolchain.toml` file.
 
 [APT]: https://wiki.debian.org/AptCLI
@@ -119,10 +117,10 @@ behaviour is controlled by the the `rust-toolchain.toml` file.
 
 <!-- ANCHOR: package_users -->
 
-## Using TRAMWAY Packages
+## Using GWR Packages
 
-For users of the TRAMWAY packages a `stable` Rust toolchain is required, as well
-as external tools such as [Asciidoctor], [Cap'n Proto], and [mdBook]. All of the
+For users of the GWR packages a `stable` Rust toolchain is required, as well as
+external tools such as [Asciidoctor], [Cap'n Proto], and [mdBook]. All of the
 required build dependencies can be installed by running:
 
 ```bash
@@ -133,7 +131,7 @@ required build dependencies can be installed by running:
 
 > [!IMPORTANT]
 > To ensure that the correct Rust toolchain is used the script must be executed
-> from within the TRAMWAY directory.
+> from within the GWR directory.
 
 > [!Tip]
 > Although the script is interactive, selecting the default option
@@ -154,13 +152,12 @@ required build dependencies can be installed by running:
 
 <!-- ANCHOR: package_developers -->
 
-## Developing TRAMWAY Packages
+## Developing GWR Packages
 
-For developers of the TRAMWAY packages both `stable` and `nightly` Rust
-toolchains are required, as well external tools such as [cargo-deny],
-[cargo-about] [cargo-semver-checks], [Cocogitto], [pre-commit], [Prettier], and
-[Release-plz]. All of the required development dependencies can be installed by
-running:
+For developers of the GWR packages both `stable` and `nightly` Rust toolchains
+are required, as well external tools such as [cargo-deny], [cargo-about]
+[cargo-semver-checks], [Cocogitto], [pre-commit], [Prettier], and [Release-plz].
+All of the required development dependencies can be installed by running:
 
 ```bash
 ./.github/actions/install-dev-dependencies/install.sh
@@ -170,7 +167,7 @@ running:
 
 > [!IMPORTANT]
 > To ensure that the correct Rust toolchain is used the script must be executed
-> from within the TRAMWAY directory.
+> from within the GWR directory.
 
 > [!Tip]
 > Although the script is interactive, selecting the default option
@@ -184,7 +181,7 @@ running:
 <!-- prettier-ignore-end -->
 
 Finally the pre-commit hooks need to be installed within the cloned copy of the
-TRAMWAY repo:
+GWR repo:
 
 ```bash
 pre-commit install
@@ -192,7 +189,7 @@ pre-commit install
 
 ### Branching the Repo
 
-Changes to TRAMWAY packages are developed on branches separate to `main` (the
+Changes to GWR packages are developed on branches separate to `main` (the
 default) branch of the repo, and then incorporated when complete via a pull
 request. Long running or collaborative development will likely benefit from
 having the branch pushed to the `origin` well in advance of when a pull request
@@ -207,8 +204,8 @@ the point they are merged.
 
 ### Committing a Change
 
-All commits made to the TRAMWAY repo must follow the [Conventional Commits]
-1.0.0 specification. This allows the automatic generation of both a top-level
+All commits made to the GWR repo must follow the [Conventional Commits] 1.0.0
+specification. This allows the automatic generation of both a top-level
 changelog covering the whole workspace as well as an individual changelog for
 each package within the workspace.
 
@@ -222,13 +219,13 @@ When writing a commmit message in this form:
   For example:
 
   ```text
-  fix(tramway-developer-guide): check for panic when running mdBook tests
+  fix(gwr-developer-guide): check for panic when running mdBook tests
   ```
 
   - If the change applied to multiple, but not all packages, the names should be
     comma seperated. For example:
     ```text
-    feat(tramway-track,tramway-spotter): capnp binary file support
+    feat(gwr-track,gwr-spotter): capnp binary file support
     ```
   - If the change applies to all Rust packages, infrastructure, CI, or general
     configuration the scope can be omitted. For example:
@@ -264,8 +261,8 @@ During the commit process a number of different hooks will be invoked by
 
 ### Making a Release
 
-The release process for all packages within the TRAMWAY workspace is handled by
-the [Release-plz] tool.
+The release process for all packages within the GWR workspace is handled by the
+[Release-plz] tool.
 
 To start the release process, run:
 
@@ -293,8 +290,7 @@ updated package, and automatically publishes the updated packages using
 [cargo-about]: https://github.com/EmbarkStudios/cargo-about
 [cargo-deny]: https://github.com/EmbarkStudios/cargo-deny
 [cargo-semver-checks]: https://github.com/obi1kenobi/cargo-semver-checks
-[CI system]:
-  https://github.com/graphcore-research/tramway/actions/workflows/ci.yaml
+[CI system]: https://github.com/graphcore-research/gwr/actions/workflows/ci.yaml
 [clippy]: https://doc.rust-lang.org/clippy
 [Cocogitto]: https://docs.cocogitto.io
 [Conventional Commits]: https://www.conventionalcommits.org/en/v1.0.0
@@ -305,7 +301,7 @@ updated package, and automatically publishes the updated packages using
 
 <!-- ANCHOR_END: package_developers -->
 
-[licenses.html]: https://graphcore-research.github.io/tramway/licenses.html
+[licenses.html]: https://graphcore-research.github.io/gwr/licenses.html
 
 <!-- ANCHOR: dev_docs -->
 
@@ -321,7 +317,7 @@ necessary to first install the development dependencies by running:
 and then build and open the user guide with:
 
 ```bash
-cd tramway-developer-guide/
+cd gwr-developer-guide/
 mdbook build --open
 ```
 
@@ -339,22 +335,22 @@ mdbook serve --open
 
 ## API Documentation
 
-Documentation within the TRAMWAY source is done using [`rustdoc`] formatting
-such that APIs are documented and any code snippets are compiled and run.
+Documentation within the GWR source is done using [`rustdoc`] formatting such
+that APIs are documented and any code snippets are compiled and run.
 
 This documentation can be generated by running:
 
 <!-- ANCHOR: api_docs_cmd -->
 
 ```bash
-cargo doc-tramway --open
+cargo doc-gwr --open
 ```
 
 The documentation can also be generated to include private items, which can be
-useful when developing TRAMWAY packages, by running:
+useful when developing GWR packages, by running:
 
 ```bash
-cargo doc-tramway-dev --open
+cargo doc-gwr-dev --open
 ```
 
 <!-- ANCHOR_END: api_docs_cmd -->

@@ -40,17 +40,17 @@ jobs:
         run: |
           mdbook build
           cat rustdoc_build.log
-        working-directory: ./tramway-developer-guide
+        working-directory: ./gwr-developer-guide
 
       - name: Generate top-level index.html
         id: generate-index
         run: echo "<meta http-equiv=\"refresh\" content=\"0; url=html/index.html\">" > index.html
-        working-directory: ./tramway-developer-guide/book
+        working-directory: ./gwr-developer-guide/book
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./tramway-developer-guide/book
+          path: ./gwr-developer-guide/book
 
   deploy:
     environment:

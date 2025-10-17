@@ -98,8 +98,8 @@ jobs:
           cache-name: ${{ github.job }}
           paths: |
             target/
-            tramway-developer-guide/doctest_cache/
-            tramway-developer-guide/rustdoc_cache/
+            gwr-developer-guide/doctest_cache/
+            gwr-developer-guide/rustdoc_cache/
 
   benchmark:
     strategy:

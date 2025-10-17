@@ -63,19 +63,19 @@
 //! ```
 
 use clap::Parser;
+use gwr_components::connect_port;
+use gwr_engine::engine::Engine;
+use gwr_engine::executor::Spawner;
+use gwr_engine::time::clock::Clock;
+use gwr_engine::types::SimError;
+use gwr_engine::{run_simulation, sim_error};
+use gwr_models::ethernet_frame::FRAME_OVERHEAD_BYTES;
+use gwr_track::builder::setup_all_trackers;
+use gwr_track::{error, info};
 use indicatif::ProgressBar;
 use sim_ring::ring_builder::{
     Config, Sinks, build_limiters, build_pipes, build_ring_nodes, build_source_sinks,
 };
-use tramway_components::connect_port;
-use tramway_engine::engine::Engine;
-use tramway_engine::executor::Spawner;
-use tramway_engine::time::clock::Clock;
-use tramway_engine::types::SimError;
-use tramway_engine::{run_simulation, sim_error};
-use tramway_models::ethernet_frame::FRAME_OVERHEAD_BYTES;
-use tramway_track::builder::setup_all_trackers;
-use tramway_track::{error, info};
 
 // Define the standard Ethernet data rate
 const ETHERNET_GBPS: usize = 100;
@@ -97,7 +97,7 @@ struct Cli {
     #[arg(long, default_value = "")]
     stdout_filter_regex: String,
 
-    /// Enable logging to binary file used by `tramway-spotter`.
+    /// Enable logging to binary file used by `gwr-spotter`.
     #[arg(long, default_value = "false")]
     binary: bool,
 
@@ -115,7 +115,7 @@ struct Cli {
     #[arg(long, default_value = "trace.bin")]
     binary_file: String,
 
-    /// Enable logging to Perfetto file used by `tramway-spotter`.
+    /// Enable logging to Perfetto file used by `gwr-spotter`.
     #[arg(long, default_value = "false")]
     perfetto: bool,
 

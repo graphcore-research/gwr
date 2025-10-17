@@ -4,18 +4,18 @@
 
 use std::rc::Rc;
 
-use tramway_components::arbiter::policy::WeightedRoundRobin;
-use tramway_components::flow_controls::limiter::Limiter;
-use tramway_components::rc_limiter;
-use tramway_components::router::Route;
-use tramway_components::sink::Sink;
-use tramway_components::source::Source;
-use tramway_engine::engine::Engine;
-use tramway_engine::traits::Routable;
-use tramway_engine::types::SimError;
-use tramway_models::ethernet_frame::{EthernetFrame, u64_to_mac};
-use tramway_models::fc_pipeline::{FcPipeline, FcPipelineConfig};
-use tramway_models::ring_node::{IO_INDEX, RING_INDEX, RingConfig, RingNode};
+use gwr_components::arbiter::policy::WeightedRoundRobin;
+use gwr_components::flow_controls::limiter::Limiter;
+use gwr_components::rc_limiter;
+use gwr_components::router::Route;
+use gwr_components::sink::Sink;
+use gwr_components::source::Source;
+use gwr_engine::engine::Engine;
+use gwr_engine::traits::Routable;
+use gwr_engine::types::SimError;
+use gwr_models::ethernet_frame::{EthernetFrame, u64_to_mac};
+use gwr_models::fc_pipeline::{FcPipeline, FcPipelineConfig};
+use gwr_models::ring_node::{IO_INDEX, RING_INDEX, RingConfig, RingNode};
 
 use crate::frame_gen::FrameGen;
 

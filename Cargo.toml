@@ -9,21 +9,21 @@ members = [
     "examples/sim-fabric",
     "examples/sim-pipe",
     "examples/sim-ring",
-    "tramway-components",
-    "tramway-config",
-    "tramway-developer-guide",
-    "tramway-doc-builder",
-    "tramway-docpp",
-    "tramway-engine",
-    "tramway-model-builder",
-    "tramway-models",
-    "tramway-perfetto-sys",
-    "tramway-perfetto",
-    "tramway-protocols",
-    "tramway-resources",
-    "tramway-spotter",
-    "tramway-terminus",
-    "tramway-track",
+    "gwr-components",
+    "gwr-config",
+    "gwr-developer-guide",
+    "gwr-doc-builder",
+    "gwr-docpp",
+    "gwr-engine",
+    "gwr-model-builder",
+    "gwr-models",
+    "gwr-perfetto-sys",
+    "gwr-perfetto",
+    "gwr-protocols",
+    "gwr-resources",
+    "gwr-spotter",
+    "gwr-terminus",
+    "gwr-track",
 ]
 resolver = "2"
 
@@ -31,18 +31,18 @@ resolver = "2"
 authors = ["The Silicon Architecture team"]
 edition = "2024"
 rust-version = "1.90"
-description = "Tramway is Rust Async Modelling for hardWare Architecture and sYstems (TRAMWAY)"
-homepage = "https://github.com/graphcore-research/tramway"
-documentation = "https://graphcore-research.github.io/tramway"
+description = "The Great Western Runtime (GWR)"
+homepage = "https://github.com/graphcore-research/gwr"
+documentation = "https://graphcore-research.github.io/gwr"
 readme = "README.md"
-keywords = ["tramway"]
+keywords = ["gwr"]
 categories = [
     "asynchronous",
     "simulation",
 ]
 license = "MIT"
 license-file = "LICENSE"
-repository = "https://github.com/graphcore-research/tramway"
+repository = "https://github.com/graphcore-research/gwr"
 publish = ["kellnr"]
 
 [workspace.dependencies]

@@ -1,0 +1,35 @@
+# Copyright (c) 2023 Graphcore Ltd. All rights reserved.
+
+[package]
+name = "gwr-spotter"
+version = "0.5.0"
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "TUI based viewer for trace files created by the gwr_track trace system"
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories = ["command-line-utilities", "development-tools::debugging", "parsing", "simulation"]
+publish.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+capnp.workspace = true
+clap.workspace = true
+crossterm.workspace = true
+itertools.workspace = true
+log.workspace = true
+ratatui.workspace = true
+regex.workspace = true
+rocket = "0.5.1"
+gwr-track = { path = "../gwr-track" }
+tokio = "1.45.1"
+
+[features]
+default = ["perfetto"]
+perfetto = ["gwr-track/perfetto"]

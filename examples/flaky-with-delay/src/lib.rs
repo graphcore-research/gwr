@@ -9,8 +9,8 @@
 //! # Ports
 //!
 //! This component has two ports
-//!  - One [input port](tramway_engine::port::InPort): `rx`
-//!  - One [output port](tramway_engine::port::OutPort): `tx`
+//!  - One [input port](gwr_engine::port::InPort): `rx`
+//!  - One [output port](gwr_engine::port::OutPort): `tx`
 
 /// First need to `use` all types and traits that are used.
 use std::cell::RefCell;
@@ -19,28 +19,28 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use async_trait::async_trait;
+use gwr_components::delay::Delay;
+use gwr_components::store::Store;
+/// The gwr components crate provides many connectable building blocks.
+/// Component traits and types are provided along with the components
+/// themselves.
+use gwr_components::{connect_tx, port_rx, take_option};
+use gwr_engine::engine::Engine;
+/// The gwr engine core provides the traits and types required to be
+/// implemented by a component.
+use gwr_engine::executor::Spawner;
+use gwr_engine::port::{InPort, OutPort, PortStateResult};
+use gwr_engine::time::clock::Clock;
+use gwr_engine::traits::{Runnable, SimObject};
+use gwr_engine::types::{SimError, SimResult};
+use gwr_model_builder::EntityDisplay;
+/// The gwr_track library provides tracing/logging features.
+use gwr_track::entity::Entity;
+use gwr_track::trace;
 /// Random library is just used by this component to implement its drop
 /// decisions.
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
-use tramway_components::delay::Delay;
-use tramway_components::store::Store;
-/// The tramway components crate provides many connectable building blocks.
-/// Component traits and types are provided along with the components
-/// themselves.
-use tramway_components::{connect_tx, port_rx, take_option};
-use tramway_engine::engine::Engine;
-/// The tramway engine core provides the traits and types required to be
-/// implemented by a component.
-use tramway_engine::executor::Spawner;
-use tramway_engine::port::{InPort, OutPort, PortStateResult};
-use tramway_engine::time::clock::Clock;
-use tramway_engine::traits::{Runnable, SimObject};
-use tramway_engine::types::{SimError, SimResult};
-use tramway_model_builder::EntityDisplay;
-/// The tramway_track library provides tracing/logging features.
-use tramway_track::entity::Entity;
-use tramway_track::trace;
 
 /// A struct containing configuration options
 pub struct Config {
