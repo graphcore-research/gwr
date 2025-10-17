@@ -19,12 +19,12 @@
 //!
 //! Running a ring node that will lock up:
 //! ```rust
-//! cargo run --bin sim-ring --release -- --kb-to-send 1024 --stdout
+//! cargo run --bin sim-ring --release -- --kib-to-send 1024 --stdout
 //! ```
 //!
 //! But with increased ring priority the same model will pass:
 //! ```rust
-//! cargo run --bin sim-ring --release -- --kb-to-send 1024 --ring-priority 10 --stdout
+//! cargo run --bin sim-ring --release -- --kib-to-send 1024 --ring-priority 10 --stdout
 //! ```
 //!
 //! # Diagram
@@ -152,21 +152,21 @@ struct Cli {
     #[arg(long, default_value = "8")]
     ring_size: usize,
 
-    /// The number of kB to send from each source.
+    /// The number of KiB to send from each source.
     #[arg(long, default_value = "100")]
-    kb_to_send: usize,
+    kib_to_send: usize,
 
     /// The priority of ring traffic over local traffic in the arbiter.
     #[arg(long, default_value = "1")]
     ring_priority: usize,
 
-    /// Override the default number of kB in the Tx buffer.
+    /// Override the default number of KiB in the Tx buffer.
     #[arg(long, default_value = "32")]
-    tx_buffer_kb: usize,
+    tx_buffer_kib: usize,
 
-    /// Override the default number of kB in the Rx buffer.
+    /// Override the default number of KiB in the Rx buffer.
     #[arg(long, default_value = "32")]
-    rx_buffer_kb: usize,
+    rx_buffer_kib: usize,
 
     /// Override the default frame payload bytes.
     #[arg(long, default_value = "256")]
@@ -230,9 +230,9 @@ fn main() -> Result<(), SimError> {
     let spawner = engine.spawner();
     let clock = engine.default_clock();
 
-    let tx_buffer_bytes = args.tx_buffer_kb * 1024;
-    let rx_buffer_bytes = args.rx_buffer_kb * 1024;
-    let num_payload_bytes_to_send = args.kb_to_send * 1024;
+    let tx_buffer_bytes = args.tx_buffer_kib * 1024;
+    let rx_buffer_bytes = args.rx_buffer_kib * 1024;
+    let num_payload_bytes_to_send = args.kib_to_send * 1024;
 
     // Size of max-sized frames
     let frame_bytes = args.frame_payload_bytes + FRAME_OVERHEAD_BYTES;
@@ -248,11 +248,11 @@ fn main() -> Result<(), SimError> {
 
     let top = engine.top().clone();
     info!(top ;
-        "Ring of {} sources, priority {}, each sending {} frames ({}kB) with buffers {}/{} frames.",
+        "Ring of {} sources, priority {}, each sending {} frames ({}KiB) with buffers {}/{} frames.",
         config.ring_size,
         config.ring_priority,
         config.num_send_frames,
-        args.kb_to_send,
+        args.kib_to_send,
         config.rx_buffer_frames,
         config.tx_buffer_frames
     );

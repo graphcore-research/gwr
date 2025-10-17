@@ -103,7 +103,7 @@ where
         // and the component itself.
         let entity = Entity::new(parent, name);
 
-        // Because it is shared it needs to be wrapped in an Arc
+        // Because it is shared it needs to be wrapped in an Rc
         let entity = Rc::new(entity);
 
         let rx = InPort::new(&entity, "rx");

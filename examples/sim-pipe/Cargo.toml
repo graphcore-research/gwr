@@ -1,0 +1,31 @@
+# Copyright (c) 2025 Graphcore Ltd. All rights reserved.
+
+[package]
+name = "sim-pipe"
+version = "1.0.0"
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Simulation of a flow-controlled pipe"
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords = ["example", "tramway"]
+categories = ["asynchronous", "command-line-utilities", "simulation"]
+publish.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+byte-unit.workspace = true
+clap.workspace = true
+log.workspace = true
+indicatif = "0.18.0"
+serde.workspace = true
+tramway-components = { path = "../../tramway-components" }
+tramway-engine = { path = "../../tramway-engine" }
+tramway-models = { path = "../../tramway-models" }
+tramway-model-builder = { path = "../../tramway-model-builder" }
+tramway-track = { path = "../../tramway-track", features = ["perfetto"] }

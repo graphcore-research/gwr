@@ -18,7 +18,7 @@ macro_rules! build_with_entity {
             let (test_tracker, tracker) = test_init!(100);
 
             let top = toplevel(&tracker, "top");
-            test_helpers::check_and_clear(&test_tracker, &["0: created 100, top, 0, 0 bytes"]);
+            test_helpers::check_and_clear(&test_tracker, &["0: created 100, top, 127, 0 bytes"]);
             assert_eq!(top.id, Id(100));
 
             $macro!(top ; "Loc with no args");
@@ -48,11 +48,11 @@ fn create_destroy() {
 
     let top = toplevel(&tracker, "top");
 
-    test_helpers::check_and_clear(&test_tracker, &["0: created 10, top, 0, 0 bytes"]);
+    test_helpers::check_and_clear(&test_tracker, &["0: created 10, top, 127, 0 bytes"]);
     assert_eq!(top.id, Id(10));
 
     let id1 = create_and_track_id!(top);
-    test_helpers::check_and_clear(&test_tracker, &["10: created 11, id, 0, 0 bytes"]);
+    test_helpers::check_and_clear(&test_tracker, &["10: created 11, id, 127, 0 bytes"]);
     assert_eq!(id1, Id(11));
 
     destroy_id!(top ; id1);
@@ -72,8 +72,8 @@ fn enter_exit_basics() {
     test_helpers::check_and_clear(
         &test_tracker,
         &[
-            "0: created 40, top, 0, 0 bytes",
-            "40: created 41, id, 0, 0 bytes",
+            "0: created 40, top, 127, 0 bytes",
+            "40: created 41, id, 127, 0 bytes",
             "40: 41 entered",
         ],
     );
@@ -108,15 +108,15 @@ fn num_bytes() {
     let (test_tracker, tracker) = test_init!(121);
 
     let top = toplevel(&tracker, "top");
-    test_helpers::check_and_clear(&test_tracker, &["0: created 121, top, 0, 0 bytes"]);
+    test_helpers::check_and_clear(&test_tracker, &["0: created 121, top, 127, 0 bytes"]);
 
     let pkt = Packet::new(&top);
-    create!(top ; pkt, 10, 0);
+    create!(top ; pkt, 10);
     test_helpers::check_and_clear(
         &test_tracker,
         &[
-            "121: created 122, id, 0, 0 bytes",
-            r"121: created 122, Packet \{ id: 122 \}, 0, 10 bytes",
+            "121: created 122, id, 127, 0 bytes",
+            r"121: created 122, Packet \{ id: 122 \}, 127, 10 bytes",
         ],
     );
 }
@@ -126,7 +126,7 @@ fn set_time() {
     let (test_tracker, tracker) = test_init!(321);
 
     let top = toplevel(&tracker, "top");
-    test_helpers::check_and_clear(&test_tracker, &["0: created 321, top, 0, 0 bytes"]);
+    test_helpers::check_and_clear(&test_tracker, &["0: created 321, top, 127, 0 bytes"]);
 
     set_time!(top ; 10.0);
     test_helpers::check_and_clear(&test_tracker, &["321: set time 10.0ns"]);

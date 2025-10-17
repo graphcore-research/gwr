@@ -120,7 +120,7 @@ macro_rules! create_and_track_id {
             .tracker
             .is_entity_enabled($entity.id, log::Level::Trace)
         {
-            $entity.tracker.create($entity.id, id, 0, 0, "id");
+            $entity.tracker.create($entity.id, id, 0, i8::MAX, "id");
         }
         id
     }};
@@ -156,9 +156,13 @@ macro_rules! create {
                 Some(parent) => parent.id,
                 None => $crate::NO_ID,
             };
-            $entity
-                .tracker
-                .create(parent_id, $entity.id, 0, 0, $entity.full_name().as_str());
+            $entity.tracker.create(
+                parent_id,
+                $entity.id,
+                0,
+                i8::MAX,
+                $entity.full_name().as_str(),
+            );
         }
     }};
     ($entity:expr ; $created:expr, $num_bytes:expr, $req_type:expr) => {{
@@ -171,6 +175,20 @@ macro_rules! create {
                 $created.id,
                 $num_bytes,
                 $req_type,
+                format!("{}", $created).as_str(),
+            );
+        }
+    }};
+    ($entity:expr ; $created:expr, $num_bytes:expr) => {{
+        if $entity
+            .tracker
+            .is_entity_enabled($entity.id, log::Level::Trace)
+        {
+            $entity.tracker.create(
+                $entity.id,
+                $created.id,
+                $num_bytes,
+                i8::MAX,
                 format!("{}", $created).as_str(),
             );
         }
