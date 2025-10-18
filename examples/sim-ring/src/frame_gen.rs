@@ -1,5 +1,5 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
-//
+
 use std::rc::Rc;
 
 use gwr_models::ethernet_frame::{DEST_MAC_BYTES, EthernetFrame, u64_to_mac};

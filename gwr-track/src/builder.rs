@@ -1,5 +1,5 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
-//
+
 //! Library functions to build trackers as defined by the user.
 
 use std::io::BufWriter;

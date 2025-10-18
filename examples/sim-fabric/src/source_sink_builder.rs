@@ -1,5 +1,5 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
-//
+
 //! Library functions to build parts of the sim-fabric application.
 
 use std::rc::Rc;
