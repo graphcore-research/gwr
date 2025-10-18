@@ -22,7 +22,7 @@ publish.workspace = true
 byte-unit.workspace = true
 clap.workspace = true
 log.workspace = true
-indicatif = "0.18.0"
+indicatif.workspace = true
 serde.workspace = true
 gwr-components = { path = "../../gwr-components" }
 gwr-engine = { path = "../../gwr-engine" }
