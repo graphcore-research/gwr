@@ -10,8 +10,10 @@ use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::TotalBytes;
 use gwr_models::ethernet_frame::{EthernetFrame, SRC_MAC_BYTES, u64_to_mac};
-use gwr_models::fabric::FabricConfig;
-use gwr_models::fabric::functional::Fabric;
+use gwr_models::fabric::functional::FunctionalFabric;
+use gwr_models::fabric::node::FabricRoutingAlgoritm;
+use gwr_models::fabric::routed::RoutedFabric;
+use gwr_models::fabric::{Fabric, FabricConfig};
 
 trait ToDest {
     fn to_dest(&self, source_index: usize, frame_index: usize) -> [u8; SRC_MAC_BYTES];
@@ -36,8 +38,7 @@ impl ToDest for ToNext {
     }
 }
 
-// Create series of frames all destined to one egress port
-fn build_frames_for_one_dest(
+fn build_frames(
     engine: &Engine,
     source_index: usize,
     to_dest: &impl ToDest,
@@ -67,11 +68,10 @@ fn run_test(
     let mut engine = start_test(file!());
 
     let clock = engine.clock_ghz(1.0);
-    let spawner = engine.spawner();
     let top = engine.top();
 
     let fabric =
-        Fabric::new_and_register(&engine, top, "fabric", clock, spawner, config.clone()).unwrap();
+        FunctionalFabric::new_and_register(&engine, top, "fabric", &clock, config.clone()).unwrap();
 
     let num_ports = config.num_ports();
     let mut sources = Vec::with_capacity(num_ports);
@@ -81,13 +81,13 @@ fn run_test(
         let source =
             Source::new_and_register(&engine, top, format!("source{i}").as_str(), None).unwrap();
         source.set_generator(Some(Box::new(
-            build_frames_for_one_dest(&engine, i, to_dest, num_frames, payload_bytes).into_iter(),
+            build_frames(&engine, i, to_dest, num_frames, payload_bytes).into_iter(),
         )));
-        connect_port!(source, tx => fabric, rx, i).unwrap();
+        connect_port!(source, tx => fabric, ingress, i).unwrap();
         sources.push(source);
 
         let sink = Sink::new_and_register(&engine, top, format!("sink{i}").as_str()).unwrap();
-        connect_port!(fabric, tx, i => sink, rx).unwrap();
+        connect_port!(fabric, egress, i => sink, rx).unwrap();
         sinks.push(sink);
     }
 
@@ -109,6 +109,7 @@ fn default_config() -> Rc<FabricConfig> {
         num_columns,
         num_rows,
         num_ports_per_node,
+        None,
         cycles_per_hop,
         cycles_overhead,
         rx_buffer_entries,
@@ -162,18 +163,10 @@ fn latency() {
     let mut engine = start_test(file!());
 
     let clock = engine.clock_ghz(1.0);
-    let spawner = engine.spawner();
     let top = engine.top();
 
-    let fabric = Fabric::new_and_register(
-        &engine,
-        top,
-        "fabric",
-        clock.clone(),
-        spawner,
-        config.clone(),
-    )
-    .unwrap();
+    let fabric =
+        FunctionalFabric::new_and_register(&engine, top, "fabric", &clock, config.clone()).unwrap();
 
     let mut sources = Vec::with_capacity(num_ports);
     let mut sinks = Vec::with_capacity(num_ports);
@@ -182,11 +175,11 @@ fn latency() {
     for i in 0..num_ports {
         let source =
             Source::new_and_register(&engine, top, format!("source{i}").as_str(), None).unwrap();
-        connect_port!(source, tx => fabric, rx, i).unwrap();
+        connect_port!(source, tx => fabric, ingress, i).unwrap();
         sources.push(source);
 
         let sink = Sink::new_and_register(&engine, top, format!("sink{i}").as_str()).unwrap();
-        connect_port!(fabric, tx, i => sink, rx).unwrap();
+        connect_port!(fabric, egress, i => sink, rx).unwrap();
         sinks.push(sink);
     }
 
@@ -194,8 +187,8 @@ fn latency() {
     let num_rows = config.num_rows();
 
     // Send a single frame from one corner to the other
-    let source_index = config.port_index(0, 0, 0);
-    let dest_index = config.port_index(
+    let source_index = config.col_row_port_to_fabric_port_index(0, 0, 0);
+    let dest_index = config.col_row_port_to_fabric_port_index(
         num_columns - 1,
         num_rows - 1,
         config.num_ports_per_node() - 1,
@@ -222,4 +215,35 @@ fn latency() {
     let ticks_through_fabric = num_hops * config.cycles_per_hop() + config.cycles_overhead();
     let ticks = ticks_through_limiter + ticks_through_fabric;
     assert_eq!(clock.tick_now().tick(), ticks as u64);
+}
+
+#[test]
+#[should_panic(expected = "Cannot create fabric with less than 2 ports")]
+fn invalid_functional_fabric() {
+    let config = Rc::new(FabricConfig::new(1, 1, 1, None, 1, 1, 1, 1, 1));
+    let mut engine = start_test(file!());
+    let clock = engine.clock_ghz(1.0);
+    let top = engine.top();
+
+    let _: Rc<FunctionalFabric<usize>> =
+        FunctionalFabric::new_and_register(&engine, top, "fabric", &clock, config).unwrap();
+}
+
+#[test]
+#[should_panic(expected = "Cannot create fabric with less than 2 ports")]
+fn invalid_routed_fabric() {
+    let config = Rc::new(FabricConfig::new(1, 1, 1, None, 1, 1, 1, 1, 1));
+    let mut engine = start_test(file!());
+    let clock = engine.clock_ghz(1.0);
+    let top = engine.top();
+
+    let _: Rc<RoutedFabric<usize>> = RoutedFabric::new_and_register(
+        &engine,
+        top,
+        "fabric",
+        &clock,
+        config,
+        FabricRoutingAlgoritm::ColumnFirst,
+    )
+    .unwrap();
 }

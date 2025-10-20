@@ -43,6 +43,28 @@ function add_entity(depth, nodes, path_remaining, full_name, id) {
   return nodes;
 }
 
+// Annotate each node with the size of circle it should be
+//
+// This is used by the force_tree to determine the size of nodes such that
+// they roughly include their children.
+function annotate_radius(node) {
+  let area = 0;
+  node.children.forEach(function(child, index) {
+    area += annotate_radius(child);
+  });
+
+  if (area == 0) {
+    // Size of smallest node
+    node.radius = 3;
+  } else {
+    // Allow for a 10% overhead
+    node.radius = Math.sqrt(area) * 1.1;
+  }
+
+  // Allow a square box for each entity
+  return Math.pow(2 * node.radius, 2);
+}
+
 // Annotate each node with the number of children it has
 //
 // This is used by the force_tree to determine the size of nodes such that
@@ -92,7 +114,7 @@ function set_initial_xy(node, min_x, max_x, min_y, max_y) {
 // Parse create messages of the form:
 //   hierarchical::name=id
 function parse_entities(text, entities) {
-  const lines = text.split("\n")
+  const lines = text.split("\n");
   let max_depth = 0;
   lines.forEach(function(line) {
     const [name, id] = line.split("=");
@@ -102,6 +124,7 @@ function parse_entities(text, entities) {
   });
 
   annotate_num_children(entities[0]);
+  annotate_radius(entities[0]);
   let max_xy = entities[0].num_children * 10;
   set_initial_xy(entities[0], 0, max_xy, 0, max_xy);
   return max_depth - 1;
@@ -155,7 +178,7 @@ class Renderer {
    */
   _createDefaultControls() {
     var controls = {
-      plot : { url: 'plot', value: 'force_tree' },
+      plot : { url: 'plot', value: 'sunburst' },
     };
 
     // Set the default value to the current value
@@ -171,9 +194,9 @@ class Renderer {
    */
   _createGuiElements() {
     const plotTypes = new Map()
+        .set('sunburst', sunburst)
         .set('force_tree', force_tree)
         .set('tree_map', tree_map)
-        .set('sunburst', sunburst)
         .set('radial_tidy_tree', radial_tidy_tree);
 
     return {

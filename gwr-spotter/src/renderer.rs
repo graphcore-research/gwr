@@ -49,7 +49,7 @@ impl Renderer {
 
             plot_fullness: false,
 
-            print_names: false,
+            print_names: true,
             print_packets: false,
             print_times: true,
         }

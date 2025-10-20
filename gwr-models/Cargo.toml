@@ -2,7 +2,7 @@
 
 [package]
 name = "gwr-models"
-version = "0.7.0"
+version = "0.8.0"
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -24,10 +24,12 @@ harness = false
 
 [dependencies]
 async-trait.workspace = true
+clap.workspace = true
 futures.workspace = true
 log.workspace = true
 paste.workspace = true
 rand.workspace = true
+serde.workspace = true
 gwr-components = { path = "../gwr-components" }
 gwr-model-builder = { path = "../gwr-model-builder" }
 gwr-engine = { path = "../gwr-engine" }

@@ -29,7 +29,7 @@ use gwr_engine::types::SimResult;
 
 /// Command-line arguments.
 #[derive(Parser)]
-#[command(about = "Example application using the Flaky component")]
+#[command(about = "Example application using the Flaky component with delay")]
 struct Cli {
     /// Set the random seed
     #[arg(long, default_value = "123")]
@@ -39,7 +39,7 @@ struct Cli {
     #[arg(long, default_value = "0.2")]
     drop: f64,
 
-    /// The ratio of data to be dropped (should be in the range [0, 1])
+    /// The number of packets to send through the component
     #[arg(long, default_value = "100")]
     num_packets: usize,
 

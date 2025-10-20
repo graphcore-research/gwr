@@ -35,8 +35,6 @@ function force_tree(serverUrl, data, connections, max_depth) {
   var width = Math.max(600, chartDiv.clientWidth);
   var height = Math.max(400, chartDiv.clientHeight - buttonBarPadding);
 
-  const min_r = 3;
-
   // Convert the structure tree to a d3 hierarchy.
   const root = d3.hierarchy(data);
   const nodes = root.descendants();
@@ -48,7 +46,7 @@ function force_tree(serverUrl, data, connections, max_depth) {
     entities_by_id.set(node.data.id, node);
 
     // Compute a radius depending on the number of children a node has.
-    node.r = (node.data.num_children + 1) * min_r;
+    node.r = node.data.radius;
 
     // Assign the x,y to their pre-computed initial values.
     node.x = node.data.initial_x;
@@ -84,8 +82,8 @@ function force_tree(serverUrl, data, connections, max_depth) {
   const simulation = d3.forceSimulation(nodes)
       .force("link", d3.forceLink(links).id(d => d.id).distance(0).strength(d => d.strength))
       .force("charge", d3.forceManyBody().strength(-30))
-      .force("x", d3.forceX())
-      .force("y", d3.forceY())
+      .force("x", d3.forceX().strength(0.1))
+      .force("y", d3.forceY().strength(0.1))
       .alphaDecay(0.005);
 
   // Add an SVG element to the chart node of the HTML.
@@ -111,6 +109,7 @@ function force_tree(serverUrl, data, connections, max_depth) {
       .attr("class", "node")
       .attr("fill", d => d.children ? null : "#000")
       .attr("stroke", d => d.children ? null : "#fff")
+      .attr("opacity", d => d.children ? 0.5 : 1)
       .attr("r", d => d.r)
       .call(drag(simulation));
 

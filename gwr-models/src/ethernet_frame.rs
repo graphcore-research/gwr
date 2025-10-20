@@ -120,6 +120,7 @@ impl Routable for EthernetFrame {
     }
 
     fn access_type(&self) -> AccessType {
+        // Simply return a default value
         AccessType::Control
     }
 }

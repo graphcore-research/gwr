@@ -7,8 +7,8 @@
 //! # Ports
 //!
 //! This component has four ports:
-//!  - Two [passive put ports](gwr_engine::port::InPort): `rx_a`, `rx_b`,
-//!  - Two [active put ports](gwr_engine::port::OutPort): `tx_a`, `tx_b`,
+//!  - Two [input ports](gwr_engine::port::InPort): `rx_a`, `rx_b`,
+//!  - Two [output ports](gwr_engine::port::OutPort): `tx_a`, `tx_b`,
 
 use std::rc::Rc;
 
