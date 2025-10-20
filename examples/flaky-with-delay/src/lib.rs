@@ -42,7 +42,7 @@ use gwr_track::trace;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 
-/// A struct containing configuration options
+/// A struct containing configuration options for the component
 pub struct Config {
     /// Ratio for how many packets are dropped (in the range [0, 1])
     drop_ratio: f64,

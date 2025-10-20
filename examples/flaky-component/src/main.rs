@@ -37,7 +37,7 @@ struct Cli {
     #[arg(long, default_value = "0.2")]
     drop: f64,
 
-    /// The ratio of data to be dropped (should be in the range [0, 1])
+    /// The number of packets to send through the component
     #[arg(long, default_value = "100")]
     num_packets: usize,
 }

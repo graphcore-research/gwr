@@ -22,15 +22,6 @@ Next, a `struct` representing the state of the component needs to be defined.
 {{#rustdoc_include ../../../examples/flaky-component/src/lib.rs:struct}}
 ```
 
-## State
-
-A component usually requires a `State` in order to support any mutable state.
-That is therefore declared next:
-
-```rust,ignore
-{{#rustdoc_include ../../../examples/flaky-component/src/lib.rs:state}}
-```
-
 ## Component Implementation
 
 The component itself needs to implement a number of functions, including the

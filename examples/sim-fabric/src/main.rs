@@ -10,6 +10,10 @@
 //!
 //! # Examples
 //!
+//! *Note*: in all the following comments the assumption is that a default
+//! 1GHz clock is being used. If the default clock frequency were to be
+//! changed then these calculations would be invalid.
+//!
 //! Running a basic all-to-all simulation
 //! ```text
 //! cargo run --bin sim-fabric --release -- --kib-to-send 1024 --stdout --traffic-pattern all-to-all-fixed
@@ -20,29 +24,35 @@
 //! port and the 20-byte ethernet frame overhead an ideal frame size would
 //! be something like 1484:
 //! ```text
-//! cargo run --bin sim-fabric --release -- --port-bits-per-tick 128 --frame-payload-bytes 1484 --kib-to-send 1024 --stdout
+//! cargo run --bin sim-fabric --release -- --port-bits-per-tick 128 --frame-overhead-bytes 20 --frame-payload-bytes 1484 --kib-to-send 1024 --stdout
 //! ```
 //!
-//! This achieves the peak bandwith at one port of 14.9GB/s and if run with
-//! a balanced communcation pattern it can achieve that at each port (357.6GB/s
-//! for the default 24-port fabric):
+//! This achieves the peak bandwith at one port of 14.9 GiB/s and if run with
+//! a balanced communcation pattern it can achieve that at each port (357.6
+//! GiB/s for the default 24-port fabric):
+//!
+//! Note: A throughput of 342.70 GiB/s or less may be observed because the
+//! src/dest       pairing is random and a source will not send to itself. Try a
+//! different       value for `--seed` to observe this behaviour.
+//!
 //! ```text
-//! cargo run --bin sim-fabric --release -- --port-bits-per-tick 128 --frame-payload-bytes 1484 --kib-to-send 1024 --traffic-pattern all-to-all-fixed --stdout
+//! cargo run --bin sim-fabric --release -- --port-bits-per-tick 128 --frame-overhead-bytes 20 --frame-payload-bytes 1484 --kib-to-send 1024 --traffic-pattern all-to-all-fixed --seed 3 --stdout
 //! ```
 
 use std::rc::Rc;
 
 use byte_unit::{AdjustedByte, Byte, UnitType};
 use clap::Parser;
-use gwr_components::connect_port;
 use gwr_engine::engine::Engine;
 use gwr_engine::executor::Spawner;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::types::SimError;
 use gwr_engine::{run_simulation, sim_error};
-use gwr_models::ethernet_frame::FRAME_OVERHEAD_BYTES;
-use gwr_models::fabric::FabricConfig;
-use gwr_models::fabric::functional::Fabric;
+use gwr_models::data_frame::DataFrame;
+use gwr_models::fabric::functional::FunctionalFabric;
+use gwr_models::fabric::node::FabricRoutingAlgoritm;
+use gwr_models::fabric::routed::RoutedFabric;
+use gwr_models::fabric::{Fabric, FabricConfig};
 use gwr_track::builder::setup_all_trackers;
 use gwr_track::entity::Entity;
 use gwr_track::{Track, error, info};
@@ -146,8 +156,12 @@ struct Cli {
     #[arg(long, default_value = "128")]
     port_bits_per_tick: usize,
 
+    /// Set the frame overhead (protocol) bytes.
+    #[arg(long, default_value = "8")]
+    frame_overhead_bytes: usize,
+
     /// Set the default frame payload bytes.
-    #[arg(long, default_value = "256")]
+    #[arg(long, default_value = "32")]
     frame_payload_bytes: usize,
 
     /// Set the clock ticks required to move one hop in the fabric.
@@ -169,6 +183,14 @@ struct Cli {
     /// Seed for random number generator.
     #[clap(long, default_value = "1")]
     seed: u64,
+
+    /// Seed for random number generator.
+    #[clap(long, default_value = "false")]
+    routed: bool,
+
+    /// Seed for random number generator.
+    #[clap(long, default_value_t, value_enum)]
+    fabric_routing: FabricRoutingAlgoritm,
 }
 
 /// Install an event to terminate the simulation at the clock tick defined.
@@ -235,6 +257,7 @@ fn main() -> Result<(), SimError> {
         args.fabric_columns,
         args.fabric_rows,
         args.fabric_ports_per_node,
+        None,
         args.ticks_per_hop,
         args.ticks_overhead,
         args.rx_buffer_entries,
@@ -262,14 +285,18 @@ fn main() -> Result<(), SimError> {
     );
     info!(top ; "Using traffic pattern {}. Random seed {}", args.traffic_pattern, args.seed);
 
-    let fabric = Fabric::new_and_register(
-        &engine,
-        &top,
-        "fabric",
-        clock.clone(),
-        spawner.clone(),
-        config.clone(),
-    )?;
+    let fabric: Rc<dyn Fabric<DataFrame>> = if args.routed {
+        RoutedFabric::new_and_register(
+            &engine,
+            &top,
+            "fabric",
+            &clock,
+            config.clone(),
+            args.fabric_routing,
+        )?
+    } else {
+        FunctionalFabric::new_and_register(&engine, &top, "fabric", &clock, config.clone())?
+    };
 
     // By default enable all ports unless the user has constrained the generators
     let num_active_sources = match args.active_sources {
@@ -277,10 +304,11 @@ fn main() -> Result<(), SimError> {
         None => config.num_ports(),
     };
 
-    let (sources, sinks) = build_source_sinks(
+    let (sources, sinks, total_expected_frames) = build_source_sinks(
         &mut engine,
         &config,
         args.traffic_pattern,
+        args.frame_overhead_bytes,
         args.frame_payload_bytes,
         num_send_frames,
         args.seed,
@@ -288,13 +316,12 @@ fn main() -> Result<(), SimError> {
     );
 
     for i in 0..num_ports {
-        connect_port!(sources[i], tx => fabric, rx, i)?;
-        connect_port!(fabric, tx, i => sinks[i], rx)?;
+        sources[i].connect_port_tx(fabric.port_ingress_i(i))?;
+        fabric.connect_port_egress_i(i, sinks[i].port_rx())?;
     }
 
     info!(top ; "Platform built and connected");
 
-    let total_expected_frames = num_send_frames * num_ports;
     let progress_bar = ProgressBar::new(total_expected_frames as u64);
     if args.progress {
         let sinks = sinks.to_owned();
@@ -319,7 +346,6 @@ fn main() -> Result<(), SimError> {
         total_sunk_frames += sink.num_sunk();
     }
 
-    let total_expected_frames = num_send_frames * num_active_sources;
     if total_sunk_frames != total_expected_frames {
         error!(top ; "{}/{} frames received", total_sunk_frames, total_expected_frames);
         error!(top ; "Deadlock detected at {:.2}ns", clock.time_now_ns());
@@ -336,6 +362,7 @@ fn main() -> Result<(), SimError> {
         &top,
         clock.time_now_ns(),
         total_sunk_frames,
+        args.frame_overhead_bytes,
         args.frame_payload_bytes,
     );
     Ok(())
@@ -345,6 +372,7 @@ fn print_summary(
     top: &Rc<Entity>,
     time_now_ns: f64,
     total_sunk_frames: usize,
+    frame_overhead_bytes: usize,
     frame_payload_bytes: usize,
 ) {
     let time_now_s = time_now_ns / (1000.0 * 1000.0 * 1000.0);
@@ -353,7 +381,7 @@ fn print_summary(
     let (payload_value, payload_per_second) =
         compute_adjusted_value_and_rate(time_now_s, payload_bytes);
 
-    let total_bytes = payload_bytes + (total_sunk_frames * FRAME_OVERHEAD_BYTES) as u64;
+    let total_bytes = payload_bytes + (total_sunk_frames * frame_overhead_bytes) as u64;
     let (total_value, total_per_second) = compute_adjusted_value_and_rate(time_now_s, total_bytes);
 
     info!(top ; "Pass: Sent {total_sunk_frames} in {time_now_ns:.2}ns.");

@@ -8,8 +8,8 @@
 //! # Ports
 //!
 //! This component has four ports:
-//!  - Two [input ports](gwr_engine::port::InPort): `rx[RING]`, `rx[IO]`
-//!  - Two [output ports](gwr_engine::port::OutPort): `tx[RING]`, `tx[IO]`
+//!  - Two [input ports](gwr_engine::port::InPort): `ring_rx`, `io_rx`
+//!  - Two [output ports](gwr_engine::port::OutPort): `ring_tx`, `io_tx`
 //!
 //! # Diagram
 //!

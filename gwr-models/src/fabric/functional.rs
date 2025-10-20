@@ -39,7 +39,7 @@ use gwr_model_builder::EntityDisplay;
 use gwr_track::entity::Entity;
 use gwr_track::{enter, exit};
 
-use crate::fabric::FabricConfig;
+use crate::fabric::{Fabric, FabricConfig};
 
 /// Return the Manhatten time to travel between RX and TX ports specified.
 #[must_use]
@@ -48,8 +48,8 @@ fn manhatten_rx_to_tx_cycles(
     rx_port_index: usize,
     tx_port_index: usize,
 ) -> usize {
-    let (rx_col, rx_row, _) = config.port_col_row_index(rx_port_index);
-    let (tx_col, tx_row, _) = config.port_col_row_index(tx_port_index);
+    let (rx_col, rx_row, _) = config.fabric_port_index_to_col_row_port(rx_port_index);
+    let (tx_col, tx_row, _) = config.fabric_port_index_to_col_row_port(tx_port_index);
     let horizontal_hops = rx_col.abs_diff(tx_col);
     let vertical_hops = rx_row.abs_diff(tx_row);
 
@@ -59,7 +59,7 @@ fn manhatten_rx_to_tx_cycles(
 }
 
 #[derive(EntityDisplay)]
-pub struct Fabric<T>
+pub struct FunctionalFabric<T>
 where
     T: SimObject + Routable,
 {
@@ -73,23 +73,27 @@ where
     spawner: Spawner,
 }
 
-impl<T> Fabric<T>
+impl<T> FunctionalFabric<T>
 where
     T: SimObject + Routable,
 {
+    /// Create and register a new fabric.
+    ///
+    /// The total number of ingress/egress ports must be at least two, otherwise
+    /// there are no valid routes and an error will be returned.
     pub fn new_and_register(
         engine: &Engine,
         parent: &Rc<Entity>,
         name: &str,
-        clock: Clock,
-        spawner: Spawner,
+        clock: &Clock,
         config: Rc<FabricConfig>,
     ) -> Result<Rc<Self>, SimError> {
         let entity = Rc::new(Entity::new(parent, name));
+        let spawner = engine.spawner();
 
         let num_ports = config.num_columns * config.num_rows * config.num_ports_per_node;
-        if num_ports == 0 {
-            return sim_error!(format!("Cannot construct fabric with 0 ports"));
+        if num_ports < 2 {
+            return sim_error!(format!("Cannot create fabric with less than 2 ports"));
         }
 
         let mut rx_buffer_limiters = Vec::with_capacity(num_ports);
@@ -154,33 +158,34 @@ where
             tx_buffers,
             internal_tx: RefCell::new(internal_tx),
             config,
-            clock,
+            clock: clock.clone(),
             spawner,
         });
         engine.register(rc_self.clone());
         Ok(rc_self)
     }
+}
 
-    pub fn port_index(&self, col: usize, row: usize, node_index: usize) -> usize {
-        self.config.port_index(col, row, node_index)
-    }
-
-    pub fn connect_port_tx_i(&self, i: usize, port_state: PortStateResult<T>) -> SimResult {
+impl<T> Fabric<T> for FunctionalFabric<T>
+where
+    T: SimObject + Routable,
+{
+    fn connect_port_egress_i(&self, i: usize, port_state: PortStateResult<T>) -> SimResult {
         self.tx_buffers[i].connect_port_tx(port_state)
     }
 
-    pub fn port_rx_i(&self, i: usize) -> PortStateResult<T> {
+    fn port_ingress_i(&self, i: usize) -> PortStateResult<T> {
         self.rx_buffer_limiters[i].port_rx()
     }
 }
 
 #[async_trait(?Send)]
-impl<T> Runnable for Fabric<T>
+impl<T> Runnable for FunctionalFabric<T>
 where
     T: SimObject + Routable,
 {
     async fn run(&self) -> SimResult {
-        let num_ports = self.config.num_ports();
+        let num_ports = self.config.max_num_ports();
         let mut port_states = Vec::with_capacity(num_ports);
         for _ in 0..num_ports {
             port_states.push(PortState::default());
@@ -227,7 +232,7 @@ where
 ///
 /// This allows it to be easily shared across all rx and tx handlers.
 struct PortState<T> {
-    data_for_tx: RefCell<Option<(T, ClockTick)>>,
+    data_for_tx: RefCell<VecDeque<(T, ClockTick)>>,
     waiting_for_data: Repeated<()>,
     waiting_for_room: Repeated<()>,
     inputs_waiting_for_room: RefCell<VecDeque<usize>>,
@@ -236,7 +241,7 @@ struct PortState<T> {
 impl<T> Default for PortState<T> {
     fn default() -> Self {
         Self {
-            data_for_tx: RefCell::new(None),
+            data_for_tx: RefCell::new(VecDeque::new()),
             waiting_for_data: Repeated::default(),
             waiting_for_room: Repeated::default(),
             inputs_waiting_for_room: RefCell::new(VecDeque::new()),
@@ -256,6 +261,10 @@ async fn run_rx<T>(
 where
     T: SimObject + Routable,
 {
+    // Not quite right - but use the size of the TX buffer to configure the internal
+    // buffering
+    let max_internal_buffer_entries = config.tx_buffer_entries;
+
     loop {
         let value = internal_rx.get()?.await;
         let value_id = value.id();
@@ -267,15 +276,18 @@ where
         let mut tick = clock.tick_now();
         tick.set_tick(tick.tick() + delay_ticks as u64);
 
-        // If the destination already has an unhandled object then wait
-        while port_states[dest_index].data_for_tx.borrow().is_some() {
+        // If the queue to the destination is too full then wait for space
+        while port_states[dest_index].data_for_tx.borrow().len() > max_internal_buffer_entries {
             port_states[dest_index]
                 .inputs_waiting_for_room
                 .borrow_mut()
                 .push_back(port_index);
             port_states[port_index].waiting_for_room.listen().await;
         }
-        *port_states[dest_index].data_for_tx.borrow_mut() = Some((value, tick));
+        port_states[dest_index]
+            .data_for_tx
+            .borrow_mut()
+            .push_back((value, tick));
         port_states[dest_index].waiting_for_data.notify()?;
     }
 }
@@ -291,7 +303,16 @@ where
     T: SimObject + Routable,
 {
     loop {
-        let next = port_states[port_index].data_for_tx.borrow_mut().take();
+        let next = port_states[port_index].data_for_tx.borrow_mut().pop_front();
+
+        if let Some(waiting_input) = port_states[port_index]
+            .inputs_waiting_for_room
+            .borrow_mut()
+            .pop_front()
+        {
+            port_states[waiting_input].waiting_for_room.notify()?;
+        }
+
         match next {
             Some((value, tick)) => {
                 let tick_now = clock.tick_now();
@@ -299,16 +320,9 @@ where
                     // Need to send in the future, delay
                     clock.wait_ticks(tick.tick() - tick_now.tick()).await;
                 }
+
                 exit!(entity ; value.id());
                 internal_tx.put(value)?.await;
-
-                if let Some(waiting_input) = port_states[port_index]
-                    .inputs_waiting_for_room
-                    .borrow_mut()
-                    .pop_front()
-                {
-                    port_states[waiting_input].waiting_for_room.notify()?;
-                }
             }
             None => {
                 port_states[port_index].waiting_for_data.listen().await;
