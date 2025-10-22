@@ -6,8 +6,7 @@
 capacity.
 
 The `gwr_resources` library provides a collection of shared resource primitives
-to be used when building simulations. These are not intended to include or model
-Graphcore IP.
+to be used when building simulations.
 
 ## Example
 

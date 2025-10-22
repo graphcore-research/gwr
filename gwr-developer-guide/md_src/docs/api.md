@@ -18,7 +18,7 @@ via `mdbook serve`. Should you wish to view the API documentation run
 `mdbook build` or `mdbook watch` instead.
 
 The documentation will then be displayed in the above frame, as well as being
-accessable
+accessible
 <a href="../../rustdoc/gwr_engine/index.html" target="_blank">externally</a> to
 this developer guide.
 

@@ -7,8 +7,7 @@ Simulation components are the basic building blocks of any GWR model.
 The GWR `Engine` runs components that are connected together using `ports`.
 
 The `gwr_components` library provides a collection of connectable component
-primitives to be used when building models. These are not intended to include or
-model Graphcore IP.
+primitives to be used when building models.
 
 ## Creating new components
 
