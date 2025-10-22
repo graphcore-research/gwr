@@ -41,11 +41,6 @@ pub enum Permission {
     /// All writes ignored. Reads return 0.
     WriteIgnore,
 
-    /// Writes ignored after first transition from `WaitForExchange` to
-    /// `Executing`. Reads yield last value successfully written or reset
-    /// value if never written to.
-    WriteIgnoredAfterBoot,
-
     /// Writes ignored. Reads return 0.
     Reserved,
 }
