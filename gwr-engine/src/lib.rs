@@ -28,6 +28,10 @@
 //!    component that has some subcomponents.
 //!  - **examples/scrambler**: a worked example of a component that registers a
 //!    a vector of subcomponents.
+//!  - **examples/sim-fabric**: simulate a device comprising a rectangular
+//!    fabric.
+//!  - **examples/sim-pipe**: simulate a flow-controlled pipeline.
+//!  - **examples/sim-ring**: simulate a device comprising a ring of nodes.
 //!
 //! [components]: gwr_components/index.html
 

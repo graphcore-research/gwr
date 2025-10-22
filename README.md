@@ -40,12 +40,13 @@ which together provide the following functionality:
 
 ## Why GWR?
 
-GWR aims to provide a complete modelling workflow, supporting projects from the
-initial exploration phase, through more detailed evaluations, and finally to a
-full specification and golden reference quality model.
+GWR aims to provide a complete modelling workflow, supporting silicon chip and
+system architecture projects from the initial exploration phase, through more
+detailed evaluations, and finally to a full specification and golden reference
+quality model.
 
 Async language features are utilised to allow expressive description of physical
-world parallism. An asynchronous runtime executor is included within the
+world parallelism. An asynchronous runtime executor is included within the
 gwr-engine package for this purpose, which supports both event-driven and
 clocked modelling.
 
