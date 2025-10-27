@@ -1,8 +1,25 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
-//! This is an example component that will register a vector of subcomponents.
+//! An example component which can switch the how its inputs are connected.
 //!
-//! The `main.rs` in this folder shows how it can be used.
+//! For latest usage run:
+//! ```bash
+//! cargo run --bin scrambler -- --help
+//! ```
+//!
+//! # Examples
+//!
+//! Get the two inputs in the same order:
+//! ```bash
+//! $ cargo run --bin scrambler
+//! Input order: 1, 2
+//! ```
+//!
+//! Switch the two inputs:
+//! ```bash
+//! $ cargo run --bin scrambler -- -s
+//! Input order: 2, 1
+//! ```
 //!
 //! # Ports
 //!

@@ -30,7 +30,7 @@
 - [Models](models/chapter.md)
 
 - [Applications](applications/chapter.md)
-  - [Example: Writing a main.rs](applications/writing_a_main.md)
+  - [Examples](applications/examples.md)
 
 - [Documentation](docs/chapter.md)
   - [API Documentation](docs/api.md)

@@ -105,7 +105,7 @@ where
     drop_ratio: f64,
 
     /// Random number generator used for deciding when to drop. Note that it is
-    /// wrapped in a `Shared` which allows it to be used mutably in the `put()`
+    /// wrapped in a `RefCell` which allows it to be used mutably in the `put()`
     /// function despite the fact that the Inner will be immutable (`&self`
     /// argument in the trait).
     rng: RefCell<StdRng>,

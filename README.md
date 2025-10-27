@@ -27,10 +27,12 @@ which together provide the following functionality:
 - Hierarchical configuration support.
 - Documentation tooling.
 - A library of [components] and basic [models].
+- A set of [example applications].
 
 <!-- ANCHOR_END: intro -->
 
 [components]: gwr-developer-guide/md_src/components/chapter.md
+[example applications]: gwr-developer-guide/md_src/applications/examples.md
 [log viewing]: gwr-developer-guide/md_src/gwr_spotter/chapter.md
 [Logging]: gwr-developer-guide/md_src/gwr_track/chapter.md
 [models]: gwr-developer-guide/md_src/models/chapter.md
