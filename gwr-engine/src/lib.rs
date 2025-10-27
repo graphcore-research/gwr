@@ -10,7 +10,7 @@
 //!
 //! This library provides the core of the [GWR Engine](crate::engine) which
 //! executes event driven asynchronous simulation
-//! [components](../gwr_components/index.html).
+//! [components].
 //!
 //! # Developer Guide
 //!
@@ -22,18 +22,23 @@
 //!
 //! Make sure you look at the **examples/** folder which includes
 //! worked/documented examples. The current examples are:
-//!  - **examples/flaky-component**: a worked example of a simple two-port
+//!  - [examples/flaky-component]: a worked example of a simple two-port
 //!    component.
-//!  - **examples/flaky-with_delay**: a worked example of a simple two-port
+//!  - [examples/flaky-with-delay]: a worked example of a simple two-port
 //!    component that has some subcomponents.
-//!  - **examples/scrambler**: a worked example of a component that registers a
-//!    a vector of subcomponents.
-//!  - **examples/sim-fabric**: simulate a device comprising a rectangular
-//!    fabric.
-//!  - **examples/sim-pipe**: simulate a flow-controlled pipeline.
-//!  - **examples/sim-ring**: simulate a device comprising a ring of nodes.
+//!  - [examples/scrambler]: a worked example of a component that registers a a
+//!    vector of subcomponents.
+//!  - [examples/sim-pipe]: simulate a flow-controlled pipeline.
+//!  - [examples/sim-ring]: simulate a device comprising a ring of nodes.
+//!  - [examples/sim-fabric]: simulate a device comprising a rectangular fabric.
 //!
-//! [components]: gwr_components/index.html
+//! [components]: ../gwr_components/index.html
+//! [examples/flaky-component]: ../flaky_component/index.html
+//! [examples/flaky-with-delay]: ../flaky_with_delay/index.html
+//! [examples/scrambler]: ../scrambler/index.html
+//! [examples/sim-pipe]: ../sim_pipe/index.html
+//! [examples/sim-ring]: ../sim_ring/index.html
+//! [examples/sim-fabric]: ../sim_fabric/index.html
 
 //! # Simple Application
 //!

@@ -1,28 +1,8 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
-//! This is an example using the scrambler component which can switch the two
-//! inputs passing through it. The main purpose of this component is to show
-//! how the user can register a vector of subcomponents.
-//! See [Scrambler] (crate::examples::scrambler::Scrambler)
+//! An example component which can switch the how its inputs are connected.
 //!
-//! For latest usage run:
-//! ```bash
-//! cargo run --bin scrambler -- --help
-//! ```
-//!
-//! # Examples
-//!
-//! Get the two inputs in the same order:
-//! ```bash
-//! $ cargo run --bin scrambler
-//! Input order: 1, 2
-//! ```
-//!
-//! Switch the two inputs:
-//! ```bash
-//! $ cargo run --bin scrambler -- -s
-//! Input order: 2, 1
-//! ```
+//! See `lib.rs` for details.
 
 use clap::Parser;
 use gwr_components::sink::Sink;

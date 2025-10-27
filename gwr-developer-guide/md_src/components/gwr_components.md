@@ -56,6 +56,17 @@ between its inputs if more than one of them is ready.
 
 **Interfaces:** `rx(i)`: [input ports], `tx`: [output port].
 
+## Arbiteration Policies
+
+An `Arbiter` needs to be created with an arbitration policy in order to make the
+arbitration decisions. A number of arbitration policies are provided in the
+library or the user can write their own custom policy. The existing policies
+are:
+
+- `Round Robin`
+- `Weighted Round Robin`
+- `Priority Round Robin`
+
 [`Clock`]: ../gwr_engine/time/clocks.md
 [input port]: ../components/ports.md#input-ports
 [input ports]: ../components/ports.md#input-ports

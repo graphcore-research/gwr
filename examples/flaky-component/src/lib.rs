@@ -62,23 +62,22 @@ where
     drop_ratio: f64,
 
     /// Random number generator used for deciding when to drop. Note that it is
-    /// wrapped in a `RefCell` which allows it to be used mutably in the `put()`
-    /// function despite the fact that the State will be immutable (`&self`
-    /// argument in the trait.
+    /// wrapped in a [RefCell] which allows it to be used mutably in the `put()`
+    /// function despite the fact that the struct will be immutable.
     rng: RefCell<StdRng>,
 
     /// Rx port to which to send any data that hasn't been dropped.
-    /// Again, needs to be wrapped in the `Shared` to allow it to be changed
+    /// Again, needs to be wrapped in the [RefCell] to allow it to be changed
     /// when components are actually connected.
     ///
-    /// Note: It is also wrapped in an Option so that it can be take out in the
-    /// `run()` function.
+    /// Note: It is also wrapped in an [Option] so that it can be taken out in
+    /// the `run()` function.
     rx: RefCell<Option<InPort<T>>>,
 
     /// Tx port to which to send any data that hasn't been dropped.
     ///
-    /// Note: It is also wrapped in an Option so that it can be take out in the
-    /// `run()` function.
+    /// Note: It is also wrapped in an [Option] so that it can be taken out in
+    /// the `run()` function.
     tx: RefCell<Option<OutPort<T>>>,
 }
 // ANCHOR_END: struct
@@ -108,7 +107,7 @@ where
 
         let rx = InPort::new(&entity, "rx");
         let tx = OutPort::new(&entity, "tx");
-        // Finally, the top-level struct is created with the `State` wrapped in an Rc.
+        // Finally, the top-level struct is created and wrapped in an Rc.
         let rc_self = Rc::new(Self {
             entity,
             drop_ratio,
@@ -122,7 +121,8 @@ where
 
     /// This provides the `InPort` to which you can connect
     pub fn port_rx(&self) -> PortStateResult<T> {
-        // The `port_rx!` macro is the most consise way to access the rx port state.
+        // The `port_rx!` macro is the most consise way to access the rx port state
+        // when wrapped in `RefCell<Option<>>`.
         port_rx!(self.rx, state)
     }
 
@@ -132,7 +132,7 @@ where
     /// port.
     pub fn connect_port_tx(&self, port_state: PortStateResult<T>) -> SimResult {
         // Because the State is immutable then we use the `connect_tx!` macro
-        // in order to simplify the setup.
+        // in order to simplify the setup when wrapped in `RefCell<Option<>>`.
         connect_tx!(self.tx, connect ; port_state)
     }
 
