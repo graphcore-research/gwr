@@ -189,7 +189,7 @@ class Renderer {
     return controls;
   }
 
-    /**
+  /**
    * Create the graphical elements of the GUI (e.g. x-axis, y-axis)
    */
   _createGuiElements() {
