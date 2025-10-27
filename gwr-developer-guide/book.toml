@@ -8,12 +8,13 @@ src = "md_src"
 language = "en"
 
 [preprocessor.alerts]
-after = [ "links" ]
+after = ["links"]
 renderers = ["html", "linkcheck"]
 
 [preprocessor.cmdrun]
 
 [preprocessor.keeper]
+after = ["links"]
 command = "mdbook-keeper"
 manifest_dir = "../"
 is_workspace = true
