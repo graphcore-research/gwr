@@ -29,6 +29,32 @@ which together provide the following functionality:
 - A library of [components] and basic [models].
 - A set of [example applications].
 
+## Simple simulation example
+
+This example shows how the GWR engine and components can be used to create a
+simple simulation. This simulation connects a source, which will transmit 10
+objects, to a sink, which counts the number of objects it receives.
+
+```rust
+use gwr_components::sink::Sink;
+use gwr_components::source::Source;
+use gwr_components::{connect_port, option_box_repeat};
+use gwr_engine::engine::Engine;
+use gwr_engine::run_simulation;
+
+fn main() {
+  let mut engine = Engine::default();
+  let mut source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10))
+      .expect("should be able to create and register `Source`");
+  let sink = Sink::new_and_register(&engine, engine.top(), "sink")
+      .expect("should be able to create and register `Sink`");
+  connect_port!(source, tx => sink, rx)
+      .expect("should be able to connect `Source` to `Sink`");
+  run_simulation!(engine);
+  assert_eq!(sink.num_sunk(), 10);
+}
+```
+
 <!-- ANCHOR_END: intro -->
 
 [components]: gwr-developer-guide/md_src/components/chapter.md
