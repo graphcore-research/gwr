@@ -19,6 +19,7 @@ pub struct ClockTick {
     /// Clock ticks.
     tick: u64,
 
+    #[cfg(feature = "phase")]
     /// Clock phase.
     phase: u32,
 }
@@ -26,7 +27,12 @@ pub struct ClockTick {
 impl ClockTick {
     #[must_use]
     pub fn new() -> Self {
-        Self { tick: 0, phase: 0 }
+        Self {
+            tick: 0,
+
+            #[cfg(feature = "phase")]
+            phase: 0,
+        }
     }
 
     /// Get the current clock tick.
@@ -37,6 +43,7 @@ impl ClockTick {
 
     /// Get the current clock phase.
     #[must_use]
+    #[cfg(feature = "phase")]
     pub fn phase(&self) -> u32 {
         self.phase
     }
@@ -48,6 +55,7 @@ impl ClockTick {
     }
 
     /// Change the default constructor value of `phase`.
+    #[cfg(feature = "phase")]
     pub fn set_phase(&mut self, phase: u32) -> ClockTick {
         self.phase = phase;
         *self
@@ -62,12 +70,18 @@ impl Default for ClockTick {
 
 /// Define the comparison operation for SimTime.
 impl Ord for ClockTick {
+    #[cfg(feature = "phase")]
     fn cmp(&self, other: &Self) -> Ordering {
         match self.tick.cmp(&other.tick) {
             Ordering::Greater => Ordering::Greater,
             Ordering::Less => Ordering::Less,
             Ordering::Equal => self.phase.cmp(&other.phase),
         }
+    }
+
+    #[cfg(not(feature = "phase"))]
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.tick.cmp(&other.tick)
     }
 }
 
@@ -78,8 +92,13 @@ impl PartialOrd for ClockTick {
 }
 
 impl std::fmt::Display for ClockTick {
+    #[cfg(feature = "phase")]
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}.{:?}", self.tick, self.phase)
+    }
+    #[cfg(not(feature = "phase"))]
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.tick)
     }
 }
 
@@ -174,7 +193,11 @@ impl Clock {
     #[must_use]
     pub fn new(freq_mhz: f64) -> Self {
         let shared_state = Rc::new(ClockState {
-            now: RefCell::new(ClockTick { tick: 0, phase: 0 }),
+            now: RefCell::new(ClockTick {
+                tick: 0,
+                #[cfg(feature = "phase")]
+                phase: 0,
+            }),
             waiting: RefCell::new(Vec::new()),
             waiting_times: RefCell::new(Vec::new()),
             to_resolve: RefCell::new(Vec::new()),
@@ -252,6 +275,7 @@ impl Clock {
     }
 
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
+    #[cfg(feature = "phase")]
     pub fn next_tick_and_phase(&self, phase: u32) -> ClockDelay {
         let mut until = self.tick_now();
         until.tick += 1;
@@ -265,6 +289,7 @@ impl Clock {
     }
 
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
+    #[cfg(feature = "phase")]
     pub fn wait_phase(&self, phase: u32) -> ClockDelay {
         let mut until = self.tick_now();
         assert!(phase > until.phase, "Time going backwards");
