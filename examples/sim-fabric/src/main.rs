@@ -209,14 +209,7 @@ fn setup_trackers(args: &Cli) -> Rc<dyn Track> {
     .unwrap()
 }
 
-fn main() -> Result<(), SimError> {
-    let args = Cli::parse();
-    let tracker = setup_trackers(&args);
-
-    let mut engine = Engine::new(&tracker);
-    let spawner = engine.spawner();
-    let clock = engine.default_clock();
-
+fn create_config(engine: &Engine, args: &Cli) -> (Rc<FabricConfig>, usize) {
     let config = FabricConfig::new(
         args.fabric_columns,
         args.fabric_rows,
@@ -229,14 +222,13 @@ fn main() -> Result<(), SimError> {
         args.port_bits_per_tick,
     );
     let config = Rc::new(config);
-    let num_ports = config.num_ports();
 
     let num_payload_bytes_to_send = args.kib_to_send * 1024;
 
     // Size of max-sized frames
     let num_send_frames = num_payload_bytes_to_send / args.frame_payload_bytes;
 
-    let top = engine.top().clone();
+    let top = engine.top();
     info!(top ;
         "Fabric of {}x{}x{} sources, each sending {} frames ({}KiB) with buffers {}/{} frames.",
         config.num_columns(),
@@ -249,6 +241,20 @@ fn main() -> Result<(), SimError> {
     );
     info!(top ; "Using traffic pattern {}. Random seed {}", args.traffic_pattern, args.seed);
 
+    (config, num_send_frames)
+}
+
+fn main() -> Result<(), SimError> {
+    let args = Cli::parse();
+    let tracker = setup_trackers(&args);
+
+    let mut engine = Engine::new(&tracker);
+    let spawner = engine.spawner();
+    let clock = engine.default_clock();
+
+    let (config, num_send_frames) = create_config(&engine, &args);
+    let num_ports = config.num_ports();
+    let top = engine.top().clone();
     let fabric: Rc<dyn Fabric<DataFrame>> = if args.routed {
         RoutedFabric::new_and_register(
             &engine,
@@ -279,8 +285,14 @@ fn main() -> Result<(), SimError> {
         num_active_sources,
     );
 
+    let window_size_ticks = 250;
     for i in 0..num_ports {
-        sources[i].connect_port_tx(fabric.port_ingress_i(i))?;
+        let state = fabric.port_ingress_i(i);
+        if let Ok(state) = &state {
+            state.monitor(&engine, clock.clone(), window_size_ticks);
+        }
+
+        sources[i].connect_port_tx(state)?;
         fabric.connect_port_egress_i(i, sinks[i].port_rx())?;
     }
 

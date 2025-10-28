@@ -13,7 +13,10 @@ use futures::future::FusedFuture;
 use gwr_track::connect;
 use gwr_track::entity::Entity;
 
+use crate::engine::Engine;
+use crate::port::monitor::Monitor;
 use crate::sim_error;
+use crate::time::clock::Clock;
 use crate::traits::SimObject;
 use crate::types::{SimError, SimResult};
 
@@ -23,6 +26,8 @@ pub type PortStartGetResult<T> = Result<PortStartGet<T>, SimError>;
 pub type PortPutResult<T> = Result<PortPut<T>, SimError>;
 pub type PortTryPutResult<T> = Result<PortTryPut<T>, SimError>;
 
+pub mod monitor;
+
 pub struct PortState<T>
 where
     T: SimObject,
@@ -31,6 +36,7 @@ where
     waiting_get: RefCell<Option<Waker>>,
     waiting_put: RefCell<Option<Waker>>,
     pub in_port_entity: Rc<Entity>,
+    monitor: RefCell<Option<Rc<Monitor>>>,
 }
 
 impl<T> PortState<T>
@@ -43,7 +49,17 @@ where
             waiting_get: RefCell::new(None),
             waiting_put: RefCell::new(None),
             in_port_entity,
+            monitor: RefCell::new(None),
         }
+    }
+
+    pub fn monitor(&self, engine: &Engine, clock: Clock, window_size_ticks: u64) {
+        *self.monitor.borrow_mut() = Some(Monitor::new_and_register(
+            engine,
+            self.in_port_entity.clone(),
+            clock,
+            window_size_ticks,
+        ));
     }
 }
 
@@ -289,6 +305,11 @@ where
         if let Some(value) = value {
             self.done = true;
 
+            // Track the object through the port monitor if there is one
+            if let Some(monitor) = self.state.monitor.borrow().as_ref() {
+                monitor.monitor(&value);
+            }
+
             if let Some(waker) = self.state.waiting_put.borrow_mut().take() {
                 waker.wake();
             }
@@ -331,6 +352,12 @@ where
         let value = self.state.value.borrow_mut().take();
         if let Some(value) = value {
             self.done = true;
+
+            // Track the object through the port monitor if there is one
+            if let Some(monitor) = self.state.monitor.borrow().as_ref() {
+                monitor.monitor(&value);
+            }
+
             Poll::Ready(value)
         } else {
             *self.state.waiting_get.borrow_mut() = Some(cx.waker().clone());
