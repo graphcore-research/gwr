@@ -7,6 +7,7 @@ use std::path::Path;
 use gwr_track::Id;
 use gwr_track::perfetto_trace_builder::PerfettoTraceBuilder;
 use gwr_track::trace_visitor::{TraceVisitor, process_capnp};
+use gwr_track::tracker::types::ReqType;
 
 struct PerfettoGenerator {
     output: File,
@@ -38,15 +39,24 @@ impl TraceVisitor for PerfettoGenerator {
         // todo!()
     }
 
-    fn create(&mut self, created_by: Id, id: Id, _num_bytes: usize, _req_type: i8, name: &str) {
-        let trace_packet = self
-            .trace_builder
-            .build_counter_track_descriptor_trace_packet(
-                self.current_time_ns,
-                id,
-                created_by,
-                name,
-            );
+    fn create(&mut self, created_by: Id, id: Id, _num_bytes: usize, req_type: i8, name: &str) {
+        let trace_packet = if req_type == ReqType::Value as i8 {
+            self.trace_builder
+                .build_value_track_descriptor_trace_packet(
+                    self.current_time_ns,
+                    id,
+                    created_by,
+                    name,
+                )
+        } else {
+            self.trace_builder
+                .build_counter_track_descriptor_trace_packet(
+                    self.current_time_ns,
+                    id,
+                    created_by,
+                    name,
+                )
+        };
         let buf = self.trace_builder.build_trace_to_bytes(vec![trace_packet]);
         self.output
             .write_all(&buf)
@@ -80,6 +90,18 @@ impl TraceVisitor for PerfettoGenerator {
             id,
             exited,
             -1,
+        );
+        let buf = self.trace_builder.build_trace_to_bytes(vec![trace_packet]);
+        self.output
+            .write_all(&buf)
+            .expect("`output` should be writable file");
+    }
+
+    fn value(&mut self, id: Id, value: f64) {
+        let trace_packet = self.trace_builder.build_value_track_event_trace_packet(
+            self.current_time_ns,
+            id,
+            value,
         );
         let buf = self.trace_builder.build_trace_to_bytes(vec![trace_packet]);
         self.output

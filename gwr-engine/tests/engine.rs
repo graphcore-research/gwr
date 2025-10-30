@@ -10,10 +10,11 @@ use gwr_engine::test_helpers::start_test;
 #[test]
 fn all_spawned() {
     let mut engine = start_test(file!());
+    let clock = engine.default_clock();
 
     let top = engine.top();
     let source: Rc<Source<i32>> = Source::new_and_register(&engine, top, "source", None).unwrap();
-    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
 
     source.connect_port_tx(sink.port_rx()).unwrap();
     run_simulation!(engine);

@@ -16,12 +16,14 @@ use gwr_engine::engine::Engine;
 use gwr_engine::executor::Spawner;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::spawn_subcomponent;
+use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::EntityDisplay;
 use gwr_resources::Resource;
 use gwr_track::entity::Entity;
-use gwr_track::trace;
+use gwr_track::tracker::aka::Aka;
+use gwr_track::{build_aka, trace};
 
 use crate::types::Credit;
 use crate::{connect_tx, port_rx, take_option};
@@ -34,9 +36,16 @@ struct PortCredit {
 }
 
 impl PortCredit {
-    pub fn new(parent: &Rc<Entity>, name: &str, credit: Resource) -> Self {
+    pub fn new(
+        engine: &Engine,
+        clock: &Clock,
+        parent: &Rc<Entity>,
+        name: &str,
+        aka: Option<&Aka>,
+        credit: Resource,
+    ) -> Self {
         let entity = Rc::new(Entity::new(parent, name));
-        let rx = InPort::new(&entity, "rx");
+        let rx = InPort::new_with_renames(engine, clock, &entity, "rx", aka);
         Self {
             entity,
             credit,
@@ -82,15 +91,27 @@ where
 {
     pub fn new_and_register(
         engine: &Engine,
+        clock: &Clock,
         parent: &Rc<Entity>,
-        spawner: Spawner,
+        name: &str,
+        aka: Option<&Aka>,
         num_credits: usize,
     ) -> Result<Rc<Self>, SimError> {
-        let entity = Rc::new(Entity::new(parent, "credit"));
+        let spawner = engine.spawner();
+        let entity = Rc::new(Entity::new(parent, name));
         let credit = Resource::new(num_credits);
-        let credit_rx = PortCredit::new(&entity, "credit_rx", credit.clone());
-        let tx = OutPort::new(&entity, "tx");
-        let rx = InPort::new(&entity, "rx");
+
+        let credit_rx_aka = build_aka!(aka, &entity, &[("credit_rx", "rx")]);
+        let credit_rx: PortCredit = PortCredit::new(
+            engine,
+            clock,
+            &entity,
+            "credit_rx",
+            Some(&credit_rx_aka),
+            credit.clone(),
+        );
+        let tx = OutPort::new_with_renames(&entity, "tx", aka);
+        let rx = InPort::new_with_renames(engine, clock, &entity, "rx", aka);
 
         let rc_self = Rc::new(Self {
             entity,

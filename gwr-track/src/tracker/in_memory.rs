@@ -7,6 +7,7 @@ use num_traits::FromPrimitive;
 
 use super::types::ReqType;
 use crate::Id;
+use crate::tracker::aka::AlternativeNames;
 use crate::tracker::{EntityManager, Track};
 
 /// A [`Track`] event.
@@ -38,6 +39,7 @@ enum Event {
     Log { level: log::Level, text: String },
     Enter { entered: Id },
     Exit { exited: Id },
+    Value { value: f64 },
 }
 
 struct TrackedState {
@@ -297,11 +299,16 @@ impl Track for InMemoryTracker {
     }
 
     fn is_entity_enabled(&self, id: Id, level: log::Level) -> bool {
-        self.entity_manager.is_enabled(id, level)
+        self.entity_manager.is_log_enabled_at_level(id, level)
     }
 
-    fn add_entity(&self, id: Id, entity_name: &str) {
-        self.entity_manager.add_entity(id, entity_name);
+    fn monitoring_window_size_for(&self, id: Id) -> Option<u64> {
+        self.entity_manager.monitoring_window_size_for(id)
+    }
+
+    fn add_entity(&self, id: Id, entity_name: &str, alternative_names: AlternativeNames) {
+        self.entity_manager
+            .add_entity(id, entity_name, alternative_names);
     }
 
     fn enter(&self, id: Id, object: Id) {
@@ -314,6 +321,12 @@ impl Track for InMemoryTracker {
         let time = self.time();
         let exit = Event::Exit { exited: object };
         self.add_event(EventCommon::new(id, time, exit));
+    }
+
+    fn value(&self, id: Id, value: f64) {
+        let time = self.time();
+        let event = Event::Value { value };
+        self.add_event(EventCommon::new(id, time, event));
     }
 
     fn create(&self, _created_by: Id, id: Id, num_bytes: usize, req_type: i8, name: &str) {

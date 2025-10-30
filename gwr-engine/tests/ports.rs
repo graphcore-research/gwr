@@ -8,9 +8,10 @@ use gwr_engine::test_helpers::start_test;
 #[test]
 fn put_get_synced() {
     let mut engine = start_test(file!());
+    let clock = engine.default_clock();
 
     let mut tx_port = OutPort::new(engine.top(), "tx");
-    let rx_port = InPort::new(engine.top(), "rx");
+    let rx_port = InPort::new(&engine, &clock, engine.top(), "rx");
 
     tx_port.connect(rx_port.state()).unwrap();
 
@@ -52,13 +53,14 @@ fn put_get_synced() {
 #[test]
 fn select_on_ports() {
     let mut engine = start_test(file!());
+    let clock = engine.default_clock();
 
     let mut tx_port1 = OutPort::new(engine.top(), "tx");
-    let rx_port1 = InPort::new(engine.top(), "rx");
+    let rx_port1 = InPort::new(&engine, &clock, engine.top(), "rx");
     tx_port1.connect(rx_port1.state()).unwrap();
 
     let mut tx_port2 = OutPort::new(engine.top(), "tx");
-    let rx_port2 = InPort::new(engine.top(), "rx");
+    let rx_port2 = InPort::new(&engine, &clock, engine.top(), "rx");
     tx_port2.connect(rx_port2.state()).unwrap();
 
     {

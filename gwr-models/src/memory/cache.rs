@@ -48,7 +48,8 @@ use gwr_engine::traits::{Runnable, SimObject};
 use gwr_engine::types::{AccessType, SimError, SimResult};
 use gwr_model_builder::EntityDisplay;
 use gwr_track::entity::Entity;
-use gwr_track::trace;
+use gwr_track::tracker::aka::Aka;
+use gwr_track::{build_aka, trace};
 
 #[cfg(test)]
 use crate::memory::memory_access::MemoryAccess;
@@ -281,36 +282,39 @@ where
     T: SimObject + AccessMemory,
 {
     /// Create an instance of the cache and register it with the Engine.
-    pub fn new_and_register(
+    pub fn new_and_register_with_renames(
         engine: &Engine,
+        clock: &Clock,
         parent: &Rc<Entity>,
         name: &str,
-        clock: Clock,
-        spawner: Spawner,
+        aka: Option<&Aka>,
         config: CacheConfig,
     ) -> Result<Rc<Self>, SimError> {
         let bw_bytes_per_cycle = config.bw_bytes_per_cycle;
         let entity = Rc::new(Entity::new(parent, name));
 
         let policy = Box::new(RoundRobin::new());
-        let response_arbiter =
-            Arbiter::new_and_register(engine, &entity, "rsp_arb", spawner.clone(), 2, policy)?;
-
-        let response_delay = Delay::new_and_register(
+        let response_arbiter_aka = build_aka!(aka, &entity, &[("dev_tx", "tx")]);
+        let response_arbiter = Arbiter::new_and_register_with_renames(
             engine,
+            clock,
             &entity,
-            "rsp_delay",
-            clock.clone(),
-            spawner.clone(),
-            config.delay_ticks,
+            "rsp_arb",
+            Some(&response_arbiter_aka),
+            2,
+            policy,
         )?;
 
-        let request_delay = Delay::new_and_register(
+        let response_delay =
+            Delay::new_and_register(engine, clock, &entity, "rsp_delay", config.delay_ticks)?;
+
+        let request_delay_aka = build_aka!(aka, &entity, &[("mem_tx", "tx")]);
+        let request_delay = Delay::new_and_register_with_renames(
             engine,
+            clock,
             &entity,
             "req_delay",
-            clock.clone(),
-            spawner.clone(),
+            Some(&request_delay_aka),
             config.delay_ticks,
         )?;
 
@@ -326,12 +330,13 @@ where
         let mut rsp_arb_1 = OutPort::new(&entity, "rsp_arb_1");
         rsp_arb_1.connect(response_arbiter.port_rx_i(1))?;
 
-        let dev_rx = InPort::new(&entity, "dev_rx");
-        let mem_rx = InPort::new(&entity, "mem_rx");
+        let dev_rx = InPort::new_with_renames(engine, clock, &entity, "dev_rx", aka);
+        let mem_rx = InPort::new_with_renames(engine, clock, &entity, "mem_rx", aka);
 
+        let spawner = engine.spawner();
         let rc_self = Rc::new(Self {
             entity,
-            clock,
+            clock: clock.clone(),
             spawner,
             metrics: Rc::new(RefCell::new(CacheMetrics::default())),
             contents: Rc::new(RefCell::new(CacheContents::new(config))),
@@ -347,6 +352,17 @@ where
         });
         engine.register(rc_self.clone());
         Ok(rc_self)
+    }
+
+    /// Create an instance of the cache and register it with the Engine.
+    pub fn new_and_register(
+        engine: &Engine,
+        clock: &Clock,
+        parent: &Rc<Entity>,
+        name: &str,
+        config: CacheConfig,
+    ) -> Result<Rc<Self>, SimError> {
+        Self::new_and_register_with_renames(engine, clock, parent, name, None, config)
     }
 
     pub fn connect_port_dev_tx(&self, port_state: PortStateResult<T>) -> SimResult {

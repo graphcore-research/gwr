@@ -1,6 +1,7 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
 use std::collections::HashMap;
+use std::fmt::Write;
 
 use crate::app::{CHUNK_SIZE, EventLine, INITIAL_SIZE, ToFullness, ToTime};
 
@@ -173,6 +174,11 @@ impl Renderer {
                 (format!("{name}: => {packet} ({fullness})").to_owned(), time)
             }
 
+            EventLine::Value { id, value, time } => {
+                let name = self.name_id(id, &mut tmp0);
+                (format!("{name}: {value}").to_owned(), time)
+            }
+
             EventLine::Log {
                 level: _,
                 id,
@@ -203,7 +209,7 @@ impl Renderer {
         };
 
         if self.print_times {
-            line.push_str(format!(" @{time:.1}ns").as_str());
+            let _ = write!(line, " @{time:.1}ns");
         }
 
         line

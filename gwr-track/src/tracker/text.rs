@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 pub use log;
 
+use crate::tracker::aka::AlternativeNames;
 use crate::tracker::{EntityManager, Track};
 use crate::{Id, SharedWriter, Writer};
 
@@ -33,11 +34,16 @@ impl Track for TextTracker {
     }
 
     fn is_entity_enabled(&self, id: Id, level: log::Level) -> bool {
-        self.entity_manager.is_enabled(id, level)
+        self.entity_manager.is_log_enabled_at_level(id, level)
     }
 
-    fn add_entity(&self, id: Id, entity_name: &str) {
-        self.entity_manager.add_entity(id, entity_name);
+    fn monitoring_window_size_for(&self, id: Id) -> Option<u64> {
+        self.entity_manager.monitoring_window_size_for(id)
+    }
+
+    fn add_entity(&self, id: Id, entity_name: &str, alternative_names: AlternativeNames) {
+        self.entity_manager
+            .add_entity(id, entity_name, alternative_names);
     }
 
     fn enter(&self, id: Id, object: Id) {
@@ -51,6 +57,13 @@ impl Track for TextTracker {
         self.writer
             .borrow_mut()
             .write_all(format!("{id}: exit {object}\n").as_bytes())
+            .unwrap();
+    }
+
+    fn value(&self, id: Id, value: f64) {
+        self.writer
+            .borrow_mut()
+            .write_all(format!("{id}: value {value}\n").as_bytes())
             .unwrap();
     }
 

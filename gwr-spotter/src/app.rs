@@ -54,6 +54,11 @@ pub enum EventLine {
         fullness: u64,
         time: f64,
     },
+    Value {
+        id: u64,
+        value: f64,
+        time: f64,
+    },
 }
 
 impl ToTime for EventLine {
@@ -75,6 +80,11 @@ impl ToTime for EventLine {
                 id: _,
                 exited: _,
                 fullness: _,
+                time,
+            } => *time,
+            EventLine::Value {
+                id: _,
+                value: _,
                 time,
             } => *time,
             EventLine::Log {
@@ -108,6 +118,11 @@ impl ToFullness for EventLine {
                 fullness,
                 time: _,
             } => *fullness,
+            EventLine::Value {
+                id: _,
+                value: _,
+                time: _,
+            } => 0,
             EventLine::Log {
                 level: _,
                 id: _,

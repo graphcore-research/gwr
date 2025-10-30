@@ -1,6 +1,7 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
 use crate::Id;
+use crate::tracker::aka::AlternativeNames;
 use crate::tracker::{EntityManager, Track, Tracker};
 
 /// Container for multiple [`Tracker`]s
@@ -41,9 +42,18 @@ impl Track for MultiTracker {
         false
     }
 
-    fn add_entity(&self, id: Id, entity_name: &str) {
+    fn monitoring_window_size_for(&self, id: Id) -> Option<u64> {
         for tracker in &self.trackers {
-            tracker.add_entity(id, entity_name);
+            if let Some(window_size_ticks) = tracker.monitoring_window_size_for(id) {
+                return Some(window_size_ticks);
+            }
+        }
+        None
+    }
+
+    fn add_entity(&self, id: Id, entity_name: &str, alternative_names: AlternativeNames) {
+        for tracker in &self.trackers {
+            tracker.add_entity(id, entity_name, alternative_names);
         }
     }
 
@@ -59,6 +69,14 @@ impl Track for MultiTracker {
         for tracker in &self.trackers {
             if tracker.is_entity_enabled(id, log::Level::Trace) {
                 tracker.exit(id, object);
+            }
+        }
+    }
+
+    fn value(&self, id: Id, value: f64) {
+        for tracker in &self.trackers {
+            if tracker.is_entity_enabled(id, log::Level::Trace) {
+                tracker.value(id, value);
             }
         }
     }

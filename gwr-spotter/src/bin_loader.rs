@@ -175,6 +175,15 @@ impl TraceVisitor for BinLoader {
         });
     }
 
+    fn value(&mut self, id: Id, value: f64) {
+        let time = self.current_time_ns;
+        self.add_event(EventLine::Value {
+            id: id.0,
+            value,
+            time,
+        });
+    }
+
     fn time(&mut self, _id: Id, time_ns: f64) {
         self.current_time_ns = time_ns;
     }

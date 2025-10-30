@@ -23,13 +23,13 @@ use gwr_track::entity::Entity;
 #[test]
 fn source_sink() {
     let mut engine = start_test(file!());
-    let spawner = engine.spawner();
+    let clock = engine.default_clock();
 
     const NUM_PUTS: usize = 25;
 
     let top = engine.top();
     let arbiter =
-        Arbiter::new_and_register(&engine, top, "arb", spawner, 3, Box::new(RoundRobin::new()))
+        Arbiter::new_and_register(&engine, &clock, top, "arb", 3, Box::new(RoundRobin::new()))
             .unwrap();
     let source_a =
         Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; NUM_PUTS))
@@ -40,7 +40,7 @@ fn source_sink() {
     let source_c =
         Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; NUM_PUTS))
             .unwrap();
-    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
 
     connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
     connect_port!(source_b, tx => arbiter, rx, 1).unwrap();
@@ -56,7 +56,7 @@ fn source_sink() {
 #[test]
 fn two_active_inputs() {
     let mut engine = start_test(file!());
-    let spawner = engine.spawner();
+    let clock = engine.default_clock();
 
     let na = 10;
     let nb = 0;
@@ -64,7 +64,7 @@ fn two_active_inputs() {
 
     let top = engine.top();
     let arbiter =
-        Arbiter::new_and_register(&engine, top, "arb", spawner, 3, Box::new(RoundRobin::new()))
+        Arbiter::new_and_register(&engine, &clock, top, "arb", 3, Box::new(RoundRobin::new()))
             .unwrap();
     let source_a =
         Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na)).unwrap();
@@ -72,7 +72,7 @@ fn two_active_inputs() {
         Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; nb)).unwrap();
     let source_c =
         Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc)).unwrap();
-    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
 
     connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
     connect_port!(source_b, tx => arbiter, rx, 1).unwrap();
@@ -88,7 +88,6 @@ fn two_active_inputs() {
 #[test]
 fn input_order() {
     let mut engine = start_test(file!());
-    let spawner = engine.spawner();
 
     let inputs = [
         ArbiterInputData {
@@ -113,15 +112,9 @@ fn input_order() {
 
     let clock = engine.default_clock();
     let top = engine.top();
-    let arbiter = Arbiter::new_and_register(
-        &engine,
-        top,
-        "arb",
-        spawner.clone(),
-        3,
-        Box::new(RoundRobin::new()),
-    )
-    .unwrap();
+    let arbiter =
+        Arbiter::new_and_register(&engine, &clock, top, "arb", 3, Box::new(RoundRobin::new()))
+            .unwrap();
     let source_a = Source::new_and_register(
         &engine,
         top,
@@ -145,9 +138,10 @@ fn input_order() {
     .unwrap();
     let total_count = inputs.iter().map(|i| i.count).sum();
 
-    let write_limiter = rc_limiter!(clock, 1);
-    let store_limiter = Limiter::new_and_register(&engine, top, "limit_wr", write_limiter).unwrap();
-    let store = Store::new_and_register(&engine, top, "store", spawner, total_count).unwrap();
+    let write_limiter = rc_limiter!(&clock, 1);
+    let store_limiter =
+        Limiter::new_and_register(&engine, &clock, top, "limit_wr", write_limiter).unwrap();
+    let store = Store::new_and_register(&engine, &clock, top, "store", total_count).unwrap();
 
     connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
     connect_port!(source_b, tx => arbiter, rx, 1).unwrap();
@@ -155,7 +149,12 @@ fn input_order() {
     connect_port!(arbiter, tx => store_limiter, rx).unwrap();
     connect_port!(store_limiter, tx => store, rx).unwrap();
 
-    let port = InPort::new(&Rc::new(Entity::new(engine.top(), "port")), "test_rx");
+    let port = InPort::new(
+        &engine,
+        &clock,
+        &Rc::new(Entity::new(engine.top(), "port")),
+        "test_rx",
+    );
     store.connect_port_tx(port.state()).unwrap();
     engine.spawn(async move {
         let mut store_get = vec![0; total_count];
@@ -174,29 +173,23 @@ fn input_order() {
 #[should_panic]
 fn more_inputs() {
     let mut engine = start_test(file!());
-    let spawner = engine.spawner();
+    let clock = engine.default_clock();
 
     let na = 10;
     let nb = 5;
     let nc = 15;
 
     let top = engine.top();
-    let arbiter = Arbiter::new_and_register(
-        &engine,
-        top,
-        "arb",
-        spawner.clone(),
-        2,
-        Box::new(RoundRobin::new()),
-    )
-    .unwrap();
+    let arbiter =
+        Arbiter::new_and_register(&engine, &clock, top, "arb", 2, Box::new(RoundRobin::new()))
+            .unwrap();
     let source_a =
         Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na)).unwrap();
     let source_b =
         Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; nb)).unwrap();
     let source_c =
         Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc)).unwrap();
-    let store = Store::new_and_register(&engine, top, "store", spawner, na + nb + nc).unwrap();
+    let store = Store::new_and_register(&engine, &clock, top, "store", na + nb + nc).unwrap();
 
     connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
     connect_port!(source_b, tx => arbiter, rx, 1).unwrap();
@@ -210,22 +203,16 @@ fn more_inputs() {
 #[should_panic]
 fn no_output() {
     let mut engine = start_test(file!());
-    let spawner = engine.spawner();
+    let clock = engine.default_clock();
 
     let na = 10;
     let nb = 5;
     let nc = 15;
 
     let top = engine.top();
-    let arbiter = Arbiter::new_and_register(
-        &engine,
-        top,
-        "arb",
-        spawner.clone(),
-        3,
-        Box::new(RoundRobin::new()),
-    )
-    .unwrap();
+    let arbiter =
+        Arbiter::new_and_register(&engine, &clock, top, "arb", 3, Box::new(RoundRobin::new()))
+            .unwrap();
     let source_a =
         Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na)).unwrap();
     let source_b =
@@ -233,7 +220,7 @@ fn no_output() {
     let source_c =
         Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc)).unwrap();
     let _store: Rc<Store<i32>> =
-        Store::new_and_register(&engine, top, "store", spawner, na + nb + nc).unwrap();
+        Store::new_and_register(&engine, &clock, top, "store", na + nb + nc).unwrap();
 
     connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
     connect_port!(source_b, tx => arbiter, rx, 1).unwrap();
@@ -246,7 +233,6 @@ fn no_output() {
 fn weighted_policy() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
-    let spawner = engine.spawner();
 
     let inputs = vec![
         ArbiterInputData {
@@ -270,9 +256,9 @@ fn weighted_policy() {
     let top = engine.top();
     let arbiter = Arbiter::new_and_register(
         &engine,
+        &clock,
         top,
         file!(),
-        spawner.clone(),
         num_inputs,
         Box::new(WeightedRoundRobin::new(weights.clone(), num_inputs).unwrap()),
     )
@@ -291,16 +277,22 @@ fn weighted_policy() {
         option_box_repeat!(inputs[1].val; inputs[1].count),
     )
     .unwrap();
-    let write_limiter = rc_limiter!(clock, 1);
-    let store_limiter = Limiter::new_and_register(&engine, top, "limit_wr", write_limiter).unwrap();
-    let store = Store::new_and_register(&engine, top, "store", spawner, total_count).unwrap();
+    let write_limiter = rc_limiter!(&clock, 1);
+    let store_limiter =
+        Limiter::new_and_register(&engine, &clock, top, "limit_wr", write_limiter).unwrap();
+    let store = Store::new_and_register(&engine, &clock, top, "store", total_count).unwrap();
 
     connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
     connect_port!(source_b, tx => arbiter, rx, 1).unwrap();
     connect_port!(arbiter, tx => store_limiter, rx).unwrap();
     connect_port!(store_limiter, tx => store, rx).unwrap();
 
-    let port = InPort::new(&Rc::new(Entity::new(engine.top(), "port")), "test_rx");
+    let port = InPort::new(
+        &engine,
+        &clock,
+        &Rc::new(Entity::new(engine.top(), "port")),
+        "test_rx",
+    );
     store.connect_port_tx(port.state()).unwrap();
     engine.spawn(async move {
         let mut store_get = vec![0; total_count];
@@ -396,8 +388,8 @@ fn multiple_inputs_priority_policy() {
 #[test]
 #[should_panic]
 fn panic_priority_policy() {
-    let engine = start_test(file!());
-    let spawner = engine.spawner();
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
 
     let inputs = [
         ArbiterInputData {
@@ -420,9 +412,9 @@ fn panic_priority_policy() {
     let top = engine.top();
     let _arbiter: Rc<Arbiter<usize>> = Arbiter::new_and_register(
         &engine,
+        &clock,
         top,
         "arb",
-        spawner,
         num_inputs,
         Box::new(PriorityRoundRobin::from_priorities(priorities.clone(), num_inputs + 1).unwrap()),
     )

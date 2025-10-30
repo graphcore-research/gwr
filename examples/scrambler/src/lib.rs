@@ -32,8 +32,8 @@ use std::rc::Rc;
 use async_trait::async_trait;
 use gwr_components::store::Store;
 use gwr_engine::engine::Engine;
-use gwr_engine::executor::Spawner;
 use gwr_engine::port::PortStateResult;
+use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::SimObject;
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, Runnable};
@@ -56,14 +56,14 @@ where
 {
     pub fn new_and_register(
         engine: &Engine,
+        clock: &Clock,
         parent: &Rc<Entity>,
         name: &str,
-        spawner: Spawner,
         scramble: bool,
     ) -> Result<Rc<Self>, SimError> {
         let entity = Rc::new(Entity::new(parent, name));
-        let buffer_a = Store::new_and_register(engine, &entity, "buffer_a", spawner.clone(), 1)?;
-        let buffer_b = Store::new_and_register(engine, &entity, "buffer_b", spawner, 1)?;
+        let buffer_a = Store::new_and_register(engine, clock, &entity, "buffer_a", 1)?;
+        let buffer_b = Store::new_and_register(engine, clock, &entity, "buffer_b", 1)?;
 
         let rc_self = Rc::new(Self {
             entity: entity.clone(),

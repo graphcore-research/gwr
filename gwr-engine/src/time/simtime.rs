@@ -101,9 +101,9 @@ impl SimTime {
 #[cfg(test)]
 mod tests {
     use gwr_track::entity::toplevel;
+    use gwr_track::test_helpers::create_tracker;
 
     use super::*;
-    use crate::test_helpers::create_tracker;
 
     #[test]
     fn clock_created_once() {

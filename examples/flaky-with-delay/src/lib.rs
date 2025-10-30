@@ -28,7 +28,6 @@ use gwr_components::{connect_tx, port_rx, take_option};
 use gwr_engine::engine::Engine;
 /// The gwr engine core provides the traits and types required to be
 /// implemented by a component.
-use gwr_engine::executor::Spawner;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Runnable, SimObject};
@@ -36,7 +35,8 @@ use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::EntityDisplay;
 /// The gwr_track library provides tracing/logging features.
 use gwr_track::entity::Entity;
-use gwr_track::trace;
+use gwr_track::tracker::aka::Aka;
+use gwr_track::{build_aka, trace};
 /// Random library is just used by this component to implement its drop
 /// decisions.
 use rand::rngs::StdRng;
@@ -121,10 +121,29 @@ where
     /// with the `Engine`.
     pub fn new_and_register(
         engine: &Engine,
+        clock: &Clock,
         parent: &Rc<Entity>,
         name: &str,
-        clock: Clock,
-        spawner: Spawner,
+        config: &Config,
+    ) -> Result<Rc<Self>, SimError> {
+        // In this case it simply uses the function that provides renaming features as
+        // well.
+        Self::new_and_register_with_renames(engine, clock, parent, name, None, config)
+    }
+
+    /// The `new_and_register_with_renames()` function does the work of creating
+    /// the component from the parameters provided, as well as registering the
+    /// component with the [Engine].
+    ///
+    /// This function adds the ability to provide multiple names for the `tx`
+    /// port which is actually just the mapped through to the internal buffer's
+    /// `tx` port.
+    pub fn new_and_register_with_renames(
+        engine: &Engine,
+        clock: &Clock,
+        parent: &Rc<Entity>,
+        name: &str,
+        aka: Option<&Aka>,
         config: &Config,
     ) -> Result<Rc<Self>, SimError> {
         // The entity needs to be created first because this component will be the
@@ -134,15 +153,19 @@ where
         // Because it is shared it needs to be wrapped in an Arc
         let entity = Rc::new(entity);
 
-        let delay = Delay::new_and_register(
+        let delay = Delay::new_and_register(engine, clock, &entity, "delay", config.delay_ticks)?;
+
+        // Build up a renaming that shows that this component's `tx` port is the same
+        // as the buffer's `tx` port and the user will be able to use either name.
+        let buffer_aka = build_aka!(aka, &entity, &[("tx", "tx")]);
+        let buffer = Store::new_and_register_with_renames(
             engine,
-            &entity,
-            "delay",
             clock,
-            spawner.clone(),
-            config.delay_ticks,
+            &entity,
+            "buffer",
+            Some(&buffer_aka),
+            1,
         )?;
-        let buffer = Store::new_and_register(engine, &entity, "buffer", spawner, 1)?;
 
         delay.connect_port_tx(buffer.port_rx())?;
 
@@ -150,7 +173,7 @@ where
         let mut tx = OutPort::new(&entity, "delay_tx");
         tx.connect(delay.port_rx())?;
 
-        let rx = InPort::new(&entity, "rx");
+        let rx = InPort::new(engine, clock, &entity, "rx");
 
         // Finally, create the component
         let rc_self = Rc::new(Self {

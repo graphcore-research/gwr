@@ -55,7 +55,7 @@
 //! let clock = engine.clock_ghz(1.0);
 //!
 //! // And build a 16 bits-per-tick rate limiter.
-//! let rate_limiter = rc_limiter!(clock, 16);
+//! let rate_limiter = rc_limiter!(&clock, 16);
 //!
 //! // Build the source (initially with no generator).
 //! let source = Source::new_and_register(&engine, engine.top(), "source", None)
@@ -68,11 +68,11 @@
 //! source.set_generator(option_box_repeat!(packet ; 10));
 //!
 //! // Create the a limiter component to enforce the limit
-//! let limiter = Limiter::new_and_register(&engine, engine.top(), "limit", rate_limiter)
+//! let limiter = Limiter::new_and_register(&engine, &clock, engine.top(), "limit", rate_limiter)
 //!     .expect("should be able to create and register `Limiter`");
 //!
 //! // Create the sink to accept these packets.
-//! let sink = Sink::new_and_register(&engine, engine.top(), "sink")
+//! let sink = Sink::new_and_register(&engine, &clock, engine.top(), "sink")
 //!     .expect("should be able to create and register `Sink`");
 //!
 //! // Connect the components.
@@ -136,9 +136,9 @@ where
     T: TotalBytes,
 {
     #[must_use]
-    pub fn new(clock: Clock, bits_per_tick: usize) -> Self {
+    pub fn new(clock: &Clock, bits_per_tick: usize) -> Self {
         Self {
-            clock,
+            clock: clock.clone(),
             bits_per_tick,
             phantom: PhantomData,
         }

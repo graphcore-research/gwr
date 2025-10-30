@@ -87,7 +87,7 @@ impl FrameGen {
         next_dests.shuffle(&mut rng);
 
         Self {
-            entity: Rc::new(Entity::new(parent, format!("gen{source_index}").as_str())),
+            entity: Rc::new(Entity::new(parent, &format!("gen{source_index}"))),
             config,
             source_index,
             dest_index,

@@ -3,6 +3,8 @@
 //! Simulate a device comprising ring nodes.
 //!
 //! See `lib.rs` for details.
+use std::rc::Rc;
+
 use clap::Parser;
 use gwr_components::connect_port;
 use gwr_engine::engine::Engine;
@@ -11,8 +13,8 @@ use gwr_engine::time::clock::Clock;
 use gwr_engine::types::SimError;
 use gwr_engine::{run_simulation, sim_error};
 use gwr_models::ethernet_frame::FRAME_OVERHEAD_BYTES;
-use gwr_track::builder::setup_all_trackers;
-use gwr_track::{error, info};
+use gwr_track::builder::{MonitorsConfig, TrackerConfig, TrackersConfig, setup_trackers};
+use gwr_track::{Track, error, info};
 use indicatif::ProgressBar;
 use sim_ring::ring_builder::{
     Config, Sinks, build_limiters, build_pipes, build_ring_nodes, build_source_sinks,
@@ -73,6 +75,15 @@ struct Cli {
     /// The filename Perfetto trace output is written to.
     #[arg(long, default_value = "trace.pftrace")]
     perfetto_file: String,
+
+    /// Enable monitoring at the specified number of clock ticks.
+    #[clap(long)]
+    monitor_window_ticks: Option<u64>,
+
+    /// Set a regular expression for which ports should have monitors
+    /// enabled.
+    #[arg(long, default_value = "")]
+    monitor_filter_regex: String,
 
     /// Show a progress bar for the received frame count (updated at the rate
     /// defined by `progress_ticks`).
@@ -149,23 +160,39 @@ fn start_frame_dump(
     });
 }
 
+fn setup_all_trackers(args: &Cli) -> Rc<dyn Track> {
+    let config = TrackersConfig {
+        stdout: TrackerConfig {
+            enable: args.stdout,
+            level: args.stdout_level,
+            filter_regex: &args.stdout_filter_regex,
+            file: None,
+        },
+        binary: TrackerConfig {
+            enable: args.binary,
+            level: args.binary_level,
+            filter_regex: &args.binary_filter_regex,
+            file: Some(&args.binary_file),
+        },
+        perfetto: TrackerConfig {
+            enable: args.perfetto,
+            level: args.perfetto_level,
+            filter_regex: &args.perfetto_filter_regex,
+            file: Some(&args.perfetto_file),
+        },
+        monitors: MonitorsConfig {
+            enable: args.monitor_window_ticks.is_some(),
+            window_size_ticks: args.monitor_window_ticks.unwrap_or(0),
+            filter_regex: &args.monitor_filter_regex,
+        },
+    };
+    setup_trackers(&config).unwrap()
+}
+
 fn main() -> Result<(), SimError> {
     let args = Cli::parse();
 
-    let tracker = setup_all_trackers(
-        args.stdout,
-        args.stdout_level,
-        args.stdout_filter_regex.as_str(),
-        args.binary,
-        args.binary_level,
-        &args.binary_filter_regex,
-        &args.binary_file,
-        args.perfetto,
-        args.perfetto_level,
-        &args.perfetto_filter_regex,
-        &args.perfetto_file,
-    )
-    .unwrap();
+    let tracker = setup_all_trackers(&args);
 
     let mut engine = Engine::new(&tracker);
     let spawner = engine.spawner();
@@ -198,11 +225,11 @@ fn main() -> Result<(), SimError> {
         config.tx_buffer_frames
     );
 
-    let ring_nodes = build_ring_nodes(&mut engine, &config);
-    let (sources, sinks) = build_source_sinks(&mut engine, &config);
-    let (ingress_pipes, ring_pipes) = build_pipes(&mut engine, &config);
+    let ring_nodes = build_ring_nodes(&mut engine, &clock, &config);
+    let (sources, sinks) = build_source_sinks(&mut engine, &clock, &config);
+    let (ingress_pipes, ring_pipes) = build_pipes(&mut engine, &clock, &config);
     let (source_limiters, ring_limiters, sink_limiters) =
-        build_limiters(&mut engine, &config, ETHERNET_GBPS);
+        build_limiters(&mut engine, &clock, &config, ETHERNET_GBPS);
 
     for i in 0..config.ring_size {
         let right = (i + 1) % config.ring_size;

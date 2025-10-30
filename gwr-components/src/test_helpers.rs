@@ -77,7 +77,6 @@ pub fn check_round_robin(inputs: &[ArbiterInputData], data: &[usize]) {
 
 pub fn priority_policy_test_core(engine: &mut Engine, inputs: &[ArbiterInputData]) {
     let clock = engine.default_clock();
-    let spawner = engine.spawner();
     let num_inputs = inputs.len();
     let total_count = inputs.iter().map(|e| e.count).sum();
     let mut policy = PriorityRoundRobin::new(num_inputs);
@@ -87,9 +86,9 @@ pub fn priority_policy_test_core(engine: &mut Engine, inputs: &[ArbiterInputData
 
     let arbiter = Arbiter::new_and_register(
         engine,
+        &clock,
         engine.top(),
         "arb",
-        spawner.clone(),
         num_inputs,
         Box::new(policy),
     )
@@ -107,11 +106,11 @@ pub fn priority_policy_test_core(engine: &mut Engine, inputs: &[ArbiterInputData
         );
     }
 
-    let write_limiter = rc_limiter!(clock, 1);
+    let write_limiter = rc_limiter!(&clock, 1);
     let store_limiter =
-        Limiter::new_and_register(engine, engine.top(), "limit_wr", write_limiter).unwrap();
+        Limiter::new_and_register(engine, &clock, engine.top(), "limit_wr", write_limiter).unwrap();
     let store =
-        Store::new_and_register(engine, engine.top(), "store", spawner, total_count).unwrap();
+        Store::new_and_register(engine, &clock, engine.top(), "store", total_count).unwrap();
     connect_port!(store_limiter, tx => store, rx).unwrap();
 
     for (i, source) in sources.iter_mut().enumerate() {
@@ -119,7 +118,12 @@ pub fn priority_policy_test_core(engine: &mut Engine, inputs: &[ArbiterInputData
     }
     connect_port!(arbiter, tx => store_limiter, rx).unwrap();
 
-    let port = InPort::new(&Rc::new(Entity::new(engine.top(), "port")), "test_rx");
+    let port = InPort::new(
+        engine,
+        &clock,
+        &Rc::new(Entity::new(engine.top(), "port")),
+        "test_rx",
+    );
     store.connect_port_tx(port.state()).unwrap();
 
     let check_inputs = inputs.to_owned();

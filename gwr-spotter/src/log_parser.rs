@@ -23,6 +23,7 @@ struct LogParser {
     create_re: Regex,
     enter_re: Regex,
     exit_re: Regex,
+    value_re: Regex,
     time_re: Regex,
     text_re: Regex,
 
@@ -41,6 +42,7 @@ impl LogParser {
             .unwrap(),
             enter_re: Regex::new(r"(\d+): enter (\d+)$").unwrap(),
             exit_re: Regex::new(r"(\d+): exit (\d+)$").unwrap(),
+            value_re: Regex::new(r"(\d+): value (.*)$").unwrap(),
             time_re: Regex::new(r"\d+: set time to ([^n]+)ns").unwrap(),
             text_re: Regex::new(r"(\d+): (\d+) entered$").unwrap(),
 
@@ -126,6 +128,15 @@ impl LogParser {
                 id,
                 fullness: *fullness,
                 exited: exited_id_str.parse().unwrap(),
+                time: self.current_time,
+            };
+        } else if let Some(e) = self.value_re.captures(msg) {
+            let id_str = e.get(1).unwrap().as_str();
+            let id = id_str.parse().unwrap();
+            let value_str = e.get(2).unwrap().as_str();
+            return EventLine::Value {
+                id,
+                value: value_str.parse().unwrap(),
                 time: self.current_time,
             };
         } else if let Some(e) = self.time_re.captures(msg) {

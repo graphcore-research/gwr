@@ -34,11 +34,10 @@ pub fn env_doc_builder() -> bool {
 #[must_use]
 pub fn unprocessed(input: &proc_macro2::TokenStream, prefix: &str) -> proc_macro2::TokenStream {
     handle_error(|| {
-        Ok(LitStr::new(
-            format!("#[doc = {prefix}({input})").as_str(),
-            Span::call_site(),
+        Ok(
+            LitStr::new(&format!("#[doc = {prefix}({input})"), Span::call_site())
+                .into_token_stream(),
         )
-        .into_token_stream())
     })
 }
 

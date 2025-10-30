@@ -12,10 +12,16 @@ use futures::Future;
 use futures::future::FusedFuture;
 use gwr_track::connect;
 use gwr_track::entity::Entity;
+use gwr_track::tracker::aka::Aka;
 
+use crate::engine::Engine;
+use crate::port::monitor::Monitor;
 use crate::sim_error;
+use crate::time::clock::Clock;
 use crate::traits::SimObject;
 use crate::types::{SimError, SimResult};
+
+pub mod monitor;
 
 pub type PortStateResult<T> = Result<Rc<PortState<T>>, SimError>;
 pub type PortGetResult<T> = Result<PortGet<T>, SimError>;
@@ -31,18 +37,28 @@ where
     waiting_get: RefCell<Option<Waker>>,
     waiting_put: RefCell<Option<Waker>>,
     pub in_port_entity: Rc<Entity>,
+    monitor: Option<Rc<Monitor>>,
 }
 
 impl<T> PortState<T>
 where
     T: SimObject,
 {
-    fn new(in_port_entity: Rc<Entity>) -> Self {
+    fn new(
+        engine: &Engine,
+        clock: &Clock,
+        in_port_entity: Rc<Entity>,
+        window_size_ticks: Option<u64>,
+    ) -> Self {
+        let monitor = window_size_ticks.map(|window_size_ticks| {
+            Monitor::new_and_register(engine, &in_port_entity, clock, window_size_ticks)
+        });
         Self {
             value: RefCell::new(None),
             waiting_get: RefCell::new(None),
             waiting_put: RefCell::new(None),
             in_port_entity,
+            monitor,
         }
     }
 }
@@ -70,11 +86,23 @@ where
     T: SimObject,
 {
     #[must_use]
-    pub fn new(parent: &Rc<Entity>, name: &str) -> Self {
-        let entity = Rc::new(Entity::new(parent, name));
+    pub fn new(engine: &Engine, clock: &Clock, parent: &Rc<Entity>, name: &str) -> Self {
+        Self::new_with_renames(engine, clock, parent, name, None)
+    }
+
+    #[must_use]
+    pub fn new_with_renames(
+        engine: &Engine,
+        clock: &Clock,
+        parent: &Rc<Entity>,
+        name: &str,
+        aka: Option<&Aka>,
+    ) -> Self {
+        let entity = Rc::new(Entity::new_with_renames(parent, name, aka));
+        let monitor_window_size = entity.tracker.monitoring_window_size_for(entity.id);
         Self {
             entity: entity.clone(),
-            state: Rc::new(PortState::new(entity)),
+            state: Rc::new(PortState::new(engine, clock, entity, monitor_window_size)),
             connected: RefCell::new(false),
         }
     }
@@ -144,7 +172,12 @@ where
 {
     #[must_use]
     pub fn new(parent: &Rc<Entity>, name: &str) -> Self {
-        let entity = Rc::new(Entity::new(parent, name));
+        Self::new_with_renames(parent, name, None)
+    }
+
+    #[must_use]
+    pub fn new_with_renames(parent: &Rc<Entity>, name: &str, aka: Option<&Aka>) -> Self {
+        let entity = Rc::new(Entity::new_with_renames(parent, name, aka));
         Self {
             entity,
             state: None,
@@ -289,6 +322,11 @@ where
         if let Some(value) = value {
             self.done = true;
 
+            // Track the object through the port monitor if there is one
+            if let Some(monitor) = self.state.monitor.as_ref() {
+                monitor.sample(&value);
+            }
+
             if let Some(waker) = self.state.waiting_put.borrow_mut().take() {
                 waker.wake();
             }
@@ -331,6 +369,12 @@ where
         let value = self.state.value.borrow_mut().take();
         if let Some(value) = value {
             self.done = true;
+
+            // Track the object through the port monitor if there is one
+            if let Some(monitor) = self.state.monitor.as_ref() {
+                monitor.sample(&value);
+            }
+
             Poll::Ready(value)
         } else {
             *self.state.waiting_get.borrow_mut() = Some(cx.waker().clone());

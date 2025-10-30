@@ -21,11 +21,13 @@ use gwr_engine::engine::Engine;
 use gwr_engine::executor::Spawner;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::sim_error;
+use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::EntityDisplay;
 use gwr_track::Id;
 use gwr_track::entity::Entity;
+use gwr_track::tracker::aka::Aka;
 
 use crate::memory::traits::AccessMemory;
 
@@ -49,15 +51,17 @@ impl<T> MemoryAccessGen<T>
 where
     T: SimObject + AccessMemory,
 {
-    pub fn new_and_register(
+    pub fn new_and_register_with_renames(
         engine: &Engine,
+        clock: &Clock,
         parent: &Rc<Entity>,
         name: &str,
+        aka: Option<&Aka>,
         data_generator: DataGenerator<T>,
     ) -> Result<Rc<Self>, SimError> {
         let entity = Rc::new(Entity::new(parent, name));
-        let rx = InPort::new(&entity, "rx");
-        let tx = OutPort::new(&entity, "tx");
+        let rx = InPort::new_with_renames(engine, clock, &entity, "rx", aka);
+        let tx = OutPort::new_with_renames(&entity, "tx", aka);
         let rc_self = Rc::new(Self {
             entity,
             spawner: engine.spawner(),
@@ -68,6 +72,16 @@ where
         });
         engine.register(rc_self.clone());
         Ok(rc_self)
+    }
+
+    pub fn new_and_register(
+        engine: &Engine,
+        clock: &Clock,
+        parent: &Rc<Entity>,
+        name: &str,
+        data_generator: DataGenerator<T>,
+    ) -> Result<Rc<Self>, SimError> {
+        Self::new_and_register_with_renames(engine, clock, parent, name, None, data_generator)
     }
 
     #[must_use]

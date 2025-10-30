@@ -12,6 +12,7 @@ pub enum ReqType {
     Read, //
     Write,
     WriteNonPosted,
+    Value,
 }
 
 impl fmt::Display for ReqType {
@@ -25,6 +26,9 @@ impl fmt::Display for ReqType {
             }
             ReqType::WriteNonPosted => {
                 write!(f, "WriteNonPosted")
+            }
+            ReqType::Value => {
+                write!(f, "Value")
             }
         }
     }

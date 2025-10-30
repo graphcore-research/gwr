@@ -45,7 +45,6 @@ fn create_and_connect_memory<T>(engine: &mut Engine, cache: &Rc<Cache<T>>) -> Rc
 where
     T: SimObject + AccessMemory,
 {
-    let spawner = engine.spawner();
     let clock = engine.default_clock();
     let top = engine.top();
 
@@ -55,7 +54,7 @@ where
         BW_BYTES_PER_CYCLE,
         DELAY_TICKS,
     );
-    let memory = Memory::new_and_register(&engine, top, "memory", clock, spawner, config).unwrap();
+    let memory = Memory::new_and_register(&engine, &clock, top, "memory", config).unwrap();
 
     connect_port!(cache, mem_tx => memory, rx).unwrap();
     connect_port!(memory, tx => cache, mem_rx).unwrap();
@@ -68,7 +67,6 @@ fn cache_dev_read_goes_to_mem() {
     let num_accesses = 100;
 
     let mut engine = start_test(file!());
-    let spawner = engine.spawner();
     let clock = engine.default_clock();
 
     let top = engine.top();
@@ -89,9 +87,9 @@ fn cache_dev_read_goes_to_mem() {
         NUM_WAYS,
         DELAY_TICKS,
     );
-    let cache = Cache::new_and_register(&engine, top, "cache", clock, spawner, config).unwrap();
-    let dev_req_sink = Sink::new_and_register(&engine, top, "dev_req_sink").unwrap();
-    let mem_req_sink = Sink::new_and_register(&engine, top, "mem_req_sink").unwrap();
+    let cache = Cache::new_and_register(&engine, &clock, top, "cache", config).unwrap();
+    let dev_req_sink = Sink::new_and_register(&engine, &clock, top, "dev_req_sink").unwrap();
+    let mem_req_sink = Sink::new_and_register(&engine, &clock, top, "mem_req_sink").unwrap();
 
     connect_port!(source, tx => cache, dev_rx).unwrap();
     connect_port!(cache, dev_tx => dev_req_sink, rx).unwrap();
@@ -121,7 +119,6 @@ fn build_cache_and_all_ports() -> (
     InPort<MemoryAccess>,
 ) {
     let mut engine = start_test(file!());
-    let spawner = engine.spawner();
     let clock = engine.default_clock();
 
     let config = CacheConfig::new(
@@ -132,18 +129,18 @@ fn build_cache_and_all_ports() -> (
         DELAY_TICKS,
     );
     let top = engine.top();
-    let cache = Cache::new_and_register(&engine, top, "cache", clock, spawner, config).unwrap();
+    let cache = Cache::new_and_register(&engine, &clock, top, "cache", config).unwrap();
 
     let mut dev_rx_driver = OutPort::new(&top, "dev_rx_driver");
     dev_rx_driver.connect(cache.port_dev_rx()).unwrap();
 
-    let dev_tx_recv = InPort::new(&top, "dev_tx_recv");
+    let dev_tx_recv = InPort::new(&engine, &clock, &top, "dev_tx_recv");
     cache.connect_port_dev_tx(dev_tx_recv.state()).unwrap();
 
     let mut mem_rx_driver = OutPort::new(&top, "mem_rx_driver");
     mem_rx_driver.connect(cache.port_mem_rx()).unwrap();
 
-    let mem_tx_recv = InPort::new(&top, "mem_tx_recv");
+    let mem_tx_recv = InPort::new(&engine, &clock, &top, "mem_tx_recv");
     cache.connect_port_mem_tx(mem_tx_recv.state()).unwrap();
 
     (
@@ -237,7 +234,6 @@ fn build_cache_and_dev_ports() -> (
     InPort<MemoryAccess>,
 ) {
     let mut engine = start_test(file!());
-    let spawner = engine.spawner();
     let clock = engine.default_clock();
 
     let config = CacheConfig::new(
@@ -248,12 +244,12 @@ fn build_cache_and_dev_ports() -> (
         DELAY_TICKS,
     );
     let top = engine.top();
-    let cache = Cache::new_and_register(&engine, top, "cache", clock, spawner, config).unwrap();
+    let cache = Cache::new_and_register(&engine, &clock, top, "cache", config).unwrap();
 
     let mut dev_rx_driver = OutPort::new(&top, "dev_rx_driver");
     dev_rx_driver.connect(cache.port_dev_rx()).unwrap();
 
-    let dev_tx_recv = InPort::new(&top, "dev_tx_recv");
+    let dev_tx_recv = InPort::new(&engine, &clock, &top, "dev_tx_recv");
     cache.connect_port_dev_tx(dev_tx_recv.state()).unwrap();
 
     (engine, cache, dev_rx_driver, dev_tx_recv)

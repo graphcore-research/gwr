@@ -9,7 +9,8 @@
 use std::fmt;
 use std::rc::Rc;
 
-use crate::{Id, Tracker, create, destroy};
+use crate::tracker::aka::{Aka, get_alternative_names};
+use crate::{Id, Tracker, create, destroy, trace};
 
 /// A simulation entity
 ///
@@ -39,13 +40,38 @@ impl Entity {
     /// Create a new entity.
     #[must_use]
     pub fn new(parent: &Rc<Entity>, name: &str) -> Self {
+        Self::new_with_renames_and_optional_create(parent, name, None, true)
+    }
+
+    /// Create a new entity with a potential list of alternative names
+    #[must_use]
+    pub fn new_with_renames(parent: &Rc<Entity>, name: &str, aka: Option<&Aka>) -> Self {
+        Self::new_with_renames_and_optional_create(parent, name, aka, true)
+    }
+
+    /// Create a new entity but let the user do their own call to the
+    /// `create!()` macro.
+    #[must_use]
+    pub fn new_without_create(parent: &Rc<Entity>, name: &str) -> Self {
+        Self::new_with_renames_and_optional_create(parent, name, None, false)
+    }
+
+    /// Create a new entity with a potential list of alternative names
+    #[must_use]
+    pub fn new_with_renames_and_optional_create(
+        parent: &Rc<Entity>,
+        name: &str,
+        aka: Option<&Aka>,
+        do_create: bool,
+    ) -> Self {
+        let alternative_names = get_alternative_names(aka, name);
         let mut full_name = parent.full_name();
         full_name.push_str(JOIN);
         full_name.push_str(name);
 
         let tracker = parent.tracker.clone();
         let id = tracker.unique_id();
-        tracker.add_entity(id, &full_name);
+        tracker.add_entity(id, &full_name, alternative_names);
 
         let entity = Self {
             name: String::from(name),
@@ -54,7 +80,15 @@ impl Entity {
             tracker,
         };
 
-        create!(entity);
+        if do_create {
+            create!(entity);
+        }
+
+        if let Some(alternative_names) = alternative_names {
+            for name in alternative_names {
+                trace!(entity ; "aka {name}");
+            }
+        }
 
         entity
     }
@@ -105,7 +139,7 @@ impl fmt::Display for Entity {
 /// parent.
 pub fn toplevel(tracker: &Tracker, name: &str) -> Rc<Entity> {
     let id = tracker.unique_id();
-    tracker.add_entity(id, name);
+    tracker.add_entity(id, name, None);
     let top = Rc::new(Entity {
         parent: None,
         name: String::from(name),

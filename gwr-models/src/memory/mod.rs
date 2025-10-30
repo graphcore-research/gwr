@@ -7,14 +7,14 @@ use async_trait::async_trait;
 use gwr_components::delay::Delay;
 use gwr_components::{port_rx, take_option};
 use gwr_engine::engine::Engine;
-use gwr_engine::executor::Spawner;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Runnable, SimObject};
 use gwr_engine::types::{AccessType, SimError, SimResult};
 use gwr_model_builder::EntityDisplay;
 use gwr_track::entity::Entity;
-use gwr_track::trace;
+use gwr_track::tracker::aka::Aka;
+use gwr_track::{build_aka, trace};
 
 use crate::memory::traits::{AccessMemory, ReadMemory};
 
@@ -88,24 +88,25 @@ impl<T> Memory<T>
 where
     T: SimObject + AccessMemory,
 {
-    pub fn new_and_register(
+    pub fn new_and_register_with_renames(
         engine: &Engine,
+        clock: &Clock,
         parent: &Rc<Entity>,
         name: &str,
-        clock: Clock,
-        spawner: Spawner,
+        aka: Option<&Aka>,
         config: MemoryConfig,
     ) -> Result<Rc<Self>, SimError> {
         let entity = Rc::new(Entity::new(parent, name));
 
-        let rx = InPort::new(&entity, "rx");
+        let rx = InPort::new_with_renames(engine, clock, &entity, "rx", aka);
 
-        let response_delay = Delay::new_and_register(
+        let response_delay_aka = build_aka!(aka, &entity, &[("tx", "tx")]);
+        let response_delay = Delay::new_and_register_with_renames(
             engine,
+            clock,
             &entity,
             "delay",
-            clock.clone(),
-            spawner,
+            Some(&response_delay_aka),
             config.delay_ticks,
         )?;
 
@@ -115,7 +116,7 @@ where
 
         let rc_self = Rc::new(Self {
             entity,
-            clock,
+            clock: clock.clone(),
             config,
             metrics: RefCell::new(MemoryMetrics::new()),
             response_delay,
@@ -124,6 +125,16 @@ where
         });
         engine.register(rc_self.clone());
         Ok(rc_self)
+    }
+
+    pub fn new_and_register(
+        engine: &Engine,
+        clock: &Clock,
+        parent: &Rc<Entity>,
+        name: &str,
+        config: MemoryConfig,
+    ) -> Result<Rc<Self>, SimError> {
+        Self::new_and_register_with_renames(engine, clock, parent, name, None, config)
     }
 
     pub fn connect_port_tx(&self, port_state: PortStateResult<T>) -> SimResult {

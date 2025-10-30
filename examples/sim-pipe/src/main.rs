@@ -18,7 +18,7 @@ use gwr_engine::types::SimError;
 use gwr_engine::{run_simulation, sim_error};
 use gwr_models::data_frame::DataFrame;
 use gwr_models::fc_pipeline::{FcPipeline, FcPipelineConfig};
-use gwr_track::builder::setup_all_trackers;
+use gwr_track::builder::{MonitorsConfig, TrackerConfig, TrackersConfig, setup_trackers};
 use gwr_track::entity::Entity;
 use gwr_track::{Track, error, info};
 use indicatif::ProgressBar;
@@ -76,6 +76,15 @@ struct Cli {
     /// The filename Perfetto trace output is written to.
     #[arg(long, default_value = "trace.pftrace")]
     perfetto_file: String,
+
+    /// Enable monitoring at the specified number of clock ticks.
+    #[clap(long)]
+    monitor_window_ticks: Option<u64>,
+
+    /// Set a regular expression for which ports should have monitors
+    /// enabled.
+    #[arg(long, default_value = "")]
+    monitor_filter_regex: String,
 
     /// Show a progress bar for the received frame count (updated at the rate
     /// defined by `progress_ticks`).
@@ -162,30 +171,42 @@ fn start_frame_dump(
     });
 }
 
-fn setup_trackers(args: &Cli) -> Rc<dyn Track> {
-    setup_all_trackers(
-        args.stdout,
-        args.stdout_level,
-        args.stdout_filter_regex.as_str(),
-        args.binary,
-        args.binary_level,
-        &args.binary_filter_regex,
-        &args.binary_file,
-        args.perfetto,
-        args.perfetto_level,
-        &args.perfetto_filter_regex,
-        &args.perfetto_file,
-    )
-    .unwrap()
+fn setup_all_trackers(args: &Cli) -> Rc<dyn Track> {
+    let config = TrackersConfig {
+        stdout: TrackerConfig {
+            enable: args.stdout,
+            level: args.stdout_level,
+            filter_regex: &args.stdout_filter_regex,
+            file: None,
+        },
+        binary: TrackerConfig {
+            enable: args.binary,
+            level: args.binary_level,
+            filter_regex: &args.binary_filter_regex,
+            file: Some(&args.binary_file),
+        },
+        perfetto: TrackerConfig {
+            enable: args.perfetto,
+            level: args.perfetto_level,
+            filter_regex: &args.perfetto_filter_regex,
+            file: Some(&args.perfetto_file),
+        },
+        monitors: MonitorsConfig {
+            enable: args.monitor_window_ticks.is_some(),
+            window_size_ticks: args.monitor_window_ticks.unwrap_or(0),
+            filter_regex: &args.monitor_filter_regex,
+        },
+    };
+    setup_trackers(&config).unwrap()
 }
 
 fn main() -> Result<(), SimError> {
     let args = Cli::parse();
-    let tracker = setup_trackers(&args);
+    let tracker = setup_all_trackers(&args);
 
     let mut engine = Engine::new(&tracker);
-    let spawner = engine.spawner();
     let clock = engine.default_clock();
+    let spawner = engine.spawner();
 
     let num_payload_bytes_to_send = args.kib_to_send * 1024;
     let num_send_frames = num_payload_bytes_to_send / args.frame_payload_bytes;
@@ -210,26 +231,20 @@ fn main() -> Result<(), SimError> {
         num_send_frames,
     );
     let source = Source::new_and_register(&engine, &top, "source", Some(Box::new(frame_gen)))?;
-    let rx_limiter = rc_limiter!(clock.clone(), args.pipe_rx_bits_per_tick);
-    let source_limiter = Limiter::new_and_register(&engine, &top, "rx_limiter", rx_limiter)?;
+    let rx_limiter = rc_limiter!(&clock, args.pipe_rx_bits_per_tick);
+    let source_limiter =
+        Limiter::new_and_register(&engine, &clock, &top, "rx_limiter", rx_limiter)?;
 
     let pipe_config = FcPipelineConfig::new(
         args.pipe_buffer_entries,
         args.pipe_data_delay,
         args.pipe_credit_delay,
     );
-    let pipe = FcPipeline::new_and_register(
-        &engine,
-        &top,
-        "pipe",
-        clock.clone(),
-        spawner.clone(),
-        &pipe_config,
-    )?;
-    let tx_limiter = rc_limiter!(clock.clone(), args.pipe_tx_bits_per_tick);
-    let sink_limiter = Limiter::new_and_register(&engine, &top, "tx_limiter", tx_limiter)?;
-    let sink =
-        Sink::new_and_register(&engine, &top, "sink").expect("should be able to create sink");
+    let pipe = FcPipeline::new_and_register(&engine, &clock, &top, "pipe", &pipe_config)?;
+    let tx_limiter = rc_limiter!(&clock, args.pipe_tx_bits_per_tick);
+    let sink_limiter = Limiter::new_and_register(&engine, &clock, &top, "tx_limiter", tx_limiter)?;
+    let sink = Sink::new_and_register(&engine, &clock, &top, "sink")
+        .expect("should be able to create sink");
 
     connect_port!(source, tx => source_limiter, rx)?;
     connect_port!(source_limiter, tx => pipe, rx)?;

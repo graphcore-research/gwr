@@ -34,9 +34,8 @@ where
 {
     let config = MemoryConfig::new(DST_ADDR, CAPACITY_BYTES, BW_BYTES_PER_CYCLE, DELAY_TICKS);
     let clock = engine.default_clock();
-    let spawner = engine.spawner();
     let top = engine.top();
-    let memory = Memory::new_and_register(&engine, top, "memory", clock, spawner, config).unwrap();
+    let memory = Memory::new_and_register(&engine, &clock, top, "memory", config).unwrap();
     memory
 }
 
@@ -45,6 +44,7 @@ fn setup_system(
     create_fn: fn(&Rc<Entity>, usize, u64, u64, usize) -> MemoryAccess,
 ) -> (Engine, Rc<Sink<MemoryAccess>>, Rc<Memory<MemoryAccess>>) {
     let mut engine = start_test(file!());
+    let clock = engine.default_clock();
     let memory = create_memory(&mut engine);
     let top = engine.top();
 
@@ -58,7 +58,7 @@ fn setup_system(
     );
     source.set_generator(option_box_repeat!(to_put ; num_accesses));
 
-    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
 
     connect_port!(source, tx => memory, rx).unwrap();
     connect_port!(memory, tx => sink, rx).unwrap();
@@ -119,13 +119,14 @@ fn memory_write_np() {
 #[test]
 fn read_becomes_write() {
     let mut engine = start_test(file!());
+    let clock = engine.default_clock();
     let memory = create_memory(&mut engine);
     let top = engine.top();
 
     let mut mem_rx_driver = OutPort::new(&top, "mem_rx_driver");
     mem_rx_driver.connect(memory.port_rx()).unwrap();
 
-    let mem_tx_recv = InPort::new(&top, "mem_tx_recv");
+    let mem_tx_recv = InPort::new(&engine, &clock, &top, "mem_tx_recv");
     memory.connect_port_tx(mem_tx_recv.state()).unwrap();
 
     engine.spawn(async move {

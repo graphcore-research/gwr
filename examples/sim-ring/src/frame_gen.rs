@@ -27,7 +27,7 @@ impl FrameGen {
         num_send_frames: usize,
     ) -> Self {
         Self {
-            entity: Rc::new(Entity::new(parent, format!("gen{dest:?}").as_str())),
+            entity: Rc::new(Entity::new(parent, &format!("gen_{dest:?}"))),
             dest,
             payload_bytes,
             num_send_frames,

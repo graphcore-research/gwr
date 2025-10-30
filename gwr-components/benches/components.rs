@@ -25,8 +25,8 @@ fn run_engine(mut engine: Engine) {
 }
 
 fn spawn_source_store_sink() -> Engine {
-    let engine = create_engine();
-    let spawner = engine.spawner();
+    let mut engine = create_engine();
+    let clock = engine.default_clock();
 
     let capacity = 5;
     let num_puts = 200;
@@ -34,8 +34,8 @@ fn spawn_source_store_sink() -> Engine {
     let top = engine.top();
     let source =
         Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; num_puts)).unwrap();
-    let store = Store::new_and_register(&engine, top, "store", spawner, capacity).unwrap();
-    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
+    let store = Store::new_and_register(&engine, &clock, top, "store", capacity).unwrap();
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
 
     source.connect_port_tx(store.port_rx()).unwrap();
     connect_port!(store, tx => sink, rx).unwrap();
@@ -50,14 +50,12 @@ fn spawn_source_delay_sink() -> Engine {
     let delay = 3;
     let num_puts = 200;
 
-    let spawner = engine.spawner();
-
     let top = engine.top();
     let source =
         Source::new_and_register(&engine, top, "source", option_box_repeat!(500; num_puts))
             .unwrap();
-    let delay = Delay::new_and_register(&engine, top, "delay", clock, spawner, delay).unwrap();
-    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
+    let delay = Delay::new_and_register(&engine, &clock, top, "delay", delay).unwrap();
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
 
     connect_port!(source, tx => delay, rx).unwrap();
     connect_port!(delay, tx => sink, rx).unwrap();
@@ -100,9 +98,8 @@ fn spawn_arbiter_fixedpriority_policy() -> Engine {
 
 fn spawn_larger_simulation() -> Engine {
     let mut engine = create_engine();
-    let spawner = engine.spawner();
     let clock = engine.default_clock();
-    let rate_limiter = rc_limiter!(clock, 1);
+    let rate_limiter = rc_limiter!(&clock, 1);
 
     let num_puts = 20;
 
@@ -112,21 +109,22 @@ fn spawn_larger_simulation() -> Engine {
     let top = engine.top();
     let arbiter = Arbiter::new_and_register(
         &engine,
+        &clock,
         top,
         "arb",
-        spawner,
         num_sources,
         Box::new(RoundRobin::new()),
     )
     .unwrap();
-    let sink_limiter = Limiter::new_and_register(&engine, top, "limit_sink", rate_limiter).unwrap();
-    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
+    let sink_limiter =
+        Limiter::new_and_register(&engine, &clock, top, "limit_sink", rate_limiter).unwrap();
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
     for i in 0..num_sources {
         sources.push(
             Source::new_and_register(
                 &engine,
                 top,
-                format!("source{i}").as_str(),
+                &format!("source_{i}"),
                 option_box_repeat!(i ; num_puts),
             )
             .unwrap(),

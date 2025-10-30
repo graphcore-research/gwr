@@ -58,10 +58,12 @@ use async_trait::async_trait;
 use gwr_engine::engine::Engine;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::sim_error;
+use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Routable, Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::EntityDisplay;
 use gwr_track::entity::Entity;
+use gwr_track::tracker::aka::Aka;
 use gwr_track::{enter, exit, trace};
 
 use crate::take_option;
@@ -103,18 +105,20 @@ impl<T> Router<T>
 where
     T: SimObject + Routable,
 {
-    pub fn new_and_register(
+    pub fn new_and_register_with_renames(
         engine: &Engine,
+        clock: &Clock,
         parent: &Rc<Entity>,
         name: &str,
+        aka: Option<&Aka>,
         num_egress: usize,
         algorithm: Box<dyn Route<T>>,
     ) -> Result<Rc<Self>, SimError> {
         let entity = Rc::new(Entity::new(parent, name));
-        let rx = InPort::new(&entity, "rx");
+        let rx = InPort::new_with_renames(engine, clock, &entity, "rx", aka);
         let mut tx = Vec::with_capacity(num_egress);
         for i in 0..num_egress {
-            tx.push(OutPort::new(&entity, format!("tx{i}").as_str()));
+            tx.push(OutPort::new_with_renames(&entity, &format!("tx_{i}"), aka));
         }
         let rc_self = Rc::new(Self {
             entity,
@@ -124,6 +128,19 @@ where
         });
         engine.register(rc_self.clone());
         Ok(rc_self)
+    }
+
+    pub fn new_and_register(
+        engine: &Engine,
+        clock: &Clock,
+        parent: &Rc<Entity>,
+        name: &str,
+        num_egress: usize,
+        algorithm: Box<dyn Route<T>>,
+    ) -> Result<Rc<Self>, SimError> {
+        Self::new_and_register_with_renames(
+            engine, clock, parent, name, None, num_egress, algorithm,
+        )
     }
 
     pub fn connect_port_tx_i(&self, i: usize, port_state: PortStateResult<T>) -> SimResult {

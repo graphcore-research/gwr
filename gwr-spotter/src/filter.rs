@@ -78,6 +78,11 @@ impl SearchState {
                 fullness: _,
                 time: _,
             } => self.id_matches(id) || self.id_matches(exited),
+            EventLine::Value {
+                id,
+                value: _,
+                time: _,
+            } => self.id_matches(id),
             EventLine::Log {
                 level: _,
                 id,

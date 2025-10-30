@@ -35,8 +35,9 @@ fn disconnected_outport_try_put() {
 #[should_panic(expected = "top::rx not connected")]
 fn disconnected_input() {
     let mut engine = start_test(file!());
+    let clock = engine.default_clock();
 
-    let rx_port = InPort::new(engine.top(), "rx");
+    let rx_port = InPort::new(&engine, &clock, engine.top(), "rx");
     engine.spawn(async move {
         let _: i32 = rx_port.get()?.await;
         Ok(())
@@ -48,8 +49,9 @@ fn disconnected_input() {
 #[should_panic(expected = "top::rx not connected")]
 fn disconnected_input_start() {
     let mut engine = start_test(file!());
+    let clock = engine.default_clock();
 
-    let rx_port = InPort::new(engine.top(), "rx");
+    let rx_port = InPort::new(&engine, &clock, engine.top(), "rx");
     engine.spawn(async move {
         let _: i32 = rx_port.start_get()?.await;
         rx_port.finish_get();

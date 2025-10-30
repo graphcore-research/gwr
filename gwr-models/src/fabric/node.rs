@@ -98,7 +98,9 @@ use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Routable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, Runnable};
+use gwr_track::build_aka;
 use gwr_track::entity::Entity;
+use gwr_track::tracker::aka::Aka;
 use serde::Serialize;
 
 use crate::fabric::FabricConfig;
@@ -230,6 +232,7 @@ type RouterArbiterResult<T> = Result<(Rc<Arbiter<T>>, Rc<Router<T>>), SimError>;
 #[expect(clippy::too_many_arguments)]
 fn router_arbiter<T>(
     engine: &Engine,
+    clock: &Clock,
     node: &Rc<Entity>,
     config: Rc<FabricConfig>,
     fabric_algorithm: FabricRoutingAlgoritm,
@@ -250,20 +253,20 @@ where
         fabric_algorithm,
         config,
     });
-    let spawner = engine.spawner();
     Ok((
         Arbiter::new_and_register(
             engine,
+            clock,
             node,
-            format!("arb_{name}").as_str(),
-            spawner,
+            &format!("arb_{name}"),
             num_arbiter_router_ports,
             policy,
         )?,
         Router::new_and_register(
             engine,
+            clock,
             node,
-            format!("router_{name}").as_str(),
+            &format!("router_{name}"),
             num_arbiter_router_ports,
             algorithm,
         )?,
@@ -274,8 +277,10 @@ type Arbiters<T> = Vec<Rc<Arbiter<T>>>;
 type Routers<T> = Vec<Rc<Router<T>>>;
 type RoutersArbitersResult<T> = Result<(Arbiters<T>, Routers<T>), SimError>;
 
+#[expect(clippy::too_many_arguments)]
 fn create_arbiters_routers<T>(
     engine: &Engine,
+    clock: &Clock,
     node: &Rc<Entity>,
     config: &Rc<FabricConfig>,
     fabric_algorithm: FabricRoutingAlgoritm,
@@ -301,6 +306,7 @@ where
         let name = port.to_string();
         let (arbiter, router) = router_arbiter(
             engine,
+            clock,
             node,
             config.clone(),
             fabric_algorithm,
@@ -314,15 +320,14 @@ where
         routers.push(router);
     }
 
-    let spawner = engine.spawner();
     for i in 0..num_ingress_egress_ports {
         let ingress_egress_index = i + Port::Ingress as usize;
         let policy = Box::new(RoundRobin::new());
         arbiters.push(Arbiter::new_and_register(
             engine,
+            clock,
             node,
-            format!("arb{ingress_egress_index}").as_str(),
-            spawner.clone(),
+            &format!("arb_{ingress_egress_index}"),
             num_arbiter_router_ports,
             policy,
         )?);
@@ -335,8 +340,9 @@ where
         });
         routers.push(Router::new_and_register(
             engine,
+            clock,
             node,
-            format!("router{ingress_egress_index}").as_str(),
+            &format!("router_{ingress_egress_index}"),
             num_arbiter_router_ports,
             algorithm,
         )?);
@@ -347,10 +353,12 @@ where
 
 type IngressEgressBuffersResult<T> = Result<(Vec<Rc<Limiter<T>>>, Vec<Rc<Store<T>>>), SimError>;
 
+#[expect(clippy::too_many_arguments)]
 fn create_ingress_egress_buffers<T>(
     engine: &Engine,
-    clock: Clock,
+    clock: &Clock,
     node: &Rc<Entity>,
+    aka: Option<&Aka>,
     config: &Rc<FabricConfig>,
     num_ingress_egress_ports: usize,
     arbiters: &Arbiters<T>,
@@ -362,22 +370,24 @@ where
     let mut ingress_buffer_limiters = Vec::with_capacity(num_ingress_egress_ports);
     let mut egress_buffers = Vec::with_capacity(num_ingress_egress_ports);
 
-    let spawner = engine.spawner();
     let port_limiter = rc_limiter!(clock, config.port_bits_per_tick);
     for i in 0..num_ingress_egress_ports {
         let ingress_egress_index = Port::Ingress as usize + i;
         // Build a buffer per input
-        let ingress_buffer_limiter = Limiter::new_and_register(
+        let ingress_buffer_limiter_aka = build_aka!(aka, node, &[(&format!("ingress_{i}"), "rx")]);
+        let ingress_buffer_limiter = Limiter::new_and_register_with_renames(
             engine,
+            clock,
             node,
-            format!("limit_ingress{i}").as_str(),
+            &format!("limit_ingress_{i}"),
+            Some(&ingress_buffer_limiter_aka),
             port_limiter.clone(),
         )?;
         let ingress_buffer = Store::new_and_register(
             engine,
+            clock,
             node,
-            format!("ingress_buf{i}").as_str(),
-            spawner.clone(),
+            &format!("ingress_buf_{i}"),
             config.rx_buffer_entries,
         )?;
         connect_port!(ingress_buffer_limiter, tx => ingress_buffer, rx)?;
@@ -387,15 +397,18 @@ where
         // Build a buffer per output
         let egress_buffer_limiter = Limiter::new_and_register(
             engine,
+            clock,
             node,
-            format!("limit_egress{i}").as_str(),
+            &format!("limit_egress_{i}"),
             port_limiter.clone(),
         )?;
-        let egress_buffer = Store::new_and_register(
+        let egress_buffer_aka = build_aka!(aka, node, &[(&format!("egress_{i}"), "tx")]);
+        let egress_buffer = Store::new_and_register_with_renames(
             engine,
+            clock,
             node,
-            format!("egress_buf{i}").as_str(),
-            spawner.clone(),
+            &format!("egress_buf_{i}"),
+            Some(&egress_buffer_aka),
             config.tx_buffer_entries,
         )?;
         connect_port!(egress_buffer_limiter, tx => egress_buffer, rx)?;
@@ -425,13 +438,14 @@ where
     T: SimObject + Routable,
 {
     #[expect(clippy::too_many_arguments)]
-    pub fn new_and_register(
+    pub fn new_and_register_with_renames(
         engine: &Engine,
+        clock: &Clock,
         parent: &Rc<Entity>,
         name: &str,
+        aka: Option<&Aka>,
         node_col: usize,
         node_row: usize,
-        clock: Clock,
         config: &Rc<FabricConfig>,
         fabric_algorithm: FabricRoutingAlgoritm,
     ) -> Result<Rc<Self>, SimError> {
@@ -441,6 +455,7 @@ where
 
         let (arbiters, routers) = create_arbiters_routers(
             engine,
+            clock,
             &entity,
             config,
             fabric_algorithm,
@@ -453,6 +468,7 @@ where
             engine,
             clock,
             &entity,
+            aka,
             config,
             num_ingress_egress_ports,
             &arbiters,
@@ -481,6 +497,30 @@ where
         });
         engine.register(rc_self.clone());
         Ok(rc_self)
+    }
+
+    #[expect(clippy::too_many_arguments)]
+    pub fn new_and_register(
+        engine: &Engine,
+        clock: &Clock,
+        parent: &Rc<Entity>,
+        name: &str,
+        node_col: usize,
+        node_row: usize,
+        config: &Rc<FabricConfig>,
+        fabric_algorithm: FabricRoutingAlgoritm,
+    ) -> Result<Rc<Self>, SimError> {
+        Self::new_and_register_with_renames(
+            engine,
+            clock,
+            parent,
+            name,
+            None,
+            node_col,
+            node_row,
+            config,
+            fabric_algorithm,
+        )
     }
 
     pub fn connect_port_egress_i(&self, i: usize, port_state: PortStateResult<T>) -> SimResult {

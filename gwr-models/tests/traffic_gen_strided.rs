@@ -38,7 +38,6 @@ fn build_system(
     Rc<MemoryAccessGen<MemoryAccess>>,
 ) {
     let mut engine = start_test(file!());
-    let spawner = engine.spawner();
     let clock = engine.default_clock();
 
     let top = engine.top();
@@ -55,7 +54,7 @@ fn build_system(
     ));
 
     let traffic_gen =
-        MemoryAccessGen::new_and_register(&engine, top, "gen", data_generator).unwrap();
+        MemoryAccessGen::new_and_register(&engine, &clock, top, "gen", data_generator).unwrap();
 
     let config = CacheConfig::new(
         LINE_SIZE_BYTES,
@@ -64,15 +63,7 @@ fn build_system(
         NUM_WAYS,
         DELAY_TICKS,
     );
-    let cache = Cache::new_and_register(
-        &engine,
-        top,
-        "cache",
-        clock.clone(),
-        spawner.clone(),
-        config,
-    )
-    .unwrap();
+    let cache = Cache::new_and_register(&engine, &clock, top, "cache", config).unwrap();
 
     connect_port!(traffic_gen, tx => cache, dev_rx).unwrap();
     connect_port!(cache, dev_tx => traffic_gen, rx).unwrap();
@@ -83,7 +74,7 @@ fn build_system(
         BW_BYTES_PER_CYCLE,
         DELAY_TICKS,
     );
-    let memory = Memory::new_and_register(&engine, top, "memory", clock, spawner, config).unwrap();
+    let memory = Memory::new_and_register(&engine, &clock, top, "memory", config).unwrap();
 
     connect_port!(cache, mem_tx => memory, rx).unwrap();
     connect_port!(memory, tx => cache, mem_rx).unwrap();

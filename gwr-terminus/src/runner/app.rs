@@ -138,7 +138,7 @@ fn build_recipe_list(recipes_folder: &str, logger: &mut impl Logger) -> Vec<AppR
         let recipe = match Recipe::new_from_file(&path.path()) {
             Ok(recipe) => recipe,
             Err(e) => {
-                logger.error(format!("{e}").as_str());
+                logger.error(&format!("{e}"));
                 continue;
             }
         };

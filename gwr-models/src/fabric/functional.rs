@@ -37,7 +37,8 @@ use gwr_engine::traits::{Event, Routable, Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::EntityDisplay;
 use gwr_track::entity::Entity;
-use gwr_track::{enter, exit};
+use gwr_track::tracker::aka::Aka;
+use gwr_track::{build_aka, enter, exit};
 
 use crate::fabric::{Fabric, FabricConfig};
 
@@ -81,11 +82,12 @@ where
     ///
     /// The total number of ingress/egress ports must be at least two, otherwise
     /// there are no valid routes and an error will be returned.
-    pub fn new_and_register(
+    pub fn new_and_register_with_renames(
         engine: &Engine,
+        clock: &Clock,
         parent: &Rc<Entity>,
         name: &str,
-        clock: &Clock,
+        aka: Option<&Aka>,
         config: Rc<FabricConfig>,
     ) -> Result<Rc<Self>, SimError> {
         let entity = Rc::new(Entity::new(parent, name));
@@ -101,27 +103,31 @@ where
         let mut tx_buffers = Vec::with_capacity(num_ports);
         let mut internal_tx = Vec::with_capacity(num_ports);
 
-        let port_limiter = rc_limiter!(clock.clone(), config.port_bits_per_tick);
+        let port_limiter = rc_limiter!(clock, config.port_bits_per_tick);
 
         for i in 0..num_ports {
             // Build a buffer per input
-            let rx_buffer_limiter = Limiter::new_and_register(
+            let rx_buffer_limiter_aka =
+                build_aka!(aka, &entity, &[(&format!("ingress_{i}"), "rx")]);
+            let rx_buffer_limiter = Limiter::new_and_register_with_renames(
                 engine,
+                clock,
                 &entity,
-                format!("limit_rx{i}").as_str(),
+                &format!("limit_rx_{i}"),
+                Some(&rx_buffer_limiter_aka),
                 port_limiter.clone(),
             )?;
             let rx_buffer = Store::new_and_register(
                 engine,
+                clock,
                 &entity,
-                format!("rx_buf{i}").as_str(),
-                spawner.clone(),
+                &format!("rx_buf_{i}"),
                 config.rx_buffer_entries,
             )?;
             connect_port!(rx_buffer_limiter, tx => rx_buffer, rx)?;
 
             // Create and connect a port to receive from the RX
-            let internal_rx_port = InPort::new(&entity, format!("internal_rx{i}").as_str());
+            let internal_rx_port = InPort::new(engine, clock, &entity, &format!("internal_rx_{i}"));
             rx_buffer.connect_port_tx(internal_rx_port.state()).unwrap();
 
             rx_buffer_limiters.push(rx_buffer_limiter);
@@ -130,21 +136,25 @@ where
             // Build a buffer per output
             let tx_buffer_limiter = Limiter::new_and_register(
                 engine,
+                clock,
                 &entity,
-                format!("limit_tx{i}").as_str(),
+                &format!("limit_tx_{i}"),
                 port_limiter.clone(),
             )?;
-            let tx_buffer = Store::new_and_register(
+
+            let tx_buffer_aka = build_aka!(aka, &entity, &[(&format!("egress_{i}"), "tx")]);
+            let tx_buffer = Store::new_and_register_with_renames(
                 engine,
+                clock,
                 &entity,
-                format!("tx_buf{i}").as_str(),
-                spawner.clone(),
+                &format!("tx_buf_{i}"),
+                Some(&tx_buffer_aka),
                 config.tx_buffer_entries,
             )?;
             connect_port!(tx_buffer_limiter, tx => tx_buffer, rx)?;
 
             // Create and connect a port to drive the TX
-            let mut internal_tx_port = OutPort::new(&entity, format!("internal_tx{i}").as_str());
+            let mut internal_tx_port = OutPort::new(&entity, &format!("internal_tx_{i}"));
             internal_tx_port.connect(tx_buffer_limiter.port_rx())?;
 
             tx_buffers.push(tx_buffer);
@@ -163,6 +173,20 @@ where
         });
         engine.register(rc_self.clone());
         Ok(rc_self)
+    }
+
+    /// Create and register a new fabric.
+    ///
+    /// The total number of ingress/egress ports must be at least two, otherwise
+    /// there are no valid routes and an error will be returned.
+    pub fn new_and_register(
+        engine: &Engine,
+        clock: &Clock,
+        parent: &Rc<Entity>,
+        name: &str,
+        config: Rc<FabricConfig>,
+    ) -> Result<Rc<Self>, SimError> {
+        Self::new_and_register_with_renames(engine, clock, parent, name, None, config)
     }
 }
 

@@ -46,14 +46,15 @@ fn main() -> SimResult {
     let args = Cli::parse();
 
     let mut engine = Engine::default();
+    let clock = engine.default_clock();
 
     let num_puts = args.num_packets;
 
     let top = engine.top();
     let source =
         Source::new_and_register(&engine, top, "source", option_box_repeat!(0x123 ; num_puts))?;
-    let flaky = Flaky::new_and_register(&engine, top, "flaky", args.drop, args.seed)?;
-    let sink = Sink::new_and_register(&engine, top, "sink")?;
+    let flaky = Flaky::new_and_register(&engine, &clock, top, "flaky", args.drop, args.seed)?;
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink")?;
 
     connect_port!(source, tx => flaky, rx)?;
     connect_port!(flaky, tx => sink, rx)?;

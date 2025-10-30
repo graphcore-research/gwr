@@ -17,7 +17,7 @@ use gwr_models::fabric::functional::FunctionalFabric;
 use gwr_models::fabric::node::FabricRoutingAlgoritm;
 use gwr_models::fabric::routed::RoutedFabric;
 use gwr_models::fabric::{Fabric, FabricConfig};
-use gwr_track::builder::setup_all_trackers;
+use gwr_track::builder::{MonitorsConfig, TrackerConfig, TrackersConfig, setup_trackers};
 use gwr_track::entity::Entity;
 use gwr_track::{Track, error, info};
 use indicatif::ProgressBar;
@@ -76,6 +76,15 @@ struct Cli {
     /// The filename Perfetto trace output is written to.
     #[arg(long, default_value = "trace.pftrace")]
     perfetto_file: String,
+
+    /// Enable monitoring at the specified number of clock ticks.
+    #[clap(long)]
+    monitor_window_ticks: Option<u64>,
+
+    /// Set a regular expression for which ports should have monitors
+    /// enabled.
+    #[arg(long, default_value = "")]
+    monitor_filter_regex: String,
 
     /// Show a progress bar for the received frame count (updated at the rate
     /// defined by `progress_ticks`).
@@ -192,31 +201,36 @@ fn start_frame_dump(
     });
 }
 
-fn setup_trackers(args: &Cli) -> Rc<dyn Track> {
-    setup_all_trackers(
-        args.stdout,
-        args.stdout_level,
-        args.stdout_filter_regex.as_str(),
-        args.binary,
-        args.binary_level,
-        &args.binary_filter_regex,
-        &args.binary_file,
-        args.perfetto,
-        args.perfetto_level,
-        &args.perfetto_filter_regex,
-        &args.perfetto_file,
-    )
-    .unwrap()
+fn setup_all_trackers(args: &Cli) -> Rc<dyn Track> {
+    let config = TrackersConfig {
+        stdout: TrackerConfig {
+            enable: args.stdout,
+            level: args.stdout_level,
+            filter_regex: &args.stdout_filter_regex,
+            file: None,
+        },
+        binary: TrackerConfig {
+            enable: args.binary,
+            level: args.binary_level,
+            filter_regex: &args.binary_filter_regex,
+            file: Some(&args.binary_file),
+        },
+        perfetto: TrackerConfig {
+            enable: args.perfetto,
+            level: args.perfetto_level,
+            filter_regex: &args.perfetto_filter_regex,
+            file: Some(&args.perfetto_file),
+        },
+        monitors: MonitorsConfig {
+            enable: args.monitor_window_ticks.is_some(),
+            window_size_ticks: args.monitor_window_ticks.unwrap_or(0),
+            filter_regex: &args.monitor_filter_regex,
+        },
+    };
+    setup_trackers(&config).unwrap()
 }
 
-fn main() -> Result<(), SimError> {
-    let args = Cli::parse();
-    let tracker = setup_trackers(&args);
-
-    let mut engine = Engine::new(&tracker);
-    let spawner = engine.spawner();
-    let clock = engine.default_clock();
-
+fn create_config(engine: &Engine, args: &Cli) -> (Rc<FabricConfig>, usize) {
     let config = FabricConfig::new(
         args.fabric_columns,
         args.fabric_rows,
@@ -229,14 +243,13 @@ fn main() -> Result<(), SimError> {
         args.port_bits_per_tick,
     );
     let config = Rc::new(config);
-    let num_ports = config.num_ports();
 
     let num_payload_bytes_to_send = args.kib_to_send * 1024;
 
     // Size of max-sized frames
     let num_send_frames = num_payload_bytes_to_send / args.frame_payload_bytes;
 
-    let top = engine.top().clone();
+    let top = engine.top();
     info!(top ;
         "Fabric of {}x{}x{} sources, each sending {} frames ({}KiB) with buffers {}/{} frames.",
         config.num_columns(),
@@ -249,17 +262,31 @@ fn main() -> Result<(), SimError> {
     );
     info!(top ; "Using traffic pattern {}. Random seed {}", args.traffic_pattern, args.seed);
 
+    (config, num_send_frames)
+}
+
+fn main() -> Result<(), SimError> {
+    let args = Cli::parse();
+    let tracker = setup_all_trackers(&args);
+
+    let mut engine = Engine::new(&tracker);
+    let spawner = engine.spawner();
+    let clock = engine.default_clock();
+
+    let (config, num_send_frames) = create_config(&engine, &args);
+    let num_ports = config.num_ports();
+    let top = engine.top().clone();
     let fabric: Rc<dyn Fabric<DataFrame>> = if args.routed {
         RoutedFabric::new_and_register(
             &engine,
+            &clock,
             &top,
             "fabric",
-            &clock,
             config.clone(),
             args.fabric_routing,
         )?
     } else {
-        FunctionalFabric::new_and_register(&engine, &top, "fabric", &clock, config.clone())?
+        FunctionalFabric::new_and_register(&engine, &clock, &top, "fabric", config.clone())?
     };
 
     // By default enable all ports unless the user has constrained the generators
@@ -270,6 +297,7 @@ fn main() -> Result<(), SimError> {
 
     let (sources, sinks, total_expected_frames) = build_source_sinks(
         &mut engine,
+        &clock,
         &config,
         args.traffic_pattern,
         args.frame_overhead_bytes,
