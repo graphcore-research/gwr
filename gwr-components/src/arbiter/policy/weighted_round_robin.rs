@@ -2,6 +2,7 @@
 
 //! Weighted Round Robin policy
 
+use std::fmt::Write;
 use std::rc::Rc;
 
 use gwr_engine::sim_error;
@@ -38,10 +39,10 @@ impl WeightedRoundRobin {
         T: SimObject,
     {
         let mut s = String::new();
-        s.push_str(format!("{}: ", self.candidate).as_str());
+        let _ = write!(s, "{}: ", self.candidate);
         for (i, grant) in self.grants.iter().enumerate() {
             let req = if input_values[i].is_some() { "r" } else { "-" };
-            s.push_str(format!("{}/{}/{}, ", req, grant, self.weights[i]).as_str());
+            let _ = write!(s, "{req}/{grant}/{}, ", self.weights[i]);
         }
         s
     }

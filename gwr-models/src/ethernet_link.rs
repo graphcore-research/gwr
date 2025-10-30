@@ -17,13 +17,14 @@ use gwr_components::delay::Delay;
 use gwr_components::flow_controls::limiter::Limiter;
 use gwr_components::{connect_port, rc_limiter};
 use gwr_engine::engine::Engine;
-use gwr_engine::executor::Spawner;
 use gwr_engine::port::PortStateResult;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::SimObject;
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, Runnable};
+use gwr_track::build_aka;
 use gwr_track::entity::Entity;
+use gwr_track::tracker::aka::Aka;
 
 // Default values for an Ethernet Link
 pub const DELAY_TICKS: usize = 500;
@@ -45,29 +46,53 @@ impl<T> EthernetLink<T>
 where
     T: SimObject,
 {
-    pub fn new_and_register(
+    pub fn new_and_register_with_renames(
         engine: &Engine,
+        clock: &Clock,
         parent: &Rc<Entity>,
         name: &str,
-        clock: Clock,
-        spawner: Spawner,
+        aka: Option<&Aka>,
     ) -> Result<Rc<Self>, SimError> {
         let entity = Rc::new(Entity::new(parent, name));
-        let limiter = rc_limiter!(clock.clone(), BITS_PER_TICK);
-        let limiter_a = Limiter::new_and_register(engine, &entity, "limit_a", limiter.clone())?;
-        let delay_a = Delay::new_and_register(
+        let limiter = rc_limiter!(clock, BITS_PER_TICK);
+        let limiter_a_aka = build_aka!(aka, &entity, &[("rx_a", "rx")]);
+        let limiter_a = Limiter::new_and_register_with_renames(
             engine,
+            clock,
+            &entity,
+            "limit_a",
+            Some(&limiter_a_aka),
+            limiter.clone(),
+        )?;
+        let delay_a_aka = build_aka!(aka, &entity, &[("tx_a", "tx")]);
+        let delay_a = Delay::new_and_register_with_renames(
+            engine,
+            clock,
             &entity,
             "a",
-            clock.clone(),
-            spawner.clone(),
+            Some(&delay_a_aka),
             DELAY_TICKS,
         )?;
         connect_port!(limiter_a, tx => delay_a, rx)?;
 
-        let limiter_b: Rc<Limiter<_>> =
-            Limiter::new_and_register(engine, &entity, "limit_b", limiter.clone())?;
-        let delay_b = Delay::new_and_register(engine, &entity, "b", clock, spawner, DELAY_TICKS)?;
+        let limiter_b_aka = build_aka!(aka, &entity, &[("rx_b", "rx")]);
+        let limiter_b: Rc<Limiter<_>> = Limiter::new_and_register_with_renames(
+            engine,
+            clock,
+            &entity,
+            "limit_b",
+            Some(&limiter_b_aka),
+            limiter.clone(),
+        )?;
+        let delay_b_aka = build_aka!(aka, &entity, &[("tx_b", "tx")]);
+        let delay_b = Delay::new_and_register_with_renames(
+            engine,
+            clock,
+            &entity,
+            "b",
+            Some(&delay_b_aka),
+            DELAY_TICKS,
+        )?;
         connect_port!(limiter_b, tx => delay_b, rx)?;
 
         let rc_self = Rc::new(Self {
@@ -79,6 +104,15 @@ where
         });
         engine.register(rc_self.clone());
         Ok(rc_self)
+    }
+
+    pub fn new_and_register(
+        engine: &Engine,
+        clock: &Clock,
+        parent: &Rc<Entity>,
+        name: &str,
+    ) -> Result<Rc<Self>, SimError> {
+        Self::new_and_register_with_renames(engine, clock, parent, name, None)
     }
 
     pub fn set_delay(&self, delay: usize) -> SimResult {

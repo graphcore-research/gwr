@@ -7,6 +7,7 @@ use std::rc::Rc;
 use gwr_components::sink::Sink;
 use gwr_components::source::Source;
 use gwr_engine::engine::Engine;
+use gwr_engine::time::clock::Clock;
 use gwr_models::data_frame::DataFrame;
 use gwr_models::fabric::FabricConfig;
 use rand::SeedableRng;
@@ -23,6 +24,7 @@ pub type Sinks = Vec<Rc<Sink<DataFrame>>>;
 #[must_use]
 pub fn build_source_sinks(
     engine: &mut Engine,
+    clock: &Clock,
     config: &Rc<FabricConfig>,
     traffic_pattern: TrafficPattern,
     overhead_size_bytes: usize,
@@ -102,7 +104,7 @@ pub fn build_source_sinks(
             Source::new_and_register(
                 engine,
                 top,
-                format!("source{source_index}").as_str(),
+                &format!("source{source_index}"),
                 data_generator,
             )
             .unwrap(),
@@ -112,7 +114,7 @@ pub fn build_source_sinks(
     let sinks: Sinks = config
         .port_indices()
         .iter()
-        .map(|i| Sink::new_and_register(engine, top, format!("sink{i}").as_str()).unwrap())
+        .map(|i| Sink::new_and_register(engine, clock, top, &format!("sink_{i}")).unwrap())
         .collect();
 
     (sources, sinks, total_expected_frames)

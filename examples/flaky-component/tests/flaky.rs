@@ -6,13 +6,14 @@ use gwr_components::source::Source;
 use gwr_components::{connect_port, option_box_repeat};
 use gwr_engine::engine::Engine;
 use gwr_engine::run_simulation;
-use gwr_engine::test_helpers::create_tracker;
+use gwr_track::test_helpers::create_tracker;
 
 /// Command-line arguments.
 #[test]
 fn drop_precent() {
     let tracker = create_tracker(file!());
     let mut engine = Engine::new(&tracker);
+    let clock = engine.default_clock();
     let num_puts = 100;
 
     let drop = 0.5;
@@ -21,8 +22,8 @@ fn drop_precent() {
     let source =
         Source::new_and_register(&engine, top, "source", option_box_repeat!(0x123 ; num_puts))
             .unwrap();
-    let flaky = Flaky::new_and_register(&engine, top, "flaky", drop, seed).unwrap();
-    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
+    let flaky = Flaky::new_and_register(&engine, &clock, top, "flaky", drop, seed).unwrap();
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
 
     connect_port!(source, tx => flaky, rx).unwrap();
     connect_port!(flaky, tx => sink, rx).unwrap();

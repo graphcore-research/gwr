@@ -825,7 +825,7 @@ checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
 
 [[package]]
 name = "flaky-component"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "async-trait",
  "clap",
@@ -838,7 +838,7 @@ dependencies = [
 
 [[package]]
 name = "flaky-with-delay"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "async-trait",
  "clap",
@@ -1006,7 +1006,7 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "gwr-components"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "clap",
@@ -1068,10 +1068,11 @@ dependencies = [
 
 [[package]]
 name = "gwr-engine"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "arc-swap",
  "async-trait",
+ "byte-unit",
  "clap",
  "criterion",
  "futures",
@@ -1093,7 +1094,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-models"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "async-trait",
  "clap",
@@ -1142,7 +1143,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-spotter"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "capnp",
  "clap",
@@ -1173,7 +1174,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-track"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "capnp",
  "capnpc",
@@ -2522,7 +2523,7 @@ dependencies = [
 
 [[package]]
 name = "sim-fabric"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "byte-unit",
  "clap",
@@ -2556,7 +2557,7 @@ dependencies = [
 
 [[package]]
 name = "sim-ring"
-version = "5.0.0"
+version = "6.0.0"
 dependencies = [
  "clap",
  "gwr-components",

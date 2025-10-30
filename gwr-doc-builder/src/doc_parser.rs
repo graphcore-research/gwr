@@ -173,7 +173,7 @@ impl DocParser {
             let parent_path = parent.full_name();
             match e.name("after") {
                 Some(after) => {
-                    format!("{}{}", parent_path, after.as_str())
+                    format!("{parent_path}{}", after.as_str())
                 }
                 None => parent_path,
             }

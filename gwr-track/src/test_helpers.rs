@@ -10,10 +10,16 @@
 //! unpredictable results.
 
 use std::cell::RefCell;
+use std::fs;
+use std::io::BufWriter;
+use std::path::Path;
+use std::rc::Rc;
 
 use regex::Regex;
 
-use crate::{Id, Track};
+use crate::tracker::aka::AlternativeNames;
+use crate::tracker::{CapnProtoTracker, EntityManager};
+use crate::{Id, Track, Tracker, Writer};
 
 /// A tracker that keeps track events.
 pub struct TestTracker {
@@ -23,7 +29,7 @@ pub struct TestTracker {
 }
 
 impl TestTracker {
-    /// Create a new [`Tracker`](crate::Tracker) for the tests.
+    /// Create a new [`Tracker`] for the tests.
     ///
     /// This keeps the track events in memory for checking later.
     #[must_use]
@@ -53,7 +59,11 @@ impl Track for TestTracker {
         true
     }
 
-    fn add_entity(&self, _id: Id, _entity_name: &str) {
+    fn monitoring_window_size_for(&self, _id: Id) -> Option<u64> {
+        None
+    }
+
+    fn add_entity(&self, _id: Id, _entity_name: &str, _alternative_names: AlternativeNames) {
         // Do nothing
     }
 
@@ -63,6 +73,10 @@ impl Track for TestTracker {
 
     fn exit(&self, id: Id, item: Id) {
         self.add_event(format!("{id}: {item} exited"));
+    }
+
+    fn value(&self, id: Id, value: f64) {
+        self.add_event(format!("{id}: {value}"));
     }
 
     fn create(&self, created_by: Id, id: Id, num_bytes: usize, req_type: i8, name: &str) {
@@ -180,4 +194,28 @@ pub fn check_and_clear(tracker: &TestTracker, expected: &[&str]) {
     }
 
     log_contents_ref.clear();
+}
+
+#[must_use]
+/// Create a tracker for tests
+pub fn create_tracker(full_filepath: &str) -> Tracker {
+    // Place all trace files in one folder
+    const FOLDER: &str = "traces";
+
+    // Create that folder if it doesn't exist yet
+    fs::create_dir_all(FOLDER).unwrap();
+
+    let filename_only = Path::new(full_filepath)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap();
+
+    let bin_writer: Writer = Box::new(BufWriter::new(
+        fs::File::create(format!("{FOLDER}/{filename_only}.bin")).unwrap(),
+    ));
+
+    let default_log_level = log::Level::Trace;
+    let entity_manger = EntityManager::new(default_log_level);
+    let tracker: Tracker = Rc::new(CapnProtoTracker::new(entity_manger, bin_writer));
+    tracker
 }

@@ -16,11 +16,13 @@ use std::rc::Rc;
 use async_trait::async_trait;
 use gwr_engine::engine::Engine;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
+use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::EntityDisplay;
 use gwr_track::entity::Entity;
 use gwr_track::trace;
+use gwr_track::tracker::aka::Aka;
 
 use crate::types::Credit;
 use crate::{connect_tx, port_rx, take_option};
@@ -40,11 +42,17 @@ impl<T> CreditIssuer<T>
 where
     T: SimObject,
 {
-    pub fn new_and_register(engine: &Engine, parent: &Rc<Entity>) -> Result<Rc<Self>, SimError> {
-        let entity = Rc::new(Entity::new(parent, "credit_issue"));
-        let tx = OutPort::new(&entity, "tx");
-        let credit_tx = OutPort::new(&entity, "credit_tx");
-        let rx = InPort::new(&entity, "rx");
+    pub fn new_and_register_with_renames(
+        engine: &Engine,
+        clock: &Clock,
+        parent: &Rc<Entity>,
+        name: &str,
+        aka: Option<&Aka>,
+    ) -> Result<Rc<Self>, SimError> {
+        let entity = Rc::new(Entity::new(parent, name));
+        let tx = OutPort::new_with_renames(&entity, "tx", aka);
+        let credit_tx = OutPort::new_with_renames(&entity, "credit_tx", aka);
+        let rx = InPort::new_with_renames(engine, clock, &entity, "rx", aka);
         let rc_self = Rc::new(Self {
             entity,
             tx: RefCell::new(Some(tx)),
@@ -53,6 +61,15 @@ where
         });
         engine.register(rc_self.clone());
         Ok(rc_self)
+    }
+
+    pub fn new_and_register(
+        engine: &Engine,
+        clock: &Clock,
+        parent: &Rc<Entity>,
+        name: &str,
+    ) -> Result<Rc<Self>, SimError> {
+        Self::new_and_register_with_renames(engine, clock, parent, name, None)
     }
 
     pub fn connect_port_tx(&self, port_state: PortStateResult<T>) -> SimResult {

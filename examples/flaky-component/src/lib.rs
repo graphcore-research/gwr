@@ -24,6 +24,7 @@ use async_trait::async_trait;
 use gwr_components::{connect_tx, port_rx, take_option};
 use gwr_engine::engine::Engine;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
+use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::EntityDisplay;
@@ -93,6 +94,7 @@ where
     /// parameters provided.
     pub fn new_and_register(
         engine: &Engine,
+        clock: &Clock,
         parent: &Rc<Entity>,
         name: &str,
         drop_ratio: f64,
@@ -105,7 +107,7 @@ where
         // Because it is shared it needs to be wrapped in an Rc
         let entity = Rc::new(entity);
 
-        let rx = InPort::new(&entity, "rx");
+        let rx = InPort::new(engine, clock, &entity, "rx");
         let tx = OutPort::new(&entity, "tx");
         // Finally, the top-level struct is created and wrapped in an Rc.
         let rc_self = Rc::new(Self {

@@ -27,16 +27,17 @@
 //! use gwr_components::store::Store;
 //! use gwr_engine::engine::Engine;
 //! use gwr_engine::executor::Spawner;
+//! use gwr_engine::time::clock::Clock;
 //! use gwr_track::entity::Entity;
 //!
-//! fn build_store(engine: &Engine, parent: &Rc<Entity>, spawner: Spawner) -> Rc<Store<i32>> {
+//! fn build_store(engine: &Engine, clock: &Clock, parent: &Rc<Entity>) -> Rc<Store<i32>> {
 //!     // Create a store. It is passed:
+//!     //   - the engine under which the store runs
+//!     //   - a clock that the store will run off
 //!     //   - a parent entity which provides its location within the simulation.
 //!     //   - a name which should be unique within the parent.
-//!     //   - a [spawner](gwr_engine::executor::Spawner) that is used to spawn
-//!     //     internal concurrent tasks.
 //!     //   - a capacity.
-//!     let store: Rc<Store<i32>> = Store::new_and_register(engine, parent, "store", spawner, 5)
+//!     let store: Rc<Store<i32>> = Store::new_and_register(engine, clock, parent, "store", 5)
 //!         .expect("should be able to create and register `Store`");
 //!     store
 //! }
@@ -52,16 +53,18 @@
 //! use gwr_components::store::Store;
 //! use gwr_engine::engine::Engine;
 //! use gwr_engine::executor::Spawner;
+//! use gwr_engine::time::clock::Clock;
 //! use gwr_track::entity::Entity;
 //!
 //! fn build_store_with_panic(
 //!     engine: &Engine,
+//!     clock: &Clock,
 //!     parent: &Rc<Entity>,
 //!     spawner: Spawner,
 //! ) -> Rc<Store<i32>> {
 //!     // Create a store that panics on overflow. Use `new_and_register()` as before,
 //!     // then call `set_error_on_overflow()` on the resulting struct.
-//!     let store = Store::new_and_register(engine, parent, "store_error", spawner, 5)
+//!     let store = Store::new_and_register(engine, clock, parent, "store_error", 5)
 //!         .expect("should be able to create and register `Store`");
 //!     store.set_error_on_overflow();
 //!     store
@@ -81,13 +84,14 @@
 //! use gwr_components::store::Store;
 //! use gwr_components::{connect_port, option_box_repeat};
 //! use gwr_engine::engine::Engine;
+//! use gwr_engine::time::clock::Clock;
 //! use gwr_engine::run_simulation;
 //!
 //! // Every simulation is based around an `Engine`
 //! let mut engine = Engine::default();
 //!
-//! // A spawner allows components to spawn activity
-//! let spawner = engine.spawner();
+//! // For this simulation just use the default clock
+//! let clock = engine.default_clock();
 //!
 //! // Take a reference to the engine top to use as the parent
 //! let top = engine.top();
@@ -97,10 +101,10 @@
 //! let source = Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; 10))
 //!     .expect("should be able to create and register `Source`");
 //! // Create the store - its type will be derived from the connections to its ports.
-//! let store = Store::new_and_register(&engine, top, "store", spawner, 5)
+//! let store = Store::new_and_register(&engine, &clock, top, "store", 5)
 //!     .expect("should be able to create and register `Store`");
 //! // Create the sink which will pull all of the data items out of the store
-//! let sink = Sink::new_and_register(&engine, top, "sink")
+//! let sink = Sink::new_and_register(&engine, &clock, top, "sink")
 //!     .expect("should be able to create and register `Sink`");
 //!
 //! // Connect the ports together:
@@ -127,10 +131,12 @@ use gwr_engine::events::repeated::Repeated;
 use gwr_engine::executor::Spawner;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::sim_error;
+use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Event, Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::EntityDisplay;
 use gwr_track::entity::Entity;
+use gwr_track::tracker::aka::Aka;
 use gwr_track::{enter, exit};
 
 use crate::{connect_tx, port_rx, take_option};
@@ -214,20 +220,22 @@ where
     /// Basic store constructor
     ///
     /// Returns a `SimError` if `capacity` is 0.
-    pub fn new_and_register(
+    pub fn new_and_register_with_renames(
         engine: &Engine,
+        clock: &Clock,
         parent: &Rc<Entity>,
         name: &str,
-        spawner: Spawner,
+        aka: Option<&Aka>,
         capacity: usize,
     ) -> Result<Rc<Self>, SimError> {
+        let spawner = engine.spawner();
         if capacity == 0 {
             return sim_error!("Unsupported Store with 0 capacity");
         }
         let entity = Rc::new(Entity::new(parent, name));
         let state = Rc::new(State::new(&entity, capacity));
-        let tx = OutPort::new(&entity, "tx");
-        let rx = InPort::new(&entity, "rx");
+        let tx = OutPort::new_with_renames(&entity, "tx", aka);
+        let rx = InPort::new_with_renames(engine, clock, &entity, "rx", aka);
         let rc_self = Rc::new(Self {
             entity,
             spawner,
@@ -237,6 +245,19 @@ where
         });
         engine.register(rc_self.clone());
         Ok(rc_self)
+    }
+
+    /// Basic store constructor
+    ///
+    /// Returns a `SimError` if `capacity` is 0.
+    pub fn new_and_register(
+        engine: &Engine,
+        clock: &Clock,
+        parent: &Rc<Entity>,
+        name: &str,
+        capacity: usize,
+    ) -> Result<Rc<Self>, SimError> {
+        Self::new_and_register_with_renames(engine, clock, parent, name, None, capacity)
     }
 
     pub fn connect_port_tx(&self, port_state: PortStateResult<T>) -> SimResult {

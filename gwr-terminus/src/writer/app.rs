@@ -63,7 +63,7 @@ fn read_history(history_path: &PathBuf, error_handler: &mut impl Logger) -> Vec<
     let file = match File::open(history_path) {
         Ok(file) => file,
         Err(e) => {
-            error_handler.error(format!("Failed to open {}: {e}", history_path.display()).as_str());
+            error_handler.error(&format!("Failed to open {}: {e}", history_path.display()));
             return lines;
         }
     };
@@ -72,7 +72,7 @@ fn read_history(history_path: &PathBuf, error_handler: &mut impl Logger) -> Vec<
     for line in reader.lines() {
         match line {
             Ok(line) => lines.push(line),
-            Err(err) => error_handler.error(format!("IO error: {err}").as_str()),
+            Err(err) => error_handler.error(&format!("IO error: {err}")),
         }
     }
     lines

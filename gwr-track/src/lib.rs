@@ -94,6 +94,20 @@ macro_rules! exit {
     };
 }
 
+// Track a value event.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! value {
+    ($entity:expr ; $value:expr) => {
+        if $entity
+            .tracker
+            .is_entity_enabled($entity.id, log::Level::Trace)
+        {
+            $entity.tracker.value($entity.id, $value);
+        }
+    };
+}
+
 /// Create a unique ID for tracking.
 ///
 /// The user must specify an entity with a [`Tracker`] to create the ID.
@@ -175,7 +189,7 @@ macro_rules! create {
                 $created.id,
                 $num_bytes,
                 $req_type,
-                format!("{}", $created).as_str(),
+                &format!("{}", $created),
             );
         }
     }};
@@ -189,7 +203,7 @@ macro_rules! create {
                 $created.id,
                 $num_bytes,
                 i8::MAX,
-                format!("{}", $created).as_str(),
+                &format!("{}", $created),
             );
         }
     }};

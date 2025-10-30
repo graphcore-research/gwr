@@ -19,13 +19,11 @@ use gwr_engine::traits::SimObject;
 fn put_get() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
-    let spawner = engine.spawner();
 
     let top = engine.top();
     // Create a pair of tasks that use a delay
-    let delay =
-        Delay::new_and_register(&engine, top, "delay", clock.clone(), spawner.clone(), 20).unwrap();
-    let buffer = Store::new_and_register(&engine, top, "buffer", spawner, 1).unwrap();
+    let delay = Delay::new_and_register(&engine, &clock, top, "delay", 20).unwrap();
+    let buffer = Store::new_and_register(&engine, &clock, top, "buffer", 1).unwrap();
     const NUM_PUTS: i32 = 100;
 
     connect_port!(delay, tx => buffer, rx).unwrap();
@@ -41,7 +39,7 @@ fn put_get() {
         Ok(())
     });
 
-    let rx = InPort::new(engine.top(), "test_rx");
+    let rx = InPort::new(&engine, &clock, engine.top(), "test_rx");
     buffer.connect_port_tx(rx.state()).unwrap();
     let rx_count = Rc::new(RefCell::new(0));
     {
@@ -70,7 +68,6 @@ fn put_get() {
 fn source_sink() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
-    let spawner = engine.spawner();
 
     const DELAY: usize = 3;
     const NUM_PUTS: usize = DELAY * 10;
@@ -79,8 +76,8 @@ fn source_sink() {
     let source =
         Source::new_and_register(&engine, top, "source", option_box_repeat!(500 ; NUM_PUTS))
             .unwrap();
-    let delay = Delay::new_and_register(&engine, top, "delay", clock, spawner, DELAY).unwrap();
-    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
+    let delay = Delay::new_and_register(&engine, &clock, top, "delay", DELAY).unwrap();
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
 
     connect_port!(source, tx => delay, rx).unwrap();
     connect_port!(delay, tx => sink, rx).unwrap();
@@ -97,7 +94,6 @@ fn error_on_output_stall() {
     // Cause the delay to raise an assertion because it will find the buffer full
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
-    let spawner = engine.spawner();
 
     const DELAY: usize = 1;
     const NUM_PUTS: usize = 10;
@@ -106,25 +102,24 @@ fn error_on_output_stall() {
     let source =
         Source::new_and_register(&engine, top, "source", option_box_repeat!(500 ; NUM_PUTS))
             .unwrap();
-    let delay =
-        Delay::new_and_register(&engine, top, "delay", clock.clone(), spawner.clone(), DELAY)
-            .unwrap();
+    let delay = Delay::new_and_register(&engine, &clock, top, "delay", DELAY).unwrap();
     delay.set_error_on_output_stall();
-    let store = Store::new_and_register(&engine, top, "store", spawner, 1).unwrap();
+    let store = Store::new_and_register(&engine, &clock, top, "store", 1).unwrap();
 
     connect_port!(source, tx => delay, rx).unwrap();
     connect_port!(delay, tx => store, rx).unwrap();
 
-    spawn_slow_reader(&engine, clock, &store);
+    spawn_slow_reader(&engine, &clock, &store);
     run_simulation!(engine);
 }
 
-fn spawn_slow_reader<T>(engine: &Engine, clock: Clock, store: &Store<T>)
+fn spawn_slow_reader<T>(engine: &Engine, clock: &Clock, store: &Store<T>)
 where
     T: SimObject,
 {
-    let rx = InPort::new(engine.top(), "rx");
+    let rx = InPort::new(&engine, clock, engine.top(), "rx");
     store.connect_port_tx(rx.state()).unwrap();
+    let clock = clock.clone();
     engine.spawn(async move {
         loop {
             let value = rx.get()?.await;
@@ -140,7 +135,6 @@ where
 fn disconnected_delay() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
-    let spawner = engine.spawner();
 
     const DELAY: usize = 1;
     const NUM_PUTS: usize = 10;
@@ -149,7 +143,7 @@ fn disconnected_delay() {
     let source =
         Source::new_and_register(&engine, top, "source", option_box_repeat!(500 ; NUM_PUTS))
             .unwrap();
-    let delay = Delay::new_and_register(&engine, top, "delay", clock, spawner, DELAY).unwrap();
+    let delay = Delay::new_and_register(&engine, &clock, top, "delay", DELAY).unwrap();
 
     connect_port!(source, tx => delay, rx).unwrap();
 

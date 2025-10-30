@@ -40,17 +40,16 @@ fn run_test(
     let tx_buffer_bytes = 1024;
 
     let clock = engine.clock_ghz(1.0);
-    let spawner = engine.spawner();
     let top = engine.top();
 
-    let limiter_128b_per_tick = rc_limiter!(clock.clone(), 128);
+    let limiter_128b_per_tick = rc_limiter!(&clock, 128);
 
     let config = RingConfig::new(rx_buffer_bytes, tx_buffer_bytes, limiter_128b_per_tick);
     let ring_node = RingNode::new_and_register(
         &engine,
+        &clock,
         top,
         "dut",
-        spawner,
         &config,
         route_fn,
         Box::new(WeightedRoundRobin::new(weights, 2).unwrap()),
@@ -79,8 +78,8 @@ fn run_test(
         });
     }
 
-    let io_sink = Sink::new_and_register(&engine, top, "io_sink").unwrap();
-    let ring_sink = Sink::new_and_register(&engine, top, "ring_sink").unwrap();
+    let io_sink = Sink::new_and_register(&engine, &clock, top, "io_sink").unwrap();
+    let ring_sink = Sink::new_and_register(&engine, &clock, top, "ring_sink").unwrap();
 
     connect_port!(ring_node, io_tx => io_sink, rx).unwrap();
     connect_port!(ring_node, ring_tx => ring_sink, rx).unwrap();

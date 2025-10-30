@@ -30,7 +30,7 @@
 //! # async fn run_tx<T>(
 //! #     entity: Rc<Entity>,
 //! #     tx: OutPort<T>,
-//! #     clock: Clock,
+//! #     clock: &Clock,
 //! #     rx: InPort<T>,
 //! #     delay_ticks: u64,
 //! # ) -> SimResult
@@ -69,7 +69,7 @@
 //! # async fn run_rx<T>(
 //! #     entity: Rc<Entity>,
 //! #     rx: InPort<T>,
-//! #     clock: Clock,
+//! #     clock: &Clock,
 //! #     pending: Rc<RefCell<VecDeque<(T, ClockTick)>>>,
 //! #     pending_changed: Repeated<usize>,
 //! #     delay_ticks: u64,
@@ -115,7 +115,7 @@
 //! # async fn run_tx<T>(
 //! #     entity: Rc<Entity>,
 //! #     tx: OutPort<T>,
-//! #     clock: Clock,
+//! #     clock: &Clock,
 //! #     pending: Rc<RefCell<VecDeque<(T, ClockTick)>>>,
 //! #     pending_changed: Repeated<usize>,
 //! # ) -> SimResult
@@ -164,7 +164,6 @@
 //! # fn source_sink() -> SimResult {
 //! #     let mut engine = start_test(file!());
 //! #     let clock = engine.default_clock();
-//! #     let spawner = engine.spawner();
 //! #
 //! #     let delay_ticks = 3;
 //! #     let num_puts = delay_ticks * 10;
@@ -173,8 +172,8 @@
 //! #     let to_send: Option<Box<dyn Iterator<Item = _>>> = option_box_repeat!(500 ; num_puts);
 //!     // Create the components
 //!     let source = Source::new_and_register(&engine, top, "source", to_send)?;
-//!     let delay = Delay::new_and_register(&engine, top, "delay", clock, spawner, delay_ticks)?;
-//!     let sink = Sink::new_and_register(&engine, top, "sink")?;
+//!     let delay = Delay::new_and_register(&engine, &clock, top, "delay", delay_ticks)?;
+//!     let sink = Sink::new_and_register(&engine, &clock, top, "sink")?;
 //!
 //!     // Connect the ports
 //!     connect_port!(source, tx => delay, rx)?;
@@ -203,6 +202,7 @@ use gwr_engine::traits::{Event, Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::EntityDisplay;
 use gwr_track::entity::Entity;
+use gwr_track::tracker::aka::Aka;
 use gwr_track::{enter, exit};
 
 use crate::{connect_tx, port_rx, take_option};
@@ -230,21 +230,22 @@ impl<T> Delay<T>
 where
     T: SimObject,
 {
-    pub fn new_and_register(
+    pub fn new_and_register_with_renames(
         engine: &Engine,
+        clock: &Clock,
         parent: &Rc<Entity>,
         name: &str,
-        clock: Clock,
-        spawner: Spawner,
+        aka: Option<&Aka>,
         delay_ticks: usize,
     ) -> Result<Rc<Self>, SimError> {
+        let spawner = engine.spawner();
         let entity = Rc::new(Entity::new(parent, name));
-        let tx = OutPort::new(&entity, "tx");
-        let rx = InPort::new(&entity, "rx");
+        let tx = OutPort::new_with_renames(&entity, "tx", aka);
+        let rx = InPort::new_with_renames(engine, clock, &entity, "rx", aka);
         let rc_self = Rc::new(Self {
             entity,
             spawner,
-            clock,
+            clock: clock.clone(),
             delay_ticks: RefCell::new(delay_ticks),
             rx: RefCell::new(Some(rx)),
             pending: Rc::new(RefCell::new(VecDeque::new())),
@@ -255,6 +256,16 @@ where
         });
         engine.register(rc_self.clone());
         Ok(rc_self)
+    }
+
+    pub fn new_and_register(
+        engine: &Engine,
+        clock: &Clock,
+        parent: &Rc<Entity>,
+        name: &str,
+        delay_ticks: usize,
+    ) -> Result<Rc<Self>, SimError> {
+        Self::new_and_register_with_renames(engine, clock, parent, name, None, delay_ticks)
     }
 
     pub fn set_error_on_output_stall(&self) {
@@ -300,7 +311,7 @@ where
             run_tx(
                 entity,
                 tx,
-                clock,
+                &clock,
                 pending,
                 pending_changed,
                 output_changed,
@@ -335,7 +346,7 @@ where
 async fn run_tx<T>(
     entity: Rc<Entity>,
     tx: OutPort<T>,
-    clock: Clock,
+    clock: &Clock,
     pending: Rc<RefCell<VecDeque<(T, ClockTick)>>>,
     pending_changed: Repeated<()>,
     output_changed: Repeated<()>,

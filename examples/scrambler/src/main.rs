@@ -25,9 +25,9 @@ fn main() -> SimResult {
     let args = Cli::parse();
 
     let mut engine = Engine::default();
-    let spawner = engine.spawner();
+    let clock = engine.default_clock();
     let top = engine.top();
-    let scrambler = Scrambler::new_and_register(&engine, top, "scrambler", spawner, args.scramble)?;
+    let scrambler = Scrambler::new_and_register(&engine, &clock, top, "scrambler", args.scramble)?;
     let source_a = Source::new_and_register(
         &engine,
         top,
@@ -40,8 +40,8 @@ fn main() -> SimResult {
         &format!("{}_{}", "source", "b"),
         option_box_repeat!(2 ; 2),
     )?;
-    let sink_a = Sink::new_and_register(&engine, top, "sink_a")?;
-    let sink_b = Sink::new_and_register(&engine, top, "sink_b")?;
+    let sink_a = Sink::new_and_register(&engine, &clock, top, "sink_a")?;
+    let sink_b = Sink::new_and_register(&engine, &clock, top, "sink_b")?;
 
     connect_port!(source_a, tx => scrambler, rx_a)?;
     connect_port!(source_b, tx => scrambler, rx_b)?;

@@ -3,6 +3,7 @@
 //! Process the `section!` documentation proc_macro.
 
 use std::collections::HashMap;
+use std::fmt::Write;
 
 use proc_macro2::Span;
 use quote::ToTokens;
@@ -61,8 +62,8 @@ pub fn process(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let section_descriptor = syn::parse_macro_input!(input as SectionDescriptor);
     handle_error(|| {
         let mut output = String::new();
-        output.push_str(format!("# {}\n\n", section_descriptor.title).as_str());
-        output.push_str(format!("{}\n\n", section_descriptor.text).as_str());
+        let _ = write!(output, "# {}\n\n", section_descriptor.title);
+        let _ = write!(output, "{}\n\n", section_descriptor.text);
 
         Ok(LitStr::new(output.as_str(), Span::call_site()).into_token_stream())
     })

@@ -71,22 +71,21 @@ fn run_test(
     let top = engine.top();
 
     let fabric =
-        FunctionalFabric::new_and_register(&engine, top, "fabric", &clock, config.clone()).unwrap();
+        FunctionalFabric::new_and_register(&engine, &clock, top, "fabric", config.clone()).unwrap();
 
     let num_ports = config.num_ports();
     let mut sources = Vec::with_capacity(num_ports);
     let mut sinks = Vec::with_capacity(num_ports);
 
     for i in 0..num_ports {
-        let source =
-            Source::new_and_register(&engine, top, format!("source{i}").as_str(), None).unwrap();
+        let source = Source::new_and_register(&engine, top, &format!("source_{i}"), None).unwrap();
         source.set_generator(Some(Box::new(
             build_frames(&engine, i, to_dest, num_frames, payload_bytes).into_iter(),
         )));
         connect_port!(source, tx => fabric, ingress, i).unwrap();
         sources.push(source);
 
-        let sink = Sink::new_and_register(&engine, top, format!("sink{i}").as_str()).unwrap();
+        let sink = Sink::new_and_register(&engine, &clock, top, &format!("sink_{i}")).unwrap();
         connect_port!(fabric, egress, i => sink, rx).unwrap();
         sinks.push(sink);
     }
@@ -166,19 +165,18 @@ fn latency() {
     let top = engine.top();
 
     let fabric =
-        FunctionalFabric::new_and_register(&engine, top, "fabric", &clock, config.clone()).unwrap();
+        FunctionalFabric::new_and_register(&engine, &clock, top, "fabric", config.clone()).unwrap();
 
     let mut sources = Vec::with_capacity(num_ports);
     let mut sinks = Vec::with_capacity(num_ports);
 
     // Connect up sources that will do nothing to all ports
     for i in 0..num_ports {
-        let source =
-            Source::new_and_register(&engine, top, format!("source{i}").as_str(), None).unwrap();
+        let source = Source::new_and_register(&engine, top, &format!("source_{i}"), None).unwrap();
         connect_port!(source, tx => fabric, ingress, i).unwrap();
         sources.push(source);
 
-        let sink = Sink::new_and_register(&engine, top, format!("sink{i}").as_str()).unwrap();
+        let sink = Sink::new_and_register(&engine, &clock, top, &format!("sink_{i}")).unwrap();
         connect_port!(fabric, egress, i => sink, rx).unwrap();
         sinks.push(sink);
     }
@@ -226,7 +224,7 @@ fn invalid_functional_fabric() {
     let top = engine.top();
 
     let _: Rc<FunctionalFabric<usize>> =
-        FunctionalFabric::new_and_register(&engine, top, "fabric", &clock, config).unwrap();
+        FunctionalFabric::new_and_register(&engine, &clock, top, "fabric", config).unwrap();
 }
 
 #[test]
@@ -239,9 +237,9 @@ fn invalid_routed_fabric() {
 
     let _: Rc<RoutedFabric<usize>> = RoutedFabric::new_and_register(
         &engine,
+        &clock,
         top,
         "fabric",
-        &clock,
         config,
         FabricRoutingAlgoritm::ColumnFirst,
     )

@@ -2,6 +2,8 @@
 
 //! Define the [`Track`] trait a number of [`Tracker`]s.
 
+/// Include the alternative name manager.
+pub mod aka;
 /// Include the CapnProto tracker.
 pub mod capnp;
 /// Include the /dev/null tracker.
@@ -30,6 +32,7 @@ pub use in_memory::InMemoryTracker;
 use regex::Regex;
 pub use text::TextTracker;
 
+use crate::tracker::aka::AlternativeNames;
 use crate::{Id, ROOT};
 
 /// Error used to return configuration errors
@@ -45,14 +48,21 @@ pub trait Track {
     /// entity looked up by its ID.
     fn is_entity_enabled(&self, id: Id, level: log::Level) -> bool;
 
+    /// Return the monitoring window size if it is to be enabled.
+    /// Entity looked up by its ID.
+    fn monitoring_window_size_for(&self, id: Id) -> Option<u64>;
+
     /// Record an entity being created.
-    fn add_entity(&self, id: Id, entity_name: &str);
+    fn add_entity(&self, id: Id, entity_name: &str, alternative_names: AlternativeNames);
 
     /// Track when an entity with the given ID arrives.
     fn enter(&self, enter_into: Id, enter_obj: Id);
 
     /// Track when an entity with the given ID leaves.
     fn exit(&self, exit_from: Id, exit_obj: Id);
+
+    /// Track an entity setting a value.
+    fn value(&self, id: Id, value: f64);
 
     /// Track when an entity with the given ID is created.
     fn create(&self, created_by: Id, created_obj: Id, num_bytes: usize, req_type: i8, name: &str);
@@ -107,6 +117,9 @@ pub struct EntityManager {
     /// List of regular expressions mapping entity names to log levels.
     regex_to_entity_level: Vec<(Regex, log::Level)>,
 
+    /// List of regular expressions mapping entity names to log levels.
+    regex_to_enable_monitors_for: Vec<(Regex, u64)>,
+
     /// Used to assign unique IDs.
     unique_id: RefCell<u64>,
 
@@ -114,8 +127,11 @@ pub struct EntityManager {
     current_time: RefCell<f64>,
 
     /// Keep track of entities that have trace enable/log levels different to
-    /// the default
-    entity_lookup: RefCell<HashMap<Id, log::Level>>,
+    /// the default.
+    log_entity_lookup: RefCell<HashMap<Id, log::Level>>,
+
+    /// Keep track of the window size for entities.
+    monitor_window_size_lookup: RefCell<HashMap<Id, u64>>,
 }
 
 impl EntityManager {
@@ -125,9 +141,11 @@ impl EntityManager {
         Self {
             default_entity_level,
             regex_to_entity_level: Vec::new(),
+            regex_to_enable_monitors_for: Vec::new(),
             unique_id: RefCell::new(ROOT.0 + 1),
             current_time: RefCell::new(0.0),
-            entity_lookup: RefCell::new(HashMap::new()),
+            log_entity_lookup: RefCell::new(HashMap::new()),
+            monitor_window_size_lookup: RefCell::new(HashMap::new()),
         }
     }
 
@@ -138,33 +156,72 @@ impl EntityManager {
         Id(id)
     }
 
-    fn is_enabled(&self, id: Id, level: log::Level) -> bool {
-        match self.entity_lookup.borrow().get(&id) {
+    fn is_log_enabled_at_level(&self, id: Id, level: log::Level) -> bool {
+        match self.log_entity_lookup.borrow().get(&id) {
             None => level <= self.default_entity_level,
             Some(entity_level) => level <= *entity_level,
         }
     }
 
-    fn add_entity(&self, id: Id, entity_name: &str) {
-        let entity_level = self.log_level_for(entity_name);
+    fn monitoring_window_size_for(&self, id: Id) -> Option<u64> {
+        self.monitor_window_size_lookup.borrow().get(&id).copied()
+    }
+
+    fn add_entity(&self, id: Id, entity_name: &str, alternative_names: AlternativeNames) {
+        let entity_level = self.log_level_for(entity_name, alternative_names);
         if entity_level != self.default_entity_level
             && self
-                .entity_lookup
+                .log_entity_lookup
                 .borrow_mut()
                 .insert(id, entity_level)
                 .is_some()
         {
             panic!("Entity ID {id} already seen ({entity_name})");
         }
+
+        if let Some(window_size_ticks) =
+            self.monitor_window_size_for(entity_name, alternative_names)
+        {
+            self.monitor_window_size_lookup
+                .borrow_mut()
+                .insert(id, window_size_ticks);
+        }
     }
 
-    fn log_level_for(&self, entity_name: &str) -> log::Level {
+    fn log_level_for(&self, entity_name: &str, alternative_names: AlternativeNames) -> log::Level {
         for (regex, level) in &self.regex_to_entity_level {
             if regex.is_match(entity_name) {
                 return *level;
             }
+            if let Some(alternative_names) = alternative_names {
+                for name in alternative_names {
+                    if regex.is_match(name.as_str()) {
+                        return *level;
+                    }
+                }
+            }
         }
         self.default_entity_level
+    }
+
+    fn monitor_window_size_for(
+        &self,
+        entity_name: &str,
+        alternative_names: AlternativeNames,
+    ) -> Option<u64> {
+        for (regex, window_size_ticks) in &self.regex_to_enable_monitors_for {
+            if regex.is_match(entity_name) {
+                return Some(*window_size_ticks);
+            }
+            if let Some(alternative_names) = alternative_names {
+                for name in alternative_names {
+                    if regex.is_match(name.as_str()) {
+                        return Some(*window_size_ticks);
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Add a filter regular expression to set matching entites to a given
@@ -184,6 +241,34 @@ impl EntityManager {
     ) -> Result<(), TrackConfigError> {
         match Regex::new(regex_str) {
             Ok(regex) => self.regex_to_entity_level.push((regex, level)),
+            Err(e) => {
+                return Err(TrackConfigError(format!(
+                    "Failed to parse regex {regex_str}:\n{e}\n"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Add a filter for ports that should have monitoring enabled
+    /// with the specified window size in ticks.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use gwr_track::tracker::EntityManager;
+    /// let mut manager = EntityManager::new(log::Level::Warn);
+    /// manager.set_monitor_window_size_for(".*fabric::ingress.*", 250);
+    /// ```
+    pub fn set_monitor_window_size_for(
+        &mut self,
+        regex_str: &str,
+        window_size_ticks: u64,
+    ) -> Result<(), TrackConfigError> {
+        match Regex::new(regex_str) {
+            Ok(regex) => self
+                .regex_to_enable_monitors_for
+                .push((regex, window_size_ticks)),
             Err(e) => {
                 return Err(TrackConfigError(format!(
                     "Failed to parse regex {regex_str}:\n{e}\n"
@@ -219,7 +304,7 @@ mod tests {
         let manager = EntityManager::new(Level::Error);
 
         for p in entity_paths() {
-            assert_eq!(manager.log_level_for(p), Level::Error);
+            assert_eq!(manager.log_level_for(p, None), Level::Error);
         }
     }
 
@@ -233,7 +318,7 @@ mod tests {
         let expected_levels = [Level::Error, Level::Trace, Level::Trace, Level::Trace];
 
         for (i, p) in entity_paths().iter().enumerate() {
-            assert_eq!(manager.log_level_for(p), expected_levels[i]);
+            assert_eq!(manager.log_level_for(p, None), expected_levels[i]);
         }
     }
 
@@ -247,7 +332,7 @@ mod tests {
         let expected_levels = [Level::Warn, Level::Warn, Level::Error, Level::Warn];
 
         for (i, p) in entity_paths().iter().enumerate() {
-            assert_eq!(manager.log_level_for(p), expected_levels[i]);
+            assert_eq!(manager.log_level_for(p, None), expected_levels[i]);
         }
     }
 
@@ -261,7 +346,7 @@ mod tests {
         let expected_levels = [Level::Error, Level::Error, Level::Warn, Level::Error];
 
         for (i, p) in entity_paths().iter().enumerate() {
-            assert_eq!(manager.log_level_for(p), expected_levels[i]);
+            assert_eq!(manager.log_level_for(p, None), expected_levels[i]);
         }
     }
 
@@ -279,7 +364,7 @@ mod tests {
         let expected_levels = [Level::Error, Level::Info, Level::Warn, Level::Info];
 
         for (i, p) in entity_paths().iter().enumerate() {
-            assert_eq!(manager.log_level_for(p), expected_levels[i]);
+            assert_eq!(manager.log_level_for(p, None), expected_levels[i]);
         }
     }
 
@@ -300,7 +385,7 @@ mod tests {
         let expected_levels = [Level::Warn, Level::Trace, Level::Info, Level::Trace];
 
         for (i, p) in entity_paths().iter().enumerate() {
-            assert_eq!(manager.log_level_for(p), expected_levels[i]);
+            assert_eq!(manager.log_level_for(p, None), expected_levels[i]);
         }
     }
 

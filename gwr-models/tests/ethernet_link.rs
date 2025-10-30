@@ -19,7 +19,6 @@ fn run_test(
     let mut engine = start_test(file!());
 
     let clock = engine.clock_ghz(1.0);
-    let spawner = engine.spawner();
     let top = engine.top();
 
     let source_a = Source::new_and_register(&engine, top, "src_a", None).unwrap();
@@ -30,11 +29,10 @@ fn run_test(
     let frame_b = EthernetFrame::new(&source_b.entity, payload_bytes);
     source_b.set_generator(option_box_repeat!(frame_b; num_put_b));
 
-    let link =
-        EthernetLink::new_and_register(&engine, top, "link", clock.clone(), spawner).unwrap();
+    let link = EthernetLink::new_and_register(&engine, &clock, top, "link").unwrap();
 
-    let sink_a = Sink::new_and_register(&engine, top, "sink_a").unwrap();
-    let sink_b = Sink::new_and_register(&engine, top, "sink_b").unwrap();
+    let sink_a = Sink::new_and_register(&engine, &clock, top, "sink_a").unwrap();
+    let sink_b = Sink::new_and_register(&engine, &clock, top, "sink_b").unwrap();
 
     connect_port!(source_a, tx => link, rx_a).unwrap();
     connect_port!(source_b, tx => link, rx_b).unwrap();
@@ -104,7 +102,6 @@ fn change_delay() {
     const DELAY_TICKS: usize = 100;
 
     let clock = engine.clock_ghz(1.0);
-    let spawner = engine.spawner();
     let top = engine.top();
 
     let source_a = Source::new_and_register(&engine, top, "src_a", None).unwrap();
@@ -113,12 +110,11 @@ fn change_delay() {
 
     let source_b = Source::new_and_register(&engine, top, "src_b", None).unwrap();
 
-    let link =
-        EthernetLink::new_and_register(&engine, top, "link", clock.clone(), spawner).unwrap();
+    let link = EthernetLink::new_and_register(&engine, &clock, top, "link").unwrap();
     link.set_delay(DELAY_TICKS).unwrap();
 
-    let sink_a = Sink::new_and_register(&engine, top, "sink_a").unwrap();
-    let sink_b = Sink::new_and_register(&engine, top, "sink_b").unwrap();
+    let sink_a = Sink::new_and_register(&engine, &clock, top, "sink_a").unwrap();
+    let sink_b = Sink::new_and_register(&engine, &clock, top, "sink_b").unwrap();
 
     connect_port!(source_a, tx => link, rx_a).unwrap();
     connect_port!(source_b, tx => link, rx_b).unwrap();

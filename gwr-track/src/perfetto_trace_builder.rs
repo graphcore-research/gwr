@@ -70,6 +70,20 @@ impl PerfettoTraceBuilder {
         track_descriptor
     }
 
+    fn build_value_track_descriptor(&mut self, id: Id, parent: Id, name: &str) -> TrackDescriptor {
+        let counter_desc = CounterDescriptor {
+            r#type: Some(counter_descriptor::BuiltinCounterType::CounterUnspecified as i32),
+            unit: Some(counter_descriptor::Unit::Count as i32),
+            is_incremental: Some(false),
+            ..Default::default()
+        };
+
+        let mut track_descriptor = self.build_track_descriptor(id, parent, name);
+        track_descriptor.counter = Some(counter_desc);
+
+        track_descriptor
+    }
+
     fn build_track_descriptor(&mut self, id: Id, parent: Id, name: &str) -> TrackDescriptor {
         self.set_id_to_name(id, name);
 
@@ -90,6 +104,15 @@ impl PerfettoTraceBuilder {
         track_event.set_type(track_event::Type::Counter);
         track_event.counter_value_field =
             Some(track_event::CounterValueField::CounterValue(increment));
+
+        track_event
+    }
+
+    fn build_value_track_event(&self, id: Id, value: f64) -> TrackEvent {
+        let mut track_event = self.build_track_event(id, Id(0));
+        track_event.set_type(track_event::Type::Counter);
+        track_event.counter_value_field =
+            Some(track_event::CounterValueField::DoubleCounterValue(value));
 
         track_event
     }
@@ -131,6 +154,21 @@ impl PerfettoTraceBuilder {
         self.build_track_descriptor_trace_packet(current_time_ns, track_descriptor)
     }
 
+    /// Build a TracePacket containing the TrackDescriptor for a sequence of
+    /// values.
+    #[must_use]
+    pub fn build_value_track_descriptor_trace_packet(
+        &mut self,
+        current_time_ns: u64,
+        id: Id,
+        parent: Id,
+        name: &str,
+    ) -> TracePacket {
+        let track_descriptor = self.build_value_track_descriptor(id, parent, name);
+
+        self.build_track_descriptor_trace_packet(current_time_ns, track_descriptor)
+    }
+
     fn build_track_descriptor_trace_packet(
         &self,
         current_time_ns: u64,
@@ -153,6 +191,20 @@ impl PerfettoTraceBuilder {
         increment: i64,
     ) -> TracePacket {
         let track_event = self.build_counter_track_event(id, other, increment);
+
+        self.build_track_event_trace_packet(current_time_ns, track_event)
+    }
+
+    /// Build a TracePacket containing the TrackEvent for a floating point
+    /// value.
+    #[must_use]
+    pub fn build_value_track_event_trace_packet(
+        &self,
+        current_time_ns: u64,
+        id: Id,
+        value: f64,
+    ) -> TracePacket {
+        let track_event = self.build_value_track_event(id, value);
 
         self.build_track_event_trace_packet(current_time_ns, track_event)
     }

@@ -26,13 +26,14 @@ use gwr_components::store::Store;
 use gwr_components::types::Credit;
 use gwr_components::{connect_port, connect_tx, port_rx};
 use gwr_engine::engine::Engine;
-use gwr_engine::executor::Spawner;
 use gwr_engine::port::PortStateResult;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::SimObject;
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, Runnable};
+use gwr_track::build_aka;
 use gwr_track::entity::Entity;
+use gwr_track::tracker::aka::Aka;
 
 /// Configuration for a flow-controlled pipeline.
 pub struct FcPipelineConfig {
@@ -69,44 +70,50 @@ impl<T> FcPipeline<T>
 where
     T: SimObject,
 {
-    pub fn new_and_register(
+    pub fn new_and_register_with_renames(
         engine: &Engine,
+        clock: &Clock,
         parent: &Rc<Entity>,
         name: &str,
-        clock: Clock,
-        spawner: Spawner,
+        aka: Option<&Aka>,
         config: &FcPipelineConfig,
     ) -> Result<Rc<Self>, SimError> {
         let entity = Rc::new(Entity::new(parent, name));
 
-        let credit_limiter =
-            CreditLimiter::new_and_register(engine, &entity, spawner.clone(), config.buffer_size)?;
-
-        let data_delay = Delay::new_and_register(
+        let credit_limiter_aka = build_aka!(aka, &entity, &[("rx", "rx")]);
+        let credit_limiter = CreditLimiter::new_and_register(
             engine,
+            clock,
             &entity,
-            "pipe",
-            clock.clone(),
-            spawner.clone(),
-            config.data_delay_ticks,
+            "credit_limiter",
+            Some(&credit_limiter_aka),
+            config.buffer_size,
         )?;
+
+        let data_delay =
+            Delay::new_and_register(engine, clock, &entity, "pipe", config.data_delay_ticks)?;
         // The whole point of the flow-controlled pipeline is that the delays should
         // never have to stall at their outputs
         data_delay.set_error_on_output_stall();
 
-        let buffer =
-            Store::new_and_register(engine, &entity, "buf", spawner.clone(), config.buffer_size)?;
+        let buffer = Store::new_and_register(engine, clock, &entity, "buf", config.buffer_size)?;
 
         connect_port!(credit_limiter, tx => data_delay, rx)?;
         connect_port!(data_delay, tx => buffer, rx)?;
 
-        let credit_issuer = CreditIssuer::new_and_register(engine, &entity)?;
+        let credit_issuer_aka = build_aka!(aka, &entity, &[("tx", "tx")]);
+        let credit_issuer = CreditIssuer::new_and_register_with_renames(
+            engine,
+            clock,
+            &entity,
+            "credit_issuer",
+            Some(&credit_issuer_aka),
+        )?;
         let credit_delay = Delay::new_and_register(
             engine,
+            clock,
             &entity,
             "credit_pipe",
-            clock,
-            spawner,
             config.credit_delay_ticks,
         )?;
         // The whole point of the flow-controlled pipeline is that the delays should
@@ -126,6 +133,16 @@ where
         });
         engine.register(rc_self.clone());
         Ok(rc_self)
+    }
+
+    pub fn new_and_register(
+        engine: &Engine,
+        clock: &Clock,
+        parent: &Rc<Entity>,
+        name: &str,
+        config: &FcPipelineConfig,
+    ) -> Result<Rc<Self>, SimError> {
+        Self::new_and_register_with_renames(engine, clock, parent, name, None, config)
     }
 
     pub fn set_data_delay(&self, delay: usize) -> SimResult {

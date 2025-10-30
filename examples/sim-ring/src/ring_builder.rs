@@ -11,6 +11,7 @@ use gwr_components::router::Route;
 use gwr_components::sink::Sink;
 use gwr_components::source::Source;
 use gwr_engine::engine::Engine;
+use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::Routable;
 use gwr_engine::types::SimError;
 use gwr_models::ethernet_frame::{EthernetFrame, u64_to_mac};
@@ -49,10 +50,8 @@ where
     }
 }
 
-pub fn build_ring_nodes(engine: &mut Engine, config: &Config) -> Nodes {
-    let spawner = engine.spawner().clone();
-    let clock = engine.default_clock().clone();
-    let limiter_128_gbps = rc_limiter!(clock.clone(), 128);
+pub fn build_ring_nodes(engine: &mut Engine, clock: &Clock, config: &Config) -> Nodes {
+    let limiter_128_gbps = rc_limiter!(clock, 128);
     let ring_config = RingConfig::new(
         config.rx_buffer_frames,
         config.tx_buffer_frames,
@@ -64,9 +63,9 @@ pub fn build_ring_nodes(engine: &mut Engine, config: &Config) -> Nodes {
             let weights = vec![config.ring_priority, 1];
             RingNode::new_and_register(
                 engine,
+                clock,
                 top,
-                format!("node{i}").as_str(),
-                spawner.clone(),
+                &format!("node_{i}"),
                 &ring_config,
                 Box::new(RoutingAlgorithm(i)),
                 Box::new(WeightedRoundRobin::new(weights, 2).unwrap()),
@@ -77,7 +76,7 @@ pub fn build_ring_nodes(engine: &mut Engine, config: &Config) -> Nodes {
     ring_nodes
 }
 
-pub fn build_source_sinks(engine: &mut Engine, config: &Config) -> (Sources, Sinks) {
+pub fn build_source_sinks(engine: &mut Engine, clock: &Clock, config: &Config) -> (Sources, Sinks) {
     let mut sources = Vec::with_capacity(config.ring_size);
     let top = engine.top();
 
@@ -88,7 +87,7 @@ pub fn build_source_sinks(engine: &mut Engine, config: &Config) -> (Sources, Sin
             Source::new_and_register(
                 engine,
                 top,
-                format!("source{i}").as_str(),
+                &format!("source_{i}"),
                 Some(Box::new(FrameGen::new(
                     top,
                     u64_to_mac(neighbour_left as u64),
@@ -101,29 +100,26 @@ pub fn build_source_sinks(engine: &mut Engine, config: &Config) -> (Sources, Sin
     }
 
     let sinks: Sinks = (0..config.ring_size)
-        .map(|i| Sink::new_and_register(engine, top, format!("sink{i}").as_str()).unwrap())
+        .map(|i| Sink::new_and_register(engine, clock, top, &format!("sink_{i}")).unwrap())
         .collect();
 
     (sources, sinks)
 }
 
-pub fn build_pipes(engine: &mut Engine, config: &Config) -> (Pipes, Pipes) {
+pub fn build_pipes(engine: &mut Engine, clock: &Clock, config: &Config) -> (Pipes, Pipes) {
     let mut ingress_pipes = Vec::with_capacity(config.ring_size);
     let mut ring_pipes = Vec::with_capacity(config.ring_size);
 
-    let clock = engine.default_clock();
     let top = engine.top();
-    let spawner = engine.spawner();
 
     let pipe_config = FcPipelineConfig::new(500, 500, 500);
     for i in 0..config.ring_size {
         ingress_pipes.push(
             FcPipeline::new_and_register(
                 engine,
+                clock,
                 top,
-                format!("ingress_pipe{i}").as_str(),
-                clock.clone(),
-                spawner.clone(),
+                &format!("ingress_pipe_{i}"),
                 &pipe_config,
             )
             .unwrap(),
@@ -131,10 +127,9 @@ pub fn build_pipes(engine: &mut Engine, config: &Config) -> (Pipes, Pipes) {
         ring_pipes.push(
             FcPipeline::new_and_register(
                 engine,
+                clock,
                 top,
-                format!("ring_pipe{i}").as_str(),
-                clock.clone(),
-                spawner.clone(),
+                &format!("ring_pipe_{i}"),
                 &pipe_config,
             )
             .unwrap(),
@@ -145,18 +140,19 @@ pub fn build_pipes(engine: &mut Engine, config: &Config) -> (Pipes, Pipes) {
 
 pub fn build_limiters(
     engine: &mut Engine,
+    clock: &Clock,
     config: &Config,
     gbps: usize,
 ) -> (Limiters, Limiters, Limiters) {
-    let clock = engine.default_clock();
     let limiter_gbps = rc_limiter!(clock, gbps);
     let top = engine.top();
     let source_limiters: Limiters = (0..config.ring_size)
         .map(|i| {
             Limiter::new_and_register(
                 engine,
+                clock,
                 top,
-                format!("src_limit{i}").as_str(),
+                &format!("src_limit_{i}"),
                 limiter_gbps.clone(),
             )
             .unwrap()
@@ -167,8 +163,9 @@ pub fn build_limiters(
         .map(|i| {
             Limiter::new_and_register(
                 engine,
+                clock,
                 top,
-                format!("ring_limit{i}").as_str(),
+                &format!("ring_limit_{i}"),
                 limiter_gbps.clone(),
             )
             .unwrap()
@@ -179,8 +176,9 @@ pub fn build_limiters(
         .map(|i| {
             Limiter::new_and_register(
                 engine,
+                clock,
                 top,
-                format!("sink_limit{i}").as_str(),
+                &format!("sink_limit_{i}"),
                 limiter_gbps.clone(),
             )
             .unwrap()

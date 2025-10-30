@@ -7,6 +7,7 @@ use capnp::serialize_packed;
 
 use crate::gwr_track_capnp::event;
 use crate::gwr_track_capnp::log::LogLevel;
+use crate::tracker::aka::AlternativeNames;
 use crate::tracker::{EntityManager, Track};
 use crate::{Id, SharedWriter, Writer, gwr_track_capnp};
 
@@ -64,11 +65,16 @@ impl Track for CapnProtoTracker {
     }
 
     fn is_entity_enabled(&self, id: Id, level: log::Level) -> bool {
-        self.entity_manager.is_enabled(id, level)
+        self.entity_manager.is_log_enabled_at_level(id, level)
     }
 
-    fn add_entity(&self, id: Id, entity_name: &str) {
-        self.entity_manager.add_entity(id, entity_name);
+    fn monitoring_window_size_for(&self, id: Id) -> Option<u64> {
+        self.entity_manager.monitoring_window_size_for(id)
+    }
+
+    fn add_entity(&self, id: Id, entity_name: &str, alternative_names: AlternativeNames) {
+        self.entity_manager
+            .add_entity(id, entity_name, alternative_names);
     }
 
     fn enter(&self, id: Id, object: Id) {
@@ -80,6 +86,12 @@ impl Track for CapnProtoTracker {
     fn exit(&self, id: Id, object: Id) {
         self.write_event(id, |mut event| {
             event.set_exit(object.0);
+        });
+    }
+
+    fn value(&self, id: Id, value: f64) {
+        self.write_event(id, |mut event| {
+            event.set_value(value);
         });
     }
 

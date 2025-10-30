@@ -33,12 +33,14 @@ use gwr_components::flow_controls::rate_limiter::RateLimiter;
 use gwr_components::router::{Route, Router};
 use gwr_components::store::Store;
 use gwr_engine::engine::Engine;
-use gwr_engine::executor::Spawner;
 use gwr_engine::port::PortStateResult;
+use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Routable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, Runnable};
+use gwr_track::build_aka;
 use gwr_track::entity::Entity;
+use gwr_track::tracker::aka::Aka;
 
 /// The port index used for ring connections.
 pub const RING_INDEX: usize = 0;
@@ -88,43 +90,72 @@ impl<T> RingNode<T>
 where
     T: SimObject + Routable,
 {
-    pub fn new_and_register(
+    #[expect(clippy::too_many_arguments)]
+    pub fn new_and_register_with_renames(
         engine: &Engine,
+        clock: &Clock,
         parent: &Rc<Entity>,
         name: &str,
-        spawner: Spawner,
+        aka: Option<&Aka>,
         config: &RingConfig<T>,
         routing_algorithm: Box<dyn Route<T>>,
         policy: Box<dyn Arbitrate<T>>,
     ) -> Result<Rc<Self>, SimError> {
         let entity = Rc::new(Entity::new(parent, name));
 
-        let rx_buffer_limiter =
-            Limiter::new_and_register(engine, &entity, "limit_rx", config.write_limiter.clone())?;
-        let rx_buffer = Store::new_and_register(
+        let rx_buffer_limiter_aka = build_aka!(aka, &entity, &[("ring_rx", "rx")]);
+        let rx_buffer_limiter = Limiter::new_and_register_with_renames(
             engine,
+            clock,
             &entity,
-            "rx_buf",
-            spawner.clone(),
-            config.rx_buffer_entries,
+            "limit_rx",
+            Some(&rx_buffer_limiter_aka),
+            config.write_limiter.clone(),
         )?;
+        let rx_buffer =
+            Store::new_and_register(engine, clock, &entity, "rx_buf", config.rx_buffer_entries)?;
         connect_port!(rx_buffer_limiter, tx => rx_buffer, rx)?;
 
-        let tx_buffer_limiter =
-            Limiter::new_and_register(engine, &entity, "limit_tx", config.write_limiter.clone())?;
-        let tx_buffer = Store::new_and_register(
+        let tx_buffer_limiter = Limiter::new_and_register(
             engine,
+            clock,
+            &entity,
+            "limit_tx",
+            config.write_limiter.clone(),
+        )?;
+        let tx_buffer_aka = build_aka!(aka, &entity, &[("ring_tx", "tx")]);
+        let tx_buffer = Store::new_and_register_with_renames(
+            engine,
+            clock,
             &entity,
             "tx_buf",
-            spawner.clone(),
+            Some(&tx_buffer_aka),
             config.tx_buffer_entries,
         )?;
         connect_port!(tx_buffer_limiter, tx => tx_buffer, rx)?;
 
-        let router = Router::new_and_register(engine, &entity, "router", 2, routing_algorithm)?;
+        let router_aka = build_aka!(aka, &entity, &[("io_tx", &format!("tx_{IO_INDEX}"))]);
+        let router = Router::new_and_register_with_renames(
+            engine,
+            clock,
+            &entity,
+            "router",
+            Some(&router_aka),
+            2,
+            routing_algorithm,
+        )?;
         connect_port!(rx_buffer, tx => router, rx)?;
 
-        let arbiter = Arbiter::new_and_register(engine, &entity, "arb", spawner, 2, policy)?;
+        let arbiter_aka = build_aka!(aka, &entity, &[("io_rx", &format!("rx_{IO_INDEX}"))]);
+        let arbiter = Arbiter::new_and_register_with_renames(
+            engine,
+            clock,
+            &entity,
+            "arb",
+            Some(&arbiter_aka),
+            2,
+            policy,
+        )?;
         connect_port!(router, tx, RING_INDEX => arbiter, rx, RING_INDEX)?;
         connect_port!(arbiter, tx => tx_buffer_limiter, rx)?;
 
@@ -137,6 +168,27 @@ where
         });
         engine.register(rc_self.clone());
         Ok(rc_self)
+    }
+
+    pub fn new_and_register(
+        engine: &Engine,
+        clock: &Clock,
+        parent: &Rc<Entity>,
+        name: &str,
+        config: &RingConfig<T>,
+        routing_algorithm: Box<dyn Route<T>>,
+        policy: Box<dyn Arbitrate<T>>,
+    ) -> Result<Rc<Self>, SimError> {
+        Self::new_and_register_with_renames(
+            engine,
+            clock,
+            parent,
+            name,
+            None,
+            config,
+            routing_algorithm,
+            policy,
+        )
     }
 
     pub fn connect_port_ring_tx(&self, port_state: PortStateResult<T>) -> SimResult {

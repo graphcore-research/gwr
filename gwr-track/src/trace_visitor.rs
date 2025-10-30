@@ -96,6 +96,18 @@ pub trait TraceVisitor {
         let _ = exited;
     }
 
+    /// A value has been set by the specified ID.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The originator of this event.
+    /// * `value` - The value.
+    fn value(&mut self, id: Id, value: f64) {
+        // Remove the unused variable warnings
+        let _ = id;
+        let _ = value;
+    }
+
     /// Advance simulation time.
     ///
     /// # Arguments
@@ -205,6 +217,9 @@ where
             }
             Ok(gwr_track_capnp::event::Which::Exit(exited)) => {
                 visitor.exit(id, Id(exited));
+            }
+            Ok(gwr_track_capnp::event::Which::Value(value)) => {
+                visitor.value(id, value);
             }
             Ok(gwr_track_capnp::event::Which::Time(time)) => {
                 visitor.time(id, time);

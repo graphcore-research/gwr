@@ -53,7 +53,6 @@ fn main() -> SimResult {
 
     let mut engine = Engine::default();
     let clock = engine.default_clock();
-    let spawner = engine.spawner();
 
     let num_puts = args.num_packets;
 
@@ -66,8 +65,8 @@ fn main() -> SimResult {
         exit(1);
     }
     let config = Config::new(args.drop, args.seed, args.delay);
-    let flaky = Flaky::new_and_register(&engine, top, "flaky", clock, spawner, &config)?;
-    let sink = Sink::new_and_register(&engine, top, "sink")?;
+    let flaky = Flaky::new_and_register(&engine, &clock, top, "flaky", &config)?;
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink")?;
 
     connect_port!(source, tx => flaky, rx)?;
     connect_port!(flaky, tx => sink, rx)?;

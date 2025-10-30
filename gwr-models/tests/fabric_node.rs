@@ -2,8 +2,10 @@
 
 use std::rc::Rc;
 
+use gwr_engine::engine::Engine;
 use gwr_engine::port::{InPort, OutPort};
 use gwr_engine::test_helpers::start_test;
+use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Routable, SimObject};
 use gwr_models::fabric::FabricConfig;
 use gwr_models::fabric::node::{FabricNode, FabricRoutingAlgoritm};
@@ -33,14 +35,19 @@ fn default_config() -> Rc<FabricConfig> {
     Rc::new(config)
 }
 
-fn connect_ingress_egress<T>(top: &Rc<Entity>, node: &Rc<FabricNode<T>>, config: &Rc<FabricConfig>)
-where
+fn connect_ingress_egress<T>(
+    engine: &Engine,
+    clock: &Clock,
+    top: &Rc<Entity>,
+    node: &Rc<FabricNode<T>>,
+    config: &Rc<FabricConfig>,
+) where
     T: SimObject + Routable,
 {
     for i in 0..config.num_ports_per_node() {
         let mut port = OutPort::new(top, "port");
         port.connect(node.port_ingress_i(i)).unwrap();
-        let port = InPort::new(top, "port");
+        let port = InPort::new(engine, clock, top, "port");
         node.connect_port_egress_i(i, port.state()).unwrap();
     }
 }
@@ -53,11 +60,11 @@ fn all_ports_connect() {
     let config = default_config();
     let node: Rc<FabricNode<usize>> = FabricNode::new_and_register(
         &engine,
+        &clock,
         top,
         "node",
         0,
         0,
-        clock,
         &config,
         FabricRoutingAlgoritm::ColumnFirst,
     )
@@ -72,14 +79,14 @@ fn all_ports_connect() {
     let mut port = OutPort::new(top, "port");
     port.connect(node.port_row_plus()).unwrap();
 
-    let port = InPort::new(top, "port");
+    let port = InPort::new(&engine, &clock, top, "port");
     node.connect_port_col_minus(port.state()).unwrap();
-    let port = InPort::new(top, "port");
+    let port = InPort::new(&engine, &clock, top, "port");
     node.connect_port_col_plus(port.state()).unwrap();
-    let port = InPort::new(top, "port");
+    let port = InPort::new(&engine, &clock, top, "port");
     node.connect_port_row_minus(port.state()).unwrap();
-    let port = InPort::new(top, "port");
+    let port = InPort::new(&engine, &clock, top, "port");
     node.connect_port_row_plus(port.state()).unwrap();
 
-    connect_ingress_egress(top, &node, &config);
+    connect_ingress_egress(&engine, &clock, top, &node, &config);
 }

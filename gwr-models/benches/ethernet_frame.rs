@@ -34,7 +34,8 @@ fn setup_frame_simulation() -> (Engine, Rc<Sink<EthernetFrame>>) {
     let payload_size_bytes = 256;
     let frame_dest = [0, 1, 2, 3, 4, 5];
 
-    let engine = create_engine();
+    let mut engine = create_engine();
+    let clock = engine.default_clock();
     let top = engine.top();
     let mut ring_frames = Vec::with_capacity(num_frames);
     for i in 0..num_frames {
@@ -45,8 +46,7 @@ fn setup_frame_simulation() -> (Engine, Rc<Sink<EthernetFrame>>) {
     }
 
     let store_capacity = num_frames / 4;
-    let store =
-        Store::new_and_register(&engine, top, "store", engine.spawner(), store_capacity).unwrap();
+    let store = Store::new_and_register(&engine, &clock, top, "store", store_capacity).unwrap();
 
     {
         let mut frame_tx = OutPort::new(engine.top(), "frame_tx");
@@ -59,7 +59,7 @@ fn setup_frame_simulation() -> (Engine, Rc<Sink<EthernetFrame>>) {
         });
     }
 
-    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
 
     connect_port!(store, tx => sink, rx).unwrap();
 
@@ -71,7 +71,8 @@ fn setup_box_frame_simulation() -> (Engine, Rc<Sink<Box<EthernetFrame>>>) {
     let payload_size_bytes = 256;
     let frame_dest = [0, 1, 2, 3, 4, 5];
 
-    let engine = create_engine();
+    let mut engine = create_engine();
+    let clock = engine.default_clock();
     let top = engine.top();
     let mut ring_frames = Vec::with_capacity(num_frames);
     for i in 0..num_frames {
@@ -82,8 +83,7 @@ fn setup_box_frame_simulation() -> (Engine, Rc<Sink<Box<EthernetFrame>>>) {
     }
 
     let store_capacity = num_frames / 4;
-    let store =
-        Store::new_and_register(&engine, top, "store", engine.spawner(), store_capacity).unwrap();
+    let store = Store::new_and_register(&engine, &clock, top, "store", store_capacity).unwrap();
 
     {
         let mut frame_tx = OutPort::new(engine.top(), "frame_tx");
@@ -96,7 +96,7 @@ fn setup_box_frame_simulation() -> (Engine, Rc<Sink<Box<EthernetFrame>>>) {
         });
     }
 
-    let sink = Sink::new_and_register(&engine, top, "sink").unwrap();
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
 
     connect_port!(store, tx => sink, rx).unwrap();
 
