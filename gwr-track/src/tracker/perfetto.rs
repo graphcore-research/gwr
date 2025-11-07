@@ -49,24 +49,16 @@ impl Track for PerfettoTracker {
 
     fn enter(&self, id: Id, entered: Id) {
         let guard = self.trace_builder.borrow_mut();
-        let trace_packet = guard.build_counter_track_event_trace_packet(
-            *self.current_time_ns.borrow(),
-            id,
-            entered,
-            1,
-        );
+        let trace_packet =
+            guard.build_enter_track_event_trace_packet(*self.current_time_ns.borrow(), id, entered);
         let buf = guard.build_trace_to_bytes(vec![trace_packet]);
         self.writer.borrow_mut().write_all(&buf).unwrap();
     }
 
     fn exit(&self, id: Id, exited: Id) {
         let guard = self.trace_builder.borrow_mut();
-        let trace_packet = guard.build_counter_track_event_trace_packet(
-            *self.current_time_ns.borrow(),
-            id,
-            exited,
-            -1,
-        );
+        let trace_packet =
+            guard.build_exit_track_event_trace_packet(*self.current_time_ns.borrow(), id, exited);
         let buf = guard.build_trace_to_bytes(vec![trace_packet]);
         self.writer.borrow_mut().write_all(&buf).unwrap();
     }
@@ -89,7 +81,7 @@ impl Track for PerfettoTracker {
                 name,
             )
         } else {
-            guard.build_counter_track_descriptor_trace_packet(
+            guard.build_enter_exit_track_descriptor_trace_packet(
                 *self.current_time_ns.borrow(),
                 id,
                 created_by,
