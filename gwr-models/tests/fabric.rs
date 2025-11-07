@@ -11,7 +11,7 @@ use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::TotalBytes;
 use gwr_models::ethernet_frame::{EthernetFrame, SRC_MAC_BYTES, u64_to_mac};
 use gwr_models::fabric::functional::FunctionalFabric;
-use gwr_models::fabric::node::FabricRoutingAlgoritm;
+use gwr_models::fabric::node::FabricRoutingAlgorithm;
 use gwr_models::fabric::routed::RoutedFabric;
 use gwr_models::fabric::{Fabric, FabricConfig};
 
@@ -241,7 +241,7 @@ fn invalid_routed_fabric() {
         top,
         "fabric",
         config,
-        FabricRoutingAlgoritm::ColumnFirst,
+        FabricRoutingAlgorithm::ColumnFirst,
     )
     .unwrap();
 }

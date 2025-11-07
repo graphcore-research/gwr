@@ -8,7 +8,7 @@ use gwr_engine::test_helpers::start_test;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Routable, SimObject};
 use gwr_models::fabric::FabricConfig;
-use gwr_models::fabric::node::{FabricNode, FabricRoutingAlgoritm};
+use gwr_models::fabric::node::{FabricNode, FabricRoutingAlgorithm};
 use gwr_track::entity::Entity;
 
 fn default_config() -> Rc<FabricConfig> {
@@ -66,7 +66,7 @@ fn all_ports_connect() {
         0,
         0,
         &config,
-        FabricRoutingAlgoritm::ColumnFirst,
+        FabricRoutingAlgorithm::ColumnFirst,
     )
     .unwrap();
 
