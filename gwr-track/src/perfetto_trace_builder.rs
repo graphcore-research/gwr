@@ -3,7 +3,8 @@
 //! Support for generating Perfetto traces.
 //!
 //! The public API allows the creation of various TrackDescriptors and
-//! TrackEvents, each contained within their own timestamped TracePacket.
+//! TrackEvents required to represent events from the [crate::tracker::Track]
+//! trait, each contained within their own timestamped TracePacket.
 //!
 //! To create trace files that can be opened using the Perfetto UI the
 //! TracePackets must be wrapped in a Trace message. The build_trace_to_bytes()
@@ -51,7 +52,7 @@ impl PerfettoTraceBuilder {
         PerfettoTraceBuilder::default()
     }
 
-    fn build_counter_track_descriptor(
+    fn build_incremental_counter_track_descriptor(
         &mut self,
         id: Id,
         parent: Id,
@@ -70,7 +71,12 @@ impl PerfettoTraceBuilder {
         track_descriptor
     }
 
-    fn build_value_track_descriptor(&mut self, id: Id, parent: Id, name: &str) -> TrackDescriptor {
+    fn build_absolute_counter_track_descriptor(
+        &mut self,
+        id: Id,
+        parent: Id,
+        name: &str,
+    ) -> TrackDescriptor {
         let counter_desc = CounterDescriptor {
             r#type: Some(counter_descriptor::BuiltinCounterType::CounterUnspecified as i32),
             unit: Some(counter_descriptor::Unit::Count as i32),
@@ -99,7 +105,12 @@ impl PerfettoTraceBuilder {
         self.id_to_name.insert(id.0, name.to_owned());
     }
 
-    fn build_counter_track_event(&self, id: Id, other: Id, increment: i64) -> TrackEvent {
+    fn build_incremental_counter_track_event(
+        &self,
+        id: Id,
+        other: Id,
+        increment: i64,
+    ) -> TrackEvent {
         let mut track_event = self.build_track_event(id, other);
         track_event.set_type(track_event::Type::Counter);
         track_event.counter_value_field =
@@ -108,11 +119,11 @@ impl PerfettoTraceBuilder {
         track_event
     }
 
-    fn build_value_track_event(&self, id: Id, value: f64) -> TrackEvent {
+    fn build_absolute_double_counter_track_event(&self, id: Id, absolute: f64) -> TrackEvent {
         let mut track_event = self.build_track_event(id, Id(0));
         track_event.set_type(track_event::Type::Counter);
         track_event.counter_value_field =
-            Some(track_event::CounterValueField::DoubleCounterValue(value));
+            Some(track_event::CounterValueField::DoubleCounterValue(absolute));
 
         track_event
     }
@@ -137,25 +148,24 @@ impl PerfettoTraceBuilder {
         name.to_string()
     }
 
-    /// Build a TracePacket containing the TrackDescriptor for an incremental
-    /// counter.
-    ///
-    /// An incremental counter expects delta value updates.
+    /// Build a TracePacket containing the TrackDescriptor for
+    /// [crate::tracker::Track::enter] and [crate::tracker::Track::exit] events
+    /// (using an incremental counter).
     #[must_use]
-    pub fn build_counter_track_descriptor_trace_packet(
+    pub fn build_enter_exit_track_descriptor_trace_packet(
         &mut self,
         current_time_ns: u64,
         id: Id,
         parent: Id,
         name: &str,
     ) -> TracePacket {
-        let track_descriptor = self.build_counter_track_descriptor(id, parent, name);
+        let track_descriptor = self.build_incremental_counter_track_descriptor(id, parent, name);
 
         self.build_track_descriptor_trace_packet(current_time_ns, track_descriptor)
     }
 
     /// Build a TracePacket containing the TrackDescriptor for a sequence of
-    /// values.
+    /// [crate::tracker::Track::value]s.
     #[must_use]
     pub fn build_value_track_descriptor_trace_packet(
         &mut self,
@@ -164,7 +174,7 @@ impl PerfettoTraceBuilder {
         parent: Id,
         name: &str,
     ) -> TracePacket {
-        let track_descriptor = self.build_value_track_descriptor(id, parent, name);
+        let track_descriptor = self.build_absolute_counter_track_descriptor(id, parent, name);
 
         self.build_track_descriptor_trace_packet(current_time_ns, track_descriptor)
     }
@@ -180,23 +190,38 @@ impl PerfettoTraceBuilder {
         trace_packet
     }
 
-    /// Build a TracePacket containing the TrackEvent for an incremental
-    /// counter update.
+    /// Build a TracePacket containing a TrackEvent to represent an
+    /// [crate::tracker::Track::enter] event (as an incremental counter
+    /// update).
     #[must_use]
-    pub fn build_counter_track_event_trace_packet(
+    pub fn build_enter_track_event_trace_packet(
         &self,
         current_time_ns: u64,
         id: Id,
         other: Id,
-        increment: i64,
     ) -> TracePacket {
-        let track_event = self.build_counter_track_event(id, other, increment);
+        let track_event = self.build_incremental_counter_track_event(id, other, 1);
+
+        self.build_track_event_trace_packet(current_time_ns, track_event)
+    }
+
+    /// Build a TracePacket containing a TrackEvent to represent an
+    /// [crate::tracker::Track::exit] event (as an incremental counter
+    /// update).
+    #[must_use]
+    pub fn build_exit_track_event_trace_packet(
+        &self,
+        current_time_ns: u64,
+        id: Id,
+        other: Id,
+    ) -> TracePacket {
+        let track_event = self.build_incremental_counter_track_event(id, other, -1);
 
         self.build_track_event_trace_packet(current_time_ns, track_event)
     }
 
     /// Build a TracePacket containing the TrackEvent for a floating point
-    /// value.
+    /// [crate::tracker::Track::value].
     #[must_use]
     pub fn build_value_track_event_trace_packet(
         &self,
@@ -204,7 +229,7 @@ impl PerfettoTraceBuilder {
         id: Id,
         value: f64,
     ) -> TracePacket {
-        let track_event = self.build_value_track_event(id, value);
+        let track_event = self.build_absolute_double_counter_track_event(id, value);
 
         self.build_track_event_trace_packet(current_time_ns, track_event)
     }

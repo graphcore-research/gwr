@@ -50,7 +50,7 @@ impl TraceVisitor for PerfettoGenerator {
                 )
         } else {
             self.trace_builder
-                .build_counter_track_descriptor_trace_packet(
+                .build_enter_exit_track_descriptor_trace_packet(
                     self.current_time_ns,
                     id,
                     created_by,
@@ -72,11 +72,10 @@ impl TraceVisitor for PerfettoGenerator {
     }
 
     fn enter(&mut self, id: Id, entered: Id) {
-        let trace_packet = self.trace_builder.build_counter_track_event_trace_packet(
+        let trace_packet = self.trace_builder.build_enter_track_event_trace_packet(
             self.current_time_ns,
             id,
             entered,
-            1,
         );
         let buf = self.trace_builder.build_trace_to_bytes(vec![trace_packet]);
         self.output
@@ -85,11 +84,10 @@ impl TraceVisitor for PerfettoGenerator {
     }
 
     fn exit(&mut self, id: Id, exited: Id) {
-        let trace_packet = self.trace_builder.build_counter_track_event_trace_packet(
+        let trace_packet = self.trace_builder.build_exit_track_event_trace_packet(
             self.current_time_ns,
             id,
             exited,
-            -1,
         );
         let buf = self.trace_builder.build_trace_to_bytes(vec![trace_packet]);
         self.output
