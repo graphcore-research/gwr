@@ -14,7 +14,7 @@ use gwr_engine::types::SimError;
 use gwr_engine::{run_simulation, sim_error};
 use gwr_models::data_frame::DataFrame;
 use gwr_models::fabric::functional::FunctionalFabric;
-use gwr_models::fabric::node::FabricRoutingAlgoritm;
+use gwr_models::fabric::node::FabricRoutingAlgorithm;
 use gwr_models::fabric::routed::RoutedFabric;
 use gwr_models::fabric::{Fabric, FabricConfig};
 use gwr_track::builder::{MonitorsConfig, TrackerConfig, TrackersConfig, setup_trackers};
@@ -163,7 +163,7 @@ struct Cli {
 
     /// Seed for random number generator.
     #[clap(long, default_value_t, value_enum)]
-    fabric_routing: FabricRoutingAlgoritm,
+    fabric_routing: FabricRoutingAlgorithm,
 }
 
 /// Install an event to terminate the simulation at the clock tick defined.

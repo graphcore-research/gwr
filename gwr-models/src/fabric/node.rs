@@ -107,7 +107,7 @@ use crate::fabric::FabricConfig;
 
 #[derive(clap::ValueEnum, Clone, Copy, Default, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
-pub enum FabricRoutingAlgoritm {
+pub enum FabricRoutingAlgorithm {
     #[default]
     /// Route packets to the right column first
     ColumnFirst,
@@ -120,7 +120,7 @@ struct NodeRouter {
     index: usize,
     node_col: usize,
     node_row: usize,
-    fabric_algorithm: FabricRoutingAlgoritm,
+    fabric_algorithm: FabricRoutingAlgorithm,
     config: Rc<FabricConfig>,
 }
 
@@ -160,14 +160,14 @@ where
         } else {
             // Both row/column not reached. Route according to algorithm.
             match self.fabric_algorithm {
-                FabricRoutingAlgoritm::ColumnFirst => {
+                FabricRoutingAlgorithm::ColumnFirst => {
                     if self.node_col < dest_col {
                         Port::ColPlus as usize
                     } else {
                         Port::ColMinus as usize
                     }
                 }
-                FabricRoutingAlgoritm::RowFirst => {
+                FabricRoutingAlgorithm::RowFirst => {
                     if self.node_row < dest_row {
                         Port::RowPlus as usize
                     } else {
@@ -235,7 +235,7 @@ fn router_arbiter<T>(
     clock: &Clock,
     node: &Rc<Entity>,
     config: Rc<FabricConfig>,
-    fabric_algorithm: FabricRoutingAlgoritm,
+    fabric_algorithm: FabricRoutingAlgorithm,
     num_arbiter_router_ports: usize,
     router_arbiter_index: usize,
     node_col: usize,
@@ -283,7 +283,7 @@ fn create_arbiters_routers<T>(
     clock: &Clock,
     node: &Rc<Entity>,
     config: &Rc<FabricConfig>,
-    fabric_algorithm: FabricRoutingAlgoritm,
+    fabric_algorithm: FabricRoutingAlgorithm,
     num_ingress_egress_ports: usize,
     node_col: usize,
     node_row: usize,
@@ -447,7 +447,7 @@ where
         node_col: usize,
         node_row: usize,
         config: &Rc<FabricConfig>,
-        fabric_algorithm: FabricRoutingAlgoritm,
+        fabric_algorithm: FabricRoutingAlgorithm,
     ) -> Result<Rc<Self>, SimError> {
         let entity = Rc::new(Entity::new(parent, name));
 
@@ -508,7 +508,7 @@ where
         node_col: usize,
         node_row: usize,
         config: &Rc<FabricConfig>,
-        fabric_algorithm: FabricRoutingAlgoritm,
+        fabric_algorithm: FabricRoutingAlgorithm,
     ) -> Result<Rc<Self>, SimError> {
         Self::new_and_register_with_renames(
             engine,

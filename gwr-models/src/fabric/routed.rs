@@ -34,7 +34,7 @@ use gwr_model_builder::{EntityDisplay, Runnable};
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::{Aka, populate_aka_from_string};
 
-use crate::fabric::node::{FabricNode, FabricRoutingAlgoritm};
+use crate::fabric::node::{FabricNode, FabricRoutingAlgorithm};
 use crate::fabric::{Fabric, FabricConfig};
 
 #[derive(EntityDisplay, Runnable)]
@@ -78,7 +78,7 @@ fn create_nodes<T>(
     entity: &Rc<Entity>,
     aka: Option<&Aka>,
     config: &Rc<FabricConfig>,
-    fabric_algorithm: FabricRoutingAlgoritm,
+    fabric_algorithm: FabricRoutingAlgorithm,
 ) -> FabricNodesResult<T>
 where
     T: SimObject + Routable,
@@ -238,7 +238,7 @@ where
         name: &str,
         aka: Option<&Aka>,
         config: Rc<FabricConfig>,
-        fabric_algorithm: FabricRoutingAlgoritm,
+        fabric_algorithm: FabricRoutingAlgorithm,
     ) -> Result<Rc<Self>, SimError> {
         let entity = Rc::new(Entity::new(parent, name));
         let num_ports = config.num_columns * config.num_rows * config.num_ports_per_node;
@@ -281,7 +281,7 @@ where
         parent: &Rc<Entity>,
         name: &str,
         config: Rc<FabricConfig>,
-        fabric_algorithm: FabricRoutingAlgoritm,
+        fabric_algorithm: FabricRoutingAlgorithm,
     ) -> Result<Rc<Self>, SimError> {
         Self::new_and_register_with_renames(
             engine,
