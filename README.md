@@ -5,7 +5,7 @@
 
 <div align="center">
 
-![The Great Western Runtime](gwr-developer-guide/md_src/gwr.png)
+![The Great Western Runtime](https://raw.githubusercontent.com/graphcore-research/gwr/main/gwr-developer-guide/md_src/gwr.png)
 
 [Developer guide] | [API documentation]
 
