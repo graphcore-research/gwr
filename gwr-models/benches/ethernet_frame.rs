@@ -10,6 +10,7 @@ use gwr_engine::engine::Engine;
 use gwr_engine::port::OutPort;
 use gwr_engine::traits::SimObject;
 use gwr_models::ethernet_frame::{EthernetFrame, SRC_MAC_BYTES};
+use gwr_track::entity::GetEntity;
 use gwr_track::tracker::dev_null_tracker;
 
 const NUM_FRAMES: usize = 500;

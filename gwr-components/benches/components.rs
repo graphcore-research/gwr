@@ -12,6 +12,7 @@ use gwr_components::store::Store;
 use gwr_components::test_helpers::{ArbiterInputData, priority_policy_test_core};
 use gwr_components::{connect_port, option_box_repeat, rc_limiter};
 use gwr_engine::engine::Engine;
+use gwr_track::entity::GetEntity;
 use gwr_track::tracker::dev_null_tracker;
 
 fn create_engine() -> Engine {

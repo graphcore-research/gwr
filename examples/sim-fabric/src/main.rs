@@ -7,6 +7,7 @@ use std::rc::Rc;
 
 use byte_unit::{AdjustedByte, Byte, UnitType};
 use clap::Parser;
+use gwr_components::connect_port;
 use gwr_engine::engine::Engine;
 use gwr_engine::executor::Spawner;
 use gwr_engine::time::clock::Clock;
@@ -308,8 +309,8 @@ fn main() -> Result<(), SimError> {
     );
 
     for i in 0..num_ports {
-        sources[i].connect_port_tx(fabric.port_ingress_i(i))?;
-        fabric.connect_port_egress_i(i, sinks[i].port_rx())?;
+        connect_port!(sources[i], tx => fabric, ingress, i)?;
+        connect_port!(fabric, egress, i => sinks[i], rx)?;
     }
 
     info!(top ; "Platform built and connected");

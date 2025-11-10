@@ -26,6 +26,26 @@ pub fn entity_display(input: proc_macro::TokenStream) -> proc_macro::TokenStream
     output.into()
 }
 
+/// Create a `entity(&self)` method for a struct to provide access to the Entity
+/// that is required by the `GetEntity` trait.
+#[proc_macro_derive(EntityGet)]
+pub fn get_entity(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let DeriveInput {
+        ident, generics, ..
+    } = parse_macro_input!(input);
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+
+    let output = quote! {
+        impl #impl_generics gwr_track::entity::GetEntity for #ident #ty_generics #where_clause {
+            fn entity(&self) -> &std::rc::Rc<gwr_track::entity::Entity> {
+                &self.entity
+            }
+        }
+    };
+
+    output.into()
+}
+
 /// Create a default (empty) implementation of Runnable.
 #[proc_macro_derive(Runnable)]
 pub fn runnable(input: proc_macro::TokenStream) -> proc_macro::TokenStream {

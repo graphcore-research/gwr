@@ -16,6 +16,7 @@ use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::traits::{AccessMemory, ReadMemory};
 use gwr_models::memory::{Memory, MemoryConfig};
 use gwr_models::test_helpers::{create_read, create_write};
+use gwr_track::entity::GetEntity;
 
 const BASE_ADDRESS: u64 = 0x80000;
 const DST_ADDR: u64 = BASE_ADDRESS;
@@ -72,7 +73,7 @@ fn cache_dev_read_goes_to_mem() {
     let top = engine.top();
     let source = Source::new_and_register(&engine, top, "source", None).unwrap();
     let to_put = create_read(
-        &source.entity,
+        source.entity(),
         ACCESS_SIZE_BYTES,
         DST_ADDR,
         SRC_ADDR,
@@ -166,7 +167,7 @@ fn cache() {
 
         // Make a device request
         let read = create_read(
-            &dev_rx_driver.entity,
+            dev_rx_driver.entity(),
             ACCESS_SIZE_BYTES,
             dst_addr,
             SRC_ADDR,
@@ -194,7 +195,7 @@ fn cache() {
         // Make a second device request to the same address - expecting response without
         // need to go to memory
         let read = create_read(
-            &dev_rx_driver.entity,
+            dev_rx_driver.entity(),
             ACCESS_SIZE_BYTES,
             dst_addr,
             SRC_ADDR,
@@ -268,7 +269,7 @@ fn cache_plus_mem() {
 
         // Make a device request
         let read = create_read(
-            &dev_rx_driver.entity,
+            dev_rx_driver.entity(),
             ACCESS_SIZE_BYTES,
             dst_addr,
             SRC_ADDR,
@@ -285,7 +286,7 @@ fn cache_plus_mem() {
             // Make a second device request to the same address - expecting response without
             // need to go to memory
             let read = create_read(
-                &dev_rx_driver.entity,
+                dev_rx_driver.entity(),
                 ACCESS_SIZE_BYTES,
                 dst_addr,
                 SRC_ADDR,
@@ -330,7 +331,7 @@ fn cache_ways() {
 
                 // Make a device request
                 let read = create_read(
-                    &dev_rx_driver.entity,
+                    dev_rx_driver.entity(),
                     ACCESS_SIZE_BYTES,
                     dst_addr,
                     SRC_ADDR,
@@ -375,7 +376,7 @@ fn cache_ways_overflow() {
 
                 // Make a device request
                 let read = create_read(
-                    &dev_rx_driver.entity,
+                    dev_rx_driver.entity(),
                     ACCESS_SIZE_BYTES,
                     dst_addr,
                     SRC_ADDR,
@@ -416,7 +417,7 @@ fn cache_write_flushes_line() {
         // Make a couple of reads to the same address
         for _ in 0..num_rereads {
             let read = create_read(
-                &dev_rx_driver.entity,
+                dev_rx_driver.entity(),
                 ACCESS_SIZE_BYTES,
                 dst_addr,
                 SRC_ADDR,
@@ -432,7 +433,7 @@ fn cache_write_flushes_line() {
 
         // Write to address to cause cache flush
         let write = create_write(
-            &dev_rx_driver.entity,
+            dev_rx_driver.entity(),
             ACCESS_SIZE_BYTES,
             dst_addr,
             SRC_ADDR,
@@ -443,7 +444,7 @@ fn cache_write_flushes_line() {
         // Read the memory again
         for _ in 0..num_rereads {
             let read = create_read(
-                &dev_rx_driver.entity,
+                dev_rx_driver.entity(),
                 ACCESS_SIZE_BYTES,
                 dst_addr,
                 SRC_ADDR,

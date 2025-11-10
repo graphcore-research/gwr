@@ -14,6 +14,7 @@ use gwr_engine::types::SimError;
 use gwr_engine::{run_simulation, sim_error};
 use gwr_models::ethernet_frame::FRAME_OVERHEAD_BYTES;
 use gwr_track::builder::{MonitorsConfig, TrackerConfig, TrackersConfig, setup_trackers};
+use gwr_track::entity::GetEntity;
 use gwr_track::{Track, error, info};
 use indicatif::ProgressBar;
 use sim_ring::ring_builder::{

@@ -2,13 +2,15 @@
 
 use std::rc::Rc;
 
+use gwr_model_builder::EntityGet;
 use gwr_models::data_frame::DataFrame;
 use gwr_track::entity::Entity;
 
 /// A frame Generator that can be used by the `Source` to produce frames on
 /// the fly.
+#[derive(EntityGet)]
 pub struct FrameGen {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     payload_bytes: usize,
     overhead_bytes: usize,
     num_send_frames: usize,

@@ -28,7 +28,7 @@ macro_rules! build_packet_type {
         #[derive(Clone)]
         pub struct [< $packet_type  >] {
             /// The entity responsible for the logging control of this packet.
-            pub entity: std::rc::Rc<Entity>,
+            entity: std::rc::Rc<Entity>,
 
             /// The unique id used for logging this packet.
             pub id: gwr_track::Id,

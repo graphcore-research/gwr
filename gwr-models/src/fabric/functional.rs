@@ -35,8 +35,8 @@ use gwr_engine::sim_error;
 use gwr_engine::time::clock::{Clock, ClockTick};
 use gwr_engine::traits::{Event, Routable, Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
-use gwr_model_builder::EntityDisplay;
-use gwr_track::entity::Entity;
+use gwr_model_builder::{EntityDisplay, EntityGet};
+use gwr_track::entity::{Entity, GetEntity};
 use gwr_track::tracker::aka::Aka;
 use gwr_track::{build_aka, enter, exit};
 
@@ -59,12 +59,12 @@ fn manhatten_rx_to_tx_cycles(
     (horizontal_hops + vertical_hops) * config.cycles_per_hop + config.cycles_overhead
 }
 
-#[derive(EntityDisplay)]
+#[derive(EntityGet, EntityDisplay)]
 pub struct FunctionalFabric<T>
 where
     T: SimObject + Routable,
 {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     rx_buffer_limiters: Vec<Rc<Limiter<T>>>,
     internal_rx: RefCell<Vec<InPort<T>>>,
     tx_buffers: Vec<Rc<Store<T>>>,

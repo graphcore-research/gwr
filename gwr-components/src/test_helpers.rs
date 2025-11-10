@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use gwr_engine::engine::Engine;
 use gwr_engine::port::InPort;
-use gwr_track::entity::Entity;
+use gwr_track::entity::{Entity, GetEntity};
 
 use crate::arbiter::Arbiter;
 use crate::arbiter::policy::{Priority, PriorityRoundRobin};

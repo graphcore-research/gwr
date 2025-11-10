@@ -2,6 +2,7 @@
 
 use std::rc::Rc;
 
+use gwr_model_builder::EntityGet;
 use gwr_models::ethernet_frame::{DEST_MAC_BYTES, EthernetFrame, u64_to_mac};
 use gwr_track::entity::Entity;
 
@@ -10,8 +11,9 @@ use gwr_track::entity::Entity;
 ///
 /// This allows each frame being created to be unique which aids debug of the
 /// system.
+#[derive(EntityGet)]
 pub struct FrameGen {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     dest: [u8; DEST_MAC_BYTES],
     payload_bytes: usize,
     num_send_frames: usize,

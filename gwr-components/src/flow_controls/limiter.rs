@@ -18,7 +18,7 @@ use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
-use gwr_model_builder::EntityDisplay;
+use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
 use gwr_track::{enter, exit};
@@ -30,12 +30,12 @@ use crate::{connect_tx, port_rx, take_option};
 /// specified rate.
 ///
 /// The rate is defined in bits-per-second.
-#[derive(EntityDisplay)]
+#[derive(EntityGet, EntityDisplay)]
 pub struct Limiter<T>
 where
     T: SimObject,
 {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     limiter: Rc<RateLimiter<T>>,
     tx: RefCell<Option<OutPort<T>>>,
     rx: RefCell<Option<InPort<T>>>,

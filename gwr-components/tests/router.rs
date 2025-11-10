@@ -6,6 +6,7 @@ use gwr_components::sink::Sink;
 use gwr_components::source::Source;
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
+use gwr_track::entity::GetEntity;
 
 #[test]
 fn router() {

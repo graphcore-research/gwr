@@ -93,7 +93,6 @@ impl ExecutorState {
 /// [module documentation]: index.html
 #[derive(Clone)]
 pub struct Executor {
-    pub entity: Rc<Entity>,
     state: Rc<ExecutorState>,
 }
 
@@ -184,10 +183,8 @@ impl Spawner {
 #[must_use]
 pub fn new_executor_and_spawner(top: &Rc<Entity>) -> (Executor, Spawner) {
     let state = Rc::new(ExecutorState::new(top));
-    let entity = Rc::new(Entity::new(top, "executor"));
     (
         Executor {
-            entity,
             state: state.clone(),
         },
         Spawner { state },

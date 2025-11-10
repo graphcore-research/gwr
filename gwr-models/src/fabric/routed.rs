@@ -30,19 +30,19 @@ use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Routable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
-use gwr_model_builder::{EntityDisplay, Runnable};
-use gwr_track::entity::Entity;
+use gwr_model_builder::{EntityDisplay, EntityGet, Runnable};
+use gwr_track::entity::{Entity, GetEntity};
 use gwr_track::tracker::aka::{Aka, populate_aka_from_string};
 
 use crate::fabric::node::{FabricNode, FabricRoutingAlgorithm};
 use crate::fabric::{Fabric, FabricConfig};
 
-#[derive(EntityDisplay, Runnable)]
+#[derive(EntityGet, EntityDisplay, Runnable)]
 pub struct RoutedFabric<T>
 where
     T: SimObject + Routable,
 {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     nodes: Vec<Vec<Rc<FabricNode<T>>>>,
     config: Rc<FabricConfig>,
 }

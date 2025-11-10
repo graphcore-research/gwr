@@ -825,7 +825,7 @@ checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
 
 [[package]]
 name = "flaky-component"
-version = "3.0.0"
+version = "4.0.0"
 dependencies = [
  "async-trait",
  "clap",
@@ -838,7 +838,7 @@ dependencies = [
 
 [[package]]
 name = "flaky-with-delay"
-version = "3.0.0"
+version = "4.0.0"
 dependencies = [
  "async-trait",
  "clap",
@@ -1006,7 +1006,7 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "gwr-components"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "async-trait",
  "clap",
@@ -1068,7 +1068,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-engine"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1083,7 +1083,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-model-builder"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "proc-macro2",
@@ -1094,7 +1094,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-models"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "async-trait",
  "clap",
@@ -2355,7 +2355,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scrambler"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "async-trait",
  "clap",
@@ -2523,7 +2523,7 @@ dependencies = [
 
 [[package]]
 name = "sim-fabric"
-version = "3.0.0"
+version = "4.0.0"
 dependencies = [
  "byte-unit",
  "clap",
@@ -2541,7 +2541,7 @@ dependencies = [
 
 [[package]]
 name = "sim-pipe"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "byte-unit",
  "clap",
@@ -2557,7 +2557,7 @@ dependencies = [
 
 [[package]]
 name = "sim-ring"
-version = "6.0.0"
+version = "7.0.0"
 dependencies = [
  "clap",
  "gwr-components",

@@ -11,7 +11,7 @@ use std::task::{Context, Poll, Waker};
 use futures::Future;
 use futures::future::FusedFuture;
 use gwr_track::connect;
-use gwr_track::entity::Entity;
+use gwr_track::entity::{Entity, GetEntity};
 use gwr_track::tracker::aka::Aka;
 
 use crate::engine::Engine;
@@ -67,7 +67,7 @@ pub struct InPort<T>
 where
     T: SimObject,
 {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     state: Rc<PortState<T>>,
     connected: RefCell<bool>,
 }
@@ -153,8 +153,17 @@ pub struct OutPort<T>
 where
     T: SimObject,
 {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     state: Option<Rc<PortState<T>>>,
+}
+
+impl<T> GetEntity for OutPort<T>
+where
+    T: SimObject,
+{
+    fn entity(&self) -> &Rc<Entity> {
+        &self.entity
+    }
 }
 
 impl<T> fmt::Display for OutPort<T>

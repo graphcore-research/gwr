@@ -18,7 +18,7 @@ use gwr_engine::engine::Engine;
 use gwr_engine::port::{OutPort, PortStateResult};
 use gwr_engine::traits::{Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
-use gwr_model_builder::EntityDisplay;
+use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::entity::Entity;
 use gwr_track::exit;
 use gwr_track::tracker::aka::Aka;
@@ -39,12 +39,12 @@ macro_rules! option_box_chain {
     };
 }
 
-#[derive(EntityDisplay)]
+#[derive(EntityGet, EntityDisplay)]
 pub struct Source<T>
 where
     T: SimObject,
 {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     data_generator: RefCell<Option<DataGenerator<T>>>,
     tx: RefCell<Option<OutPort<T>>>,
 }

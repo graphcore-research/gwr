@@ -6,6 +6,7 @@ use gwr_components::source::Source;
 use gwr_components::{connect_port, option_box_repeat};
 use gwr_engine::engine::Engine;
 use gwr_engine::run_simulation;
+use gwr_track::entity::GetEntity;
 use gwr_track::test_helpers::create_tracker;
 
 /// Command-line arguments.

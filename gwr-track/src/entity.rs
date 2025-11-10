@@ -149,3 +149,9 @@ pub fn toplevel(tracker: &Tracker, name: &str) -> Rc<Entity> {
     create!(top);
     top
 }
+
+/// The `GetEntity` trait is used to provide access to an objects [Entity]
+pub trait GetEntity {
+    /// Return the [Entity]
+    fn entity(&self) -> &Rc<Entity>;
+}

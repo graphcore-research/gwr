@@ -14,6 +14,7 @@ use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::SimObject;
+use gwr_track::entity::GetEntity;
 
 #[test]
 fn put_get() {

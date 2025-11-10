@@ -24,7 +24,7 @@ use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
-use gwr_model_builder::EntityDisplay;
+use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::Id;
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
@@ -34,12 +34,12 @@ use crate::memory::traits::AccessMemory;
 pub mod random;
 pub mod strided;
 
-#[derive(EntityDisplay)]
+#[derive(EntityGet, EntityDisplay)]
 pub struct MemoryAccessGen<T>
 where
     T: SimObject + AccessMemory,
 {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     spawner: Spawner,
     data_generator: RefCell<Option<DataGenerator<T>>>,
     rx: RefCell<Option<InPort<T>>>,

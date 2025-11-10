@@ -160,6 +160,7 @@
 //! # use gwr_engine::time::clock::Clock;
 //! # use gwr_engine::traits::SimObject;
 //! # use gwr_engine::types::SimResult;
+//! # use gwr_track::entity::GetEntity;
 //! #
 //! # fn source_sink() -> SimResult {
 //! #     let mut engine = start_test(file!());
@@ -200,19 +201,19 @@ use gwr_engine::sim_error;
 use gwr_engine::time::clock::{Clock, ClockTick};
 use gwr_engine::traits::{Event, Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
-use gwr_model_builder::EntityDisplay;
+use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
 use gwr_track::{enter, exit};
 
 use crate::{connect_tx, port_rx, take_option};
 
-#[derive(EntityDisplay)]
+#[derive(EntityGet, EntityDisplay)]
 pub struct Delay<T>
 where
     T: SimObject,
 {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     spawner: Spawner,
     clock: Clock,
     delay_ticks: RefCell<usize>,

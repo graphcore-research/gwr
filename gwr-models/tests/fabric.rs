@@ -14,6 +14,7 @@ use gwr_models::fabric::functional::FunctionalFabric;
 use gwr_models::fabric::node::FabricRoutingAlgorithm;
 use gwr_models::fabric::routed::RoutedFabric;
 use gwr_models::fabric::{Fabric, FabricConfig};
+use gwr_track::entity::GetEntity;
 
 trait ToDest {
     fn to_dest(&self, source_index: usize, frame_index: usize) -> [u8; SRC_MAC_BYTES];

@@ -47,6 +47,7 @@
 //! # use gwr_components::{connect_port, rc_limiter, option_box_repeat};
 //! # use gwr_engine::engine::Engine;
 //! # use gwr_engine::run_simulation;
+//! # use gwr_track::entity::GetEntity;
 //!
 //! // Create the engine.
 //! let mut engine = Engine::default();
