@@ -36,15 +36,15 @@ use gwr_engine::port::PortStateResult;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::SimObject;
 use gwr_engine::types::{SimError, SimResult};
-use gwr_model_builder::{EntityDisplay, Runnable};
+use gwr_model_builder::{EntityDisplay, EntityGet, Runnable};
 use gwr_track::entity::Entity;
 
-#[derive(EntityDisplay, Runnable)]
+#[derive(EntityGet, EntityDisplay, Runnable)]
 pub struct Scrambler<T>
 where
     T: SimObject,
 {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     scramble: bool,
     buffer_a: Rc<Store<T>>,
     buffer_b: Rc<Store<T>>,

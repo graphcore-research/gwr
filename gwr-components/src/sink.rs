@@ -19,19 +19,19 @@ use gwr_engine::port::{InPort, PortStateResult};
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
-use gwr_model_builder::EntityDisplay;
+use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::enter;
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
 
 use crate::{port_rx, take_option};
 
-#[derive(EntityDisplay)]
+#[derive(EntityGet, EntityDisplay)]
 pub struct Sink<T>
 where
     T: SimObject,
 {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     sunk_count: RefCell<usize>,
     rx: RefCell<Option<InPort<T>>>,
 }

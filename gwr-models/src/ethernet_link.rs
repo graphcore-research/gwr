@@ -21,21 +21,21 @@ use gwr_engine::port::PortStateResult;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::SimObject;
 use gwr_engine::types::{SimError, SimResult};
-use gwr_model_builder::{EntityDisplay, Runnable};
+use gwr_model_builder::{EntityDisplay, EntityGet, Runnable};
 use gwr_track::build_aka;
-use gwr_track::entity::Entity;
+use gwr_track::entity::{Entity, GetEntity};
 use gwr_track::tracker::aka::Aka;
 
 // Default values for an Ethernet Link
 pub const DELAY_TICKS: usize = 500;
 pub const BITS_PER_TICK: usize = 100;
 
-#[derive(EntityDisplay, Runnable)]
+#[derive(EntityGet, EntityDisplay, Runnable)]
 pub struct EthernetLink<T>
 where
     T: SimObject,
 {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     limiter_a: Rc<Limiter<T>>,
     delay_a: Rc<Delay<T>>,
     limiter_b: Rc<Limiter<T>>,

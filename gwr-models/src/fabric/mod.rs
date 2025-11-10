@@ -8,12 +8,14 @@
 //! ingress/egress ports will be populated.
 
 use std::cmp::min;
+use std::fmt::Display;
 
 use gwr_engine::port::PortStateResult;
 use gwr_engine::traits::{Routable, SimObject};
 use gwr_engine::types::SimResult;
+use gwr_track::entity::GetEntity;
 
-pub trait Fabric<T>
+pub trait Fabric<T>: GetEntity + Display
 where
     T: SimObject + Routable,
 {

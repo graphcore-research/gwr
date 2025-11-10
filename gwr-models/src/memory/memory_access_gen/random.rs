@@ -13,7 +13,7 @@ use crate::memory::memory_access::MemoryAccess;
 ///
 /// Will emit memory accesses in the range [base, end)
 pub struct Random {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     // Configuration
     src_addr: u64,
     base_addr: u64,

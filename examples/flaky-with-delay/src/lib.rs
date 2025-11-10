@@ -32,7 +32,7 @@ use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
-use gwr_model_builder::EntityDisplay;
+use gwr_model_builder::{EntityDisplay, EntityGet};
 /// The gwr_track library provides tracing/logging features.
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
@@ -69,9 +69,13 @@ impl Config {
 /// A component needs to support being cloned and also being printed for debug
 /// logging.
 ///
+///
+/// The `EntityGet` automatically implements the `GetEntity` trait for this
+/// struct.
+///
 /// The `EntityDisply` automatically derives the `Display` trait as long as the
 /// struct contains the `entity`.
-#[derive(EntityDisplay)]
+#[derive(EntityGet, EntityDisplay)]
 pub struct Flaky<T>
 where
     T: SimObject,
@@ -79,7 +83,7 @@ where
     /// Every component should include an Entity that defines where in the
     /// overall simulation hierarchy it is. The Entity is also used to
     /// filter logging.
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
 
     /// This component has an `rx` port that it uses to handle incoming data.
     ///

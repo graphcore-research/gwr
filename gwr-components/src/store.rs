@@ -28,7 +28,7 @@
 //! use gwr_engine::engine::Engine;
 //! use gwr_engine::executor::Spawner;
 //! use gwr_engine::time::clock::Clock;
-//! use gwr_track::entity::Entity;
+//! use gwr_track::entity::{Entity, GetEntity};
 //!
 //! fn build_store(engine: &Engine, clock: &Clock, parent: &Rc<Entity>) -> Rc<Store<i32>> {
 //!     // Create a store. It is passed:
@@ -54,7 +54,7 @@
 //! use gwr_engine::engine::Engine;
 //! use gwr_engine::executor::Spawner;
 //! use gwr_engine::time::clock::Clock;
-//! use gwr_track::entity::Entity;
+//! use gwr_track::entity::{Entity, GetEntity};
 //!
 //! fn build_store_with_panic(
 //!     engine: &Engine,
@@ -86,6 +86,7 @@
 //! use gwr_engine::engine::Engine;
 //! use gwr_engine::time::clock::Clock;
 //! use gwr_engine::run_simulation;
+//! use gwr_track::entity::GetEntity;
 //!
 //! // Every simulation is based around an `Engine`
 //! let mut engine = Engine::default();
@@ -134,7 +135,7 @@ use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Event, Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
-use gwr_model_builder::EntityDisplay;
+use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
 use gwr_track::{enter, exit};
@@ -200,12 +201,12 @@ where
 /// A component that can support a configurable number of objects.
 ///
 /// Objects must support the [SimObject] trait.
-#[derive(EntityDisplay)]
+#[derive(EntityGet, EntityDisplay)]
 pub struct Store<T>
 where
     T: SimObject,
 {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     spawner: Spawner,
     state: Rc<State<T>>,
 

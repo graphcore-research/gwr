@@ -61,7 +61,7 @@ use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Routable, Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
-use gwr_model_builder::EntityDisplay;
+use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
 use gwr_track::{enter, exit, trace};
@@ -90,12 +90,12 @@ where
     }
 }
 
-#[derive(EntityDisplay)]
+#[derive(EntityGet, EntityDisplay)]
 pub struct Router<T>
 where
     T: SimObject + Routable,
 {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     rx: RefCell<Option<InPort<T>>>,
     tx: RefCell<Vec<OutPort<T>>>,
     algorithm: Box<dyn Route<T>>,

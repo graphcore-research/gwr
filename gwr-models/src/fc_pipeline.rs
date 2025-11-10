@@ -30,9 +30,9 @@ use gwr_engine::port::PortStateResult;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::SimObject;
 use gwr_engine::types::{SimError, SimResult};
-use gwr_model_builder::{EntityDisplay, Runnable};
+use gwr_model_builder::{EntityDisplay, EntityGet, Runnable};
 use gwr_track::build_aka;
-use gwr_track::entity::Entity;
+use gwr_track::entity::{Entity, GetEntity};
 use gwr_track::tracker::aka::Aka;
 
 /// Configuration for a flow-controlled pipeline.
@@ -54,12 +54,12 @@ impl FcPipelineConfig {
 }
 
 /// The Flow-Controlled Pipeline.
-#[derive(EntityDisplay, Runnable)]
+#[derive(EntityGet, EntityDisplay, Runnable)]
 pub struct FcPipeline<T>
 where
     T: SimObject,
 {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     credit_limiter: RefCell<Option<Rc<CreditLimiter<T>>>>,
     credit_delay: RefCell<Option<Rc<Delay<Credit>>>>,
     credit_issuer: RefCell<Option<Rc<CreditIssuer<T>>>>,

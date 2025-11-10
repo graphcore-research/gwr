@@ -10,6 +10,7 @@ use gwr_engine::test_helpers::start_test;
 use gwr_engine::time::clock::Clock;
 use gwr_models::ethernet_frame::{EthernetFrame, FRAME_OVERHEAD_BYTES};
 use gwr_models::ethernet_link::{self, EthernetLink};
+use gwr_track::entity::GetEntity;
 
 fn run_test(
     num_put_a: usize,
@@ -22,11 +23,11 @@ fn run_test(
     let top = engine.top();
 
     let source_a = Source::new_and_register(&engine, top, "src_a", None).unwrap();
-    let frame_a = EthernetFrame::new(&source_a.entity, payload_bytes);
+    let frame_a = EthernetFrame::new(source_a.entity(), payload_bytes);
     source_a.set_generator(option_box_repeat!(frame_a; num_put_a));
 
     let source_b = Source::new_and_register(&engine, top, "src_b", None).unwrap();
-    let frame_b = EthernetFrame::new(&source_b.entity, payload_bytes);
+    let frame_b = EthernetFrame::new(source_b.entity(), payload_bytes);
     source_b.set_generator(option_box_repeat!(frame_b; num_put_b));
 
     let link = EthernetLink::new_and_register(&engine, &clock, top, "link").unwrap();
@@ -105,7 +106,7 @@ fn change_delay() {
     let top = engine.top();
 
     let source_a = Source::new_and_register(&engine, top, "src_a", None).unwrap();
-    let etwr = EthernetFrame::new(&source_a.entity, 128);
+    let etwr = EthernetFrame::new(source_a.entity(), 128);
     source_a.set_generator(option_box_repeat!(etwr; 1));
 
     let source_b = Source::new_and_register(&engine, top, "src_b", None).unwrap();

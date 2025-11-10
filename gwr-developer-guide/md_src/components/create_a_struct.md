@@ -13,16 +13,16 @@ be wrapped in [`std::rc::Rc`] so that it can be shared.
 # use std::marker::PhantomData;
 # use std::rc::Rc;
 # use gwr_engine::traits::SimObject;
-# use gwr_model_builder::EntityDisplay;
+# use gwr_model_builder::{EntityGet, EntityDisplay};
 # use gwr_track::entity::Entity;
 # #[allow(dead_code)]
 
-#[derive(EntityDisplay)]
+#[derive(EntityGet, EntityDisplay)]
 struct MyComponent<T>
 where
     T: SimObject
 {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
 
     // Any component-specific state
 #   phantom: PhantomData<T>

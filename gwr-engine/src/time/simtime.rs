@@ -17,7 +17,7 @@ use crate::time::clock::TaskWaker;
 /// Contains all Clocks and the current simulation time in ns.
 #[derive(Clone)]
 pub struct SimTime {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
 
     current_ns: f64,
 

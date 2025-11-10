@@ -37,9 +37,9 @@ use gwr_engine::port::PortStateResult;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Routable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
-use gwr_model_builder::{EntityDisplay, Runnable};
+use gwr_model_builder::{EntityDisplay, EntityGet, Runnable};
 use gwr_track::build_aka;
-use gwr_track::entity::Entity;
+use gwr_track::entity::{Entity, GetEntity};
 use gwr_track::tracker::aka::Aka;
 
 /// The port index used for ring connections.
@@ -74,12 +74,12 @@ where
     }
 }
 
-#[derive(EntityDisplay, Runnable)]
+#[derive(EntityGet, EntityDisplay, Runnable)]
 pub struct RingNode<T>
 where
     T: SimObject + Routable,
 {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     rx_buffer_limiter: Rc<Limiter<T>>,
     tx_buffer: Rc<Store<T>>,
     arbiter: Rc<Arbiter<T>>,

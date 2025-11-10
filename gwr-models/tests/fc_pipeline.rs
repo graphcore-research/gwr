@@ -7,6 +7,7 @@ use gwr_components::{connect_port, option_box_repeat, rc_limiter};
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
 use gwr_models::fc_pipeline::{FcPipeline, FcPipelineConfig};
+use gwr_track::entity::GetEntity;
 
 fn test_fc_pipeline(buffer_size: usize, data_delay: usize, credit_delay: usize) {
     let mut engine = start_test(file!());

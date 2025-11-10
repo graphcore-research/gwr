@@ -19,7 +19,7 @@ use gwr_engine::spawn_subcomponent;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
-use gwr_model_builder::EntityDisplay;
+use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_resources::Resource;
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
@@ -28,9 +28,9 @@ use gwr_track::{build_aka, trace};
 use crate::types::Credit;
 use crate::{connect_tx, port_rx, take_option};
 
-#[derive(EntityDisplay)]
+#[derive(EntityGet, EntityDisplay)]
 struct PortCredit {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     credit: Resource,
     rx: RefCell<Option<InPort<Credit>>>,
 }
@@ -71,12 +71,12 @@ impl PortCredit {
     }
 }
 
-#[derive(EntityDisplay)]
+#[derive(EntityGet, EntityDisplay)]
 pub struct CreditLimiter<T>
 where
     T: SimObject,
 {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     spawner: Spawner,
     credit: Resource,
 

@@ -16,7 +16,7 @@ use crate::types::{Component, Eventable, SimResult};
 const DEFAULT_CLOCK_MHZ: f64 = 1000.0;
 
 pub struct Registry {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     components: RefCell<Vec<Component>>,
 }
 

@@ -27,7 +27,7 @@ use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
-use gwr_model_builder::EntityDisplay;
+use gwr_model_builder::{EntityDisplay, EntityGet};
 /// The gwr_track library provides tracing/logging features.
 use gwr_track::entity::Entity;
 use gwr_track::trace;
@@ -46,10 +46,14 @@ use rand::{RngCore, SeedableRng};
 /// a simulation of any type - as long as that type implements the `SimObject`
 /// trait.
 ///
+/// Every entity needs to implement the `GetEntity` trait in order to provide
+/// the `entity()` access function to get at the private `entity` member. The
+/// `EntityGet` automatically implements this function for this struct.
+///
 /// The `fmt::Display` trait is used when converting a component to a string
 /// for logging/printing using "{}". Simply pass through to the entity. This can
 /// be hand-written, but the `EntityDisplay` derive writes this automatically.
-#[derive(EntityDisplay)]
+#[derive(EntityGet, EntityDisplay)]
 pub struct Flaky<T>
 where
     T: SimObject,
@@ -57,7 +61,7 @@ where
     /// Every component should include an Entity that defines where in the
     /// overall simulation hierarchy it is. The Entity is also used to
     /// filter logging.
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
 
     /// Store the ratio at which packets should be dropped.
     drop_ratio: f64,

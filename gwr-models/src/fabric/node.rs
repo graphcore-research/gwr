@@ -97,9 +97,9 @@ use gwr_engine::port::PortStateResult;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Routable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
-use gwr_model_builder::{EntityDisplay, Runnable};
+use gwr_model_builder::{EntityDisplay, EntityGet, Runnable};
 use gwr_track::build_aka;
-use gwr_track::entity::Entity;
+use gwr_track::entity::{Entity, GetEntity};
 use gwr_track::tracker::aka::Aka;
 use serde::Serialize;
 
@@ -419,12 +419,12 @@ where
     Ok((ingress_buffer_limiters, egress_buffers))
 }
 
-#[derive(EntityDisplay, Runnable)]
+#[derive(EntityGet, EntityDisplay, Runnable)]
 pub struct FabricNode<T>
 where
     T: SimObject + Routable,
 {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
 
     arbiters: Vec<Rc<Arbiter<T>>>,
     routers: Vec<Rc<Router<T>>>,

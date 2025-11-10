@@ -3,6 +3,7 @@
 use std::fmt;
 use std::rc::Rc;
 
+use gwr_model_builder::EntityGet;
 use gwr_models::data_frame::DataFrame;
 use gwr_models::fabric::FabricConfig;
 use gwr_track::entity::Entity;
@@ -43,8 +44,9 @@ impl fmt::Display for TrafficPattern {
 ///
 /// This allows each frame being created to be unique which aids debug of the
 /// system.
+#[derive(EntityGet)]
 pub struct FrameGen {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     config: Rc<FabricConfig>,
     source_index: usize,
     dest_index: usize,

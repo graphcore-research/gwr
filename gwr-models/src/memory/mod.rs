@@ -11,7 +11,7 @@ use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Runnable, SimObject};
 use gwr_engine::types::{AccessType, SimError, SimResult};
-use gwr_model_builder::EntityDisplay;
+use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
 use gwr_track::{build_aka, trace};
@@ -69,12 +69,12 @@ impl MemoryMetrics {
     }
 }
 
-#[derive(EntityDisplay)]
+#[derive(EntityGet, EntityDisplay)]
 pub struct Memory<T>
 where
     T: SimObject + AccessMemory,
 {
-    pub entity: Rc<Entity>,
+    entity: Rc<Entity>,
     clock: Clock,
     config: MemoryConfig,
     metrics: RefCell<MemoryMetrics>,

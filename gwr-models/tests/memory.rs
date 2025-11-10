@@ -16,7 +16,7 @@ use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::traits::AccessMemory;
 use gwr_models::memory::{Memory, MemoryConfig};
 use gwr_models::test_helpers::{create_read, create_write, create_write_np};
-use gwr_track::entity::Entity;
+use gwr_track::entity::{Entity, GetEntity};
 
 const DST_ADDR: u64 = 0x80000;
 const SRC_ADDR: u64 = DST_ADDR + 0x1000;
@@ -50,7 +50,7 @@ fn setup_system(
 
     let source = Source::new_and_register(&engine, top, "source", None).unwrap();
     let to_put = create_fn(
-        &source.entity,
+        source.entity(),
         ACCESS_SIZE_BYTES,
         DST_ADDR,
         SRC_ADDR,
@@ -134,7 +134,7 @@ fn read_becomes_write() {
 
         // Make a device request
         let request = create_read(
-            &mem_rx_driver.entity,
+            mem_rx_driver.entity(),
             ACCESS_SIZE_BYTES,
             dst_addr,
             SRC_ADDR,

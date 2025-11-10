@@ -15,6 +15,7 @@ use gwr_engine::traits::Routable;
 use gwr_engine::types::SimError;
 use gwr_models::ethernet_frame::{EthernetFrame, SRC_MAC_BYTES, mac_to_u64};
 use gwr_models::ring_node::{IO_INDEX, RING_INDEX, RingConfig, RingNode};
+use gwr_track::entity::GetEntity;
 
 struct TestAlgorithm(u64);
 
