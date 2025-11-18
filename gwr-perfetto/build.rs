@@ -3,10 +3,10 @@
 use std::fs;
 use std::path::Path;
 
-const PERFETTO_SRC_DIR: &str = "../gwr-perfetto-sys/perfetto/";
+use gwr_perfetto_sys::PERFETTO_SOURCE;
 
 fn main() {
-    let perfetto_src = fs::canonicalize(Path::new(PERFETTO_SRC_DIR)).unwrap();
+    let perfetto_src = fs::canonicalize(Path::new(PERFETTO_SOURCE)).unwrap();
 
     let mut prost_build = prost_build::Config::new();
     prost_build
