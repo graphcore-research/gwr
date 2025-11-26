@@ -24,13 +24,13 @@ harness = false
 
 [dependencies]
 async-trait.workspace = true
-log.workspace = true
 futures.workspace = true
-paste.workspace = true
 gwr-engine = { path = "../gwr-engine", version = "0.8.0" }
 gwr-model-builder = { path = "../gwr-model-builder", version = "0.2.0" }
 gwr-resources = { path = "../gwr-resources", version = "0.1.0" }
 gwr-track = { path = "../gwr-track", version = "0.7.0" }
+log.workspace = true
+paste.workspace = true
 
 [dev-dependencies]
 clap.workspace = true

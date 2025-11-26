@@ -22,12 +22,12 @@ publish.workspace = true
 capnp.workspace = true
 clap.workspace = true
 crossterm.workspace = true
+gwr-track = { path = "../gwr-track", version = "0.7.0" }
 itertools.workspace = true
 log.workspace = true
 ratatui.workspace = true
 regex.workspace = true
 rocket = "0.5.1"
-gwr-track = { path = "../gwr-track", version = "0.7.0" }
 tokio = "1.45.1"
 
 [features]
