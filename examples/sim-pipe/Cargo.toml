@@ -24,8 +24,8 @@ clap.workspace = true
 log.workspace = true
 indicatif.workspace = true
 serde.workspace = true
-gwr-components = { path = "../../gwr-components" }
-gwr-engine = { path = "../../gwr-engine" }
-gwr-models = { path = "../../gwr-models" }
-gwr-model-builder = { path = "../../gwr-model-builder" }
-gwr-track = { path = "../../gwr-track", features = ["perfetto"] }
+gwr-components = { path = "../../gwr-components", version = "0.7.0" }
+gwr-engine = { path = "../../gwr-engine", version = "0.8.0" }
+gwr-models = { path = "../../gwr-models", version = "0.11.0" }
+gwr-model-builder = { path = "../../gwr-model-builder", version = "0.2.0" }
+gwr-track = { path = "../../gwr-track", features = ["perfetto"], version = "0.7.0" }

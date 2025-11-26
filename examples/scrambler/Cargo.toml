@@ -21,7 +21,7 @@ publish.workspace = true
 [dependencies]
 async-trait.workspace = true
 clap.workspace = true
-gwr-components = { path = "../../gwr-components" }
-gwr-engine = { path = "../../gwr-engine" }
-gwr-model-builder = { path = "../../gwr-model-builder" }
-gwr-track = { path = "../../gwr-track" }
+gwr-components = { path = "../../gwr-components", version = "0.7.0" }
+gwr-engine = { path = "../../gwr-engine", version = "0.8.0" }
+gwr-model-builder = { path = "../../gwr-model-builder", version = "0.2.0" }
+gwr-track = { path = "../../gwr-track", version = "0.7.0" }

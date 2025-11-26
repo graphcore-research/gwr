@@ -27,10 +27,10 @@ async-trait.workspace = true
 log.workspace = true
 futures.workspace = true
 paste.workspace = true
-gwr-engine = { path = "../gwr-engine" }
-gwr-model-builder = { path = "../gwr-model-builder" }
-gwr-resources = { path = "../gwr-resources" }
-gwr-track = { path = "../gwr-track" }
+gwr-engine = { path = "../gwr-engine", version = "0.8.0" }
+gwr-model-builder = { path = "../gwr-model-builder", version = "0.2.0" }
+gwr-resources = { path = "../gwr-resources", version = "0.1.0" }
+gwr-track = { path = "../gwr-track", version = "0.7.0" }
 
 [dev-dependencies]
 clap.workspace = true
