@@ -23,7 +23,7 @@ proc-macro = true
 path = "src/lib.rs"
 
 [dependencies]
-gwr-doc-builder = { path = "../gwr-doc-builder" }
+gwr-doc-builder = { path = "../gwr-doc-builder", version = "0.1.0" }
 proc-macro2.workspace = true
 syn.workspace = true
 quote.workspace = true
