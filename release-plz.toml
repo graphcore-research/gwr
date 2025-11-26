@@ -39,5 +39,17 @@ name = "scrambler"
 publish = false
 
 [[package]]
+name = "sim-fabric"
+publish = false
+
+[[package]]
+name = "sim-pipe"
+publish = false
+
+[[package]]
+name = "sim-ring"
+publish = false
+
+[[package]]
 name = "gwr-developer-guide"
 publish = false
