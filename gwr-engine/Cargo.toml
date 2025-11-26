@@ -23,8 +23,8 @@ async-trait.workspace = true
 byte-unit.workspace = true
 clap.workspace = true
 futures.workspace = true
-log.workspace = true
 gwr-track = { path = "../gwr-track", version = "0.7.0" }
+log.workspace = true
 
 [dev-dependencies]
 arc-swap = "1.6.0"
