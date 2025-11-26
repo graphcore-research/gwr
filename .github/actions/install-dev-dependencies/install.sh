@@ -37,5 +37,5 @@ cargo binstall --disable-telemetry --no-confirm --locked   \
   cargo-about@0.8.2                                        \
   cargo-deny@0.18.5                                        \
   cargo-semver-checks@0.44.0                               \
-  release-plz@0.3.147
+  release-plz@0.3.149
 cargo binstall --disable-telemetry --no-confirm --locked --bin=cog cocogitto@6.3.0
