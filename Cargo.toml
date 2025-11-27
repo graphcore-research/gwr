@@ -43,7 +43,7 @@ categories = [
 license = "MIT"
 license-file = "LICENSE"
 repository = "https://github.com/graphcore-research/gwr"
-publish = ["kellnr"]
+publish = true
 
 [workspace.dependencies]
 approx = "0.5.1"
