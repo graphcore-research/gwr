@@ -32,7 +32,8 @@ repos:
             .*\.stderr$|
             d3.*.js|
             jquery.*.js|
-            .*\.png
+            .*\.png|
+            .*\.json
           )
         stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: lychee-check-links
@@ -111,7 +112,9 @@ repos:
         description: lint crate API changes for semver violations
         language: system
         types_or: [rust, toml]
-        entry: cargo semver-checks --baseline-rev origin/main
+        entry:
+          cargo semver-checks --baseline-rev origin/main --exclude gwr-timetable
+          --exclude gwr-platform
         pass_filenames: false
         stages: [manual]
       - id: cog-verify

@@ -201,6 +201,11 @@ where
     fn port_ingress_i(&self, i: usize) -> PortStateResult<T> {
         self.rx_buffer_limiters[i].port_rx()
     }
+
+    fn col_row_port_to_fabric_port_index(&self, col: usize, row: usize, port: usize) -> usize {
+        self.config
+            .col_row_port_to_fabric_port_index(col, row, port)
+    }
 }
 
 #[async_trait(?Send)]

@@ -1,0 +1,146 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+memory_maps:
+  # The default memory map for Processing Elements
+  - ranges: &pe_memory_map
+      - base_address: 0x1_0000_0000
+        size_bytes: 16GB
+        device: hbm0
+
+fabrics:
+  - name: fabric0
+    kind: functional
+    columns: 4
+    rows: 4
+    routing: column-first
+
+# A default PE config so that it doesn't have to be repeated
+default_pe_config: &default_pe_config
+  num_active_requests: 8
+  lsu_access_bytes: 32
+
+processing_elements:
+  - name: pe_0_0
+    memory_map:
+      ranges: *pe_memory_map
+    config: *default_pe_config
+  - name: pe_0_1
+    memory_map:
+      ranges: *pe_memory_map
+    config: *default_pe_config
+  - name: pe_0_2
+    memory_map:
+      ranges: *pe_memory_map
+    config: *default_pe_config
+  - name: pe_0_3
+    memory_map:
+      ranges: *pe_memory_map
+    config: *default_pe_config
+
+  - name: p_e1_0
+    memory_map:
+      ranges: *pe_memory_map
+    config: *default_pe_config
+  - name: pe_1_1
+    memory_map:
+      ranges: *pe_memory_map
+    config: *default_pe_config
+  - name: pe_1_2
+    memory_map:
+      ranges: *pe_memory_map
+    config: *default_pe_config
+  - name: pe_1_3
+    memory_map:
+      ranges: *pe_memory_map
+    config: *default_pe_config
+
+  - name: pe_2_0
+    memory_map:
+      ranges: *pe_memory_map
+    config: *default_pe_config
+  - name: pe_2_1
+    memory_map:
+      ranges: *pe_memory_map
+    config: *default_pe_config
+  - name: pe_2_2
+    memory_map:
+      ranges: *pe_memory_map
+    config: *default_pe_config
+  - name: pe_2_3
+    memory_map:
+      ranges: *pe_memory_map
+    config: *default_pe_config
+
+  - name: pe_3_0
+    memory_map:
+      ranges: *pe_memory_map
+    config: *default_pe_config
+  - name: pe_3_1
+    memory_map:
+      ranges: *pe_memory_map
+    config: *default_pe_config
+  - name: pe_3_2
+    memory_map:
+      ranges: *pe_memory_map
+    config: *default_pe_config
+  # No need to create PE for 3,3 as the HBM is connected there
+
+memories:
+  - name: hbm0
+    kind: hbm
+    base_address: 0x1_0000_0000
+    capacity_bytes: 16GiB
+    delay_ticks: 10
+
+connections:
+  - connect:
+      - pe.pe_0_0
+      - fabric.fabric0@(0,0)
+  - connect:
+      - pe.pe_0_1
+      - fabric.fabric0@(0,1)
+  - connect:
+      - pe.pe_0_2
+      - fabric.fabric0@(0,2)
+  - connect:
+      - pe.pe_0_3
+      - fabric.fabric0@(0,3)
+
+  - connect:
+      - pe.pe_1_0
+      - fabric.fabric0@(1,0)
+  - connect:
+      - pe.pe_1_1
+      - fabric.fabric0@(1,1)
+  - connect:
+      - pe.pe_1_2
+      - fabric.fabric0@(1,2)
+  - connect:
+      - pe.pe_1_3
+      - fabric.fabric0@(1,3)
+
+  - connect:
+      - pe.pe_2_0
+      - fabric.fabric0@(2,0)
+  - connect:
+      - pe.pe_2_1
+      - fabric.fabric0@(2,1)
+  - connect:
+      - pe.pe_2_2
+      - fabric.fabric0@(2,2)
+  - connect:
+      - pe.pe_2_3
+      - fabric.fabric0@(2,3)
+
+  - connect:
+      - pe.pe_3_0
+      - fabric.fabric0@(3,0)
+  - connect:
+      - pe.pe_3_1
+      - fabric.fabric0@(3,1)
+  - connect:
+      - pe.pe_3_2
+      - fabric.fabric0@(3,2)
+  - connect:
+      - mem.hbm0
+      - fabric.fabric0@(3,3)

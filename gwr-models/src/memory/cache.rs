@@ -17,8 +17,10 @@
 //!  |  dev_rx          dev_tx  |
 //!  |    |               ^     |
 //!  |    |               |     |
+//!  |    |             delay   |
+//!  |    |               |     |
 //!  |    |        0  response  |
-//!  |    +--delay--> arbiter   |
+//!  |    +---------> arbiter   |
 //!  |    |               ^     |
 //!  |  delay             | 1   |
 //!  |    |     Cache     |     |
@@ -261,8 +263,7 @@ where
     metrics: Rc<RefCell<CacheMetrics>>,
     contents: Rc<RefCell<CacheContents<T>>>,
 
-    response_arbiter: RefCell<Option<Rc<Arbiter<T>>>>,
-
+    response_delay: RefCell<Option<Rc<Delay<T>>>>,
     request_delay: RefCell<Option<Rc<Delay<T>>>>,
 
     dev_rx: RefCell<Option<InPort<T>>>,
@@ -293,19 +294,18 @@ where
         let entity = Rc::new(Entity::new(parent, name));
 
         let policy = Box::new(RoundRobin::new());
-        let response_arbiter_aka = build_aka!(aka, &entity, &[("dev_tx", "tx")]);
-        let response_arbiter = Arbiter::new_and_register_with_renames(
+        let response_arbiter =
+            Arbiter::new_and_register(engine, clock, &entity, "rsp_arb", 2, policy)?;
+
+        let response_delay_aka = build_aka!(aka, &entity, &[("dev_tx", "tx")]);
+        let response_delay = Delay::new_and_register_with_renames(
             engine,
             clock,
             &entity,
-            "rsp_arb",
-            Some(&response_arbiter_aka),
-            2,
-            policy,
+            "rsp_delay",
+            Some(&response_delay_aka),
+            config.delay_ticks,
         )?;
-
-        let response_delay =
-            Delay::new_and_register(engine, clock, &entity, "rsp_delay", config.delay_ticks)?;
 
         let request_delay_aka = build_aka!(aka, &entity, &[("mem_tx", "tx")]);
         let request_delay = Delay::new_and_register_with_renames(
@@ -317,14 +317,14 @@ where
             config.delay_ticks,
         )?;
 
-        response_delay.connect_port_tx(response_arbiter.port_rx_i(0))?;
+        response_arbiter.connect_port_tx(response_delay.port_rx())?;
 
         // Create internal ports that are driven by the cache logic
         let mut req = OutPort::new(&entity, "req_arb_0");
         req.connect(request_delay.port_rx())?;
 
         let mut rsp_arb_0 = OutPort::new(&entity, "rsp_arb_0");
-        rsp_arb_0.connect(response_delay.port_rx())?;
+        rsp_arb_0.connect(response_arbiter.port_rx_i(0))?;
 
         let mut rsp_arb_1 = OutPort::new(&entity, "rsp_arb_1");
         rsp_arb_1.connect(response_arbiter.port_rx_i(1))?;
@@ -339,7 +339,7 @@ where
             spawner,
             metrics: Rc::new(RefCell::new(CacheMetrics::default())),
             contents: Rc::new(RefCell::new(CacheContents::new(config))),
-            response_arbiter: RefCell::new(Some(response_arbiter)),
+            response_delay: RefCell::new(Some(response_delay)),
             request_delay: RefCell::new(Some(request_delay)),
             dev_rx: RefCell::new(Some(dev_rx)),
             mem_rx: RefCell::new(Some(mem_rx)),
@@ -365,7 +365,7 @@ where
     }
 
     pub fn connect_port_dev_tx(&self, port_state: PortStateResult<T>) -> SimResult {
-        connect_tx!(self.response_arbiter, connect_port_tx ; port_state)
+        connect_tx!(self.response_delay, connect_port_tx ; port_state)
     }
 
     pub fn connect_port_mem_tx(&self, port_state: PortStateResult<T>) -> SimResult {
@@ -548,8 +548,12 @@ where
 {
     let access_type = access.access_type();
     match access_type {
-        AccessType::Control | AccessType::WriteNonPostedResponse => {
+        AccessType::Control => {
             // Drop and ignore for now
+        }
+        AccessType::WriteNonPostedResponse => {
+            // Forward this response back to the memory (via the arbiter)
+            rsp_arb_0.put(access)?.await;
         }
         AccessType::ReadRequest | AccessType::WriteRequest | AccessType::WriteNonPostedRequest => {
             return sim_error!(
@@ -570,7 +574,7 @@ where
             // Forward this response back to the memory (via the arbiter)
             rsp_arb_0.put(access)?.await;
 
-            // Forward on
+            // Forward on any other waiting reads that were waiting for this response
             if let Some(m) = matching {
                 for x in m {
                     let response = x.to_response(state.contents.as_ref())?;

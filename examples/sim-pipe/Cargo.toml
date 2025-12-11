@@ -24,7 +24,7 @@ clap.workspace = true
 gwr-components = { path = "../../gwr-components", version = "0.7.0" }
 gwr-engine = { path = "../../gwr-engine", version = "0.9.0" }
 gwr-model-builder = { path = "../../gwr-model-builder", version = "0.2.0" }
-gwr-models = { path = "../../gwr-models", version = "0.13.0" }
+gwr-models = { path = "../../gwr-models", version = "0.14.0" }
 gwr-track = { path = "../../gwr-track", features = ["perfetto"], version = "0.7.0" }
 indicatif.workspace = true
 log.workspace = true

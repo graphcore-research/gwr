@@ -310,4 +310,9 @@ where
         let (c, r, p) = self.config.fabric_port_index_to_col_row_port(i);
         self.nodes[c][r].port_ingress_i(p)
     }
+
+    fn col_row_port_to_fabric_port_index(&self, col: usize, row: usize, port: usize) -> usize {
+        self.config
+            .col_row_port_to_fabric_port_index(col, row, port)
+    }
 }
