@@ -163,7 +163,7 @@ fn cache() {
     let (mut engine, cache, dev_rx_driver, dev_tx_recv, mem_rx_driver, mem_tx_recv) =
         build_cache_and_all_ports();
     let clock = engine.default_clock();
-    let memory_latency_ticks = 10;
+    let memory_delay_ticks = 10;
     let memory_map = Rc::new(create_default_memory_map());
 
     engine.spawn(async move {
@@ -185,7 +185,7 @@ fn cache() {
         assert_eq!(mem_req.src_addr(), SRC_ADDR);
         assert_eq!(mem_req.dst_addr(), dst_addr);
 
-        clock.wait_ticks(memory_latency_ticks).await;
+        clock.wait_ticks(memory_delay_ticks).await;
 
         // Provide response from memory
         let write = mem_req.to_response(&TestMemory {})?;

@@ -179,7 +179,9 @@ where
             assert!(
                 begin >= config.base_address
                     && end < (config.base_address + config.capacity_bytes as u64),
-                "Invalid memory access received"
+                "Out of bounds memory access received [0x{begin:x},0x{end:x}] not in [0x{:x},0x{:x}]",
+                config.base_address,
+                config.base_address + config.capacity_bytes as u64
             );
 
             let access_type = access.access_type();

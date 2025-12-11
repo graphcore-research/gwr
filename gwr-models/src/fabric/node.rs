@@ -101,11 +101,11 @@ use gwr_model_builder::{EntityDisplay, EntityGet, Runnable};
 use gwr_track::build_aka;
 use gwr_track::entity::{Entity, GetEntity};
 use gwr_track::tracker::aka::Aka;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::fabric::FabricConfig;
 
-#[derive(clap::ValueEnum, Clone, Copy, Default, Debug, Serialize, PartialEq)]
+#[derive(clap::ValueEnum, Clone, Copy, Default, Debug, Serialize, PartialEq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FabricRoutingAlgorithm {
     #[default]

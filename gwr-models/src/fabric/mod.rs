@@ -21,6 +21,7 @@ where
 {
     fn connect_port_egress_i(&self, i: usize, port_state: PortStateResult<T>) -> SimResult;
     fn port_ingress_i(&self, i: usize) -> PortStateResult<T>;
+    fn col_row_port_to_fabric_port_index(&self, col: usize, row: usize, port: usize) -> usize;
 }
 
 pub enum RoutingAlgoritm {

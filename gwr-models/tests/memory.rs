@@ -122,7 +122,7 @@ fn memory_write_np() {
 }
 
 #[test]
-fn read_becomes_write() {
+fn read_becomes_read_response() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
     let memory = create_memory(&mut engine);
@@ -151,6 +151,7 @@ fn read_becomes_write() {
 
         let response = mem_tx_recv.get()?.await;
 
+        // The memory should reply to a Read with a ReadResponse
         assert_eq!(response.access_type(), AccessType::ReadResponse);
         assert_eq!(response.access_size_bytes(), ACCESS_SIZE_BYTES);
         assert_eq!(

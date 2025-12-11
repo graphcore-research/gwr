@@ -1,0 +1,81 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+nodes:
+  - id: load_A
+    kind: memory
+    op: load
+    pe: pe_0_0
+    config:
+      addr: 0x1_0000_0000
+      num_bytes: 1024
+
+  - id: load_B
+    kind: memory
+    op: load
+    pe: pe_0_0
+    config:
+      addr: 0x1_1000_0000
+      num_bytes: 1024
+
+  - id: add
+    kind: compute
+    op: add
+    pe: pe_0_0
+    config:
+      dtype: fp32
+
+  - id: store_C
+    kind: memory
+    op: store
+    pe: pe_0_0
+    config:
+      addr: 0x1_2000_0000
+      num_bytes: 1024
+
+  - id: load_C
+    kind: memory
+    op: load
+    pe: pe_0_1
+    config:
+      addr: 0x1_2000_0000
+      num_bytes: 1024
+
+  - id: mul2
+    kind: compute
+    op: mul
+    pe: pe_0_1
+    config:
+      dtype: fp32
+
+  - id: store_C2
+    kind: memory
+    op: store
+    pe: pe_0_1
+    config:
+      addr: 0x1_3000_0000
+      num_bytes: 1024
+
+edges:
+  - from: load_A
+    to: add
+    kind: data
+
+  - from: load_B
+    to: add
+    kind: data
+
+  - from: add
+    to: store_C
+    kind: data
+
+  - from: store_C
+    to: load_C
+    kind: data
+
+  - from: load_C
+    to: mul2
+    kind: data
+
+  - from: mul2
+    to: store_C2
+    kind: data

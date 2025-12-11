@@ -1,0 +1,140 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+nodes:
+  - id: pe_0_0_load_1
+    kind: memory
+    op: load
+    pe: pe_0_0
+    config:
+      addr: 0x1_0000_0000
+      num_bytes: 0x1000
+
+  - id: pe_0_0_load_2
+    kind: memory
+    op: load
+    pe: pe_0_0
+    config:
+      addr: 0x2_0000_0000
+      num_bytes: 0x1000
+
+  - id: pe_0_0_add
+    kind: compute
+    op: add
+    pe: pe_0_0
+    config:
+      dtype: fp32
+
+  - id: pe_0_0_store
+    kind: memory
+    op: store
+    pe: pe_0_0
+    config:
+      addr: 0x3_0000_0000
+      num_bytes: 0x1000
+
+  - id: pe_0_1_load_1
+    kind: memory
+    op: load
+    pe: pe_0_1
+    config:
+      addr: 0x1_1000_0000
+      num_bytes: 0x1000
+
+  - id: pe_0_1_load_2
+    kind: memory
+    op: load
+    pe: pe_0_1
+    config:
+      addr: 0x2_1000_0000
+      num_bytes: 0x1000
+
+  - id: pe_0_1_add
+    kind: compute
+    op: add
+    pe: pe_0_1
+    config:
+      dtype: fp32
+
+  - id: pe_0_1_store
+    kind: memory
+    op: store
+    pe: pe_0_1
+    config:
+      addr: 0x3_1000_0000
+      num_bytes: 0x1000
+
+  - id: pe_1_0_load_3_0
+    kind: memory
+    op: load
+    pe: pe_1_0
+    config:
+      addr: 0x3_0000_0000
+      num_bytes: 0x1000
+
+  - id: pe_1_0_load_3_1
+    kind: memory
+    op: load
+    pe: pe_1_0
+    config:
+      addr: 0x3_1000_0000
+      num_bytes: 0x1000
+
+  - id: pe_1_0_mul
+    kind: compute
+    op: mul
+    pe: pe_1_0
+    config:
+      dtype: fp32
+
+  - id: pe_1_0_store
+    kind: memory
+    op: store
+    pe: pe_1_0
+    config:
+      addr: 0x4_0000_0000
+      num_bytes: 0x1000
+
+edges:
+  - from: pe_0_0_load_1
+    to: pe_0_0_add
+    kind: data
+
+  - from: pe_0_0_load_2
+    to: pe_0_0_add
+    kind: data
+
+  - from: pe_0_0_add
+    to: pe_0_0_store
+    kind: data
+
+  - from: pe_0_1_load_1
+    to: pe_0_1_add
+    kind: data
+
+  - from: pe_0_1_load_2
+    to: pe_0_1_add
+    kind: data
+
+  - from: pe_0_1_add
+    to: pe_0_1_store
+    kind: data
+
+  - from: pe_0_0_store
+    to: pe_1_0_load_3_0
+    kind: data
+
+  - from: pe_0_1_store
+    to: pe_1_0_load_3_1
+    kind: data
+
+  - from: pe_1_0_load_3_0
+    to: pe_1_0_mul
+    kind: data
+
+  - from: pe_1_0_load_3_1
+    to: pe_1_0_mul
+    kind: data
+
+  - from: pe_1_0_mul
+    to: pe_1_0_store
+    kind: data

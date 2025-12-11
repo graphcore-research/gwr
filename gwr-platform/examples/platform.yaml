@@ -1,0 +1,70 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+memory_maps:
+  # The default memory map for Processing Elements
+  - ranges: &pe_memory_map
+      - base_address: 0x1_0000_0000
+        size_bytes: 16GB
+        device: hbm0
+
+fabrics:
+  - name: fabric0
+    kind: functional
+    columns: 2
+    rows: 2
+    routing: column-first
+
+# A default PE config so that it doesn't have to be repeated
+default_pe_config: &default_pe_config
+  num_active_requests: 8
+  lsu_access_bytes: 32
+  sram_bytes: 0x20_0000 # 2MB of SRAM
+  adds_per_tick: 128
+  muls_per_tick: 16
+
+processing_elements:
+  - name: pe_0_0
+    memory_map:
+      ranges: *pe_memory_map
+    config: *default_pe_config
+  - name: pe_0_1
+    memory_map:
+      ranges: *pe_memory_map
+    config: *default_pe_config
+  - name: pe_1_0
+    memory_map:
+      ranges: *pe_memory_map
+    config: *default_pe_config
+  # No need to create PE for 1,1 as the HBM is connected there
+
+caches:
+  - name: c2
+    bw_bytes_per_cycle: 32
+    line_size_bytes: 32
+    num_ways: 4
+    num_sets: 128
+    delay_ticks: 20
+
+memories:
+  - name: hbm0
+    kind: hbm
+    base_address: 0x1_0000_0000
+    capacity_bytes: 16GiB
+    delay_ticks: 10
+
+connections:
+  - connect:
+      - pe.pe_0_0
+      - fabric.fabric0@(0,0)
+  - connect:
+      - pe.pe_0_1
+      - fabric.fabric0@(0,1)
+  - connect:
+      - pe.pe_1_0
+      - cache.c2.dev
+  - connect:
+      - cache.c2.mem
+      - fabric.fabric0@(1,0)
+  - connect:
+      - mem.hbm0
+      - fabric.fabric0@(1,1)
