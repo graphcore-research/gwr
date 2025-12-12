@@ -30,6 +30,9 @@ regex.workspace = true
 rocket = "0.5.1"
 tokio = "1.45.1"
 
+[dev-dependencies]
+serial_test.workspace = true
+
 [features]
 default = ["perfetto"]
 perfetto = ["gwr-track/perfetto"]
