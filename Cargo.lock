@@ -1154,6 +1154,7 @@ dependencies = [
  "ratatui",
  "regex",
  "rocket",
+ "serial_test",
  "tokio",
 ]
 

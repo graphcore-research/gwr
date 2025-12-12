@@ -10,6 +10,8 @@ use crate::renderer::Renderer;
 use crate::rocket::SHARED_STATE;
 use crate::{bin_loader, log_parser};
 
+mod tests;
+
 /// Size of blocks of data to read from the file and filter at a time
 pub const CHUNK_SIZE: usize = 50000;
 
@@ -133,7 +135,7 @@ impl ToFullness for EventLine {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum InputState {
     Default,
     Goto,

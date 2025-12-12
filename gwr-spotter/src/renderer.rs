@@ -35,6 +35,7 @@ pub struct Renderer {
 
 impl Renderer {
     pub fn new() -> Self {
+        const INITIAL_FRAME_HEIGHT: usize = 60;
         Self {
             id_to_name: HashMap::with_capacity(INITIAL_SIZE),
             blocks: Vec::with_capacity(INITIAL_SIZE),
@@ -45,8 +46,8 @@ impl Renderer {
             render_index: 0,
 
             // Choose a sensible starting default will be updated on the fly
-            frame_height: 25,
-            block_move_lines: 25 / 3,
+            frame_height: INITIAL_FRAME_HEIGHT,
+            block_move_lines: INITIAL_FRAME_HEIGHT / 3,
 
             plot_fullness: false,
 

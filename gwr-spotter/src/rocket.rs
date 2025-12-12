@@ -23,6 +23,13 @@ impl SharedState {
             selected: None,
         }
     }
+
+    pub fn reset(&mut self) {
+        self.entity_names.clear();
+        self.connections.clear();
+        self.command = None;
+        self.selected = None;
+    }
 }
 
 pub static SHARED_STATE: Mutex<SharedState> = Mutex::new(SharedState::new());
