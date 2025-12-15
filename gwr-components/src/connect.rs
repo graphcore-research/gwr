@@ -47,6 +47,60 @@ macro_rules! connect_port {
 }
 
 #[macro_export]
+/// Create and connect a dummy RX port
+macro_rules! connect_dummy_rx {
+    ($from:expr, $from_port_name:ident => $engine:expr, $clock:expr, $entity:expr) => {
+        {
+            use gwr_track::entity::GetEntity;
+            let rx_port = gwr_engine::port::InPort::new($engine, $clock, $entity, "dummy");
+
+            gwr_track::debug!($from.entity() ; "Connect {}.{} => {}", $from, stringify!($from_port_name), rx_port);
+            $crate::connect::paste! {
+                $from.[< connect_port_ $from_port_name >](rx_port.state())
+            }
+        }
+    };
+    ($from:expr, $from_port_name:ident, $from_index:expr => $engine:expr, $clock:expr, $entity:expr) => {
+        {
+            use gwr_track::entity::GetEntity;
+            let rx_port = gwr_engine::port::InPort::new($engine, $clock, $entity, "dummy");
+
+            let from_index: usize = $from_index;
+            gwr_track::debug!($from.entity() ; "Connect {}.{}[{}] => {}", $from, stringify!($from_port_name), from_index, rx_port);
+            $crate::connect::paste! {
+                $from.[< connect_port_ $from_port_name _i >](from_index, rx_port.state())
+            }
+        }
+    };
+}
+
+#[macro_export]
+/// Create and connect a dummy TX port
+macro_rules! connect_dummy_tx {
+    ($entity:expr => $to:expr, $to_port_name:ident) => {
+        {
+            let mut tx_port = gwr_engine::port::OutPort::new($entity, "dummy");
+
+            gwr_track::debug!($entity ; "Connect {} => {}.{}", tx_port, $to, stringify!($to_port_name));
+            $crate::connect::paste! {
+                tx_port.connect($to.[< port_ $to_port_name >]())
+            }
+        }
+    };
+    ($entity:expr => $to:expr, $to_port_name:ident, $to_index:expr) => {
+        {
+            let mut tx_port = gwr_engine::port::OutPort::new($entity, "dummy");
+
+            let to_index: usize = $to_index;
+            gwr_track::debug!($entity ; "Connect {} => {}.{}[{}]", tx_port, $to, stringify!($to_port_name), to_index);
+            $crate::connect::paste! {
+                tx_port.connect($to.[< port_ $to_port_name _i >](to_index))
+            }
+        }
+    };
+}
+
+#[macro_export]
 /// Connect a tx port for a subcomponent.
 ///
 /// The subcomponent is expected to be stored in a `RefCell<Option<>>`

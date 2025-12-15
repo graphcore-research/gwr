@@ -22,10 +22,10 @@
 use std::rc::Rc;
 
 use async_trait::async_trait;
-use gwr_components::connect_port;
 use gwr_components::delay::Delay;
+use gwr_components::{connect_dummy_rx, connect_dummy_tx, connect_port};
 use gwr_engine::engine::Engine;
-use gwr_engine::port::{InPort, OutPort, PortStateResult};
+use gwr_engine::port::PortStateResult;
 use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Routable, SimObject};
@@ -202,27 +202,19 @@ where
     // Connect dummy ports left/right
     let right = config.num_columns - 1;
     for r in 0..config.num_rows {
-        let mut port = OutPort::new(entity, &format!("out_col_dummy_0_{r}"));
-        port.connect(nodes[0][r].port_col_minus())?;
-        let port = InPort::new(engine, clock, entity, &format!("in_col_dummy_0_{r}"));
-        nodes[0][r].connect_port_col_minus(port.state())?;
-        let mut port = OutPort::new(entity, &format!("out_col_dummy_{right}_{r}"));
-        port.connect(nodes[right][r].port_col_plus())?;
-        let port = InPort::new(engine, clock, entity, &format!("in_col_dummy_{right}_{r}"));
-        nodes[right][r].connect_port_col_plus(port.state())?;
+        connect_dummy_tx!(entity => nodes[0][r], col_minus)?;
+        connect_dummy_rx!(nodes[0][r], col_minus => engine, clock, entity)?;
+        connect_dummy_tx!(entity => nodes[right][r], col_plus)?;
+        connect_dummy_rx!(nodes[right][r], col_plus => engine, clock, entity)?;
     }
 
     // Connect dummy ports top/bottom
     let bottom = config.num_rows - 1;
-    for (c, col) in nodes.iter().enumerate() {
-        let mut port = OutPort::new(entity, &format!("out_row_dummy_{c}_0"));
-        port.connect(col[0].port_row_minus())?;
-        let port = InPort::new(engine, clock, entity, &format!("in_row_dummy_{c}_0"));
-        col[0].connect_port_row_minus(port.state())?;
-        let mut port = OutPort::new(entity, &format!("out_row_dummy_{c}_{bottom}"));
-        port.connect(col[bottom].port_row_plus())?;
-        let port = InPort::new(engine, clock, entity, &format!("in_row_dummy_{c}_{bottom}"));
-        col[bottom].connect_port_row_plus(port.state())?;
+    for col in nodes {
+        connect_dummy_tx!(entity => col[0], row_minus)?;
+        connect_dummy_rx!(col[0], row_minus => engine, clock, entity)?;
+        connect_dummy_tx!(entity => col[bottom], row_plus)?;
+        connect_dummy_rx!(col[bottom], row_plus => engine, clock, entity)?;
     }
     Ok(())
 }
