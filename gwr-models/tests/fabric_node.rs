@@ -2,8 +2,8 @@
 
 use std::rc::Rc;
 
+use gwr_components::{connect_dummy_rx, connect_dummy_tx};
 use gwr_engine::engine::Engine;
-use gwr_engine::port::{InPort, OutPort};
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Routable, SimObject};
@@ -45,10 +45,8 @@ fn connect_ingress_egress<T>(
     T: SimObject + Routable,
 {
     for i in 0..config.num_ports_per_node() {
-        let mut port = OutPort::new(top, "port");
-        port.connect(node.port_ingress_i(i)).unwrap();
-        let port = InPort::new(engine, clock, top, "port");
-        node.connect_port_egress_i(i, port.state()).unwrap();
+        connect_dummy_tx!(top => node, ingress, i).unwrap();
+        connect_dummy_rx!(node, egress, i => engine, clock, top).unwrap();
     }
 }
 
@@ -70,23 +68,15 @@ fn all_ports_connect() {
     )
     .unwrap();
 
-    let mut port = OutPort::new(top, "port");
-    port.connect(node.port_col_minus()).unwrap();
-    let mut port = OutPort::new(top, "port");
-    port.connect(node.port_col_plus()).unwrap();
-    let mut port = OutPort::new(top, "port");
-    port.connect(node.port_row_minus()).unwrap();
-    let mut port = OutPort::new(top, "port");
-    port.connect(node.port_row_plus()).unwrap();
+    connect_dummy_tx!(top => node, col_minus).unwrap();
+    connect_dummy_tx!(top => node, col_plus).unwrap();
+    connect_dummy_tx!(top => node, row_minus).unwrap();
+    connect_dummy_tx!(top => node, row_plus).unwrap();
 
-    let port = InPort::new(&engine, &clock, top, "port");
-    node.connect_port_col_minus(port.state()).unwrap();
-    let port = InPort::new(&engine, &clock, top, "port");
-    node.connect_port_col_plus(port.state()).unwrap();
-    let port = InPort::new(&engine, &clock, top, "port");
-    node.connect_port_row_minus(port.state()).unwrap();
-    let port = InPort::new(&engine, &clock, top, "port");
-    node.connect_port_row_plus(port.state()).unwrap();
+    connect_dummy_rx!(node, col_minus => &engine, &clock, top).unwrap();
+    connect_dummy_rx!(node, col_plus => &engine, &clock, top).unwrap();
+    connect_dummy_rx!(node, row_minus => &engine, &clock, top).unwrap();
+    connect_dummy_rx!(node, row_plus => &engine, &clock, top).unwrap();
 
     connect_ingress_egress(&engine, &clock, top, &node, &config);
 }
