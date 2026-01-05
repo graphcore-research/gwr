@@ -27,32 +27,40 @@ publish_all_features = true
 
 [[package]]
 name = "check-copyright"
+changelog_update = false
 publish = false
 
 [[package]]
 name = "flaky-component"
+changelog_update = false
 publish = false
 
 [[package]]
 name = "flaky-with-delay"
+changelog_update = false
 publish = false
 
 [[package]]
 name = "scrambler"
+changelog_update = false
 publish = false
 
 [[package]]
 name = "sim-fabric"
+changelog_update = false
 publish = false
 
 [[package]]
 name = "sim-pipe"
+changelog_update = false
 publish = false
 
 [[package]]
 name = "sim-ring"
+changelog_update = false
 publish = false
 
 [[package]]
 name = "gwr-developer-guide"
+changelog_update = false
 publish = false
