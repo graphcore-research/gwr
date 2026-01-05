@@ -22,6 +22,9 @@ commit_parsers = [
     { message = "^chore", skip = true },
 ]
 
+[workspace]
+publish_all_features = true
+
 [[package]]
 name = "check-copyright"
 publish = false
