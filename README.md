@@ -285,6 +285,7 @@ During the commit process a number of different hooks will be invoked by
   [licenses.html] file using [cargo-about].
 - Source files will be formatted using `rustfmt`, [Prettier], and built in tools
   from the [pre-commit-hooks] library.
+- Links in Markdown source will be validated using [lychee].
 - Rust source will be linted using [clippy] (via the `cargo clippy-strict`
   alias).
 - Rust source will be compiled using `cargo check`.
@@ -324,6 +325,7 @@ updated package, and automatically publishes the updated packages using
 [clippy]: https://doc.rust-lang.org/clippy
 [Cocogitto]: https://docs.cocogitto.io
 [Conventional Commits]: https://www.conventionalcommits.org/en/v1.0.0
+[lychee]: https://lychee.cli.rs
 [pre-commit]: https://pre-commit.com
 [pre-commit-hooks]: https://github.com/pre-commit/pre-commit-hooks
 [Prettier]: https://prettier.io
@@ -331,7 +333,7 @@ updated package, and automatically publishes the updated packages using
 
 <!-- ANCHOR_END: package_developers -->
 
-[licenses.html]: https://graphcore-research.github.io/gwr/licenses.html
+[licenses.html]: https://graphcore-research.github.io/gwr/html/licenses.html
 
 <!-- ANCHOR: dev_docs -->
 
