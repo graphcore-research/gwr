@@ -1,0 +1,32 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+# Check not only the link but also the validity of any anchor suffixes present
+include_fragments = true
+
+# Do not check the validity of links in these files
+exclude_path = [
+    # Links within the developer guide are validated by mdbook-linkcheck
+    # which is run after mdbook "links" pre-processes has expanded all
+    # {{ #include }} handlebars
+    "^\\./gwr-developer-guide\\/.*",
+    # The licenses file is automatically generarte by cargo-about
+    "^\\.\\/licenses\\.html$",
+]
+
+# Do not check links to private IP addresses, local host or loopback
+exclude_all_private = true
+# Do not check the following URLs
+exclude = [
+    # The npm website uses Cloudflare Bot Management, requiring clients to
+    # handle a challenge, see
+    # https://github.com/orgs/community/discussions/174098
+    "^https://www\\.npmjs\\.com/",
+]
+
+# Cache the status returned when checking external links
+cache = true
+# But only if the status is OK (200)
+cache_exclude_status = "..200,201.."
+
+# Search for possible replacements when broken links are found
+suggest = true

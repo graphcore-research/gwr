@@ -35,6 +35,14 @@ repos:
             .*\.png
           )
         stages: [pre-commit, pre-merge-commit, pre-push, manual]
+      - id: lychee-check-links
+        name: check links
+        description: check validity of links in Markdown and HTML
+        language: system
+        types_or: [markdown, html]
+        entry: lychee .
+        pass_filenames: false
+        stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: prettier-markdown
         name: prettier markdown
         description: check formatting of Markdown files

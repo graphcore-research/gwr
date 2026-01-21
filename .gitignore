@@ -7,3 +7,4 @@ flamegraph*
 *.profraw
 *.profdata
 node_modules/
+.lycheecache
