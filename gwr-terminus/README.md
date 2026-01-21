@@ -1,6 +1,6 @@
 <!-- Copyright (c) 2025 Graphcore Ltd. All rights reserved. -->
 
-# terminus
+# gwr-terminus
 
 This is command-line utility used to create and manage recipes of useful
 commands.

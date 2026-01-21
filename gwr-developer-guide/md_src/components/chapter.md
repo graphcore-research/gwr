@@ -2,12 +2,10 @@
 
 # Components
 
-Simulation components are the basic building blocks of any GWR model.
+{{#include ../../../gwr-components/README.md:intro}}
 
-The GWR `Engine` runs components that are connected together using `ports`.
-
-The `gwr_components` library provides a collection of connectable component
-primitives to be used when building models.
+[`Engine`]: ../gwr_engine/chapter.md
+[`ports`]: ../components/ports.md
 
 ## Creating new components
 
