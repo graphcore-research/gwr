@@ -39,6 +39,11 @@ impl SearchState {
             return self.filter_id.is_none();
         }
 
+        // Clippy suggestion to avoid unnecessary_unwrap are not well suited to
+        // statements with multiple conditions. Any refactoring should keep the
+        // else condition DRY.
+        // https://github.com/rust-lang/rust-clippy/issues/11513
+        #[expect(clippy::unnecessary_unwrap)]
         if self.use_regex && self.search_re.is_some() {
             self.search_re.as_ref().unwrap().is_match(text)
         } else {
