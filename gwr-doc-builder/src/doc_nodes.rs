@@ -147,8 +147,8 @@ impl DocNodeCommon {
     }
 
     fn full_path(&self, path: &mut Vec<String>) {
-        if self.parent.is_some() {
-            self.parent.as_ref().unwrap().borrow().full_path(path);
+        if let Some(parent) = &self.parent {
+            parent.borrow().full_path(path);
         }
         path.push(self.name.to_string());
     }

@@ -124,6 +124,12 @@ where
 {
     for c in 1..config.num_columns {
         let c_m1 = c - 1;
+        // Clippy suggestion to avoid needless_range_loop results in an unused
+        // variable from the iterator and therefore a larger refactor is likely
+        // required here. There may be hazards to be aware of when attempting
+        // to resolve this, such as highlighted in
+        // https://github.com/rust-lang/rust-clippy/issues/16344.
+        #[expect(clippy::needless_range_loop)]
         for r in 0..config.num_rows {
             let delay = Delay::new_and_register(
                 engine,
@@ -201,6 +207,10 @@ where
 {
     // Connect dummy ports left/right
     let right = config.num_columns - 1;
+    // Clippy suggestion to avoid needless_range_loop doesn't account for the
+    // way nodes is accessed, i.e. nodes[0][r] and nodes[right][r] and therefore
+    // a larger refactor is likely required here.
+    #[expect(clippy::needless_range_loop)]
     for r in 0..config.num_rows {
         connect_dummy_tx!(entity => nodes[0][r], col_minus)?;
         connect_dummy_rx!(nodes[0][r], col_minus => engine, clock, entity)?;

@@ -6,7 +6,7 @@ error: unexpected end of input, expected string literal
   |
   = note: this error originates in the attribute macro `multi_source_config` (in Nightly builds, run with -Z macro-backtrace for more info)
 
-error[E0412]: cannot find type `Config` in this scope
+error[E0425]: cannot find type `Config` in this scope
   --> tests/macro_properties/missing_path.rs:13:18
    |
 13 | impl Default for Config {

@@ -12,17 +12,12 @@ use gwr_track::entity::Entity;
 
 use crate::arbiter::Arbitrate;
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum Priority {
+    #[default]
     Low = 0,
     Medium,
     High,
-}
-
-impl Default for Priority {
-    fn default() -> Self {
-        Self::Low
-    }
 }
 
 struct PriorityLevel {

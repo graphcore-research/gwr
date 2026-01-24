@@ -30,7 +30,7 @@ resolver = "2"
 [workspace.package]
 authors = ["The Silicon Architecture team"]
 edition = "2024"
-rust-version = "1.90"
+rust-version = "1.93"
 description = "The Great Western Runtime (GWR)"
 homepage = "https://github.com/graphcore-research/gwr"
 documentation = "https://graphcore-research.github.io/gwr"
