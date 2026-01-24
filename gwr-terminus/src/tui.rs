@@ -29,7 +29,11 @@ impl<B: Backend> Tui<B> {
     /// Initializes the terminal interface.
     ///
     /// It enables the raw mode and sets terminal properties.
-    pub fn init(&mut self) -> Result<()> {
+    pub fn init(&mut self) -> Result<()>
+    where
+        <B as Backend>::Error: Send + Sync,
+        <B as Backend>::Error: 'static,
+    {
         terminal::enable_raw_mode()?;
         crossterm::execute!(io::stderr(), EnterAlternateScreen, EnableMouseCapture)?;
 
@@ -50,7 +54,11 @@ impl<B: Backend> Tui<B> {
     /// [`Draw`] the terminal interface by rendering the widgets.
     ///
     /// [`Draw`]: ratatui::Terminal::draw
-    pub fn draw(&mut self, app: &mut impl Draw) -> Result<()> {
+    pub fn draw(&mut self, app: &mut impl Draw) -> Result<()>
+    where
+        <B as Backend>::Error: Send + Sync,
+        <B as Backend>::Error: 'static,
+    {
         // self.terminal.draw(|frame| ui::render(app, frame))?;
         self.terminal.draw(|frame| app.draw(frame))?;
         Ok(())
@@ -69,7 +77,11 @@ impl<B: Backend> Tui<B> {
     /// Exits the terminal interface.
     ///
     /// It disables the raw mode and reverts back the terminal properties.
-    pub fn exit(&mut self) -> Result<()> {
+    pub fn exit(&mut self) -> Result<()>
+    where
+        <B as Backend>::Error: Send + Sync,
+        <B as Backend>::Error: 'static,
+    {
         Self::reset()?;
         self.terminal.show_cursor()?;
         Ok(())
