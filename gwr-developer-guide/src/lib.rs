@@ -32,35 +32,35 @@ mod tests {
             .output()
             .expect("Failed to build gwr-developer-guide mdBook");
 
-        let stdout =
+        let stderr =
             strip_str(str::from_utf8(&mdbook_output.stderr).expect("Failed to get command output"));
 
         // Catch all signal terminations and non-zero exits
         assert!(
             mdbook_output.status.success(),
-            "mdbook build did not exit successfully:\n{stdout}"
+            "mdbook build did not exit successfully:\n{stderr}"
         );
 
         // Attempt to catch warnings and errors emitted despite zero exit status
         assert!(
-            !stdout.contains("(Panicked)"),
-            "Error emitted during mdBook build:\n{stdout}"
+            !stderr.contains("(Panicked)"),
+            "Error emitted during mdBook build:\n{stderr}"
         );
         assert!(
-            !stdout.contains("[ERROR]"),
-            "Error emitted during mdBook build:\n{stdout}"
+            !stderr.contains("[ERROR]"),
+            "Error emitted during mdBook build:\n{stderr}"
         );
         assert!(
-            !stdout.contains("error:"),
-            "Error emitted during mdBook build:\n{stdout}"
+            !stderr.contains("error:"),
+            "Error emitted during mdBook build:\n{stderr}"
         );
         assert!(
-            !stdout.contains("[WARN]"),
-            "Warning emitted during mdBook build:\n{stdout}"
+            !stderr.contains("[WARN]"),
+            "Warning emitted during mdBook build:\n{stderr}",
         );
         assert!(
-            !stdout.contains("warning"),
-            "Warning emitted during mdBook build:\n{stdout}"
+            !stderr.contains("warning"),
+            "Warning emitted during mdBook build:\n{stderr}"
         );
     }
 }
