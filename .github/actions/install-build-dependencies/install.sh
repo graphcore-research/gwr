@@ -68,7 +68,7 @@ export BINSTALL_VERSION=1.17.3
 curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 
 cargo binstall --disable-telemetry --no-confirm --locked   \
-  cargo-expand@1.0.116                                     \
+  cargo-expand@1.0.119                                     \
   mdbook@0.4.52                                            \
   mdbook-alerts@0.8.0                                      \
   mdbook-cmdrun@0.7.3                                      \
