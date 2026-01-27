@@ -69,7 +69,7 @@ curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-
 
 cargo binstall --disable-telemetry --no-confirm --locked   \
   cargo-expand@1.0.119                                     \
-  mdbook@0.5.2                                             \
+  mdbook@0.4.52                                            \
   mdbook-alerts@0.8.0                                      \
   mdbook-cmdrun@0.7.3                                      \
   mdbook-keeper@0.5.0                                      \
