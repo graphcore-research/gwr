@@ -74,7 +74,7 @@ cargo binstall --disable-telemetry --no-confirm --locked   \
   mdbook-cmdrun@0.7.3                                      \
   mdbook-keeper@0.5.0                                      \
   mdbook-linkcheck@0.7.7                                   \
-  typst-cli@0.14.0
+  typst-cli@0.14.2
 
 if $show_exit_message; then
   echo "Please start a new shell to pickup changes to PATH"
