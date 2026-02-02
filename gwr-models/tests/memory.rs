@@ -13,9 +13,12 @@ use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::{Routable, SimObject, TotalBytes};
 use gwr_engine::types::AccessType;
 use gwr_models::memory::memory_access::MemoryAccess;
+use gwr_models::memory::memory_map::MemoryMap;
 use gwr_models::memory::traits::AccessMemory;
 use gwr_models::memory::{Memory, MemoryConfig};
-use gwr_models::test_helpers::{create_read, create_write, create_write_np};
+use gwr_models::test_helpers::{
+    create_default_memory_map, create_read, create_write, create_write_np,
+};
 use gwr_track::entity::{Entity, GetEntity};
 
 const DST_ADDR: u64 = 0x80000;
@@ -41,16 +44,18 @@ where
 
 fn setup_system(
     num_accesses: usize,
-    create_fn: fn(&Rc<Entity>, usize, u64, u64, usize) -> MemoryAccess,
+    create_fn: fn(&Rc<Entity>, &Rc<MemoryMap>, usize, u64, u64, usize) -> MemoryAccess,
 ) -> (Engine, Rc<Sink<MemoryAccess>>, Rc<Memory<MemoryAccess>>) {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
     let memory = create_memory(&mut engine);
+    let memory_map = Rc::new(create_default_memory_map());
     let top = engine.top();
 
     let source = Source::new_and_register(&engine, top, "source", None).unwrap();
     let to_put = create_fn(
         source.entity(),
+        &memory_map,
         ACCESS_SIZE_BYTES,
         DST_ADDR,
         SRC_ADDR,
@@ -121,6 +126,7 @@ fn read_becomes_write() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
     let memory = create_memory(&mut engine);
+    let memory_map = Rc::new(create_default_memory_map());
     let top = engine.top();
 
     let mut mem_rx_driver = OutPort::new(&top, "mem_rx_driver");
@@ -135,6 +141,7 @@ fn read_becomes_write() {
         // Make a device request
         let request = create_read(
             mem_rx_driver.entity(),
+            &memory_map,
             ACCESS_SIZE_BYTES,
             dst_addr,
             SRC_ADDR,

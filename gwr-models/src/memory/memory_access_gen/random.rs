@@ -8,12 +8,17 @@ use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 
 use crate::memory::memory_access::MemoryAccess;
+use crate::memory::memory_map::MemoryMap;
 
 /// A Random address access generator.
 ///
 /// Will emit memory accesses in the range [base, end)
 pub struct Random {
     entity: Rc<Entity>,
+
+    // For address -> device mapping
+    memory_map: Rc<MemoryMap>,
+
     // Configuration
     src_addr: u64,
     base_addr: u64,
@@ -35,6 +40,7 @@ impl Random {
         parent: &Rc<Entity>,
         name: &str,
         seed: u64,
+        memory_map: &Rc<MemoryMap>,
         src_addr: u64,
         base_addr: u64,
         end_addr: u64,
@@ -46,6 +52,7 @@ impl Random {
         let rng = StdRng::seed_from_u64(seed);
         Self {
             entity: Rc::new(Entity::new(parent, name)),
+            memory_map: memory_map.clone(),
             src_addr,
             base_addr,
             addr_range: end_addr - base_addr,
@@ -61,18 +68,24 @@ impl Random {
 
 impl Iterator for Random {
     type Item = MemoryAccess;
+
     fn next(&mut self) -> Option<Self::Item> {
         if self.num_sent < self.num_to_send {
             self.num_sent += 1;
 
             let dst_addr =
                 ((self.rng.next_u64() % self.addr_range) + self.base_addr) & self.alignment_mask;
+            let (dst_device, _) = self.memory_map.lookup(dst_addr)?;
+            let (src_device, _) = self.memory_map.lookup(self.src_addr)?;
+
             let access = MemoryAccess::new(
                 &self.entity,
                 AccessType::ReadRequest,
                 self.access_size_bytes,
                 dst_addr,
                 self.src_addr,
+                dst_device,
+                src_device,
                 self.overhead_size_bytes,
             );
 
