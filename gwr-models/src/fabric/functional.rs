@@ -95,7 +95,7 @@ where
 
         let num_ports = config.num_columns * config.num_rows * config.num_ports_per_node;
         if num_ports < 2 {
-            return sim_error!(format!("Cannot create fabric with less than 2 ports"));
+            return sim_error!("Cannot create fabric with less than 2 ports");
         }
 
         let mut rx_buffer_limiters = Vec::with_capacity(num_ports);

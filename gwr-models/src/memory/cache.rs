@@ -544,7 +544,7 @@ where
             // Drop and ignore for now
         }
         AccessType::Read => {
-            return sim_error!(format!("{}: read on response port", state.entity));
+            return sim_error!("{}: read on response port", state.entity);
         }
         AccessType::Write => {
             state.contents.borrow_mut().set_data_valid(access.source());
@@ -565,10 +565,7 @@ where
             }
         }
         AccessType::WriteNonPosted => {
-            return sim_error!(format!(
-                "{}: write non-posted on response port",
-                state.entity
-            ));
+            return sim_error!("{}: write non-posted on response port", state.entity);
         }
     }
 

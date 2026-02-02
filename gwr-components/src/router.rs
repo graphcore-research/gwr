@@ -146,7 +146,7 @@ where
     pub fn connect_port_tx_i(&self, i: usize, port_state: PortStateResult<T>) -> SimResult {
         match self.tx.borrow_mut().get_mut(i) {
             None => {
-                sim_error!(format!("{self}: no tx port {i}"))
+                sim_error!("{self}: no tx port {i}")
             }
             Some(tx) => tx.connect(port_state),
         }
@@ -176,9 +176,9 @@ where
 
             match tx.get(tx_index) {
                 None => {
-                    return sim_error!(format!(
+                    return sim_error!(
                         "{self}: {value:?} selected invalid egress index {tx_index}"
-                    ));
+                    );
                 }
                 Some(tx) => {
                     exit!(self.entity ; value.id());

@@ -134,7 +134,7 @@ where
         for value in data_generator {
             let id = value.id();
             if !expected.borrow_mut().insert(id) {
-                return sim_error!(format!("Generator produced duplicate ID {id}"));
+                return sim_error!("Generator produced duplicate ID {id}");
             }
             tx.put(value)?.await;
         }
@@ -155,7 +155,7 @@ where
         let received = rx.get()?.await;
         let received_id = received.id();
         if !expected.borrow_mut().remove(&received_id) {
-            return sim_error!(format!("{received_id} received when not expected"));
+            return sim_error!("{received_id} received when not expected");
         }
         *payload_bytes_received.borrow_mut() += received.access_size_bytes();
     }
