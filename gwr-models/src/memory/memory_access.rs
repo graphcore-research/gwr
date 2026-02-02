@@ -11,6 +11,7 @@ use gwr_track::id::Unique;
 use gwr_track::{Id, create_id};
 
 use crate::memory::CacheHintType;
+use crate::memory::memory_map::DeviceId;
 use crate::memory::traits::{AccessMemory, ReadMemory};
 
 #[derive(Clone, Debug)]
@@ -21,6 +22,8 @@ pub struct MemoryAccess {
     access_size_bytes: usize,
     dst_addr: u64,
     src_addr: u64,
+    dst_device: DeviceId,
+    src_device: DeviceId,
     cache_hint: CacheHintType,
 
     /// Non-data overhead. Control/Read accesses don't contain any data.
@@ -91,6 +94,8 @@ impl AccessMemory for MemoryAccess {
             access_size_bytes: self.access_size_bytes,
             dst_addr: self.dst_addr,
             src_addr: self.src_addr,
+            dst_device: self.src_device,
+            src_device: self.dst_device,
             cache_hint: self.cache_hint,
             overhead_size_bytes: self.overhead_size_bytes,
         })
@@ -99,7 +104,8 @@ impl AccessMemory for MemoryAccess {
 
 impl Routable for MemoryAccess {
     fn destination(&self) -> u64 {
-        self.dst_addr
+        // The device ID is used for routing
+        self.dst_device.0
     }
     fn access_type(&self) -> AccessType {
         self.access_type
@@ -108,12 +114,15 @@ impl Routable for MemoryAccess {
 
 impl MemoryAccess {
     #[must_use]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         created_by: &Rc<Entity>,
         access_type: AccessType,
         access_size_bytes: usize,
         dst_addr: u64,
         src_addr: u64,
+        dst_device: DeviceId,
+        src_device: DeviceId,
         overhead_size_bytes: usize,
     ) -> Self {
         Self {
@@ -123,6 +132,8 @@ impl MemoryAccess {
             access_type,
             dst_addr,
             src_addr,
+            dst_device,
+            src_device,
             cache_hint: CacheHintType::Allocate,
             overhead_size_bytes,
         }

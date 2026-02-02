@@ -22,6 +22,7 @@ use crate::memory::traits::{AccessMemory, ReadMemory};
 pub mod cache;
 pub mod memory_access;
 pub mod memory_access_gen;
+pub mod memory_map;
 pub mod traits;
 
 #[derive(Copy, Clone, Debug, PartialEq)]

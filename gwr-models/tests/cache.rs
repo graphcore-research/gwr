@@ -15,7 +15,7 @@ use gwr_models::memory::cache::{Cache, CacheConfig};
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::traits::{AccessMemory, ReadMemory};
 use gwr_models::memory::{Memory, MemoryConfig};
-use gwr_models::test_helpers::{create_read, create_write};
+use gwr_models::test_helpers::{create_default_memory_map, create_read, create_write};
 use gwr_track::entity::GetEntity;
 
 const BASE_ADDRESS: u64 = 0x80000;
@@ -70,10 +70,13 @@ fn cache_dev_read_goes_to_mem() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
 
+    let memory_map = Rc::new(create_default_memory_map());
+
     let top = engine.top();
     let source = Source::new_and_register(&engine, top, "source", None).unwrap();
     let to_put = create_read(
         source.entity(),
+        &memory_map,
         ACCESS_SIZE_BYTES,
         DST_ADDR,
         SRC_ADDR,
@@ -161,6 +164,7 @@ fn cache() {
         build_cache_and_all_ports();
     let clock = engine.default_clock();
     let memory_latency_ticks = 10;
+    let memory_map = Rc::new(create_default_memory_map());
 
     engine.spawn(async move {
         let dst_addr = DST_ADDR + 0x40;
@@ -168,6 +172,7 @@ fn cache() {
         // Make a device request
         let read = create_read(
             dev_rx_driver.entity(),
+            &memory_map,
             ACCESS_SIZE_BYTES,
             dst_addr,
             SRC_ADDR,
@@ -196,6 +201,7 @@ fn cache() {
         // need to go to memory
         let read = create_read(
             dev_rx_driver.entity(),
+            &memory_map,
             ACCESS_SIZE_BYTES,
             dst_addr,
             SRC_ADDR,
@@ -262,6 +268,7 @@ fn build_cache_and_dev_ports() -> (
 fn cache_plus_mem() {
     let (mut engine, cache, dev_rx_driver, dev_tx_recv) = build_cache_and_dev_ports();
     let memory = create_and_connect_memory(&mut engine, &cache);
+    let memory_map = Rc::new(create_default_memory_map());
 
     let num_rereads = 10;
 
@@ -271,6 +278,7 @@ fn cache_plus_mem() {
         // Make a device request
         let read = create_read(
             dev_rx_driver.entity(),
+            &memory_map,
             ACCESS_SIZE_BYTES,
             dst_addr,
             SRC_ADDR,
@@ -289,6 +297,7 @@ fn cache_plus_mem() {
             // need to go to memory
             let read = create_read(
                 dev_rx_driver.entity(),
+                &memory_map,
                 ACCESS_SIZE_BYTES,
                 dst_addr,
                 SRC_ADDR,
@@ -324,6 +333,7 @@ fn cache_plus_mem() {
 fn cache_ways() {
     let (mut engine, cache, dev_rx_driver, dev_tx_recv) = build_cache_and_dev_ports();
     let memory = create_and_connect_memory(&mut engine, &cache);
+    let memory_map = Rc::new(create_default_memory_map());
 
     let num_iterations = 10;
     engine.spawn(async move {
@@ -335,6 +345,7 @@ fn cache_ways() {
                 // Make a device request
                 let read = create_read(
                     dev_rx_driver.entity(),
+                    &memory_map,
                     ACCESS_SIZE_BYTES,
                     dst_addr,
                     SRC_ADDR,
@@ -370,6 +381,7 @@ fn cache_ways() {
 fn cache_ways_overflow() {
     let (mut engine, cache, dev_rx_driver, dev_tx_recv) = build_cache_and_dev_ports();
     let memory = create_and_connect_memory(&mut engine, &cache);
+    let memory_map = Rc::new(create_default_memory_map());
 
     let num_iterations = 10;
     engine.spawn(async move {
@@ -381,6 +393,7 @@ fn cache_ways_overflow() {
                 // Make a device request
                 let read = create_read(
                     dev_rx_driver.entity(),
+                    &memory_map,
                     ACCESS_SIZE_BYTES,
                     dst_addr,
                     SRC_ADDR,
@@ -414,6 +427,7 @@ fn cache_ways_overflow() {
 fn cache_write_flushes_line() {
     let (mut engine, cache, dev_rx_driver, dev_tx_recv) = build_cache_and_dev_ports();
     let memory = create_and_connect_memory(&mut engine, &cache);
+    let memory_map = Rc::new(create_default_memory_map());
 
     let num_rereads = 3;
     engine.spawn(async move {
@@ -423,6 +437,7 @@ fn cache_write_flushes_line() {
         for _ in 0..num_rereads {
             let read = create_read(
                 dev_rx_driver.entity(),
+                &memory_map,
                 ACCESS_SIZE_BYTES,
                 dst_addr,
                 SRC_ADDR,
@@ -440,6 +455,7 @@ fn cache_write_flushes_line() {
         // Write to address to cause cache flush
         let write = create_write(
             dev_rx_driver.entity(),
+            &memory_map,
             ACCESS_SIZE_BYTES,
             dst_addr,
             SRC_ADDR,
@@ -451,6 +467,7 @@ fn cache_write_flushes_line() {
         for _ in 0..num_rereads {
             let read = create_read(
                 dev_rx_driver.entity(),
+                &memory_map,
                 ACCESS_SIZE_BYTES,
                 dst_addr,
                 SRC_ADDR,

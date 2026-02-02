@@ -11,6 +11,7 @@ use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::memory_access_gen::MemoryAccessGen;
 use gwr_models::memory::memory_access_gen::random::Random;
 use gwr_models::memory::{Memory, MemoryConfig};
+use gwr_models::test_helpers::create_default_memory_map;
 use gwr_track::entity::GetEntity;
 
 const BASE_ADDRESS: u64 = 0x80000;
@@ -40,12 +41,14 @@ fn build_system(
 ) {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
+    let memory_map = Rc::new(create_default_memory_map());
 
     let top = engine.top();
     let data_generator = Box::new(Random::new(
         top,
         "random",
         seed,
+        &memory_map,
         SRC_ADDR,
         base_addr,
         end_addr,
