@@ -176,7 +176,7 @@ where
         enter!(self.entity ; value.id());
         if *self.error_on_overflow.borrow() {
             if self.data.borrow().len() >= self.capacity {
-                return sim_error!(format!("Overflow in {:?}", self.entity.full_name()));
+                return sim_error!("Overflow in {:?}", self.entity.full_name());
             }
         } else {
             assert!(self.data.borrow().len() < self.capacity);

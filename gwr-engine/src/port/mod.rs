@@ -109,7 +109,7 @@ where
 
     pub fn state(&self) -> PortStateResult<T> {
         if *self.connected.borrow() {
-            return sim_error!(format!("{self} already connected"));
+            return sim_error!("{self} already connected");
         }
 
         *self.connected.borrow_mut() = true;
@@ -119,7 +119,7 @@ where
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
     pub fn get(&self) -> PortGetResult<T> {
         if !*self.connected.borrow() {
-            return sim_error!(format!("{self} not connected"));
+            return sim_error!("{self} not connected");
         }
 
         Ok(PortGet {
@@ -132,7 +132,7 @@ where
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
     pub fn start_get(&self) -> PortStartGetResult<T> {
         if !*self.connected.borrow() {
-            return sim_error!(format!("{self} not connected"));
+            return sim_error!("{self} not connected");
         }
 
         Ok(PortStartGet {
@@ -199,7 +199,7 @@ where
         connect!(self.entity ; port_state.in_port_entity);
         match self.state {
             Some(_) => {
-                return sim_error!(format!("{self} already connected"));
+                return sim_error!("{self} already connected");
             }
             None => {
                 self.state = Some(port_state);
@@ -212,7 +212,7 @@ where
     pub fn put(&self, value: T) -> PortPutResult<T> {
         let state = match self.state.as_ref() {
             Some(s) => s.clone(),
-            None => return sim_error!(format!("{self} not connected")),
+            None => return sim_error!("{self} not connected"),
         };
         Ok(PortPut {
             state,
@@ -225,7 +225,7 @@ where
     pub fn try_put(&self) -> PortTryPutResult<T> {
         let state = match self.state.as_ref() {
             Some(s) => s.clone(),
-            None => return sim_error!(format!("{self} not connected")),
+            None => return sim_error!("{self} not connected"),
         };
         Ok(PortTryPut { state, done: false })
     }

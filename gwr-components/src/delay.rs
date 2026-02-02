@@ -283,10 +283,10 @@ where
 
     pub fn set_delay(&self, delay_ticks: usize) -> SimResult {
         if self.rx.borrow().is_none() {
-            return sim_error!(format!(
+            return sim_error!(
                 "{}: can't change the delay after the simulation has started",
                 self.entity
-            ));
+            );
         }
         *self.delay_ticks.borrow_mut() = delay_ticks;
         Ok(())
@@ -368,7 +368,7 @@ where
                     }
                     Ordering::Less => {
                         if error_on_output_stall {
-                            return sim_error!(format!("{entity} delay output stalled"));
+                            return sim_error!("{entity} delay output stalled");
                         }
                     }
                     Ordering::Equal => {
