@@ -25,7 +25,7 @@ impl Routable for RateLimiterTest {
         0
     }
     fn access_type(&self) -> AccessType {
-        AccessType::Read
+        AccessType::ReadRequest
     }
 }
 

@@ -177,20 +177,20 @@ fn cache() {
 
         // Request passed on to memory
         let mem_req = mem_tx_recv.get()?.await;
-        assert_eq!(mem_req.destination(), dst_addr);
-        assert_eq!(mem_req.source(), SRC_ADDR);
+        assert_eq!(mem_req.src_addr(), SRC_ADDR);
+        assert_eq!(mem_req.dst_addr(), dst_addr);
 
         clock.wait_ticks(memory_latency_ticks).await;
 
         // Provide response from memory
-        let write = mem_req.to_response(&TestMemory {});
+        let write = mem_req.to_response(&TestMemory {})?;
         mem_rx_driver.put(write)?.await;
 
         // Response back to device
         let response_to_dev = dev_tx_recv.get()?.await;
-        assert_eq!(response_to_dev.destination(), SRC_ADDR);
-        assert_eq!(response_to_dev.source(), dst_addr);
-        assert_eq!(response_to_dev.access_type(), AccessType::Write);
+        assert_eq!(response_to_dev.src_addr(), SRC_ADDR);
+        assert_eq!(response_to_dev.dst_addr(), dst_addr);
+        assert_eq!(response_to_dev.access_type(), AccessType::ReadResponse);
 
         // Make a second device request to the same address - expecting response without
         // need to go to memory
@@ -211,8 +211,9 @@ fn cache() {
                 assert!(false, "No request should be made to memory");
             }
             response = response_to_dev => {
-                assert_eq!(response.destination(), SRC_ADDR);
-                assert_eq!(response.access_type(), AccessType::Write);
+                assert_eq!(response.src_addr(), SRC_ADDR);
+                assert_eq!(response.dst_addr(), dst_addr);
+                assert_eq!(response.access_type(), AccessType::ReadResponse);
             }
         }
 
@@ -279,8 +280,9 @@ fn cache_plus_mem() {
 
         // Expect the memory to have provided a response to the cache
         let response_to_dev = dev_tx_recv.get()?.await;
-        assert_eq!(response_to_dev.destination(), SRC_ADDR);
-        assert_eq!(response_to_dev.access_type(), AccessType::Write);
+        assert_eq!(response_to_dev.src_addr(), SRC_ADDR);
+        assert_eq!(response_to_dev.dst_addr(), dst_addr);
+        assert_eq!(response_to_dev.access_type(), AccessType::ReadResponse);
 
         for _ in 0..num_rereads {
             // Make a second device request to the same address - expecting response without
@@ -296,7 +298,8 @@ fn cache_plus_mem() {
 
             // Expect the memory to have provided a response to the cache
             let response_to_dev = dev_tx_recv.get()?.await;
-            assert_eq!(response_to_dev.destination(), SRC_ADDR);
+            assert_eq!(response_to_dev.src_addr(), SRC_ADDR);
+            assert_eq!(response_to_dev.dst_addr(), dst_addr);
         }
 
         Ok(())
@@ -341,8 +344,9 @@ fn cache_ways() {
 
                 // Expect the memory to have provided a response to the cache
                 let response_to_dev = dev_tx_recv.get()?.await;
-                assert_eq!(response_to_dev.destination(), SRC_ADDR);
-                assert_eq!(response_to_dev.access_type(), AccessType::Write);
+                assert_eq!(response_to_dev.src_addr(), SRC_ADDR);
+                assert_eq!(response_to_dev.dst_addr(), dst_addr);
+                assert_eq!(response_to_dev.access_type(), AccessType::ReadResponse);
             }
         }
 
@@ -386,8 +390,9 @@ fn cache_ways_overflow() {
 
                 // Expect the memory to have provided a response to the cache
                 let response_to_dev = dev_tx_recv.get()?.await;
-                assert_eq!(response_to_dev.destination(), SRC_ADDR);
-                assert_eq!(response_to_dev.access_type(), AccessType::Write);
+                assert_eq!(response_to_dev.src_addr(), SRC_ADDR);
+                assert_eq!(response_to_dev.dst_addr(), dst_addr);
+                assert_eq!(response_to_dev.access_type(), AccessType::ReadResponse);
             }
         }
 
@@ -427,8 +432,9 @@ fn cache_write_flushes_line() {
 
             // Handle response
             let response_to_dev = dev_tx_recv.get()?.await;
-            assert_eq!(response_to_dev.destination(), SRC_ADDR);
-            assert_eq!(response_to_dev.access_type(), AccessType::Write);
+            assert_eq!(response_to_dev.src_addr(), SRC_ADDR);
+            assert_eq!(response_to_dev.dst_addr(), dst_addr);
+            assert_eq!(response_to_dev.access_type(), AccessType::ReadResponse);
         }
 
         // Write to address to cause cache flush
@@ -454,8 +460,9 @@ fn cache_write_flushes_line() {
 
             // Handle response
             let response_to_dev = dev_tx_recv.get()?.await;
-            assert_eq!(response_to_dev.destination(), SRC_ADDR);
-            assert_eq!(response_to_dev.access_type(), AccessType::Write);
+            assert_eq!(response_to_dev.src_addr(), SRC_ADDR);
+            assert_eq!(response_to_dev.dst_addr(), dst_addr);
+            assert_eq!(response_to_dev.access_type(), AccessType::ReadResponse);
         }
 
         Ok(())

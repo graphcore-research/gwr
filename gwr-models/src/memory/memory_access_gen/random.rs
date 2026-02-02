@@ -69,7 +69,7 @@ impl Iterator for Random {
                 ((self.rng.next_u64() % self.addr_range) + self.base_addr) & self.alignment_mask;
             let access = MemoryAccess::new(
                 &self.entity,
-                AccessType::Read,
+                AccessType::ReadRequest,
                 self.access_size_bytes,
                 dst_addr,
                 self.src_addr,

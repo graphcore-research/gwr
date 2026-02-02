@@ -23,5 +23,5 @@ paste.workspace = true
 
 [dev-dependencies]
 gwr-components = { path = "../gwr-components", version = "0.7.0" }
-gwr-engine = { path = "../gwr-engine", version = "0.8.0" }
+gwr-engine = { path = "../gwr-engine", version = "0.9.0" }
 gwr-track = { path = "../gwr-track", version = "0.7.0" }

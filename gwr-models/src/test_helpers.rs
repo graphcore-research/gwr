@@ -17,7 +17,7 @@ pub fn create_read(
 ) -> MemoryAccess {
     MemoryAccess::new(
         created_by,
-        AccessType::Read,
+        AccessType::ReadRequest,
         num_bytes,
         dst_addr,
         src_addr,
@@ -35,7 +35,7 @@ pub fn create_write(
 ) -> MemoryAccess {
     MemoryAccess::new(
         created_by,
-        AccessType::Write,
+        AccessType::WriteRequest,
         num_bytes,
         dst_addr,
         src_addr,
@@ -53,7 +53,7 @@ pub fn create_write_np(
 ) -> MemoryAccess {
     MemoryAccess::new(
         created_by,
-        AccessType::WriteNonPosted,
+        AccessType::WriteNonPostedRequest,
         num_bytes,
         dst_addr,
         src_addr,

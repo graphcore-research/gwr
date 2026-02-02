@@ -205,13 +205,12 @@ where
     }
 
     fn add_waiting_for_response(&mut self, request: T) {
-        let (tag, index) = self.tag_and_index_for_addr(request.destination());
+        let (tag, index) = self.tag_and_index_for_addr(request.dst_addr());
         self.waiting_for_response.push((tag, index, request));
     }
 
     fn get_requests_waiting_for_response(&mut self, response: &T) -> Option<Vec<T>> {
-        // The `source` on the response is the original `destination`
-        let (response_tag, response_index) = self.tag_and_index_for_addr(response.source());
+        let (response_tag, response_index) = self.tag_and_index_for_addr(response.dst_addr());
 
         // If there are any requests waiting for this response then return matching sets
         if self
@@ -477,17 +476,18 @@ async fn handle_request<T>(
 where
     T: SimObject + AccessMemory,
 {
-    let addr = request.destination();
-    match request.access_type() {
+    let addr = request.dst_addr();
+    let access_type = request.access_type();
+    match access_type {
         AccessType::Control => {
             state.contents.borrow_mut().invalidate(addr);
         }
-        AccessType::Read => {
+        AccessType::ReadRequest => {
             state.metrics.borrow_mut().payload_bytes_read += request.access_size_bytes();
             let line_state = state.contents.borrow().state_for(addr);
             match line_state {
                 Some(EntryState::ValidData) => {
-                    let response = request.to_response(state.contents.as_ref());
+                    let response = request.to_response(state.contents.as_ref())?;
                     rsp_arb_1.put(response)?.await;
                     state.metrics.borrow_mut().num_hits += 1;
                 }
@@ -507,10 +507,17 @@ where
             }
         }
 
-        AccessType::Write | AccessType::WriteNonPosted => {
+        AccessType::WriteRequest | AccessType::WriteNonPostedRequest => {
             state.metrics.borrow_mut().payload_bytes_written += request.access_size_bytes();
             state.contents.borrow_mut().invalidate(addr);
             req.put(request)?.await;
+        }
+
+        AccessType::ReadResponse | AccessType::WriteNonPostedResponse => {
+            return sim_error!(
+                "{}: unsupported AccessType from device: {access_type}",
+                state.entity
+            );
         }
     }
 
@@ -539,15 +546,22 @@ async fn handle_response<T>(
 where
     T: SimObject + AccessMemory,
 {
-    match access.access_type() {
-        AccessType::Control => {
+    let access_type = access.access_type();
+    match access_type {
+        AccessType::Control | AccessType::WriteNonPostedResponse => {
             // Drop and ignore for now
         }
-        AccessType::Read => {
-            return sim_error!("{}: read on response port", state.entity);
+        AccessType::ReadRequest | AccessType::WriteRequest | AccessType::WriteNonPostedRequest => {
+            return sim_error!(
+                "{}: unsupported {access_type} on response port",
+                state.entity
+            );
         }
-        AccessType::Write => {
-            state.contents.borrow_mut().set_data_valid(access.source());
+        AccessType::ReadResponse => {
+            state
+                .contents
+                .borrow_mut()
+                .set_data_valid(access.dst_addr());
             let matching = state
                 .contents
                 .borrow_mut()
@@ -559,13 +573,10 @@ where
             // Forward on
             if let Some(m) = matching {
                 for x in m {
-                    let response = x.to_response(state.contents.as_ref());
+                    let response = x.to_response(state.contents.as_ref())?;
                     rsp_arb_0.put(response)?.await;
                 }
             }
-        }
-        AccessType::WriteNonPosted => {
-            return sim_error!("{}: write non-posted on response port", state.entity);
         }
     }
 

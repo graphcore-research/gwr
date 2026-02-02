@@ -62,9 +62,11 @@ impl Routable for i32 {
     }
     fn access_type(&self) -> AccessType {
         match self {
-            0 => AccessType::Read,
-            1 => AccessType::Write,
-            2 => AccessType::WriteNonPosted,
+            0 => AccessType::ReadRequest,
+            1 => AccessType::WriteRequest,
+            2 => AccessType::WriteNonPostedRequest,
+            3 => AccessType::ReadResponse,
+            4 => AccessType::WriteNonPostedResponse,
             _ => AccessType::Control,
         }
     }
@@ -85,9 +87,11 @@ impl Routable for usize {
     }
     fn access_type(&self) -> AccessType {
         match self {
-            0 => AccessType::Read,
-            1 => AccessType::Write,
-            2 => AccessType::WriteNonPosted,
+            0 => AccessType::ReadRequest,
+            1 => AccessType::WriteRequest,
+            2 => AccessType::WriteNonPostedRequest,
+            3 => AccessType::ReadResponse,
+            4 => AccessType::WriteNonPostedResponse,
             _ => AccessType::Control,
         }
     }
