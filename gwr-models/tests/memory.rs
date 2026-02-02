@@ -144,8 +144,7 @@ fn read_becomes_write() {
 
         let response = mem_tx_recv.get()?.await;
 
-        // The memory should reply to a Read with a Write
-        assert_eq!(response.access_type(), AccessType::Write);
+        assert_eq!(response.access_type(), AccessType::ReadResponse);
         assert_eq!(response.access_size_bytes(), ACCESS_SIZE_BYTES);
         assert_eq!(
             response.total_bytes(),

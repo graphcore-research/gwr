@@ -46,23 +46,31 @@ pub type SimResult = Result<(), SimError>;
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub enum AccessType {
     #[default]
-    Read,
-    Write,
-    WriteNonPosted,
+    ReadRequest,
+    WriteRequest,
+    WriteNonPostedRequest,
+    ReadResponse,
+    WriteNonPostedResponse,
     Control,
 }
 
 impl fmt::Display for AccessType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            AccessType::Read => {
-                write!(f, "Read")
+            AccessType::ReadRequest => {
+                write!(f, "ReadRequest")
             }
-            AccessType::Write => {
-                write!(f, "Write")
+            AccessType::WriteRequest => {
+                write!(f, "WriteRequest")
             }
-            AccessType::WriteNonPosted => {
-                write!(f, "WriteNonPosted")
+            AccessType::WriteNonPostedRequest => {
+                write!(f, "WriteNonPostedRequest")
+            }
+            AccessType::ReadResponse => {
+                write!(f, "ReadResponse")
+            }
+            AccessType::WriteNonPostedResponse => {
+                write!(f, "WriteNonPostedResponse")
             }
             AccessType::Control => {
                 write!(f, "Control")

@@ -63,7 +63,7 @@ impl Iterator for Strided {
 
             let access = MemoryAccess::new(
                 &self.entity,
-                AccessType::Read,
+                AccessType::ReadRequest,
                 self.access_size_bytes,
                 self.next_addr,
                 self.src_addr,

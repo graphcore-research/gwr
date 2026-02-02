@@ -3,8 +3,9 @@
 use std::fmt::Display;
 use std::rc::Rc;
 
+use gwr_engine::sim_error;
 use gwr_engine::traits::{Routable, SimObject, TotalBytes};
-use gwr_engine::types::AccessType;
+use gwr_engine::types::{AccessType, SimError};
 use gwr_track::entity::Entity;
 use gwr_track::id::Unique;
 use gwr_track::{Id, create_id};
@@ -39,10 +40,12 @@ impl Display for MemoryAccess {
 impl TotalBytes for MemoryAccess {
     fn total_bytes(&self) -> usize {
         match self.access_type {
-            AccessType::Control | AccessType::Read => self.overhead_size_bytes,
-            AccessType::Write | AccessType::WriteNonPosted => {
-                self.access_size_bytes + self.overhead_size_bytes
+            AccessType::Control | AccessType::ReadRequest | AccessType::WriteNonPostedResponse => {
+                self.overhead_size_bytes
             }
+            AccessType::WriteRequest
+            | AccessType::WriteNonPostedRequest
+            | AccessType::ReadResponse => self.access_size_bytes + self.overhead_size_bytes,
         }
     }
 }
@@ -54,7 +57,11 @@ impl Unique for MemoryAccess {
 }
 
 impl AccessMemory for MemoryAccess {
-    fn source(&self) -> u64 {
+    fn dst_addr(&self) -> u64 {
+        self.dst_addr
+    }
+
+    fn src_addr(&self) -> u64 {
         self.src_addr
     }
 
@@ -66,17 +73,27 @@ impl AccessMemory for MemoryAccess {
         self.access_size_bytes
     }
 
-    fn to_response(&self, _mem: &impl ReadMemory) -> Self {
-        MemoryAccess {
+    fn to_response(&self, _mem: &impl ReadMemory) -> Result<Self, SimError> {
+        let response_type = match self.access_type {
+            AccessType::Control => AccessType::Control,
+            AccessType::ReadRequest => AccessType::ReadResponse,
+            AccessType::WriteNonPostedRequest => AccessType::WriteNonPostedResponse,
+            AccessType::ReadResponse
+            | AccessType::WriteNonPostedResponse
+            | AccessType::WriteRequest => {
+                return sim_error!("{}: unsupported by to_response()", self.access_type);
+            }
+        };
+        Ok(MemoryAccess {
             created_by: self.created_by.clone(),
             id: self.id,
-            access_type: AccessType::Write,
+            access_type: response_type,
             access_size_bytes: self.access_size_bytes,
-            dst_addr: self.src_addr,
-            src_addr: self.dst_addr,
+            dst_addr: self.dst_addr,
+            src_addr: self.src_addr,
             cache_hint: self.cache_hint,
             overhead_size_bytes: self.overhead_size_bytes,
-        }
+        })
     }
 }
 

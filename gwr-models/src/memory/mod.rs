@@ -8,13 +8,14 @@ use gwr_components::delay::Delay;
 use gwr_components::{port_rx, take_option};
 use gwr_engine::engine::Engine;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
+use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Runnable, SimObject};
 use gwr_engine::types::{AccessType, SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
-use gwr_track::{build_aka, trace};
+use gwr_track::{build_aka, debug};
 
 use crate::memory::traits::{AccessMemory, ReadMemory};
 
@@ -167,9 +168,9 @@ where
 
         loop {
             let access = rx.get()?.await;
-            trace!(self.entity ; "Memory access {}", access);
+            debug!(self.entity ; "Memory access {}", access);
 
-            let begin = access.destination();
+            let begin = access.dst_addr();
             let payload_bytes = access.access_size_bytes();
             let end = begin + payload_bytes as u64;
 
@@ -182,17 +183,21 @@ where
 
             let access_type = access.access_type();
             match access_type {
-                AccessType::Read => {
+                AccessType::ReadRequest => {
                     self.metrics.borrow_mut().bytes_read += payload_bytes;
-                    let response = access.to_response(self);
+                    let response = access.to_response(self)?;
                     response_tx.put(response)?.await;
                 }
-                AccessType::Write | AccessType::WriteNonPosted => {
+                AccessType::WriteRequest => {
                     self.metrics.borrow_mut().bytes_written += payload_bytes;
-
-                    if access_type == AccessType::WriteNonPosted {
-                        response_tx.put(access)?.await;
-                    }
+                }
+                AccessType::WriteNonPostedRequest => {
+                    self.metrics.borrow_mut().bytes_written += payload_bytes;
+                    let response = access.to_response(self)?;
+                    response_tx.put(response)?.await;
+                }
+                AccessType::ReadResponse | AccessType::WriteNonPostedResponse => {
+                    return sim_error!("{}: unsupported {access_type} received", self.entity);
                 }
                 AccessType::Control => {
                     todo!("control handling")
