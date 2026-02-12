@@ -38,6 +38,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .lycheecache
+          key: lycheecache-${{ hashFiles('lychee.toml') }}
       - uses: ./.github/actions/install-build-dependencies
       - uses: ./.github/actions/install-dev-dependencies
 

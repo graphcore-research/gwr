@@ -25,8 +25,12 @@ exclude = [
 
 # Cache the status returned when checking external links
 cache = true
+max_cache_age = "14d"
 # But only if the status is OK (200)
 cache_exclude_status = "..200,201.."
+
+# Allow a generous timout to avoid spurious failures when run under CI
+timeout = 300
 
 # Search for possible replacements when broken links are found
 suggest = true
