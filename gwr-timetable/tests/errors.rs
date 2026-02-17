@@ -138,7 +138,7 @@ fn invalid_to_edge_pe() {
 
 #[test]
 #[should_panic(expected = "PE cannot do memory access of 256 as it only has SRAM with 128 bytes.")]
-fn meory_op_too_bit() {
+fn memory_op_too_big() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
     let platform = Rc::new(
