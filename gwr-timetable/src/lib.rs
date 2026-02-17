@@ -116,9 +116,9 @@ impl Timetable {
     }
 }
 
-fn build_compute_task(op: ComputeOp) -> Task {
+fn build_compute_task(op: ComputeOp, num_ops: usize) -> Task {
     Task::ComputeTask {
-        config: ComputeTaskConfig { op },
+        config: ComputeTaskConfig { op, num_ops },
     }
 }
 
@@ -141,8 +141,11 @@ impl Dispatch for Timetable {
                 id: _,
                 op,
                 pe: _,
-                config: _,
-            } => Ok(build_compute_task(*op)),
+                config,
+            } => {
+                let num_ops = config.num_ops.unwrap_or(1);
+                Ok(build_compute_task(*op, num_ops))
+            }
             NodeSection::Memory {
                 id: _,
                 op,

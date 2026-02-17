@@ -109,6 +109,7 @@ pub struct MemoryConfigSection {
 #[derive(Debug, Deserialize)]
 pub struct ComputeConfigSection {
     pub dtype: Option<String>,
+    pub num_ops: Option<usize>,
 }
 
 impl NodeSection {

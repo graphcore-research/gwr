@@ -225,10 +225,11 @@ async fn handle_compute_task(
     compute_timings: Rc<ComputeTimings>,
     config: &ComputeTaskConfig,
 ) -> SimResult {
-    let compute_ticks = match config.op {
+    let ops_per_tick = match config.op {
         ComputeOp::Add => compute_timings.adds_per_tick,
         ComputeOp::Mul => compute_timings.muls_per_tick,
     };
+    let compute_ticks = config.num_ops.div_ceil(ops_per_tick);
     clock.wait_ticks(compute_ticks as u64).await;
     dispatcher.set_task_completed(task_idx)
 }

@@ -5,6 +5,7 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Copy)]
 pub struct ComputeTaskConfig {
     pub op: ComputeOp,
+    pub num_ops: usize,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
