@@ -94,55 +94,6 @@ impl Timetable {
         self.completed_node_indices.borrow().len()
     }
 
-    /// Given a node index return the number of bytes that node will receive.
-    ///
-    /// If the node defines its own number of bytes then return that. Otherwise,
-    /// follow each of the input edges to determine how many bytes it will
-    /// consume.
-    ///
-    /// An error will be returned if it is unable to determine the number of
-    /// bytes or if different inputs define inconsistent number of bytes.
-    pub fn bytes_for_node(&self, node_idx: usize) -> Result<u64, SimError> {
-        let node = self.node_for(node_idx);
-        if let NodeSection::Memory {
-            id: _,
-            op: _,
-            pe: _,
-            config,
-        } = node
-        {
-            return Ok(config.num_bytes);
-        }
-
-        let (id, _) = node.id_pe();
-        match self.edges_to_node.borrow().get(&node_idx) {
-            None => {
-                sim_error!("Node {id} has no inputs so unable to determine number of bytes for it")
-            }
-            Some(edge_indices) => {
-                // Iterate through all the edges that provide inputs to the node and record how
-                // many bytes they say there should be.
-                let mut num_bytes_values = HashSet::new();
-                for edge_idx in edge_indices {
-                    let edge = self.edge_for(*edge_idx);
-                    let from_node_idx = self.node_idx_by_id[&edge.from];
-                    let node_num_bytes = self.bytes_for_node(from_node_idx)?;
-                    num_bytes_values.insert(node_num_bytes);
-                }
-
-                match num_bytes_values.len() {
-                    0 => sim_error!("Unable to determine num bytes for node {}", id),
-                    1 => Ok(num_bytes_values.into_iter().next().unwrap()),
-                    _ => sim_error!(
-                        "Inconsistent input num_bytes for {} ({:?})",
-                        id,
-                        num_bytes_values
-                    ),
-                }
-            }
-        }
-    }
-
     pub fn check_tasks_complete(&self) -> SimResult {
         let num_active = self.active_node_indices.borrow().len();
         if num_active != 0 {
@@ -161,9 +112,9 @@ impl Timetable {
     }
 }
 
-fn build_compute_task(op: ComputeOp, num_bytes: usize) -> Task {
+fn build_compute_task(op: ComputeOp) -> Task {
     Task::ComputeTask {
-        config: ComputeTaskConfig { op, num_bytes },
+        config: ComputeTaskConfig { op },
     }
 }
 
@@ -187,10 +138,7 @@ impl Dispatch for Timetable {
                 op,
                 pe: _,
                 config: _,
-            } => {
-                let num_bytes = self.bytes_for_node(task_idx)?;
-                Ok(build_compute_task(*op, num_bytes as usize))
-            }
+            } => Ok(build_compute_task(*op)),
             NodeSection::Memory {
                 id: _,
                 op,
