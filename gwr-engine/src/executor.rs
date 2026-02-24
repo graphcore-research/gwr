@@ -2,6 +2,7 @@
 
 use std::cell::RefCell;
 use std::future::Future;
+use std::mem;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
@@ -14,8 +15,14 @@ use crate::types::SimResult;
 
 fn no_op(_: *const ()) {}
 
+unsafe fn drop_task(data: *const ()) {
+    unsafe {
+        drop(Rc::from_raw(data as *const Task));
+    }
+}
+
 fn task_raw_waker(task: Rc<Task>) -> RawWaker {
-    let vtable = &RawWakerVTable::new(clone_raw_waker, wake_task, no_op, no_op);
+    let vtable = &RawWakerVTable::new(clone_raw_waker, wake_task, no_op, drop_task);
     let ptr = Rc::into_raw(task) as *const ();
     RawWaker::new(ptr, vtable)
 }
@@ -27,10 +34,12 @@ fn waker_for_task(task: Rc<Task>) -> Waker {
 unsafe fn clone_raw_waker(data: *const ()) -> RawWaker {
     unsafe {
         // Tasks are always wrapped in a reference counter to allow them to be shared
-        // read-only.
+        // read-only. The input `data` pointer is borrowed — we must not decrement its
+        // refcount, so we mem::forget the reconstructed Rc rather than letting it drop.
         let rc_task = Rc::from_raw(data as *const Task);
         let clone = rc_task.clone();
-        let vtable = &RawWakerVTable::new(clone_raw_waker, wake_task, no_op, no_op);
+        mem::forget(rc_task);
+        let vtable = &RawWakerVTable::new(clone_raw_waker, wake_task, no_op, drop_task);
         let ptr = Rc::into_raw(clone) as *const ();
         RawWaker::new(ptr, vtable)
     }
