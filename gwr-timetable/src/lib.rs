@@ -89,6 +89,10 @@ impl Timetable {
         &self.graph.edges[edge_idx]
     }
 
+    pub fn total_tasks(&self) -> usize {
+        self.graph.nodes.len()
+    }
+
     #[must_use]
     pub fn num_graph_nodes_completed(&self) -> usize {
         self.completed_node_indices.borrow().len()
