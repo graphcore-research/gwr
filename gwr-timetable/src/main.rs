@@ -13,12 +13,15 @@ use std::rc::Rc;
 use anyhow::Result;
 use clap::Parser;
 use gwr_engine::engine::Engine;
+use gwr_engine::executor::Spawner;
+use gwr_engine::time::clock::Clock;
 use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_platform::Platform;
 use gwr_timetable::Timetable;
 use gwr_timetable::types::Graph;
 use gwr_track::Track;
 use gwr_track::builder::{MonitorsConfig, TrackerConfig, TrackersConfig, setup_trackers};
+use indicatif::ProgressBar;
 
 /// Command-line arguments.
 #[derive(Parser)]
@@ -82,6 +85,16 @@ struct Cli {
     #[arg(long, default_value = "")]
     monitor_filter_regex: String,
 
+    /// Show a progress bar for the received frame count (updated at the rate
+    /// defined by `progress_ticks`).
+    #[arg(long)]
+    progress: bool,
+
+    /// Number of ticks between updates to the progress bar. Only used when
+    /// `progress` is enabled.
+    #[arg(long, default_value = "1000")]
+    progress_ticks: usize,
+
     /// Graph file
     #[arg(long, default_value = "graph.yaml")]
     graph: String,
@@ -89,6 +102,31 @@ struct Cli {
     /// Platform file
     #[arg(long, default_value = "platform.yaml")]
     platform: String,
+}
+
+fn start_frame_dump(
+    spawner: &Spawner,
+    clock: Clock,
+    progress_ticks: usize,
+    total_expected_tasks: usize,
+    timetable: Rc<Timetable>,
+    progress_bar: ProgressBar,
+) {
+    spawner.spawn(async move {
+        let mut seen_frames = 0;
+        loop {
+            // Use the `background` wait to indicate that the simulation can end if this is
+            // the only task still active.
+            clock.wait_ticks_or_exit(progress_ticks as u64).await;
+            let num_completed_tasks: usize = timetable.num_graph_nodes_completed();
+            progress_bar.inc((num_completed_tasks - seen_frames) as u64);
+            seen_frames = num_completed_tasks;
+            if num_completed_tasks == total_expected_tasks {
+                break;
+            }
+        }
+        Ok(())
+    });
 }
 
 fn setup_all_trackers(args: &Cli) -> Rc<dyn Track> {
@@ -147,7 +185,26 @@ fn main() -> Result<()> {
 
     println!("Loaded graph with {num_nodes} nodes, {num_edges} edges.");
 
+    let mut progress_bar = None;
+    if args.progress {
+        let total_expected_tasks = timetable.total_tasks();
+        progress_bar = Some(ProgressBar::new(total_expected_tasks as u64));
+        let spawner = engine.spawner();
+        start_frame_dump(
+            &spawner,
+            clock.clone(),
+            args.progress_ticks,
+            total_expected_tasks,
+            timetable.clone(),
+            progress_bar.clone().unwrap(),
+        );
+    }
+
     engine.run()?;
+
+    if let Some(progress_bar) = progress_bar {
+        progress_bar.finish();
+    }
 
     println!("Ran simulation. Time now {}ns", clock.time_now_ns());
 

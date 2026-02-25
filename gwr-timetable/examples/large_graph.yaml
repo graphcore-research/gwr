@@ -23,6 +23,7 @@ nodes:
     pe: pe_0_0
     config:
       dtype: fp32
+      num_ops: 128
 
   - id: pe_0_0_store
     kind: memory
@@ -54,6 +55,7 @@ nodes:
     pe: pe_0_1
     config:
       dtype: fp32
+      num_ops: 128
 
   - id: pe_0_1_store
     kind: memory
@@ -85,6 +87,7 @@ nodes:
     pe: pe_1_0
     config:
       dtype: fp32
+      num_ops: 128
 
   - id: pe_1_0_store
     kind: memory

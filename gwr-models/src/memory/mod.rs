@@ -173,7 +173,7 @@ where
 
             let begin = access.dst_addr();
             let payload_bytes = access.access_size_bytes();
-            let end = begin + payload_bytes as u64;
+            let end = begin + (payload_bytes as u64) - 1;
 
             let config = &self.config;
             assert!(
