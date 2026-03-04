@@ -21,10 +21,11 @@ unsafe fn drop_task(data: *const ()) {
     }
 }
 
+static VTABLE: RawWakerVTable = RawWakerVTable::new(clone_raw_waker, wake_task, no_op, drop_task);
+
 fn task_raw_waker(task: Rc<Task>) -> RawWaker {
-    let vtable = &RawWakerVTable::new(clone_raw_waker, wake_task, no_op, drop_task);
     let ptr = Rc::into_raw(task) as *const ();
-    RawWaker::new(ptr, vtable)
+    RawWaker::new(ptr, &VTABLE)
 }
 
 fn waker_for_task(task: Rc<Task>) -> Waker {
@@ -39,9 +40,8 @@ unsafe fn clone_raw_waker(data: *const ()) -> RawWaker {
         let rc_task = Rc::from_raw(data as *const Task);
         let clone = rc_task.clone();
         mem::forget(rc_task);
-        let vtable = &RawWakerVTable::new(clone_raw_waker, wake_task, no_op, drop_task);
         let ptr = Rc::into_raw(clone) as *const ();
-        RawWaker::new(ptr, vtable)
+        RawWaker::new(ptr, &VTABLE)
     }
 }
 
