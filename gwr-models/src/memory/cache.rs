@@ -597,7 +597,7 @@ fn basic_ways() {
     let mut state: CacheContents<MemoryAccess> = CacheContents::new(config);
 
     let mut addrs = Vec::new();
-    let mut addr = 0x1000000;
+    let mut addr = 0x0100_0000;
     for _ in 0..num_ways + 1 {
         addrs.push(addr);
         addr += (line_size_bytes * num_sets * num_ways) as u64;

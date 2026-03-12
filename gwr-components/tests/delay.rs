@@ -18,6 +18,8 @@ use gwr_track::entity::GetEntity;
 
 #[test]
 fn put_get() {
+    const NUM_PUTS: i32 = 100;
+
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
 
@@ -25,7 +27,6 @@ fn put_get() {
     // Create a pair of tasks that use a delay
     let delay = Delay::new_and_register(&engine, &clock, top, "delay", 20).unwrap();
     let buffer = Store::new_and_register(&engine, &clock, top, "buffer", 1).unwrap();
-    const NUM_PUTS: i32 = 100;
 
     connect_port!(delay, tx => buffer, rx).unwrap();
 
@@ -67,11 +68,11 @@ fn put_get() {
 
 #[test]
 fn source_sink() {
-    let mut engine = start_test(file!());
-    let clock = engine.default_clock();
-
     const DELAY: usize = 3;
     const NUM_PUTS: usize = DELAY * 10;
+
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
 
     let top = engine.top();
     let source =
@@ -93,11 +94,11 @@ fn source_sink() {
 #[should_panic(expected = "top::delay delay output stalled")]
 fn error_on_output_stall() {
     // Cause the delay to raise an assertion because it will find the buffer full
-    let mut engine = start_test(file!());
-    let clock = engine.default_clock();
-
     const DELAY: usize = 1;
     const NUM_PUTS: usize = 10;
+
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
 
     let top = engine.top();
     let source =
@@ -118,7 +119,7 @@ fn spawn_slow_reader<T>(engine: &Engine, clock: &Clock, store: &Store<T>)
 where
     T: SimObject,
 {
-    let rx = InPort::new(&engine, clock, engine.top(), "rx");
+    let rx = InPort::new(engine, clock, engine.top(), "rx");
     store.connect_port_tx(rx.state()).unwrap();
     let clock = clock.clone();
     engine.spawn(async move {
@@ -134,11 +135,11 @@ where
 #[test]
 #[should_panic(expected = "top::delay::tx not connected")]
 fn disconnected_delay() {
-    let mut engine = start_test(file!());
-    let clock = engine.default_clock();
-
     const DELAY: usize = 1;
     const NUM_PUTS: usize = 10;
+
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
 
     let top = engine.top();
     let source =

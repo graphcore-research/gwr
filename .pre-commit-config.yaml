@@ -88,7 +88,7 @@ repos:
         description: check for package errors with cargo check
         language: system
         types_or: [rust, toml]
-        entry: cargo check
+        entry: cargo check --all-targets
         pass_filenames: false
         stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: cargo-clippy-strict

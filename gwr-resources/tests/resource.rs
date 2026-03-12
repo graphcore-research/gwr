@@ -5,13 +5,13 @@ use gwr_resources::base::{Resource, ResourceGuard};
 
 #[test]
 fn resource_empty() {
+    const CAPACITY: usize = 2;
+    const NUM_RESOURCE_REQUESTS: usize = 5;
+
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
-    const CAPACITY: usize = 2;
 
     let resource = Resource::new(CAPACITY);
-
-    const NUM_RESOURCE_REQUESTS: usize = 5;
 
     for i in 0..NUM_RESOURCE_REQUESTS {
         let clock = clock.clone();
@@ -33,15 +33,17 @@ fn resource_empty() {
 }
 
 #[test]
-#[should_panic]
+#[should_panic(
+    expected = "called `Result::unwrap()` on an `Err` value: SimError(\"Invalid release\")"
+)]
 fn resource_more_releases() {
+    const CAPACITY: usize = 2;
+    const NUM_RESOURCE_REQUESTS: usize = 3;
+
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
-    const CAPACITY: usize = 2;
 
     let resource = Resource::new(CAPACITY);
-
-    const NUM_RESOURCE_REQUESTS: usize = 3;
 
     for i in 0..NUM_RESOURCE_REQUESTS {
         let clock = clock.clone();
@@ -63,13 +65,13 @@ fn resource_more_releases() {
 
 #[test]
 fn resource_no_release() {
+    const CAPACITY: usize = 2;
+    const NUM_RESOURCE_REQUESTS: usize = 5;
+
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
-    const CAPACITY: usize = 2;
 
     let resource = Resource::new(CAPACITY);
-
-    const NUM_RESOURCE_REQUESTS: usize = 5;
 
     for i in 0..NUM_RESOURCE_REQUESTS {
         let clock = clock.clone();
@@ -90,13 +92,13 @@ fn resource_no_release() {
 
 #[test]
 fn resource_guard() {
+    const CAPACITY: usize = 2;
+    const NUM_RESOURCE_REQUESTS: usize = 5;
+
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
-    const CAPACITY: usize = 2;
 
     let resource = Resource::new(CAPACITY);
-
-    const NUM_RESOURCE_REQUESTS: usize = 5;
 
     for i in 0..NUM_RESOURCE_REQUESTS {
         let clock = clock.clone();

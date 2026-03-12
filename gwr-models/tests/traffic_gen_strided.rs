@@ -27,6 +27,7 @@ const DELAY_TICKS: usize = 20;
 
 const OVERHEAD_SIZE_BYTES: usize = 16;
 
+#[expect(clippy::type_complexity)]
 /// Helper to build a cache and the device-side ports to drive it.
 fn build_system(
     base_addr: u64,
