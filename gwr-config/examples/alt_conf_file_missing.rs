@@ -26,9 +26,9 @@ struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            a: Some(Default::default()),
-            b: Some(Default::default()),
-            c: Some(Default::default()),
+            a: Some(String::default()),
+            b: Some(false),
+            c: Some(0),
             d: Some("foo".to_string()),
         }
     }

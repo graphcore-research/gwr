@@ -10,10 +10,10 @@ use gwr_track::entity::GetEntity;
 
 #[test]
 fn router() {
+    const NUM_PUTS: usize = 50;
+
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
-
-    const NUM_PUTS: usize = 50;
 
     let iter = Box::new((0..2).cycle().take(NUM_PUTS));
     let top = engine.top();

@@ -10,6 +10,7 @@ use crate::renderer::Renderer;
 use crate::rocket::SHARED_STATE;
 use crate::{bin_loader, log_parser};
 
+#[cfg(test)]
 mod tests;
 
 /// Size of blocks of data to read from the file and filter at a time

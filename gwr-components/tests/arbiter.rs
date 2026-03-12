@@ -22,10 +22,10 @@ use gwr_track::entity::{Entity, GetEntity};
 
 #[test]
 fn source_sink() {
+    const NUM_PUTS: usize = 25;
+
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
-
-    const NUM_PUTS: usize = 25;
 
     let top = engine.top();
     let arbiter =
@@ -170,7 +170,7 @@ fn input_order() {
 }
 
 #[test]
-#[should_panic]
+#[should_panic(expected = "index out of bounds: the len is 2 but the index is 2")]
 fn more_inputs() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
@@ -200,7 +200,9 @@ fn more_inputs() {
 }
 
 #[test]
-#[should_panic]
+#[should_panic(
+    expected = "called `Result::unwrap()` on an `Err` value: SimError(\"top::store::rx not connected\")"
+)]
 fn no_output() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
@@ -386,7 +388,9 @@ fn multiple_inputs_priority_policy() {
 }
 
 #[test]
-#[should_panic]
+#[should_panic(
+    expected = "called `Result::unwrap()` on an `Err` value: SimError(\"The number of priorities must be equal to the number of inputs\")"
+)]
 fn panic_priority_policy() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();

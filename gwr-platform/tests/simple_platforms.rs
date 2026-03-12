@@ -50,8 +50,8 @@ impl Dispatch for TestDispatcher {
                     None => return Ok((true, Vec::new())),
                     Some(i) => i,
                 };
-                if self.completed_tasks.borrow().contains(&idx)
-                    || self.started_tasks.borrow().contains(&idx)
+                if self.completed_tasks.borrow().contains(idx)
+                    || self.started_tasks.borrow().contains(idx)
                 {
                     v.pop_front();
                 } else {
@@ -80,7 +80,7 @@ impl Dispatch for TestDispatcher {
         let task = handle
             .get(&task_idx)
             .ok_or(SimError(format!("Invalid task_idx '{task_idx}'")))?;
-        Ok(task.clone())
+        Ok(*task)
     }
 
     fn total_tasks_for_pe(&self, pe_name: &str) -> usize {
@@ -92,7 +92,7 @@ impl Dispatch for TestDispatcher {
     }
 
     async fn wait_for_change(&self) {
-        self.change.listen().await
+        self.change.listen().await;
     }
 }
 

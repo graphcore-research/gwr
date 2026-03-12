@@ -38,10 +38,11 @@ where
     let config = MemoryConfig::new(DST_ADDR, CAPACITY_BYTES, BW_BYTES_PER_CYCLE, DELAY_TICKS);
     let clock = engine.default_clock();
     let top = engine.top();
-    let memory = Memory::new_and_register(&engine, &clock, top, "memory", config).unwrap();
-    memory
+
+    Memory::new_and_register(engine, &clock, top, "memory", config).unwrap()
 }
 
+#[expect(clippy::type_complexity)]
 fn setup_system(
     num_accesses: usize,
     create_fn: fn(&Rc<Entity>, &Rc<MemoryMap>, usize, u64, u64, usize) -> MemoryAccess,
@@ -129,10 +130,10 @@ fn read_becomes_read_response() {
     let memory_map = Rc::new(create_default_memory_map());
     let top = engine.top();
 
-    let mut mem_rx_driver = OutPort::new(&top, "mem_rx_driver");
+    let mut mem_rx_driver = OutPort::new(top, "mem_rx_driver");
     mem_rx_driver.connect(memory.port_rx()).unwrap();
 
-    let mem_tx_recv = InPort::new(&engine, &clock, &top, "mem_tx_recv");
+    let mem_tx_recv = InPort::new(&engine, &clock, top, "mem_tx_recv");
     memory.connect_port_tx(mem_tx_recv.state()).unwrap();
 
     engine.spawn(async move {
