@@ -1212,7 +1212,6 @@ dependencies = [
  "async-trait",
  "byte-unit",
  "clap",
- "criterion",
  "futures",
  "gwr-components",
  "gwr-track",
