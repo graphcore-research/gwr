@@ -28,7 +28,6 @@ log.workspace = true
 
 [dev-dependencies]
 arc-swap = "1.6.0"
-criterion.workspace = true
 gwr-components = { path = "../gwr-components", version = "0.7.0" }
 
 [features]
