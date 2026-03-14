@@ -120,5 +120,7 @@ jobs:
       - uses: ./.github/actions/install-build-dependencies
       - uses: ./.github/actions/run-build-command
         with:
-          command: cargo bench --all-features --verbose --no-run
+          command: |
+            cargo bench --all-features --verbose --no-run
+            cargo bench --all-features --verbose --bench one_shot_benchmarks
           cache-name: ${{ github.job }}

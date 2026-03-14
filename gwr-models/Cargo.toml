@@ -22,6 +22,10 @@ publish.workspace = true
 name = "wall_clock_benchmarks"
 harness = false
 
+[[bench]]
+name = "one_shot_benchmarks"
+harness = false
+
 [dependencies]
 async-trait.workspace = true
 clap.workspace = true
@@ -37,4 +41,6 @@ rand.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
+cfg-if.workspace = true
 criterion.workspace = true
+gungraun.workspace = true
