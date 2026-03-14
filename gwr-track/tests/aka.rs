@@ -17,7 +17,7 @@ fn alternative_names() {
         None,
         Some(&mut aka),
         &top,
-        &vec![("in", "ingress_0"), ("out", "egress_0")],
+        &[("in", "ingress_0"), ("out", "egress_0")],
     );
 
     assert_eq!(
@@ -40,7 +40,7 @@ fn build_new_aka() {
         None,
         Some(&mut aka),
         &top,
-        &vec![("in", "ingress_0"), ("out", "egress_0")],
+        &[("in", "ingress_0"), ("out", "egress_0")],
     );
 
     // Create a new model that is a child of the top
@@ -53,7 +53,7 @@ fn build_new_aka() {
         Some(&aka),
         Some(&mut model_aka),
         &model,
-        &vec![("ingress_0", "rx")],
+        &[("ingress_0", "rx")],
     );
     assert!(model_aka.get_alternative_names("ingress_0").is_none());
     assert!(model_aka.get_alternative_names("egress_0").is_none());

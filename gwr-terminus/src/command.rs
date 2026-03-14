@@ -154,25 +154,13 @@ fn parse_index(error_handler: &mut impl Logger, index_str: &str) -> Option<usize
 }
 
 #[cfg(test)]
+#[derive(Default)]
 struct TestUpdater {
     select: Vec<usize>,
     deselect: Vec<usize>,
     toggle: Vec<usize>,
     error: Vec<String>,
     info: Vec<String>,
-}
-
-#[cfg(test)]
-impl Default for TestUpdater {
-    fn default() -> Self {
-        Self {
-            select: Vec::new(),
-            deselect: Vec::new(),
-            toggle: Vec::new(),
-            error: Vec::new(),
-            info: Vec::new(),
-        }
-    }
 }
 
 #[cfg(test)]

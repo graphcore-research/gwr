@@ -61,7 +61,7 @@ fn build_frames(
 }
 
 fn run_test(
-    config: Rc<FabricConfig>,
+    config: &Rc<FabricConfig>,
     to_dest: &impl ToDest,
     num_frames: usize,
     payload_bytes: usize,
@@ -128,11 +128,11 @@ fn all_to_one() {
     let num_ports = config.num_ports();
 
     let to_dest = FixedDest(0);
-    let sinks = run_test(config.clone(), &to_dest, num_frames, payload_bytes);
+    let sinks = run_test(&config, &to_dest, num_frames, payload_bytes);
 
     assert_eq!(sinks[0].num_sunk(), num_ports * num_frames);
-    for i in 1..num_ports {
-        assert_eq!(sinks[i].num_sunk(), 0);
+    for sink in sinks.iter().take(num_ports).skip(1) {
+        assert_eq!(sink.num_sunk(), 0);
     }
 }
 
@@ -145,10 +145,10 @@ fn all_to_all() {
     let num_ports = config.num_ports();
 
     let to_dest = ToNext { num_ports };
-    let sinks = run_test(config.clone(), &to_dest, num_frames, payload_bytes);
+    let sinks = run_test(&config, &to_dest, num_frames, payload_bytes);
 
-    for i in 0..num_ports {
-        assert_eq!(sinks[i].num_sunk(), num_frames);
+    for sink in sinks.iter().take(num_ports) {
+        assert_eq!(sink.num_sunk(), num_frames);
     }
 }
 
@@ -201,11 +201,11 @@ fn latency() {
 
     run_simulation!(engine);
 
-    for i in 0..num_ports {
+    for (i, sink) in sinks.iter().enumerate().take(num_ports) {
         if i == dest_index {
-            assert_eq!(sinks[i].num_sunk(), 1);
+            assert_eq!(sink.num_sunk(), 1);
         } else {
-            assert_eq!(sinks[i].num_sunk(), 0);
+            assert_eq!(sink.num_sunk(), 0);
         }
     }
 

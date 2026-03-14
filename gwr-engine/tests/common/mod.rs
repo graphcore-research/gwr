@@ -14,6 +14,7 @@ pub fn spawn_activity(engine: &mut Engine) {
     });
 }
 
+#[expect(clippy::unnecessary_box_returns)]
 // Helper function to create an event and spawn a task that will trigger it
 // after the specified time.
 pub fn create_once_event_at_delay<T>(engine: &mut Engine, delay: u64, value: T) -> Box<Once<T>>

@@ -55,7 +55,7 @@ where
         BW_BYTES_PER_CYCLE,
         DELAY_TICKS,
     );
-    let memory = Memory::new_and_register(&engine, &clock, top, "memory", config).unwrap();
+    let memory = Memory::new_and_register(engine, &clock, top, "memory", config).unwrap();
 
     connect_port!(cache, mem_tx => memory, rx).unwrap();
     connect_port!(memory, tx => cache, mem_rx).unwrap();
@@ -100,7 +100,7 @@ fn cache_dev_read_goes_to_mem() {
     connect_port!(cache, mem_tx => mem_req_sink, rx).unwrap();
 
     // Even though we are not driving it we need to connect it.
-    let mut mem_rx_driver = OutPort::new(&top, "mem_rx_driver");
+    let mut mem_rx_driver = OutPort::new(top, "mem_rx_driver");
     mem_rx_driver.connect(cache.port_mem_rx()).unwrap();
 
     run_simulation!(engine);
@@ -113,6 +113,7 @@ fn cache_dev_read_goes_to_mem() {
     assert_eq!(cache.payload_bytes_written(), 0);
 }
 
+#[expect(clippy::type_complexity)]
 /// Helper to build a cache and four ports to drive it.
 fn build_cache_and_all_ports() -> (
     Engine,
@@ -135,16 +136,16 @@ fn build_cache_and_all_ports() -> (
     let top = engine.top();
     let cache = Cache::new_and_register(&engine, &clock, top, "cache", config).unwrap();
 
-    let mut dev_rx_driver = OutPort::new(&top, "dev_rx_driver");
+    let mut dev_rx_driver = OutPort::new(top, "dev_rx_driver");
     dev_rx_driver.connect(cache.port_dev_rx()).unwrap();
 
-    let dev_tx_recv = InPort::new(&engine, &clock, &top, "dev_tx_recv");
+    let dev_tx_recv = InPort::new(&engine, &clock, top, "dev_tx_recv");
     cache.connect_port_dev_tx(dev_tx_recv.state()).unwrap();
 
-    let mut mem_rx_driver = OutPort::new(&top, "mem_rx_driver");
+    let mut mem_rx_driver = OutPort::new(top, "mem_rx_driver");
     mem_rx_driver.connect(cache.port_mem_rx()).unwrap();
 
-    let mem_tx_recv = InPort::new(&engine, &clock, &top, "mem_tx_recv");
+    let mem_tx_recv = InPort::new(&engine, &clock, top, "mem_tx_recv");
     cache.connect_port_mem_tx(mem_tx_recv.state()).unwrap();
 
     (
@@ -214,7 +215,7 @@ fn cache() {
 
         select! {
             _ = mem_req => {
-                assert!(false, "No request should be made to memory");
+                panic!("No request should be made to memory");
             }
             response = response_to_dev => {
                 assert_eq!(response.src_addr(), SRC_ADDR);
@@ -254,10 +255,10 @@ fn build_cache_and_dev_ports() -> (
     let top = engine.top();
     let cache = Cache::new_and_register(&engine, &clock, top, "cache", config).unwrap();
 
-    let mut dev_rx_driver = OutPort::new(&top, "dev_rx_driver");
+    let mut dev_rx_driver = OutPort::new(top, "dev_rx_driver");
     dev_rx_driver.connect(cache.port_dev_rx()).unwrap();
 
-    let dev_tx_recv = InPort::new(&engine, &clock, &top, "dev_tx_recv");
+    let dev_tx_recv = InPort::new(&engine, &clock, top, "dev_tx_recv");
     cache.connect_port_dev_tx(dev_tx_recv.state()).unwrap();
 
     (engine, cache, dev_rx_driver, dev_tx_recv)

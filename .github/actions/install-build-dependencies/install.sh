@@ -47,10 +47,11 @@ fi
 
 if [[ $OSTYPE == "linux"* ]]; then
   sudo apt-get update
-  sudo apt install   \
-    asciidoctor      \
-    capnproto        \
-    protobuf-compiler
+  sudo apt install      \
+    asciidoctor         \
+    capnproto           \
+    protobuf-compiler   \
+    valgrind
 elif [[ $OSTYPE == "darwin"* ]]; then
   brew update
   brew install    \
@@ -75,6 +76,11 @@ cargo binstall --disable-telemetry --no-confirm --locked   \
   mdbook-keeper@0.5.0                                      \
   mdbook-linkcheck@0.7.7                                   \
   typst-cli@0.14.2
+
+if [[ $OSTYPE == "linux"* ]]; then
+  cargo binstall --disable-telemetry --no-confirm --locked   \
+    gungraun-runner@0.17.2
+fi
 
 if $show_exit_message; then
   echo "Please start a new shell to pickup changes to PATH"

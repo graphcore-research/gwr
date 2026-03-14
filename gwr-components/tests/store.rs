@@ -16,11 +16,11 @@ use gwr_track::entity::GetEntity;
 ///  * the store is empty at the end (fill_level == 0)
 #[test]
 fn store_basic_flow() {
-    let mut engine = start_test(file!());
-    let clock = engine.default_clock();
-
     const NUM_PUTS: usize = 50;
     const CAPACITY: usize = 8;
+
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
 
     let top = engine.top();
 
@@ -80,11 +80,11 @@ fn store_zero_capacity_fails() {
 #[test]
 #[should_panic(expected = "Overflow in")]
 fn store_overflow_panics_when_error_on_overflow_set() {
-    let mut engine = start_test(file!());
-    let clock = engine.default_clock();
-
     const CAPACITY: usize = 2;
     const NUM_PUTS: usize = 10;
+
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
 
     let top = engine.top();
 

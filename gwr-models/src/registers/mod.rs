@@ -96,11 +96,11 @@ pub mod tests {
     }
 
     // Reset values of different field types.
-    pub const CSR_RESET_VALUE: u64 = 0x00cc01;
+    pub const CSR_RESET_VALUE: u64 = 0x0000_cc01;
     // ReadVolatileOnly fields can't be changed by a write.
-    pub const CSR_WRITE_VALUE: u64 = 0x00ccff;
+    pub const CSR_WRITE_VALUE: u64 = 0x0000_ccff;
     // ReadVolatileOnly can be changed by a set.
-    pub const CSR_SET_VALUE: u64 = 0xffccff;
+    pub const CSR_SET_VALUE: u64 = 0x00ff_ccff;
 
     // An underlying register state.
     build_register_state!(
@@ -175,12 +175,12 @@ pub mod tests {
         assert_eq!(csr_ro.read(), CSR_RESET_VALUE);
         assert_eq!(csr_rw.read(), CSR_RESET_VALUE);
 
-        csr_ro.write(&resolver, 0xffffffff);
+        csr_ro.write(&resolver, 0xffff_ffff);
         resolver.resolve();
         assert_eq!(csr_ro.read(), CSR_RESET_VALUE);
         assert_eq!(csr_rw.read(), CSR_RESET_VALUE);
 
-        csr_rw.write(&resolver, 0xffffffff);
+        csr_rw.write(&resolver, 0xffff_ffff);
         resolver.resolve();
         assert_eq!(csr_ro.read(), CSR_WRITE_VALUE);
         assert_eq!(csr_rw.read(), CSR_WRITE_VALUE);
@@ -235,14 +235,14 @@ pub mod tests {
 
     #[test]
     fn reg_file_by_index() {
+        const CSR_RW_INDEX: u64 = testcsrsrw_indices::CSR;
+        const CSR_RO_INDEX: u64 = testcsrsro_indices::CSR;
+
         let resolver = TestResolver::new();
         let csr_states = TestCsrStates::new();
         let csrs_rw = TestCsrsRwRegs::new(&csr_states, 0);
         let csrs_ro = TestCsrsRoRegs::new(&csr_states, 0);
         assert_eq!(csrs_rw.csr.value(), CSR_RESET_VALUE);
-
-        const CSR_RW_INDEX: u64 = testcsrsrw_indices::CSR;
-        const CSR_RO_INDEX: u64 = testcsrsro_indices::CSR;
 
         csrs_rw.write(&resolver, testcsrsrw_indices::CSR, 0xffff);
         assert_eq!(csrs_rw.csr.value(), CSR_RESET_VALUE);
@@ -261,7 +261,7 @@ pub mod tests {
 
         assert_eq!(reg.value(), CSR_RESET_VALUE);
 
-        reg.set(&resolver, 0xffffffff);
+        reg.set(&resolver, 0xffff_ffff);
         assert_eq!(reg.value(), CSR_RESET_VALUE);
 
         resolver.resolve();
@@ -278,12 +278,12 @@ pub mod tests {
         assert_eq!(regs_ro.csr.value(), CSR_RESET_VALUE);
         assert_eq!(regs_rw.csr.value(), CSR_RESET_VALUE);
 
-        regs_ro.csr.write(&resolver, 0xffffffff);
+        regs_ro.csr.write(&resolver, 0xffff_ffff);
         resolver.resolve();
         assert_eq!(regs_ro.csr.value(), CSR_RESET_VALUE);
         assert_eq!(regs_rw.csr.value(), CSR_RESET_VALUE);
 
-        regs_rw.csr.write(&resolver, 0xffffffff);
+        regs_rw.csr.write(&resolver, 0xffff_ffff);
         assert_eq!(regs_ro.csr.value(), CSR_RESET_VALUE);
         assert_eq!(regs_rw.csr.value(), CSR_RESET_VALUE);
 
@@ -310,7 +310,7 @@ pub mod tests {
         reg.install_read_cb(cb_handler.clone());
         reg.install_write_cb(cb_handler.clone());
 
-        reg.write(&resolver, 0xffffffff);
+        reg.write(&resolver, 0xffff_ffff);
         resolver.resolve();
 
         assert_eq!(*cb_handler.read_count.borrow(), 0);
@@ -343,7 +343,7 @@ pub mod tests {
         reg.install_read_cb(cb_handler.clone());
         reg.install_write_cb(cb_handler.clone());
 
-        reg.write(&resolver, 0xffffffff);
+        reg.write(&resolver, 0xffff_ffff);
         resolver.resolve();
 
         assert_eq!(*cb_handler.read_count.borrow(), 0);
@@ -354,7 +354,7 @@ pub mod tests {
         let (old_value, written_value, new_value) = cb_handler.last_write.borrow().unwrap();
 
         assert_eq!(old_value, CSR_RESET_VALUE);
-        assert_eq!(written_value, 0xffffffff);
+        assert_eq!(written_value, 0xffff_ffff);
         assert_eq!(new_value, CSR_WRITE_VALUE);
     }
 }

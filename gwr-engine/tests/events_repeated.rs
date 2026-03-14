@@ -195,11 +195,12 @@ fn notify_listen_twice() {
 
 #[test]
 fn notify_listen_loop() {
+    const COUNTER: usize = 10;
+
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
 
     let repeated = Repeated::new(usize::default());
-    const COUNTER: usize = 10;
 
     {
         let repeated = repeated.clone();

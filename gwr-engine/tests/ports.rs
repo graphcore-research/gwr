@@ -128,7 +128,7 @@ fn select_on_ports() {
             // The second value from rx2 should be last
             assert_eq!(received[3], 4);
 
-            received.sort();
+            received.sort_unstable();
             // All values should be received, but order of first two is not guaranteed
             assert_eq!(received, [1, 2, 3, 4]);
             Ok(())

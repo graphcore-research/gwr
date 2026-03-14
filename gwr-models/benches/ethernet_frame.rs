@@ -2,7 +2,6 @@
 
 use std::rc::Rc;
 
-use criterion::{BatchSize, Criterion, criterion_group};
 use gwr_components::connect_port;
 use gwr_components::sink::Sink;
 use gwr_components::store::Store;
@@ -21,7 +20,7 @@ fn create_engine() -> Engine {
     Engine::new(&tracker)
 }
 
-fn run_engine<T>(args: (Engine, Rc<Sink<T>>))
+pub fn run_engine<T>(args: (Engine, Rc<Sink<T>>))
 where
     T: SimObject,
 {
@@ -30,7 +29,8 @@ where
     assert_eq!(sink.num_sunk(), NUM_FRAMES);
 }
 
-fn setup_frame_simulation() -> (Engine, Rc<Sink<EthernetFrame>>) {
+#[must_use]
+pub fn setup_frame_simulation() -> (Engine, Rc<Sink<EthernetFrame>>) {
     let num_frames = NUM_FRAMES;
     let payload_size_bytes = 256;
     let frame_dest = [0, 1, 2, 3, 4, 5];
@@ -67,7 +67,8 @@ fn setup_frame_simulation() -> (Engine, Rc<Sink<EthernetFrame>>) {
     (engine, sink)
 }
 
-fn setup_box_frame_simulation() -> (Engine, Rc<Sink<Box<EthernetFrame>>>) {
+#[must_use]
+pub fn setup_box_frame_simulation() -> (Engine, Rc<Sink<Box<EthernetFrame>>>) {
     let num_frames = NUM_FRAMES;
     let payload_size_bytes = 256;
     let frame_dest = [0, 1, 2, 3, 4, 5];
@@ -102,28 +103,4 @@ fn setup_box_frame_simulation() -> (Engine, Rc<Sink<Box<EthernetFrame>>>) {
     connect_port!(store, tx => sink, rx).unwrap();
 
     (engine, sink)
-}
-
-fn bench_ethernet_frame(c: &mut Criterion) {
-    let mut group = c.benchmark_group("ethernet_frame");
-
-    group.bench_function("vec_of_frame", |b| {
-        b.iter_batched(setup_frame_simulation, run_engine, BatchSize::SmallInput);
-    });
-
-    group.bench_function("vec_of_box", |b| {
-        b.iter_batched(
-            setup_box_frame_simulation,
-            run_engine,
-            BatchSize::SmallInput,
-        );
-    });
-
-    group.finish();
-}
-
-criterion_group! {
-    name = benches;
-    config = Criterion::default();
-    targets = bench_ethernet_frame
 }

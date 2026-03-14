@@ -98,9 +98,9 @@ fn throughput() {
 
 #[test]
 fn change_delay() {
-    let mut engine = start_test(file!());
-
     const DELAY_TICKS: usize = 100;
+
+    let mut engine = start_test(file!());
 
     let clock = engine.clock_ghz(1.0);
     let top = engine.top();

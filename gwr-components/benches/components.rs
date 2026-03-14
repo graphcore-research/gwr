@@ -1,7 +1,7 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
-/// Benchmark basic component usage.
-use criterion::{BatchSize, Criterion, criterion_group};
+//! Benchmark basic component usage.
+
 use gwr_components::arbiter::Arbiter;
 use gwr_components::arbiter::policy::{Priority, RoundRobin};
 use gwr_components::delay::Delay;
@@ -21,11 +21,12 @@ fn create_engine() -> Engine {
     Engine::new(&tracker)
 }
 
-fn run_engine(mut engine: Engine) {
+pub fn run_engine(mut engine: Engine) {
     engine.run().unwrap();
 }
 
-fn spawn_source_store_sink() -> Engine {
+#[must_use]
+pub fn spawn_source_store_sink() -> Engine {
     let mut engine = create_engine();
     let clock = engine.default_clock();
 
@@ -44,7 +45,8 @@ fn spawn_source_store_sink() -> Engine {
     engine
 }
 
-fn spawn_source_delay_sink() -> Engine {
+#[must_use]
+pub fn spawn_source_delay_sink() -> Engine {
     let mut engine = create_engine();
     let clock = engine.default_clock();
 
@@ -64,7 +66,8 @@ fn spawn_source_delay_sink() -> Engine {
     engine
 }
 
-fn spawn_arbiter_fixedpriority_policy() -> Engine {
+#[must_use]
+pub fn spawn_arbiter_fixedpriority_policy() -> Engine {
     let mut engine = create_engine();
     let inputs = vec![
         ArbiterInputData {
@@ -97,7 +100,8 @@ fn spawn_arbiter_fixedpriority_policy() -> Engine {
     engine
 }
 
-fn spawn_larger_simulation() -> Engine {
+#[must_use]
+pub fn spawn_larger_simulation() -> Engine {
     let mut engine = create_engine();
     let clock = engine.default_clock();
     let rate_limiter = rc_limiter!(&clock, 1);
@@ -137,36 +141,4 @@ fn spawn_larger_simulation() -> Engine {
     connect_port!(sink_limiter, tx => sink, rx).unwrap();
 
     engine
-}
-
-fn bench_blocks(c: &mut Criterion) {
-    let mut group = c.benchmark_group("blocks");
-
-    group.bench_function("source_store_sink", |b| {
-        b.iter_batched(spawn_source_store_sink, run_engine, BatchSize::SmallInput);
-    });
-
-    group.bench_function("source_delay_sink", |b| {
-        b.iter_batched(spawn_source_delay_sink, run_engine, BatchSize::SmallInput);
-    });
-
-    group.bench_function("arbiter_fixedpriority_policy", |b| {
-        b.iter_batched(
-            spawn_arbiter_fixedpriority_policy,
-            run_engine,
-            BatchSize::SmallInput,
-        );
-    });
-
-    group.bench_function("larger_simulation", |b| {
-        b.iter_batched(spawn_larger_simulation, run_engine, BatchSize::SmallInput);
-    });
-
-    group.finish();
-}
-
-criterion_group! {
-    name = benches;
-    config = Criterion::default();
-    targets = bench_blocks
 }

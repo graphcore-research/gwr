@@ -140,11 +140,11 @@ impl Checker {
         if let Some(node) = self.active_ids.remove(&id) {
             self.remove_child(node.parent, id);
 
-            if !node.children.is_empty() {
+            if node.children.is_empty() {
+                info_debug!(self.info_ids.contains(&id), "{} destroyed", id);
+            } else {
                 info!("attempting to destroy obj {id} with active children");
                 self.destroyed.insert(id, node);
-            } else {
-                info_debug!(self.info_ids.contains(&id), "{} destroyed", id);
             }
         } else {
             error!("attempting to destroy unknown ID {id}");
@@ -262,8 +262,8 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             log: Some("info".to_string()),
-            bin_log_file: Some(Default::default()),
-            ids: Some(Default::default()),
+            bin_log_file: Some(String::default()),
+            ids: Some(Vec::default()),
         }
     }
 }
