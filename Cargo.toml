@@ -53,12 +53,14 @@ async-trait = "0.1.88"
 byte-unit = "5.1.6"
 capnp = "0.25.0"
 capnpc = "0.25.0"
+cfg-if = "1.0.4"
 clap = { version = "4.4.6", features = ["derive"] }
 criterion = "0.8.2"
 crossterm = "0.29.0"
 event-listener = "3.0.0"
 figment = { version = "0.10.19", features = ["env", "toml"] }
 futures = "0.3.28"
+gungraun = "0.17.2"
 indicatif = "0.18.0"
 itertools = "0.14.0"
 log = { version = "0.4.20", features = ["std", "serde"] }
