@@ -1,6 +1,7 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
 use std::rc::Rc;
+use std::time::Duration;
 
 use criterion::{BatchSize, Criterion, criterion_group};
 use gwr_components::connect_port;
@@ -124,6 +125,10 @@ fn bench_ethernet_frame(c: &mut Criterion) {
 
 criterion_group! {
     name = benches;
-    config = Criterion::default();
+    config = Criterion::default()
+        .measurement_time(Duration::from_secs(10))
+        .warm_up_time(Duration::from_secs(6))
+        .noise_threshold(0.03)
+        .confidence_level(0.98);
     targets = bench_ethernet_frame
 }

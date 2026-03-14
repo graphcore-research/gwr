@@ -5,5 +5,5 @@ use criterion::criterion_main;
 mod components;
 
 criterion_main! {
-    components::benches,
+    components::small_benches, components::large_benches,
 }

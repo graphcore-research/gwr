@@ -1,6 +1,9 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
-/// Benchmark basic component usage.
+//! Benchmark basic component usage.
+
+use std::time::Duration;
+
 use criterion::{BatchSize, Criterion, criterion_group};
 use gwr_components::arbiter::Arbiter;
 use gwr_components::arbiter::policy::{Priority, RoundRobin};
@@ -139,7 +142,7 @@ fn spawn_larger_simulation() -> Engine {
     engine
 }
 
-fn bench_blocks(c: &mut Criterion) {
+fn bench_small_blocks(c: &mut Criterion) {
     let mut group = c.benchmark_group("blocks");
 
     group.bench_function("source_store_sink", |b| {
@@ -158,6 +161,12 @@ fn bench_blocks(c: &mut Criterion) {
         );
     });
 
+    group.finish();
+}
+
+fn bench_large_blocks(c: &mut Criterion) {
+    let mut group = c.benchmark_group("blocks");
+
     group.bench_function("larger_simulation", |b| {
         b.iter_batched(spawn_larger_simulation, run_engine, BatchSize::SmallInput);
     });
@@ -166,7 +175,21 @@ fn bench_blocks(c: &mut Criterion) {
 }
 
 criterion_group! {
-    name = benches;
-    config = Criterion::default();
-    targets = bench_blocks
+    name = small_benches;
+    config = Criterion::default()
+        .measurement_time(Duration::from_secs(10))
+        .warm_up_time(Duration::from_secs(6))
+        .noise_threshold(0.05)
+        .confidence_level(0.98)
+        .significance_level(0.03);
+    targets = bench_small_blocks
+}
+
+criterion_group! {
+    name = large_benches;
+    config = Criterion::default()
+        .measurement_time(Duration::from_secs(10))
+        .noise_threshold(0.02)
+        .confidence_level(0.98);
+    targets = bench_large_blocks
 }
