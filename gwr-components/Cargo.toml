@@ -19,7 +19,7 @@ publish.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [[bench]]
-name = "benchmarks_main"
+name = "wall_clock_benchmarks"
 harness = false
 
 [dependencies]
