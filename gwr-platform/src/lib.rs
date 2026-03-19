@@ -197,6 +197,12 @@ impl Platform {
             pe.set_dispatcher(dispatcher);
         }
     }
+
+    pub fn dump_stats(&self, time_now_ns: f64) {
+        for mem in &self.memories {
+            mem.dump_stats(time_now_ns);
+        }
+    }
 }
 
 impl Display for Platform {

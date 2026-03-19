@@ -7,12 +7,17 @@ use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::task::MemoryOp;
 use gwr_platform::Platform;
 use gwr_timetable::Timetable;
-use gwr_timetable::types::{EdgeKind, EdgeSection, Graph, MemoryConfigSection, NodeSection};
+use gwr_timetable::timetable_file::{
+    DataType, EdgeKind, EdgeSection, MemoryConfigSection, NodeSection, TensorConfigSection,
+    TimetableFile,
+};
+use gwr_track::entity::Entity;
 
-fn create_default_graph() -> (Rc<Platform>, Graph) {
+fn create_default_timetable_file() -> (Rc<Entity>, Rc<Platform>, TimetableFile) {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
     (
+        engine.top().clone(),
         Rc::new(
             Platform::from_string(
                 &engine,
@@ -36,29 +41,39 @@ memories:
             )
             .unwrap(),
         ),
-        Graph::from_string(
+        TimetableFile::from_string(
             "
 nodes:
-  - id: node0
-    kind: memory
-    op: load
-    pe: pe0
+  - id: tensor0
+    kind: tensor
     config:
       addr: 0
-      num_bytes: 0
+      dtype: fp32
+      shape: [3, 10, 10]
 
-  - id: node1
+  - id: load0
     kind: memory
     op: load
     pe: pe0
     config:
-      addr: 0
-      num_bytes: 0
+      offset: 0
+      num_elements: 150
+
+  - id: load1
+    kind: memory
+    op: load
+    pe: pe0
+    config:
+      offset: 150
+      num_elements: 150
 
 edges:
-  - id: edge0
-    from: node0
-    to: node0
+  - from: tensor0
+    to: load0
+    kind: data
+
+  - from: tensor0
+    to: load1
     kind: data
 ",
         )
@@ -67,78 +82,169 @@ edges:
 }
 
 #[test]
-fn graph() {
-    let (platform, graph) = create_default_graph();
-    graph.validate(&platform).unwrap();
+fn timetable_file() {
+    let (top, platform, timetable_file) = create_default_timetable_file();
+    Timetable::new(&top, timetable_file, &platform).unwrap();
 }
 
 // Node errors
 
 #[test]
-#[should_panic(expected = "Node node2 contains invalid PE ID pe1")]
+#[should_panic(expected = "Node 'node2' contains invalid PE ID 'pe1'")]
 fn invalid_node_pe() {
-    let (platform, mut graph) = create_default_graph();
-    graph.nodes.push(NodeSection::Memory {
+    let (top, platform, mut timetable_file) = create_default_timetable_file();
+    timetable_file.nodes.push(NodeSection::Memory {
         id: "node2".to_string(),
         op: MemoryOp::Store,
         pe: Some("pe1".to_string()),
         config: MemoryConfigSection {
-            addr: 0,
-            num_bytes: 0,
+            offset: 0,
+            num_elements: 0,
         },
     });
 
-    graph.validate(&platform).unwrap();
+    Timetable::new(&top, timetable_file, &platform).unwrap();
 }
 
 #[test]
-#[should_panic(expected = "Duplicate node ID node1")]
+#[should_panic(expected = "Duplicate Node ID 'load1'")]
 fn duplicate_node_id() {
-    let (platform, mut graph) = create_default_graph();
-    graph.nodes.push(NodeSection::Memory {
-        id: "node1".to_string(),
+    let (top, platform, mut timetable_file) = create_default_timetable_file();
+    timetable_file.nodes.push(NodeSection::Memory {
+        id: "load1".to_string(),
         op: MemoryOp::Store,
         pe: Some("pe0".to_string()),
         config: MemoryConfigSection {
-            addr: 0,
-            num_bytes: 0,
+            offset: 0,
+            num_elements: 0,
         },
     });
 
-    graph.validate(&platform).unwrap();
+    Timetable::new(&top, timetable_file, &platform).unwrap();
+}
+
+#[test]
+#[should_panic(expected = "0 edges connect into Load node")]
+fn load_not_connected_to_tensor() {
+    let (top, platform, mut timetable_file) = create_default_timetable_file();
+    timetable_file.nodes.push(NodeSection::Memory {
+        id: "node2".to_string(),
+        op: MemoryOp::Load,
+        pe: Some("pe0".to_string()),
+        config: MemoryConfigSection {
+            offset: 0,
+            num_elements: 0,
+        },
+    });
+
+    Timetable::new(&top, timetable_file, &platform).unwrap();
+}
+
+#[test]
+#[should_panic(expected = "0 edges connect from Store node")]
+fn store_not_connected_to_tensor() {
+    let (top, platform, mut timetable_file) = create_default_timetable_file();
+    timetable_file.nodes.push(NodeSection::Memory {
+        id: "node2".to_string(),
+        op: MemoryOp::Store,
+        pe: Some("pe0".to_string()),
+        config: MemoryConfigSection {
+            offset: 0,
+            num_elements: 0,
+        },
+    });
+
+    Timetable::new(&top, timetable_file, &platform).unwrap();
+}
+
+#[test]
+#[should_panic(expected = "accesses memory outside Tensor node")]
+fn load_outside_tensor() {
+    let (top, platform, mut timetable_file) = create_default_timetable_file();
+    timetable_file.nodes.push(NodeSection::Memory {
+        id: "node2".to_string(),
+        op: MemoryOp::Load,
+        pe: Some("pe0".to_string()),
+        config: MemoryConfigSection {
+            offset: 10000,
+            num_elements: 1,
+        },
+    });
+    timetable_file.edges.push(EdgeSection {
+        from: "tensor0".to_string(),
+        to: "node2".to_string(),
+        kind: EdgeKind::Data,
+    });
+
+    Timetable::new(&top, timetable_file, &platform).unwrap();
+}
+
+#[test]
+#[should_panic(expected = "accesses memory outside Tensor node")]
+fn store_outside_tensor() {
+    let (top, platform, mut timetable_file) = create_default_timetable_file();
+    timetable_file.nodes.push(NodeSection::Memory {
+        id: "store0".to_string(),
+        op: MemoryOp::Store,
+        pe: Some("pe0".to_string()),
+        config: MemoryConfigSection {
+            offset: 0,
+            num_elements: 100,
+        },
+    });
+    timetable_file.nodes.push(NodeSection::Tensor {
+        id: "tensor1".to_string(),
+        config: TensorConfigSection {
+            addr: 0,
+            dtype: DataType::Fp8,
+            shape: vec![3, 2, 4],
+        },
+    });
+    timetable_file.edges.push(EdgeSection {
+        from: "load0".to_string(),
+        to: "store0".to_string(),
+        kind: EdgeKind::Data,
+    });
+    timetable_file.edges.push(EdgeSection {
+        from: "store0".to_string(),
+        to: "tensor1".to_string(),
+        kind: EdgeKind::Data,
+    });
+
+    Timetable::new(&top, timetable_file, &platform).unwrap();
 }
 
 // Edge errors
 
 #[test]
-#[should_panic(expected = "Edge contains invalid from Node ID node2")]
+#[should_panic(expected = "Edge contains invalid from Node ID 'node2'")]
 fn invalid_from_edge_pe() {
-    let (platform, mut graph) = create_default_graph();
-    graph.edges.push(EdgeSection {
+    let (top, platform, mut timetable_file) = create_default_timetable_file();
+    timetable_file.edges.push(EdgeSection {
         from: "node2".to_string(),
-        to: "node0".to_string(),
+        to: "load0".to_string(),
         kind: EdgeKind::Data,
     });
 
-    graph.validate(&platform).unwrap();
+    Timetable::new(&top, timetable_file, &platform).unwrap();
 }
 
 #[test]
-#[should_panic(expected = "Edge contains invalid to Node ID node2")]
+#[should_panic(expected = "Edge contains invalid to Node ID 'node2'")]
 fn invalid_to_edge_pe() {
-    let (platform, mut graph) = create_default_graph();
-    graph.edges.push(EdgeSection {
-        from: "node0".to_string(),
+    let (top, platform, mut timetable_file) = create_default_timetable_file();
+    timetable_file.edges.push(EdgeSection {
+        from: "load0".to_string(),
         to: "node2".to_string(),
         kind: EdgeKind::Data,
     });
 
-    graph.validate(&platform).unwrap();
+    Timetable::new(&top, timetable_file, &platform).unwrap();
 }
 
 #[test]
-#[should_panic(expected = "PE cannot do memory access of 256 as it only has SRAM with 128 bytes.")]
-fn meory_op_too_bit() {
+#[should_panic(expected = "PE cannot do memory access of 1024 as it only has SRAM with 128 bytes.")]
+fn memory_op_too_big() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
     let platform = Rc::new(
@@ -170,36 +276,46 @@ connections:
         )
         .unwrap(),
     );
-    let graph = Graph::from_string(
+    let timetable_file = TimetableFile::from_string(
         "
 nodes:
-  - id: node0
-    kind: memory
-    op: load
-    pe: pe0
+  - id: tensor0
+    kind: tensor
     config:
       addr: 0
-      num_bytes: 128
+      dtype: fp32
+      shape: [2, 16, 16]
 
-  - id: node1
+  - id: load0
     kind: memory
     op: load
     pe: pe0
     config:
-      addr: 0
-      num_bytes: 256
+      offset: 0
+      num_elements: 256
+
+  - id: load1
+    kind: memory
+    op: load
+    pe: pe0
+    config:
+      offset: 256
+      num_elements: 256
 
 edges:
-  - id: edge0
-    from: node0
-    to: node0
+  - from: tensor0
+    to: load0
+    kind: data
+
+  - from: tensor0
+    to: load1
     kind: data
 ",
     )
     .unwrap();
 
     let timetable: Rc<dyn Dispatch> =
-        Rc::new(Timetable::new(engine.top(), graph, &platform).unwrap());
+        Rc::new(Timetable::new(engine.top(), timetable_file, &platform).unwrap());
     platform.attach_dispatcher(&timetable);
     engine.run().unwrap();
 }
