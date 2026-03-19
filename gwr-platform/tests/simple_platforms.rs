@@ -80,7 +80,7 @@ impl Dispatch for TestDispatcher {
         let task = handle
             .get(&task_idx)
             .ok_or(SimError(format!("Invalid task_idx '{task_idx}'")))?;
-        Ok(*task)
+        Ok(task.clone())
     }
 
     fn total_tasks_for_pe(&self, pe_name: &str) -> usize {
@@ -103,6 +103,7 @@ fn build_dispatcher() -> Rc<dyn Dispatch> {
                 0,
                 Task::MemoryTask {
                     config: MemoryTaskConfig {
+                        id: "task0".to_string(),
                         op: MemoryOp::Load,
                         addr: 0x1_0000_0000,
                         num_bytes: 128,
@@ -113,6 +114,7 @@ fn build_dispatcher() -> Rc<dyn Dispatch> {
                 1,
                 Task::MemoryTask {
                     config: MemoryTaskConfig {
+                        id: "task1".to_string(),
                         op: MemoryOp::Load,
                         addr: 0x1_0000_0000,
                         num_bytes: 128,

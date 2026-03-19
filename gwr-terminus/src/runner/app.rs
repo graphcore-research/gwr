@@ -82,6 +82,10 @@ pub struct App {
     /// Whether or not to keep the temporary files created
     keep_tmp: bool,
 
+    /// Whether or not to stop the generated script on the first command
+    /// failure.
+    exit_on_error: bool,
+
     /// Current value of the command box
     search_string: AppString,
 
@@ -154,10 +158,11 @@ fn build_recipe_list(recipes_folder: &str, logger: &mut impl Logger) -> Vec<AppR
 
 impl App {
     #[must_use]
-    pub fn new(recipe_folder: &str, tmp_root: &Path, keep_tmp: bool) -> Self {
+    pub fn new(recipe_folder: &str, tmp_root: &Path, keep_tmp: bool, exit_on_error: bool) -> Self {
         let mut app = Self {
             tmp_root: PathBuf::from(tmp_root),
             keep_tmp,
+            exit_on_error,
             search_string: AppString::new(""),
             app_state: AppState::RecipeSelection,
             previous_app_state: AppState::EditingSearchString,
@@ -203,7 +208,14 @@ impl App {
         let recipe_index = self.recipes_row_index().index();
         let recipe = &mut self.recipes[recipe_index].recipe;
         let mut logger = self.logger.borrow_mut();
-        recipe.execute(self.tmp_root.as_path(), self.keep_tmp, &mut logger);
+        if let Err(e) = recipe.execute(
+            self.tmp_root.as_path(),
+            self.keep_tmp,
+            self.exit_on_error,
+            &mut logger,
+        ) {
+            logger.error(&format!("{e}"));
+        }
     }
 
     pub fn logger(&mut self) -> RefMut<'_, AppLogger> {

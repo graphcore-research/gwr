@@ -40,6 +40,10 @@ struct Cli {
     #[arg(long)]
     keep_tmp: bool,
 
+    /// Continue running the generated script after a command fails.
+    #[arg(long)]
+    no_exit_on_error: bool,
+
     #[clap(subcommand)]
     command: CommandArg,
 }
@@ -108,7 +112,7 @@ fn setup_logger(debug: bool) {
 
     env_logger::builder()
         .filter_level(level)
-        .format(|buf, record| writeln!(buf, "{}: {}", record.level(), record.args()))
+        .format(|buf, record| writeln!(buf, "{}", record.args()))
         .init();
 }
 
@@ -131,6 +135,7 @@ fn main() -> Result<()> {
     let recipes_folder = &args.recipes_folder;
     let tmp_root = args.tmp_file_root.as_path();
     let keep_tmp = args.keep_tmp;
+    let exit_on_error = !args.no_exit_on_error;
 
     match &args.command {
         CommandArg::Write {
@@ -163,9 +168,16 @@ fn main() -> Result<()> {
             args,
         } => {
             if let Some(recipe) = recipe {
-                run_recipe(tmp_root, keep_tmp, recipe, *recipe_help, args)
+                run_recipe(
+                    tmp_root,
+                    keep_tmp,
+                    exit_on_error,
+                    recipe,
+                    *recipe_help,
+                    args,
+                )
             } else {
-                start_run_recipe_tui(recipes_folder, tmp_root, keep_tmp)
+                start_run_recipe_tui(recipes_folder, tmp_root, keep_tmp, exit_on_error)
             }
         }
         CommandArg::Convert {
@@ -186,6 +198,7 @@ fn main() -> Result<()> {
 fn run_recipe(
     tmp_root: &Path,
     keep_tmp: bool,
+    exit_on_error: bool,
     recipe: &String,
     recipe_help: bool,
     args: &[String],
@@ -196,7 +209,7 @@ fn run_recipe(
         recipe.print_help();
     } else {
         recipe.parse_cli_args(args);
-        recipe.execute(tmp_root, keep_tmp, &mut CliLogger {});
+        recipe.execute(tmp_root, keep_tmp, exit_on_error, &mut CliLogger {})?;
     }
     color_eyre::eyre::Ok(())
 }
@@ -253,9 +266,15 @@ fn start_write_recipe_tui(history: &PathBuf, recipes_folder: &str) -> Result<()>
     color_eyre::eyre::Ok(())
 }
 
-fn start_run_recipe_tui(recipes_folder: &str, tmp_root: &Path, keep_tmp: bool) -> Result<()> {
+fn start_run_recipe_tui(
+    recipes_folder: &str,
+    tmp_root: &Path,
+    keep_tmp: bool,
+    exit_on_error: bool,
+) -> Result<()> {
     color_eyre::install()?;
-    let mut app = gwr_terminus::runner::app::App::new(recipes_folder, tmp_root, keep_tmp);
+    let mut app =
+        gwr_terminus::runner::app::App::new(recipes_folder, tmp_root, keep_tmp, exit_on_error);
 
     // Initialize the terminal user interface.
     let backend = CrosstermBackend::new(io::stderr());

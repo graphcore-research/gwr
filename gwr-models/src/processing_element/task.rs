@@ -1,28 +1,75 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use serde::Deserialize;
+use std::rc::Rc;
 
-#[derive(Debug, Clone, Copy)]
+use gwr_engine::types::SimError;
+use serde::{Deserialize, Serialize};
+
+use crate::processing_element::ComputeCapabilities;
+use crate::processing_element::operators::add::OperatorAdd;
+use crate::processing_element::operators::gemm::OperatorGemm;
+use crate::processing_element::operators::{Operator, TensorPartition, TensorView};
+
+#[derive(Debug, Clone)]
 pub struct ComputeTaskConfig {
+    /// Only needed as a debug aid
+    pub id: String,
     pub op: ComputeOp,
-    pub num_bytes: usize,
+    pub inputs: Vec<Option<TensorView>>,
+    pub outputs: Vec<Option<TensorView>>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ComputeOp {
     Add,
-    Mul,
+    Gemm,
 }
 
-#[derive(Debug, Clone, Copy)]
+impl ComputeOp {
+    pub fn compute_delay_ticks(
+        &self,
+        compute_capabilities: &Rc<ComputeCapabilities>,
+        input_views: &[Option<TensorView>],
+        output_views: &[Option<TensorView>],
+    ) -> Result<usize, SimError> {
+        match self {
+            ComputeOp::Add => {
+                OperatorAdd {}.compute_delay_ticks(compute_capabilities, input_views, output_views)
+            }
+            ComputeOp::Gemm => {
+                OperatorGemm {}.compute_delay_ticks(compute_capabilities, input_views, output_views)
+            }
+        }
+    }
+
+    pub fn create_partitions(
+        &self,
+        input_views: &[Option<TensorView>],
+        output_views: &[Option<TensorView>],
+        num_partitions: usize,
+    ) -> Result<Vec<TensorPartition>, SimError> {
+        match self {
+            ComputeOp::Add => {
+                OperatorAdd {}.partition_views(input_views, output_views, num_partitions)
+            }
+            ComputeOp::Gemm => {
+                OperatorGemm {}.partition_views(input_views, output_views, num_partitions)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct MemoryTaskConfig {
+    /// Only needed as a debug aid
+    pub id: String,
     pub op: MemoryOp,
     pub addr: u64,
     pub num_bytes: usize,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MemoryOp {
     Load,
@@ -35,7 +82,7 @@ pub enum SyncRegion {
     Global,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Task {
     ComputeTask { config: ComputeTaskConfig },
     MemoryTask { config: MemoryTaskConfig },

@@ -4,7 +4,7 @@ memory_maps:
   # The default memory map for Processing Elements
   - ranges: &pe_memory_map
       - base_address: 0x1_0000_0000
-        size_bytes: 16GB
+        size_bytes: 64GB
         device: hbm0
 
 fabrics:
@@ -37,7 +37,7 @@ processing_elements:
       ranges: *pe_memory_map
     config: *default_pe_config
 
-  - name: p_e1_0
+  - name: pe_1_0
     memory_map:
       ranges: *pe_memory_map
     config: *default_pe_config
@@ -89,7 +89,7 @@ memories:
   - name: hbm0
     kind: hbm
     base_address: 0x1_0000_0000
-    capacity_bytes: 16GiB
+    capacity_bytes: 64GiB
     delay_ticks: 10
 
 connections:

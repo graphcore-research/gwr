@@ -1,0 +1,39 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+description:
+  Run the commands that ensure gwr-timetable features and examples are all still
+  working.
+arguments: []
+ingredients:
+  - comment: Test the tiny.yaml example on default platform.
+    command:
+      cargo run --bin gwr-timetable -- --platform
+      gwr-platform/examples/platform.yaml --timetable
+      gwr-timetable/examples/tiny.yaml --stdout --stdout-level info --dump-stats
+  - comment: Test the tiny.yaml example on 4x4 platform.
+    command:
+      cargo run --bin gwr-timetable -- --platform
+      gwr-platform/examples/platform_4x4.yaml --timetable
+      gwr-timetable/examples/tiny.yaml --stdout --stdout-level info --dump-stats
+  - comment: Test the tiny.yaml example on 4x4 platform with 4 HBMs.
+    command:
+      cargo run --bin gwr-timetable -- --platform
+      gwr-platform/examples/platform_4x4_4xhbm.yaml --timetable
+      gwr-timetable/examples/tiny.yaml --stdout --stdout-level info --dump-stats
+  - comment: Test the small.yaml example on default platform.
+    command:
+      cargo run --bin gwr-timetable -- --platform
+      gwr-platform/examples/platform.yaml --timetable
+      gwr-timetable/examples/small.yaml --stdout --stdout-level info
+      --dump-stats
+  - comment: Test the small.yaml example on 4x4 platform.
+    command:
+      cargo run --bin gwr-timetable -- --platform
+      gwr-platform/examples/platform_4x4.yaml --timetable
+      gwr-timetable/examples/small.yaml --stdout --stdout-level info
+      --dump-stats
+  - comment: Test the small.yaml example on 4x4 platform with 4 HBMs.
+    command:
+      cargo run --bin gwr-timetable -- --platform
+      gwr-platform/examples/platform_4x4_4xhbm.yaml --timetable
+      gwr-timetable/examples/small.yaml --stdout --stdout-level info
+      --dump-stats

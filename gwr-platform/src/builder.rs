@@ -35,14 +35,15 @@ pub fn build_memory_map(
     Ok(memory_map)
 }
 
+// Default local SRAM size
+pub const DEFAULT_PE_SRAM_BYTES: u64 = 1024 * 1024;
+
 fn build_pe_config(
     cfg: &ProcessingElementConfigSection,
 ) -> Result<ProcessingElementConfig, SimError> {
     const DEFAULT_NUM_ACTIVE_REQUESTS: usize = 8;
     const DEFAULT_LSU_ACCESS_BYTES: usize = 32;
     const DEFAULT_OVERHEAD_SIZE_BYTES: usize = 8;
-    // Assume a default of 1MB of local SRAM
-    const DEFAULT_SRAM_BYTES: u64 = 1024 * 1024;
     const DEFAULT_ADDS_PER_TICK: usize = 16;
     const DEFAULT_MULS_PER_TICK: usize = 4;
 
@@ -53,7 +54,7 @@ fn build_pe_config(
     let overhead_size_bytes = cfg
         .overhead_size_bytes
         .unwrap_or(DEFAULT_OVERHEAD_SIZE_BYTES);
-    let sram_bytes = cfg.sram_bytes.unwrap_or(DEFAULT_SRAM_BYTES) as usize;
+    let sram_bytes = cfg.sram_bytes.unwrap_or(DEFAULT_PE_SRAM_BYTES) as usize;
 
     let adds_per_tick = cfg.adds_per_tick.unwrap_or(DEFAULT_ADDS_PER_TICK);
     let muls_per_tick = cfg.muls_per_tick.unwrap_or(DEFAULT_MULS_PER_TICK);

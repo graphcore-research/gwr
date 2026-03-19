@@ -14,6 +14,7 @@
 use std::cell::RefCell;
 use std::cmp::min;
 use std::collections::VecDeque;
+use std::fmt;
 use std::rc::Rc;
 
 use async_trait::async_trait;
@@ -238,6 +239,14 @@ pub struct LoadStoreUnit {
     tx: RefCell<Option<OutPort<MemoryAccess>>>,
 
     state: Rc<LsuState>,
+}
+
+impl fmt::Debug for LoadStoreUnit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LoadStoreUnit")
+            .field("entity", &self.entity)
+            .finish()
+    }
 }
 
 impl LoadStoreUnit {

@@ -40,13 +40,19 @@ use crate::memory::memory_access::MemoryAccess;
 use crate::memory::memory_map::{DeviceId, MemoryMap};
 use crate::processing_element::dispatch::Dispatch;
 use crate::processing_element::load_store_unit::LoadStoreUnit;
-use crate::processing_element::task::{
-    ComputeOp, ComputeTaskConfig, MemoryOp, MemoryTaskConfig, Task,
-};
+use crate::processing_element::operators::TensorView;
+use crate::processing_element::task::{ComputeTaskConfig, MemoryOp, MemoryTaskConfig, Task};
 
 pub mod dispatch;
 mod load_store_unit;
+pub mod operators;
 pub mod task;
+
+#[derive(Eq, Hash, PartialEq)]
+pub enum MachineOp {
+    Add,
+    Mul,
+}
 
 type Dispatcher = Rc<dyn Dispatch>;
 
@@ -70,9 +76,10 @@ pub struct ProcessingElementConfig {
     pub muls_per_tick: usize,
 }
 
-struct ComputeTimings {
+pub struct ComputeCapabilities {
     adds_per_tick: usize,
     muls_per_tick: usize,
+    sram_bytes: usize,
 }
 
 #[derive(EntityGet, EntityDisplay)]
@@ -82,7 +89,7 @@ pub struct ProcessingElement {
     clock: Clock,
     spawner: Spawner,
 
-    compute_timings: Rc<ComputeTimings>,
+    compute_capabilities: Rc<ComputeCapabilities>,
     dispatcher: RefCell<Option<Dispatcher>>,
 }
 
@@ -110,9 +117,10 @@ impl ProcessingElement {
             clock: clock.clone(),
             spawner: engine.spawner(),
 
-            compute_timings: Rc::new(ComputeTimings {
+            compute_capabilities: Rc::new(ComputeCapabilities {
                 adds_per_tick: pe_config.adds_per_tick,
                 muls_per_tick: pe_config.muls_per_tick,
+                sram_bytes: pe_config.sram_bytes,
             }),
 
             dispatcher: RefCell::new(None),
@@ -184,9 +192,18 @@ impl Runnable for ProcessingElement {
                     let clock = self.clock.clone();
                     let dispatcher = dispatcher.clone();
                     let lsu = self.lsu.clone();
-                    let compute_timings = self.compute_timings.clone();
+                    let compute_capabilities = self.compute_capabilities.clone();
+                    let entity = self.entity.clone();
                     self.spawner.spawn(async move {
-                        handle_task(clock, dispatcher, lsu, compute_timings, task_idx).await
+                        handle_task(
+                            entity,
+                            clock,
+                            dispatcher,
+                            lsu,
+                            compute_capabilities,
+                            task_idx,
+                        )
+                        .await
                     });
                 }
             }
@@ -199,38 +216,98 @@ impl Runnable for ProcessingElement {
 }
 
 async fn handle_task(
+    entity: Rc<Entity>,
     clock: Clock,
     dispatcher: Dispatcher,
     lsu: Rc<LoadStoreUnit>,
-    compute_timings: Rc<ComputeTimings>,
+    compute_capabilities: Rc<ComputeCapabilities>,
     task_idx: usize,
 ) -> SimResult {
     let task = dispatcher.task_by_id(task_idx)?;
     match task {
-        Task::ComputeTask { config } => {
-            handle_compute_task(clock, dispatcher, task_idx, compute_timings, &config).await
-        }
-        Task::MemoryTask { config } => handle_memory_task(dispatcher, lsu, task_idx, &config).await,
+        Task::ComputeTask { config } => handle_compute_task(
+            clock,
+            dispatcher,
+            lsu,
+            task_idx,
+            compute_capabilities,
+            &config,
+        )
+        .await
+        .map_err(|err| SimError(format!("{entity} had error on task {}:\n{err}", config.id))),
+        Task::MemoryTask { config } => handle_memory_task(dispatcher, lsu, task_idx, &config)
+            .await
+            .map_err(|err| SimError(format!("{entity} had error on task {}:\n{err}", config.id))),
         Task::SyncTask { region: _ } => {
-            // TODO
-            dispatcher.set_task_completed(task_idx)
+            todo!();
         }
     }
+}
+
+fn tensor_view_num_bytes(view: &TensorView) -> usize {
+    view.num_bytes()
+}
+
+fn tensor_view_base_addr(view: &TensorView) -> Result<u64, SimError> {
+    let base_addr = view.tensor().addr();
+    let element_offset = view.element_offset()?;
+    let dtype = view.tensor().dtype();
+    let byte_offset = (dtype.num_bits() * element_offset).div_ceil(8) as u64;
+    Ok(base_addr + byte_offset)
 }
 
 async fn handle_compute_task(
     clock: Clock,
     dispatcher: Dispatcher,
+    lsu: Rc<LoadStoreUnit>,
     task_idx: usize,
-    compute_timings: Rc<ComputeTimings>,
+    compute_capabilities: Rc<ComputeCapabilities>,
     config: &ComputeTaskConfig,
 ) -> SimResult {
-    let num_bytes = config.num_bytes;
-    let compute_ticks = match config.op {
-        ComputeOp::Add => num_bytes.div_ceil(compute_timings.adds_per_tick),
-        ComputeOp::Mul => num_bytes.div_ceil(compute_timings.muls_per_tick),
-    };
-    clock.wait_ticks(compute_ticks as u64).await;
+    let total_num_bytes: usize = config
+        .inputs
+        .iter()
+        .chain(config.outputs.iter())
+        .filter_map(|view| view.as_ref())
+        .map(tensor_view_num_bytes)
+        .sum();
+
+    let num_partitions = total_num_bytes
+        .div_ceil(compute_capabilities.sram_bytes.max(1))
+        .max(1);
+
+    let partitions =
+        config
+            .op
+            .create_partitions(&config.inputs, &config.outputs, num_partitions)?;
+
+    for partition in partitions {
+        for view in partition.inputs.iter().flatten() {
+            lsu.do_access(
+                AccessType::ReadRequest,
+                tensor_view_num_bytes(view),
+                tensor_view_base_addr(view)?,
+            )
+            .await?;
+        }
+
+        let compute_ticks = config.op.compute_delay_ticks(
+            &compute_capabilities,
+            &partition.inputs,
+            &partition.outputs,
+        )?;
+        clock.wait_ticks(compute_ticks as u64).await;
+
+        for view in partition.outputs.iter().flatten() {
+            lsu.do_access(
+                AccessType::WriteNonPostedRequest,
+                tensor_view_num_bytes(view),
+                tensor_view_base_addr(view)?,
+            )
+            .await?;
+        }
+    }
+
     dispatcher.set_task_completed(task_idx)
 }
 
