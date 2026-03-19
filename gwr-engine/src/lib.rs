@@ -12,6 +12,16 @@
 //! executes event driven asynchronous simulation
 //! [components].
 //!
+//! # Features
+//!
+//! - `global_allocator`: When enabled this feature causes applications
+//!   dependendant on `gwr-engine` to use a global allocator selected to
+//!   deliver optimal runtime performace of the GWR engine. Currently this is
+//!   the [mimalloc](https://github.com/microsoft/mimalloc) allocator.
+//!
+//!   This feature is enabled by default. Should an application wish to use a
+//!   alternative global allocator the feature must be explicitly disabled.
+//!
 //! # Developer Guide
 //!
 //! The Developer Guide provides a document that goes through the GWR engine
@@ -76,6 +86,8 @@
 pub mod engine;
 pub mod events;
 pub mod executor;
+#[cfg(feature = "global_allocator")]
+mod global_allocator;
 pub mod port;
 pub mod test_helpers;
 pub mod time;
