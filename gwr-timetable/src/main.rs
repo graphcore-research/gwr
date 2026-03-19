@@ -16,7 +16,7 @@ use gwr_engine::engine::Engine;
 use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_platform::Platform;
 use gwr_timetable::Timetable;
-use gwr_timetable::types::Graph;
+use gwr_timetable::timetable_file::TimetableFile;
 use gwr_track::Track;
 use gwr_track::builder::{MonitorsConfig, TrackerConfig, TrackersConfig, setup_trackers};
 
@@ -89,6 +89,10 @@ struct Cli {
     /// Platform file
     #[arg(long, default_value = "platform.yaml")]
     platform: String,
+
+    /// Enable dumping of summary statistics
+    #[arg(long, default_value = "false")]
+    dump_stats: bool,
 }
 
 fn setup_all_trackers(args: &Cli) -> Rc<dyn Track> {
@@ -137,7 +141,7 @@ fn main() -> Result<()> {
     println!("Loaded platform:");
     println!("{platform}");
 
-    let graph = Graph::from_file(graph_path)?;
+    let graph = TimetableFile::from_file(graph_path)?;
     let num_nodes = graph.nodes.len();
     let num_edges = graph.edges.len();
 
@@ -152,6 +156,11 @@ fn main() -> Result<()> {
     println!("Ran simulation. Time now {}ns", clock.time_now_ns());
 
     timetable.check_tasks_complete()?;
+
+    if args.dump_stats {
+        timetable.dump_stats();
+        platform.dump_stats(clock.time_now_ns());
+    }
 
     Ok(())
 }

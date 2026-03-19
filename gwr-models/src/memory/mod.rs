@@ -10,6 +10,7 @@ use gwr_engine::engine::Engine;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
+use gwr_engine::time::compute_adjusted_value_and_rate;
 use gwr_engine::traits::{Runnable, SimObject};
 use gwr_engine::types::{AccessType, SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
@@ -56,19 +57,10 @@ impl MemoryConfig {
     }
 }
 
-#[derive(Clone)]
-pub struct MemoryMetrics {
+#[derive(Clone, Default)]
+pub struct MemoryStats {
     bytes_read: usize,
     bytes_written: usize,
-}
-
-impl MemoryMetrics {
-    fn new() -> Self {
-        Self {
-            bytes_read: 0,
-            bytes_written: 0,
-        }
-    }
 }
 
 #[derive(EntityGet, EntityDisplay)]
@@ -79,7 +71,7 @@ where
     entity: Rc<Entity>,
     clock: Clock,
     config: MemoryConfig,
-    metrics: RefCell<MemoryMetrics>,
+    stats: RefCell<MemoryStats>,
 
     response_delay: Rc<Delay<T>>,
     response_tx: RefCell<Option<OutPort<T>>>,
@@ -120,7 +112,7 @@ where
             entity,
             clock: clock.clone(),
             config,
-            metrics: RefCell::new(MemoryMetrics::new()),
+            stats: RefCell::new(MemoryStats::default()),
             response_delay,
             rx: RefCell::new(Some(rx)),
             response_tx: RefCell::new(Some(response_tx)),
@@ -149,12 +141,31 @@ where
 
     #[must_use]
     pub fn bytes_written(&self) -> usize {
-        self.metrics.borrow().bytes_written
+        self.stats.borrow().bytes_written
     }
 
     #[must_use]
     pub fn bytes_read(&self) -> usize {
-        self.metrics.borrow().bytes_read
+        self.stats.borrow().bytes_read
+    }
+
+    pub fn dump_stats(&self, time_now_ns: f64) {
+        let stats = self.stats.borrow();
+
+        let (read_value, read_per_second) =
+            compute_adjusted_value_and_rate(time_now_ns, stats.bytes_read);
+        let (write_value, write_per_second) =
+            compute_adjusted_value_and_rate(time_now_ns, stats.bytes_written);
+
+        println!("Memory {}:", self.entity.full_name());
+        println!(
+            "  Read: {} bytes, {read_value:.2}, {read_per_second:.2}/s",
+            stats.bytes_read
+        );
+        println!(
+            "  Written: {} bytes, {write_value:.2}, {write_per_second:.2}/s",
+            stats.bytes_written
+        );
     }
 }
 
@@ -187,15 +198,15 @@ where
             let access_type = access.access_type();
             match access_type {
                 AccessType::ReadRequest => {
-                    self.metrics.borrow_mut().bytes_read += payload_bytes;
+                    self.stats.borrow_mut().bytes_read += payload_bytes;
                     let response = access.to_response(self)?;
                     response_tx.put(response)?.await;
                 }
                 AccessType::WriteRequest => {
-                    self.metrics.borrow_mut().bytes_written += payload_bytes;
+                    self.stats.borrow_mut().bytes_written += payload_bytes;
                 }
                 AccessType::WriteNonPostedRequest => {
-                    self.metrics.borrow_mut().bytes_written += payload_bytes;
+                    self.stats.borrow_mut().bytes_written += payload_bytes;
                     let response = access.to_response(self)?;
                     response_tx.put(response)?.await;
                 }

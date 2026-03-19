@@ -1,102 +1,146 @@
 # Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
 nodes:
+  - id: input_tensor_0
+    kind: tensor
+    config:
+      addr: 0x1_0000_0000
+      dtype: fp16
+      shape: [2, 224, 224]
+
   - id: pe_0_0_load_1
     kind: memory
     op: load
     pe: pe_0_0
     config:
-      addr: 0x1_0000_0000
-      num_bytes: 0x1000
+      offset: 0
+      num_elements: 100352
+
+  - id: input_tensor_1
+    kind: tensor
+    config:
+      addr: 0x1_1000_0000
+      dtype: fp16
+      shape: [2, 224, 224]
 
   - id: pe_0_0_load_2
     kind: memory
     op: load
     pe: pe_0_0
     config:
-      addr: 0x2_0000_0000
-      num_bytes: 0x1000
+      offset: 0
+      num_elements: 100352
 
   - id: pe_0_0_add
     kind: compute
     op: add
     pe: pe_0_0
-    config:
-      dtype: fp32
 
   - id: pe_0_0_store
     kind: memory
     op: store
     pe: pe_0_0
     config:
-      addr: 0x3_0000_0000
-      num_bytes: 0x1000
+      offset: 0
+      num_elements: 100352
+
+  - id: tensor_0_0_to_0_1
+    kind: tensor
+    config:
+      addr: 0x2_0000_0000
+      dtype: fp32
+      shape: [2, 224, 224]
 
   - id: pe_0_1_load_1
     kind: memory
     op: load
     pe: pe_0_1
     config:
-      addr: 0x1_1000_0000
-      num_bytes: 0x1000
+      offset: 0
+      num_elements: 50176
 
   - id: pe_0_1_load_2
     kind: memory
     op: load
     pe: pe_0_1
     config:
-      addr: 0x2_1000_0000
-      num_bytes: 0x1000
+      offset: 50176
+      num_elements: 50176
 
   - id: pe_0_1_add
     kind: compute
     op: add
     pe: pe_0_1
-    config:
-      dtype: fp32
 
   - id: pe_0_1_store
     kind: memory
     op: store
     pe: pe_0_1
     config:
-      addr: 0x3_1000_0000
-      num_bytes: 0x1000
+      offset: 0
+      num_elements: 50176
+
+  - id: tensor_0_1_to_1_0
+    kind: tensor
+    config:
+      addr: 0x3_0000_0000
+      dtype: fp32
+      shape: [1, 224, 224]
 
   - id: pe_1_0_load_3_0
     kind: memory
     op: load
     pe: pe_1_0
     config:
-      addr: 0x3_0000_0000
-      num_bytes: 0x1000
+      offset: 0
+      num_elements: 50176
+
+  - id: input_tensor_2
+    kind: tensor
+    config:
+      addr: 0x3_1000_0000
+      dtype: fp32
+      shape: [1, 224, 224]
 
   - id: pe_1_0_load_3_1
     kind: memory
     op: load
     pe: pe_1_0
     config:
-      addr: 0x3_1000_0000
-      num_bytes: 0x1000
+      offset: 0
+      num_elements: 50176
 
   - id: pe_1_0_mul
     kind: compute
     op: mul
     pe: pe_1_0
-    config:
-      dtype: fp32
 
   - id: pe_1_0_store
     kind: memory
     op: store
     pe: pe_1_0
     config:
+      offset: 0
+      num_elements: 50176
+
+  - id: output_tensor_0
+    kind: tensor
+    config:
       addr: 0x4_0000_0000
-      num_bytes: 0x1000
+      dtype: fp32
+      shape: [1, 224, 224]
 
 edges:
+  - from: input_tensor_0
+    to: pe_0_0_load_1
+    kind: data
+
   - from: pe_0_0_load_1
     to: pe_0_0_add
+    kind: data
+
+  - from: input_tensor_1
+    to: pe_0_0_load_2
     kind: data
 
   - from: pe_0_0_load_2
@@ -107,8 +151,20 @@ edges:
     to: pe_0_0_store
     kind: data
 
+  - from: pe_0_0_store
+    to: tensor_0_0_to_0_1
+    kind: data
+
+  - from: tensor_0_0_to_0_1
+    to: pe_0_1_load_1
+    kind: data
+
   - from: pe_0_1_load_1
     to: pe_0_1_add
+    kind: data
+
+  - from: tensor_0_0_to_0_1
+    to: pe_0_1_load_2
     kind: data
 
   - from: pe_0_1_load_2
@@ -119,11 +175,15 @@ edges:
     to: pe_0_1_store
     kind: data
 
-  - from: pe_0_0_store
+  - from: pe_0_1_store
+    to: tensor_0_1_to_1_0
+    kind: data
+
+  - from: tensor_0_1_to_1_0
     to: pe_1_0_load_3_0
     kind: data
 
-  - from: pe_0_1_store
+  - from: input_tensor_2
     to: pe_1_0_load_3_1
     kind: data
 
@@ -137,4 +197,8 @@ edges:
 
   - from: pe_1_0_mul
     to: pe_1_0_store
+    kind: data
+
+  - from: pe_1_0_store
+    to: output_tensor_0
     kind: data

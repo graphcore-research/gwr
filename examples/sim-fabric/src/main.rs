@@ -5,12 +5,12 @@
 //! See `lib.rs` for details.
 use std::rc::Rc;
 
-use byte_unit::{AdjustedByte, Byte, UnitType};
 use clap::Parser;
 use gwr_components::connect_port;
 use gwr_engine::engine::Engine;
 use gwr_engine::executor::Spawner;
 use gwr_engine::time::clock::Clock;
+use gwr_engine::time::compute_adjusted_value_and_rate;
 use gwr_engine::types::SimError;
 use gwr_engine::{run_simulation, sim_error};
 use gwr_models::data_frame::DataFrame;
@@ -368,26 +368,13 @@ fn print_summary(
     frame_overhead_bytes: usize,
     frame_payload_bytes: usize,
 ) {
-    let time_now_s = time_now_ns / (1000.0 * 1000.0 * 1000.0);
-
-    let payload_bytes = (total_sunk_frames * frame_payload_bytes) as u64;
+    let payload_bytes = total_sunk_frames * frame_payload_bytes;
     let (payload_value, payload_per_second) =
-        compute_adjusted_value_and_rate(time_now_s, payload_bytes);
+        compute_adjusted_value_and_rate(time_now_ns, payload_bytes);
 
-    let total_bytes = payload_bytes + (total_sunk_frames * frame_overhead_bytes) as u64;
-    let (total_value, total_per_second) = compute_adjusted_value_and_rate(time_now_s, total_bytes);
+    let total_bytes = payload_bytes + (total_sunk_frames * frame_overhead_bytes);
+    let (total_value, total_per_second) = compute_adjusted_value_and_rate(time_now_ns, total_bytes);
 
     info!(top ; "Pass: Sent {total_sunk_frames} in {time_now_ns:.2}ns.");
     info!(top ; "Payload: {payload_value:.2} ({payload_per_second:.2}/s). Total: {total_value:.2} ({total_per_second:.2}/s).");
-}
-
-fn compute_adjusted_value_and_rate(
-    time_now_s: f64,
-    num_bytes: u64,
-) -> (AdjustedByte, AdjustedByte) {
-    // Convert to a binary-only unit (KiB, MiB, etc)
-    let count = Byte::from_u64(num_bytes).get_appropriate_unit(UnitType::Binary);
-    let per_second = Byte::from_f64(num_bytes as f64 / time_now_s).unwrap();
-    let count_per_second = per_second.get_appropriate_unit(UnitType::Binary);
-    (count, count_per_second)
 }

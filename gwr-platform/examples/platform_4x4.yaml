@@ -37,7 +37,7 @@ processing_elements:
       ranges: *pe_memory_map
     config: *default_pe_config
 
-  - name: p_e1_0
+  - name: pe_1_0
     memory_map:
       ranges: *pe_memory_map
     config: *default_pe_config
