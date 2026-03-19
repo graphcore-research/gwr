@@ -17,7 +17,7 @@ use serde_yaml::Value;
 /// Or specified as number of bits in which case the number returned will be the
 /// number of bytes:
 ///  80b, 80Mb, 80Mbit
-pub fn parse_byte_str<'de, D>(deserializer: D) -> Result<u64, D::Error>
+pub fn parse_u64_byte_str<'de, D>(deserializer: D) -> Result<u64, D::Error>
 where
     D: de::Deserializer<'de>,
 {
@@ -48,6 +48,7 @@ where
         u64::from_str_radix(without_0x, 16)
             .map_err(|e| de::Error::custom(format!("Unable to parse {s} as hex string: {e}")))
     } else {
+        // Don't ignore case so that bit (b) and Byte (B) can be distinguished
         let ignore_case = false;
         let num_bytes = Byte::parse_str(&s, ignore_case)
             .map_err(|e| de::Error::custom(format!("Unable to parse {s} as Byte string: {e}")))?;
@@ -55,11 +56,23 @@ where
     }
 }
 
-pub fn parse_optional_byte_str<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+/// Same as `parse_u64_byte_str` but returns a `usize`.
+pub fn parse_usize_byte_str<'de, D>(deserializer: D) -> Result<usize, D::Error>
 where
     D: de::Deserializer<'de>,
 {
-    Ok(Some(parse_byte_str(deserializer)?))
+    match parse_u64_byte_str(deserializer) {
+        Err(e) => Err(e),
+        Ok(value) => Ok(value as usize),
+    }
+}
+
+/// Same as `parse_u64_byte_str` but returns a `Option<u64>`.
+pub fn parse_optional_u64_byte_str<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    Ok(Some(parse_u64_byte_str(deserializer)?))
 }
 
 #[derive(Debug, Deserialize)]
@@ -79,9 +92,9 @@ pub struct MemoryMapSection {
 
 #[derive(Debug, Deserialize)]
 pub struct MemoryMapRangeSection {
-    #[serde(deserialize_with = "parse_byte_str")]
+    #[serde(deserialize_with = "parse_u64_byte_str")]
     pub base_address: u64,
-    #[serde(deserialize_with = "parse_byte_str")]
+    #[serde(deserialize_with = "parse_u64_byte_str")]
     pub size_bytes: u64,
     pub device: String,
 }
@@ -98,7 +111,7 @@ pub struct ProcessingElementConfigSection {
     pub num_active_requests: Option<usize>,
     pub lsu_access_bytes: Option<usize>,
     pub overhead_size_bytes: Option<usize>,
-    #[serde(default, deserialize_with = "parse_optional_byte_str")]
+    #[serde(default, deserialize_with = "parse_optional_u64_byte_str")]
     pub sram_bytes: Option<u64>,
     pub adds_per_tick: Option<usize>,
     pub muls_per_tick: Option<usize>,
@@ -130,13 +143,13 @@ pub struct FabricSection {
     pub routing: Option<FabricRoutingAlgorithm>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct MemorySection {
     pub name: String,
     pub kind: MemoryKind,
-    #[serde(deserialize_with = "parse_byte_str")]
+    #[serde(deserialize_with = "parse_u64_byte_str")]
     pub base_address: u64,
-    #[serde(deserialize_with = "parse_byte_str")]
+    #[serde(deserialize_with = "parse_u64_byte_str")]
     pub capacity_bytes: u64,
     pub bw_bytes_per_cycle: Option<usize>,
     pub delay_ticks: Option<usize>,
@@ -149,7 +162,7 @@ pub enum FabricKind {
     Routed,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MemoryKind {
     HBM,

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
 use std::collections::HashMap;
-use std::fmt::Display;
+use std::fmt::{self, Display};
 use std::path::Path;
 use std::rc::Rc;
 
@@ -44,6 +44,14 @@ pub struct Platform {
     fabrics_idx_by_id: HashMap<String, usize>,
     memories: Memories,
     memories_idx_by_id: HashMap<String, usize>,
+}
+
+impl fmt::Debug for Platform {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Platform")
+            .field("entity", &self.entity)
+            .finish()
+    }
 }
 
 impl Platform {
@@ -195,6 +203,12 @@ impl Platform {
     pub fn attach_dispatcher(&self, dispatcher: &Rc<dyn Dispatch>) {
         for pe in &self.processing_elements {
             pe.set_dispatcher(dispatcher);
+        }
+    }
+
+    pub fn dump_stats(&self, time_now_ns: f64) {
+        for mem in &self.memories {
+            mem.dump_stats(time_now_ns);
         }
     }
 }

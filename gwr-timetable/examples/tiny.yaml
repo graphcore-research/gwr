@@ -1,0 +1,82 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+nodes:
+  - id: tensor_A
+    kind: tensor
+    config:
+      addr: 0x1_0000_0000
+      dtype: fp16
+      shape: [3, 224, 224]
+
+  - id: tensor_B
+    kind: tensor
+    config:
+      addr: 0x1_1000_0000
+      dtype: fp16
+      shape: [3, 224, 224]
+
+  - id: add
+    kind: compute
+    op: add
+    pe: pe_0_0
+    input_views:
+      -
+      -
+    output_views:
+      -
+
+  - id: tensor_C
+    kind: tensor
+    config:
+      addr: 0x1_2000_0000
+      dtype: fp32
+      shape: [3, 224, 224]
+
+  - id: tensor_D
+    kind: tensor
+    config:
+      addr: 0x1_3000_0000
+      dtype: fp32
+      shape: [3, 224, 224]
+
+  - id: gemm
+    kind: compute
+    op: gemm
+    pe: pe_0_1
+    input_views:
+      -
+      -
+    output_views:
+      -
+
+  - id: tensor_E
+    kind: tensor
+    config:
+      addr: 0x1_3000_0000
+      dtype: fp32
+      shape: [3, 224, 224]
+
+edges:
+  - from: tensor_A
+    to: add
+    kind: data
+
+  - from: tensor_B
+    to: add
+    kind: data
+
+  - from: add
+    to: tensor_C
+    kind: data
+
+  - from: tensor_C
+    to: gemm.0
+    kind: data
+
+  - from: tensor_D
+    to: gemm.1
+    kind: data
+
+  - from: gemm
+    to: tensor_E
+    kind: data

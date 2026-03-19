@@ -149,5 +149,5 @@ fn notify_twice() {
         Ok(())
     });
 
-    run_simulation!(engine, "Error: once event already triggered");
+    run_simulation!(engine, "once event already triggered");
 }

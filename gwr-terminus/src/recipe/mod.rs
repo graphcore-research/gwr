@@ -4,7 +4,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{ExitStatus, Stdio};
 
 use color_eyre::eyre::Context;
 use log::{debug, error};
@@ -19,6 +19,7 @@ pub mod converter;
 use crate::recipe::converter::python;
 
 const HEADER: &str = "# Auto-generated file\n";
+const TAG: &str = "--------\n";
 
 #[derive(Serialize, Deserialize)]
 pub struct Ingredient {
@@ -191,26 +192,44 @@ impl Recipe {
         self.parse_args(args);
     }
 
-    /// Execute a recipe by writing out a single shell script which is called
-    pub fn execute(&mut self, tmp_root: &Path, keep_tmp: bool, logger: &mut impl Logger) {
+    /// Execute a recipe by writing out a single shell script which is called.
+    pub fn execute(
+        &mut self,
+        tmp_root: &Path,
+        keep_tmp: bool,
+        exit_on_error: bool,
+        logger: &mut impl Logger,
+    ) -> color_eyre::eyre::Result<()> {
         let tmp_str = tmp_root.to_string_lossy().to_string() + ".sh";
         let script_path = PathBuf::from(tmp_str);
-        if let Err(e) = self.write_script(&script_path) {
-            error!("Failed to write {}:\n{e}", script_path.display());
+        self.write_script(&script_path, exit_on_error)
+            .wrap_err_with(|| format!("Failed to write {}", script_path.display()))?;
+
+        if log::log_enabled!(log::Level::Debug) {
+            match fs::read_to_string(&script_path) {
+                Ok(script_contents) => debug!(
+                    "Contents of {}:\n{TAG}{script_contents}{TAG}",
+                    script_path.display()
+                ),
+                Err(e) => debug!(
+                    "Failed to read {} for debug dump:\n{e}",
+                    script_path.display()
+                ),
+            }
         }
 
         // Ensure the path is absolute so that there are no issues sourceing it
-        let script_path = fs::canonicalize(script_path).unwrap();
+        let script_path = fs::canonicalize(&script_path)
+            .wrap_err_with(|| format!("Failed to canonicalize {}", script_path.display()))?;
         let command = format!("source {}", script_path.display());
-        match run_command_as_interactive(&command, logger, true) {
-            Err(e) => error!("Running {command} failed to execute:\n{e}"),
-            _ => {
-                if !keep_tmp {
-                    // Ran ok, remove script
-                    fs::remove_file(script_path).expect("Should be able to remove tmp file");
-                }
-            }
+        run_command_as_interactive(&command, logger, true)
+            .wrap_err_with(|| format!("Running '{command}' failed"))?;
+
+        if !keep_tmp {
+            fs::remove_file(&script_path)
+                .wrap_err_with(|| format!("Failed to remove {}", script_path.display()))?;
         }
+        Ok(())
     }
 
     /// Parse the arguments passed by the user and track their values
@@ -257,12 +276,15 @@ impl Recipe {
         true
     }
 
-    fn write_script(&self, script_path: &PathBuf) -> io::Result<()> {
+    fn write_script(&self, script_path: &PathBuf, exit_on_error: bool) -> io::Result<()> {
         debug!("Writing recipe to {}", script_path.display());
         let file = fs::File::create(script_path)?;
 
         let mut bin_writer = Box::new(BufWriter::new(file));
         bin_writer.write_all(HEADER.as_bytes())?;
+        if exit_on_error {
+            bin_writer.write_all(b"set -e\n")?;
+        }
         self.write_args_to_script(&mut bin_writer)?;
         self.write_commands_to_script(&mut bin_writer)?;
         Ok(())
@@ -377,18 +399,33 @@ pub fn run_command_as_interactive(
     });
 
     let output = child.wait_with_output()?;
-    let success = output.status.success();
-    if !success {
-        error!("FAILED: '{to_run}'");
-        logger.info(str::from_utf8(&output.stdout).unwrap());
-        logger.error(str::from_utf8(&output.stderr).unwrap());
+    if !output.status.success() {
+        let info_str = str::from_utf8(&output.stdout).unwrap();
+        logger.info(&format!("STDOUT:\n{TAG}{info_str}{TAG}"));
+
+        let error_str = str::from_utf8(&output.stderr).unwrap();
+        logger.error(&format!("STDERR:\n{TAG}{error_str}{TAG}"));
+
+        return Err(non_zero_exit_error(to_run, output.status));
     }
-    debug!("SUCCESS: '{to_run}'");
+
     if show_output_on_pass {
-        logger.info(str::from_utf8(&output.stdout).unwrap());
-        logger.error(str::from_utf8(&output.stderr).unwrap());
+        let info_str = str::from_utf8(&output.stdout).unwrap();
+        logger.info(&format!("STDOUT:\n{TAG}{info_str}{TAG}"));
+
+        let error_str = str::from_utf8(&output.stderr).unwrap().to_string();
+        logger.info(&format!("STDERR:\n{TAG}{error_str}{TAG}"));
     }
+    logger.info("SUCCESS");
     Ok(())
+}
+
+fn non_zero_exit_error(command: &str, status: ExitStatus) -> io::Error {
+    let message = match status.code() {
+        Some(code) => format!("'{command}' exited with status code {code}"),
+        None => format!("'{command}' terminated by signal"),
+    };
+    io::Error::other(message)
 }
 
 /// Parse a command and add the variables found in the command as an argument

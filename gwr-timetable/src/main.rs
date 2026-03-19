@@ -7,10 +7,10 @@
 //! gwr-platform/examples/platform.yaml --graph
 //! gwr-timetable/examples/graph.yaml --stdout --stdout-level debug
 
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use anyhow::Result;
 use clap::Parser;
 use gwr_engine::engine::Engine;
 use gwr_engine::executor::Spawner;
@@ -18,10 +18,12 @@ use gwr_engine::time::clock::Clock;
 use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_platform::Platform;
 use gwr_timetable::Timetable;
-use gwr_timetable::types::Graph;
+use gwr_timetable::timetable_file::TimetableFile;
 use gwr_track::Track;
 use gwr_track::builder::{MonitorsConfig, TrackerConfig, TrackersConfig, setup_trackers};
 use indicatif::ProgressBar;
+
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 /// Command-line arguments.
 #[derive(Parser)]
@@ -95,13 +97,22 @@ struct Cli {
     #[arg(long, default_value = "1000")]
     progress_ticks: usize,
 
-    /// Graph file
-    #[arg(long, default_value = "graph.yaml")]
-    graph: String,
+    /// Timetable YAML file
+    #[arg(long, default_value = "timetable.yaml")]
+    timetable: PathBuf,
 
-    /// Platform file
+    /// Platform YAML file
     #[arg(long, default_value = "platform.yaml")]
-    platform: String,
+    platform: PathBuf,
+
+    /// Enable dumping of summary statistics
+    #[arg(long, default_value = "false")]
+    dump_stats: bool,
+
+    /// Write a Mermaid diagram of the timetable state to this file if execution
+    /// fails.
+    #[arg(long, default_value = "error.mmd")]
+    error_mermaid: PathBuf,
 }
 
 fn start_frame_dump(
@@ -158,12 +169,22 @@ fn setup_all_trackers(args: &Cli) -> Rc<dyn Track> {
     setup_trackers(&config).unwrap()
 }
 
+fn write_error_mermaid(timetable: &Timetable, path: &Path) {
+    let mermaid = timetable.render_mermaid();
+    if let Err(err) = fs::write(path, mermaid) {
+        eprintln!(
+            "Failed to write Mermaid timetable state to '{}': {err}",
+            path.display()
+        );
+    } else {
+        eprintln!("Wrote Mermaid timetable state to '{}'", path.display());
+    }
+}
+
 fn main() -> Result<()> {
     let args = Cli::parse();
+
     let tracker = setup_all_trackers(&args);
-
-    let graph_path = Path::new(&args.graph);
-
     let mut engine = Engine::new(&tracker);
     let clock = engine.default_clock();
     let platform = Rc::new(Platform::from_file(
@@ -172,18 +193,17 @@ fn main() -> Result<()> {
         Path::new(&args.platform),
     )?);
 
-    println!("Loaded platform:");
-    println!("{platform}");
+    println!("Loaded platform:\n{platform}");
 
-    let graph = Graph::from_file(graph_path)?;
-    let num_nodes = graph.nodes.len();
-    let num_edges = graph.edges.len();
+    let timetable_file = TimetableFile::from_file(&args.timetable)?;
+    let num_nodes = timetable_file.nodes.len();
+    let num_edges = timetable_file.edges.len();
 
-    let timetable = Rc::new(Timetable::new(engine.top(), graph, &platform)?);
+    let timetable = Rc::new(Timetable::new(engine.top(), timetable_file, &platform)?);
     let dispatcher: Rc<dyn Dispatch> = timetable.clone();
     platform.attach_dispatcher(&dispatcher);
 
-    println!("Loaded graph with {num_nodes} nodes, {num_edges} edges.");
+    println!("Loaded timetable with {num_nodes} nodes, {num_edges} edges.");
 
     let mut progress_bar = None;
     if args.progress {
@@ -200,15 +220,28 @@ fn main() -> Result<()> {
         );
     }
 
-    engine.run()?;
+    let run_result = engine.run();
 
     if let Some(progress_bar) = progress_bar {
         progress_bar.finish();
     }
 
+    if let Err(err) = run_result {
+        write_error_mermaid(&timetable, &args.error_mermaid);
+        return Err(err.into());
+    }
+
     println!("Ran simulation. Time now {}ns", clock.time_now_ns());
 
-    timetable.check_tasks_complete()?;
+    if let Err(err) = timetable.check_tasks_complete() {
+        write_error_mermaid(&timetable, &args.error_mermaid);
+        return Err(err.into());
+    }
+
+    if args.dump_stats {
+        timetable.dump_stats()?;
+        platform.dump_stats(clock.time_now_ns());
+    }
 
     Ok(())
 }

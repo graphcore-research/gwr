@@ -33,7 +33,7 @@ pub struct SimError(pub String);
 
 impl fmt::Display for SimError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Error: {}", self.0)
+        write!(f, "{}", self.0)
     }
 }
 
