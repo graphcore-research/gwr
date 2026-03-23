@@ -120,7 +120,28 @@ jobs:
       - uses: ./.github/actions/install-build-dependencies
       - uses: ./.github/actions/run-build-command
         with:
-          command: |
-            cargo bench --all-features --verbose --no-run
-            cargo bench --all-features --verbose --bench one_shot_benchmarks
+          command: cargo bench --all-features --verbose --no-run
+          cache-name: ${{ github.job }}
+      - uses: actions/download-artifact@v8
+
+      - name: Run benchmarks and save results
+        id: run-benchmarks-save-results
+        if: github.ref == 'refs/heads/main'
+        uses: ./.github/actions/run-build-command
+        with:
+          command: cargo bench --all-features --verbose --bench one_shot_benchmarks -- --save-baseline=main
+          cache-name: ${{ github.job }}
+      - if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v7
+        with:
+          name: one-shot-benchmark-baselines
+          path: target/gungraun/
+          overwrite: true
+
+      - name: Run benchmarks
+        id: run-benchmarks
+        if: github.ref != 'refs/heads/main'
+        uses: ./.github/actions/run-build-command
+        with:
+          command: cargo bench --all-features --verbose --bench one_shot_benchmarks -- --baseline=main
           cache-name: ${{ github.job }}
