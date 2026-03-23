@@ -31,7 +31,7 @@ runs:
 
     - name: Restore cached build files
       id: restore-cache
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v5
       with:
         path: ${{ inputs.paths }}
         key: ${{ steps.get-cache-key.outputs.key }}
@@ -44,7 +44,7 @@ runs:
     - name: Save build files to cache
       id: save-cache
       if: github.ref == 'refs/heads/main'
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v5
       with:
         path: ${{ inputs.paths }}
         key: ${{ steps.get-cache-key.outputs.key }}
