@@ -23,7 +23,10 @@ jobs:
       - uses: ./.github/actions/install-build-dependencies
 
   warm-dev-deps-cache:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     needs: warm-build-deps-cache
 
     steps:
@@ -31,7 +34,7 @@ jobs:
       - uses: ./.github/actions/install-dev-dependencies
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     needs: [warm-build-deps-cache, warm-dev-deps-cache]
     env:
       RUSTFLAGS: -D warnings
