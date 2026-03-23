@@ -19,7 +19,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/install-build-dependencies
 
   warm-dev-deps-cache:
@@ -27,7 +27,7 @@ jobs:
     needs: warm-build-deps-cache
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/install-dev-dependencies
 
   lint:
@@ -37,8 +37,8 @@ jobs:
       RUSTFLAGS: -D warnings
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v6
+      - uses: actions/cache@v5
         with:
           path: .lycheecache
           key: lycheecache-${{ hashFiles('lychee.toml') }}
@@ -53,7 +53,7 @@ jobs:
     needs: [warm-build-deps-cache, warm-dev-deps-cache]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0 # Required to cause the main branch to also be fetched
       - uses: ./.github/actions/install-build-dependencies
@@ -76,7 +76,7 @@ jobs:
       RUSTFLAGS: -D warnings
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/install-build-dependencies
       - uses: ./.github/actions/run-build-command
         with:
@@ -94,7 +94,7 @@ jobs:
       RUSTFLAGS: -D warnings
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/install-build-dependencies
       - uses: ./.github/actions/run-build-command
         with:
@@ -116,7 +116,7 @@ jobs:
       RUSTFLAGS: -D warnings
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/install-build-dependencies
       - uses: ./.github/actions/run-build-command
         with:
