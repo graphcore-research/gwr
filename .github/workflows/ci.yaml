@@ -114,6 +114,7 @@ jobs:
     needs: warm-build-deps-cache
     env:
       RUSTFLAGS: -D warnings
+      BASELINE_BRANCH_NAME: main
 
     steps:
       - uses: actions/checkout@v4
@@ -126,12 +127,12 @@ jobs:
 
       - name: Run benchmarks and save results
         id: run-benchmarks-save-results
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == format('refs/heads/{0}', env.BASELINE_BRANCH_NAME)
         uses: ./.github/actions/run-build-command
         with:
-          command: cargo bench --all-features --verbose --bench one_shot_benchmarks -- --save-baseline=main
+          command: cargo bench --all-features --verbose --bench one_shot_benchmarks -- --save-baseline=$BASELINE_BRANCH_NAME
           cache-name: ${{ github.job }}
-      - if: github.ref == 'refs/heads/main'
+      - if: github.ref == format('refs/heads/{0}', env.BASELINE_BRANCH_NAME)
         uses: actions/upload-artifact@v7
         with:
           name: one-shot-benchmark-baselines
@@ -140,8 +141,8 @@ jobs:
 
       - name: Run benchmarks
         id: run-benchmarks
-        if: github.ref != 'refs/heads/main'
+        if: github.ref != format('refs/heads/{0}', env.BASELINE_BRANCH_NAME)
         uses: ./.github/actions/run-build-command
         with:
-          command: cargo bench --all-features --verbose --bench one_shot_benchmarks -- --baseline=main
+          command: cargo bench --all-features --verbose --bench one_shot_benchmarks -- --baseline=$BASELINE_BRANCH_NAME
           cache-name: ${{ github.job }}
