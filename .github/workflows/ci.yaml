@@ -120,7 +120,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/install-build-dependencies
-      - uses: ./.github/actions/run-build-command
+
+      - name: Build all benchmarks
+        id: build-all-benchmarks
+        uses: ./.github/actions/run-build-command
         with:
           command: cargo bench --all-features --verbose --no-run
           cache-name: ${{ github.job }}
@@ -139,28 +142,33 @@ jobs:
           )"
           echo "id=$id" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/download-artifact@v8
+      - name: Download baseline benchmark results
+        id: download-baseline-benchmark-results
+        uses: actions/download-artifact@v8
         with:
           name: one-shot-benchmark-baselines
           path: target/gungraun/
           github-token: ${{ github.token }}
           run-id: ${{ steps.get-latest-successful-benchmark-run.outputs.id }}
 
-      - name: Run benchmarks and save results
+      - name: Run one-shot benchmarks and update baseline results
         id: run-benchmarks-save-results
         if: github.ref == format('refs/heads/{0}', env.BASELINE_BRANCH_NAME)
         uses: ./.github/actions/run-build-command
         with:
           command: cargo bench --all-features --verbose --bench one_shot_benchmarks -- --save-baseline=$BASELINE_BRANCH_NAME
           cache-name: ${{ github.job }}
-      - if: github.ref == format('refs/heads/{0}', env.BASELINE_BRANCH_NAME)
+
+      - name: Upload baseline benchmark results
+        id: upload-baseline-benchmark-results
+        if: github.ref == format('refs/heads/{0}', env.BASELINE_BRANCH_NAME)
         uses: actions/upload-artifact@v7
         with:
           name: one-shot-benchmark-baselines
           path: target/gungraun/
           overwrite: true
 
-      - name: Run benchmarks
+      - name: Run one-shot benchmarks
         id: run-benchmarks
         if: github.ref != format('refs/heads/{0}', env.BASELINE_BRANCH_NAME)
         uses: ./.github/actions/run-build-command
