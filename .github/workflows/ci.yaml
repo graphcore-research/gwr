@@ -144,9 +144,10 @@ jobs:
 
       - name: Download baseline benchmark results
         id: download-baseline-benchmark-results
+        continue-on-error: true
         uses: actions/download-artifact@v8
         with:
-          name: one-shot-benchmark-baselines
+          name: one-shot-benchmark-baselines-${{ matrix.os }}
           path: target/gungraun/
           github-token: ${{ github.token }}
           run-id: ${{ steps.get-latest-successful-benchmark-run.outputs.id }}
@@ -164,7 +165,7 @@ jobs:
         if: github.ref == format('refs/heads/{0}', env.BASELINE_BRANCH_NAME)
         uses: actions/upload-artifact@v7
         with:
-          name: one-shot-benchmark-baselines
+          name: one-shot-benchmark-baselines-${{ matrix.os }}
           path: target/gungraun/
           overwrite: true
 
