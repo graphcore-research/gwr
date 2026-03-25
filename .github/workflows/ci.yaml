@@ -115,6 +115,7 @@ jobs:
     env:
       RUSTFLAGS: -D warnings
       BASELINE_BRANCH_NAME: main
+      GH_TOKEN: ${{ github.token }}
 
     steps:
       - uses: actions/checkout@v4
@@ -123,7 +124,27 @@ jobs:
         with:
           command: cargo bench --all-features --verbose --no-run
           cache-name: ${{ github.job }}
+
+      - name: Get ID of latest successful benchmark run on baseline branch
+        id: get-latest-successful-benchmark-run
+        run: |
+          id="$(
+            gh run list \
+              --workflow ${{ github.workflow }} \
+              --branch ${{ env.BASELINE_BRANCH_NAME }} \
+              --status success \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId'
+          )"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
       - uses: actions/download-artifact@v8
+        with:
+          name: one-shot-benchmark-baselines
+          path: target/gungraun/
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.get-latest-successful-benchmark-run.outputs.id }}
 
       - name: Run benchmarks and save results
         id: run-benchmarks-save-results
