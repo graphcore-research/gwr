@@ -122,6 +122,38 @@ CARGO_PROFILE_RELEASE_DEBUG=true sudo cargo flamegraph --bin flaky-component -- 
 
 **Note:** This is usually most useful against the `release` build.
 
+## Profiling
+
+### Developing on MacOS
+
+The XCode [Instruments] profiling tools can be used via the [cargo-instruments]
+crate. To install it:
+
+```bash
+xcode-select --install
+cargo install cargo-instruments
+```
+
+The list of [templates] describes the preconfigured set of probes avaliable
+which can be enabled during the profiling run. The current list of avaliable
+templates can be shown with:
+
+```bash
+cargo instruments --list-templates
+```
+
+For example to profile memory allocations in the `flakey-component` binary,
+running:
+
+```bash
+cargo instruments --template Allocations --time-limit 2000000 --bin flaky-component -- --num-packets 500000
+```
+
+will capture a trace file and open with the [Instruments] GUI.
+
+[cargo-instruments]: https://crates.io/crates/cargo-instruments
 [engine]: ../gwr_engine/chapter.md
+[Instruments]: https://help.apple.com/instruments
 [Rust]: https://www.rust-lang.org
 [`rustdoc`]: https://doc.rust-lang.org/rustdoc/what-is-rustdoc.html
+[templates]: https://github.com/cmyr/cargo-instruments#templates
