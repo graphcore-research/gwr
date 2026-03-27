@@ -1427,6 +1427,7 @@ dependencies = [
  "gwr-models",
  "gwr-platform",
  "gwr-track",
+ "indicatif",
  "log",
  "serde",
  "serde_yaml",
