@@ -315,8 +315,9 @@ fn main() -> Result<(), SimError> {
 
     info!(top ; "Platform built and connected");
 
-    let progress_bar = ProgressBar::new(total_expected_frames as u64);
+    let mut progress_bar = None;
     if args.progress {
+        progress_bar = Some(ProgressBar::new(total_expected_frames as u64));
         let sinks = sinks.to_owned();
         start_frame_dump(
             &spawner,
@@ -324,7 +325,7 @@ fn main() -> Result<(), SimError> {
             args.progress_ticks,
             total_expected_frames,
             sinks,
-            progress_bar.clone(),
+            progress_bar.clone().unwrap(),
         );
     }
 
@@ -347,7 +348,7 @@ fn main() -> Result<(), SimError> {
         return sim_error!("Deadlock");
     }
 
-    if args.progress {
+    if let Some(progress_bar) = progress_bar {
         progress_bar.finish();
     }
 
