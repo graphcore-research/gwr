@@ -27,6 +27,7 @@ gwr-model-builder = { path = "../gwr-model-builder", version = "0.2.0" }
 gwr-models = { path = "../gwr-models", version = "0.14.0" }
 gwr-platform = { path = "../gwr-platform", version = "0.1.0" }
 gwr-track = { path = "../gwr-track", features = ["perfetto"], version = "0.7.0" }
+indicatif.workspace = true
 log.workspace = true
 serde.workspace = true
 serde_yaml.workspace = true
