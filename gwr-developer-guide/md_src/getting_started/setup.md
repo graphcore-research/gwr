@@ -2,6 +2,8 @@
 
 # Setup
 
+{{#include ../../../README.md:cloning_repo}}
+
 {{#include ../../../README.md:tooling_bootstrap}}
 
 {{#include ../../../README.md:package_users}}

@@ -2,4 +2,4 @@
 
 //! This crate is provided to wrap up the download of Perfetto.
 
-pub const PERFETTO_SOURCE: &str = env!("OUT_DIR");
+pub const PERFETTO_SOURCE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/perfetto_src");

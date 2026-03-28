@@ -11,6 +11,8 @@ exclude_path = [
     "^\\./gwr-developer-guide\\/.*",
     # The licenses file is automatically generarte by cargo-about
     "^\\.\\/licenses\\.html$",
+    # External sources included as submodules
+    "^\\./gwr-perfetto-sys/perfetto_src/.*",
 ]
 
 # Do not check links to private IP addresses, local host or loopback
