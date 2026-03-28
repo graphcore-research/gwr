@@ -114,6 +114,19 @@ included in the [Rust chapter] of the developer guide.
 
 [Rust chapter]: gwr-developer-guide/md_src/rust/chapter.md
 
+<!-- ANCHOR: cloning_repo -->
+
+## Cloning the GWR repo
+
+Some packages within the GWR workspace, such as the `-sys` packages, use [git
+submodule]s to make source code from other repositories avaliable. When cloning
+this repo passing the `--recurse-submodules` option is sufficient to make
+everything required avaliable.
+
+[git submodule]: https://git-scm.com/docs/git-submodule
+
+<!-- ANCHOR_END: cloning_repo -->
+
 <!-- ANCHOR: tooling_bootstrap -->
 
 ## Tooling

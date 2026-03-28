@@ -1,0 +1,5 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+[submodule "gwr-perfetto-sys/perfetto_src"]
+	path = gwr-perfetto-sys/perfetto_src
+	url = https://github.com/google/perfetto
