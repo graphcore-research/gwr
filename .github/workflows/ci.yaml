@@ -167,10 +167,7 @@ jobs:
       - name: Run one-shot benchmarks and update baseline results
         id: run-benchmarks-save-results
         if: github.ref == format('refs/heads/{0}', env.BASELINE_BRANCH_NAME)
-        uses: ./.github/actions/run-build-command
-        with:
-          command: cargo bench --all-features --verbose --bench one_shot_benchmarks -- --save-baseline=$BASELINE_BRANCH_NAME
-          cache-name: ${{ github.job }}
+        run: cargo bench --all-features --verbose --bench one_shot_benchmarks -- --save-baseline=$BASELINE_BRANCH_NAME
 
       - name: Upload baseline benchmark results
         id: upload-baseline-benchmark-results
@@ -184,7 +181,4 @@ jobs:
       - name: Run one-shot benchmarks
         id: run-benchmarks
         if: github.ref != format('refs/heads/{0}', env.BASELINE_BRANCH_NAME)
-        uses: ./.github/actions/run-build-command
-        with:
-          command: cargo bench --all-features --verbose --bench one_shot_benchmarks -- --baseline=$BASELINE_BRANCH_NAME
-          cache-name: ${{ github.job }}
+        run: cargo bench --all-features --verbose --bench one_shot_benchmarks -- --baseline=$BASELINE_BRANCH_NAME
