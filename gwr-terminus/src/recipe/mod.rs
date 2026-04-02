@@ -1,6 +1,6 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -132,7 +132,7 @@ impl Recipe {
         let (arg_re_bracket, arg_re_no_bracket) = build_regexs();
 
         // Track unique names of all arguments found in the commands
-        let mut arg_names = HashSet::new();
+        let mut arg_names = BTreeSet::new();
 
         for command in commands {
             if command.selected() {
@@ -394,7 +394,7 @@ pub fn run_command_as_interactive(
 /// Parse a command and add the variables found in the command as an argument
 fn find_arguments(
     command: &Command,
-    arg_names: &mut HashSet<String>,
+    arg_names: &mut BTreeSet<String>,
     arg_re_bracket: &Regex,
     arg_re_no_bracket: &Regex,
 ) {
