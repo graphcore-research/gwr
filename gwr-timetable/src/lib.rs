@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
 
 use async_trait::async_trait;
@@ -29,8 +29,10 @@ pub struct Timetable {
     node_idx_by_id: HashMap<String, usize>,
     completed_node_indices: RefCell<HashSet<usize>>,
     active_node_indices: RefCell<HashSet<usize>>,
-    nodes_per_pe: RefCell<HashMap<usize, HashSet<usize>>>,
-    edges_to_node: RefCell<HashMap<usize, HashSet<usize>>>,
+    // Use BTreeSet for the cases where we iterate over the set as they have
+    // deterministic iteration order.
+    nodes_per_pe: RefCell<HashMap<usize, BTreeSet<usize>>>,
+    edges_to_node: RefCell<HashMap<usize, BTreeSet<usize>>>,
     ready_nodes_changed: Repeated<()>,
 }
 
@@ -54,7 +56,7 @@ impl Timetable {
                 let pe_idx = platform.pe_idx_from_name(pe_id)?;
                 nodes_per_pe
                     .entry(pe_idx)
-                    .or_insert_with(HashSet::new)
+                    .or_insert_with(BTreeSet::new)
                     .insert(i);
             }
         }
@@ -64,7 +66,7 @@ impl Timetable {
             let to_node_idx = node_idx_by_id.get(&edge.to).unwrap();
             edges_to_node
                 .entry(*to_node_idx)
-                .or_insert_with(HashSet::new)
+                .or_insert_with(BTreeSet::new)
                 .insert(i);
         }
 
