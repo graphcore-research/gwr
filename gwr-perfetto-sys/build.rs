@@ -52,11 +52,12 @@ fn update_submodule() {
     assert!(git_command.success(), "{}", git_command.to_string());
 }
 
-fn get_git_args() -> [&'static str; 4] {
+fn get_git_args() -> [&'static str; 5] {
     [
         "submodule",
         "update",
         "--init",
+        "--recommend-shallow",
         submodule_path::PERFETTO_SOURCE,
     ]
 }

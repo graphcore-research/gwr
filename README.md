@@ -121,7 +121,7 @@ included in the [Rust chapter] of the developer guide.
 Some packages within the GWR workspace, such as the `-sys` packages, use [git
 submodule]s to make source code from other repositories avaliable. When cloning
 this repo passing the `--recurse-submodules` option is sufficient to make
-everything required avaliable.
+everything required avaliable. The `--shallow-submodules` can also be passed.
 
 [git submodule]: https://git-scm.com/docs/git-submodule
 
