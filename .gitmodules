@@ -3,3 +3,4 @@
 [submodule "gwr-perfetto-sys/perfetto_src"]
 	path = gwr-perfetto-sys/perfetto_src
 	url = https://github.com/google/perfetto
+	shallow = true
