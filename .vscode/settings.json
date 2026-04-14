@@ -8,5 +8,8 @@
     ],
     "rust-analyzer.rustfmt.extraArgs": [
         "+nightly"
+    ],
+    "git.ignoredRepositories": [
+        "gwr-perfetto-sys/perfetto_src"
     ]
 }
