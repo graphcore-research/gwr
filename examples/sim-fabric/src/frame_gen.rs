@@ -3,6 +3,7 @@
 use std::fmt;
 use std::rc::Rc;
 
+use clap::ValueEnum;
 use gwr_model_builder::EntityGet;
 use gwr_models::data_frame::DataFrame;
 use gwr_models::fabric::FabricConfig;
@@ -12,7 +13,7 @@ use rand::seq::{IteratorRandom, SliceRandom};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use serde::Serialize;
 
-#[derive(clap::ValueEnum, Clone, Copy, Default, Debug, Serialize, PartialEq)]
+#[derive(ValueEnum, Clone, Copy, Default, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum TrafficPattern {
     /// All sources will send to one dest chosen at random

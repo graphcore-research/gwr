@@ -387,7 +387,7 @@ pub fn run_command_as_interactive(
     let mut stdin = child.stdin.take().expect("Should be able to open stdin");
 
     let cmd = if cfg!(target_os = "macos") {
-        format!("{to_run} ; setopt zle ; exit")
+        format!("{to_run} ; setopt zle >/dev/null 2>&1 || true ; exit")
     } else {
         to_run.to_string()
     };

@@ -1,8 +1,9 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
-#[derive(clap::ValueEnum, Clone, Debug, Default, Deserialize, Serialize, PartialEq, PartialOrd)]
+#[derive(ValueEnum, Clone, Debug, Default, Deserialize, Serialize, PartialEq, PartialOrd)]
 #[serde(rename_all = "lowercase")]
 pub enum DataType {
     #[default]

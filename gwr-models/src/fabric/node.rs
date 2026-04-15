@@ -86,6 +86,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use async_trait::async_trait;
+use clap::ValueEnum;
 use gwr_components::arbiter::Arbiter;
 use gwr_components::arbiter::policy::RoundRobin;
 use gwr_components::flow_controls::limiter::Limiter;
@@ -105,7 +106,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::fabric::FabricConfig;
 
-#[derive(clap::ValueEnum, Clone, Copy, Default, Debug, Serialize, PartialEq, Deserialize)]
+#[derive(ValueEnum, Clone, Copy, Default, Debug, Serialize, PartialEq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FabricRoutingAlgorithm {
     #[default]

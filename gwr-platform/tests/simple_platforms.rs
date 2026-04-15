@@ -130,13 +130,14 @@ macro_rules! pe_mem_config {
     ($num_active_requests:expr) => {
         format!(
             "
+memory_maps:
+  - name: mm0
+    devices:
+      - name: hbm0
+
 processing_elements:
   - name: pe0
-    memory_map:
-      ranges:
-        - base_address: 0x1_0000_0000
-          size_bytes: 16GB
-          device: hbm0
+    memory_map: mm0
     config:
       num_active_requests: {}
       lsu_access_bytes: 32
@@ -204,20 +205,22 @@ fn simple_pe_cache_mem() {
         &engine,
         &clock,
         "
+memory_maps:
+  - name: mm0
+    devices:
+      - name: hbm0
+
 processing_elements:
   - name: pe0
-    memory_map:
-      ranges:
-        - base_address: 0x1_0000_0000
-          size_bytes: 16GB
-          device: hbm0
+    memory_map: mm0
     config:
       num_active_requests: 1
       lsu_access_bytes: 32
 
 caches:
   - name: c0
-    delay_ticks: 5
+    config:
+      delay_ticks: 5
 
 memories:
   - name: hbm0

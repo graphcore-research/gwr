@@ -2,10 +2,9 @@
 
 memory_maps:
   # The default memory map for Processing Elements
-  - ranges: &pe_memory_map
-      - base_address: 0x1_0000_0000
-        size_bytes: 16GB
-        device: hbm0
+  - name: pe_memory_map
+    devices:
+      - name: hbm0
 
 fabrics:
   - name: fabric0
@@ -24,26 +23,24 @@ default_pe_config: &default_pe_config
 
 processing_elements:
   - name: pe_0_0
-    memory_map:
-      ranges: *pe_memory_map
+    memory_map: pe_memory_map
     config: *default_pe_config
   - name: pe_0_1
-    memory_map:
-      ranges: *pe_memory_map
+    memory_map: pe_memory_map
     config: *default_pe_config
   - name: pe_1_0
-    memory_map:
-      ranges: *pe_memory_map
+    memory_map: pe_memory_map
     config: *default_pe_config
   # No need to create PE for 1,1 as the HBM is connected there
 
 caches:
   - name: c2
-    bw_bytes_per_cycle: 32
-    line_size_bytes: 32
-    num_ways: 4
-    num_sets: 128
-    delay_ticks: 20
+    config:
+      bw_bytes_per_cycle: 32
+      line_size_bytes: 32
+      num_ways: 4
+      num_sets: 128
+      delay_ticks: 20
 
 memories:
   - name: hbm0
