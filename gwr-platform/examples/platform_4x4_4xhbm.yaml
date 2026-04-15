@@ -2,19 +2,12 @@
 
 memory_maps:
   # The default memory map for Processing Elements
-  - ranges: &pe_memory_map
-      - base_address: 0x1_0000_0000
-        size_bytes: 0x1_0000_0000
-        device: hbm0
-      - base_address: 0x2_0000_0000
-        size_bytes: 0x1_0000_0000
-        device: hbm1
-      - base_address: 0x3_0000_0000
-        size_bytes: 0x1_0000_0000
-        device: hbm2
-      - base_address: 0x4_0000_0000
-        size_bytes: 0x1_0000_0000
-        device: hbm3
+  - name: pe_memory_map
+    devices:
+      - name: hbm0
+      - name: hbm1
+      - name: hbm2
+      - name: hbm3
 
 fabrics:
   - name: fabric0
@@ -30,54 +23,42 @@ default_pe_config: &default_pe_config
 
 processing_elements:
   - name: pe_0_0
-    memory_map:
-      ranges: *pe_memory_map
+    memory_map: pe_memory_map
     config: *default_pe_config
   - name: pe_0_1
-    memory_map:
-      ranges: *pe_memory_map
+    memory_map: pe_memory_map
     config: *default_pe_config
   - name: pe_0_2
-    memory_map:
-      ranges: *pe_memory_map
+    memory_map: pe_memory_map
     config: *default_pe_config
   - name: pe_0_3
-    memory_map:
-      ranges: *pe_memory_map
+    memory_map: pe_memory_map
     config: *default_pe_config
 
   - name: pe_1_0
-    memory_map:
-      ranges: *pe_memory_map
+    memory_map: pe_memory_map
     config: *default_pe_config
   - name: pe_1_1
-    memory_map:
-      ranges: *pe_memory_map
+    memory_map: pe_memory_map
     config: *default_pe_config
   - name: pe_1_2
-    memory_map:
-      ranges: *pe_memory_map
+    memory_map: pe_memory_map
     config: *default_pe_config
   - name: pe_1_3
-    memory_map:
-      ranges: *pe_memory_map
+    memory_map: pe_memory_map
     config: *default_pe_config
 
   - name: pe_2_0
-    memory_map:
-      ranges: *pe_memory_map
+    memory_map: pe_memory_map
     config: *default_pe_config
   - name: pe_2_1
-    memory_map:
-      ranges: *pe_memory_map
+    memory_map: pe_memory_map
     config: *default_pe_config
   - name: pe_2_2
-    memory_map:
-      ranges: *pe_memory_map
+    memory_map: pe_memory_map
     config: *default_pe_config
   - name: pe_2_3
-    memory_map:
-      ranges: *pe_memory_map
+    memory_map: pe_memory_map
     config: *default_pe_config
 
   # No need to create PEs for 0,3-3,3 as the HBM is connected there

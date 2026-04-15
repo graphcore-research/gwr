@@ -1,8 +1,9 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
 use byte_unit::Byte;
+use clap::ValueEnum;
 use gwr_models::fabric::node::FabricRoutingAlgorithm;
-use serde::{Deserialize, de};
+use serde::{Deserialize, Serialize, de};
 use serde_yaml::Value;
 
 /// Parse a value which could be an integer or a string and return u64 value
@@ -77,7 +78,7 @@ where
 
 #[derive(Debug, Deserialize)]
 pub struct PlatformConfig {
-    pub memory_maps: Option<Vec<MemoryMapSection>>,
+    pub memory_maps: Vec<MemoryMapSection>,
     pub processing_elements: Option<Vec<ProcessingElementSection>>,
     pub caches: Option<Vec<CacheSection>>,
     pub fabrics: Option<Vec<FabricSection>>,
@@ -85,28 +86,25 @@ pub struct PlatformConfig {
     pub connections: Option<Vec<ConnectSection>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct MemoryMapSection {
-    pub ranges: Vec<MemoryMapRangeSection>,
+    pub name: String,
+    pub devices: Vec<MemoryDeviceSection>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct MemoryMapRangeSection {
-    #[serde(deserialize_with = "parse_u64_byte_str")]
-    pub base_address: u64,
-    #[serde(deserialize_with = "parse_u64_byte_str")]
-    pub size_bytes: u64,
-    pub device: String,
+#[derive(Debug, Deserialize, Clone)]
+pub struct MemoryDeviceSection {
+    pub name: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ProcessingElementSection {
     pub name: String,
-    pub memory_map: MemoryMapSection,
+    pub memory_map: String,
     pub config: ProcessingElementConfigSection,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 pub struct ProcessingElementConfigSection {
     pub num_active_requests: Option<usize>,
     pub lsu_access_bytes: Option<usize>,
@@ -117,9 +115,14 @@ pub struct ProcessingElementConfigSection {
     pub muls_per_tick: Option<usize>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct CacheSection {
     pub name: String,
+    pub config: CacheConfigSection,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+pub struct CacheConfigSection {
     pub bw_bytes_per_cycle: Option<usize>,
     pub line_size_bytes: Option<usize>,
     pub num_ways: Option<usize>,
@@ -127,14 +130,13 @@ pub struct CacheSection {
     pub delay_ticks: Option<usize>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct FabricSection {
     pub name: String,
     pub kind: FabricKind,
     pub columns: usize,
     pub rows: usize,
     pub fabric_ports_per_node: Option<usize>,
-    pub ports_per_node: Option<usize>,
     pub ticks_per_hop: Option<usize>,
     pub ticks_overhead: Option<usize>,
     pub rx_buffer_entries: Option<usize>,
@@ -143,7 +145,7 @@ pub struct FabricSection {
     pub routing: Option<FabricRoutingAlgorithm>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct MemorySection {
     pub name: String,
     pub kind: MemoryKind,
@@ -155,21 +157,21 @@ pub struct MemorySection {
     pub delay_ticks: Option<usize>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum FabricKind {
     Functional,
     Routed,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum MemoryKind {
     HBM,
     DDR,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ConnectSection {
     pub connect: Vec<String>,
 }

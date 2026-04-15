@@ -25,20 +25,21 @@ fn create_default_timetable_file() -> (Rc<Entity>, Rc<Platform>, TimetableFile) 
                 &engine,
                 &clock,
                 "
+memory_maps:
+  - name: default
+    devices:
+      - name: hbm0
+
 processing_elements:
   - name: pe0
-    memory_map:
-      ranges:
-        - base_address: 0
-          size_bytes: 0x1000_0000
-          device: hbm0
+    memory_map: default
     config:
 
 memories:
   - name: hbm0
     kind: hbm
     base_address: 0
-    capacity_bytes: 0
+    capacity_bytes: 0x1000_0000
 ",
             )
             .unwrap(),
@@ -247,13 +248,14 @@ fn memory_op_too_big() {
             &engine,
             &clock,
             "
+memory_maps:
+  - name: default
+    devices:
+      - name: hbm0
+
 processing_elements:
   - name: pe0
-    memory_map:
-      ranges:
-        - base_address: 0
-          size_bytes: 0x1000_0000
-          device: hbm0
+    memory_map: default
     config:
       sram_bytes: 128
 
@@ -261,7 +263,7 @@ memories:
   - name: hbm0
     kind: hbm
     base_address: 0
-    capacity_bytes: 0
+    capacity_bytes: 0x1000_0000
 
 connections:
   - connect:

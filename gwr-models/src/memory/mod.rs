@@ -149,6 +149,16 @@ where
         self.stats.borrow().bytes_read
     }
 
+    #[must_use]
+    pub fn base_address(&self) -> u64 {
+        self.config.base_address
+    }
+
+    #[must_use]
+    pub fn capacity_bytes(&self) -> usize {
+        self.config.capacity_bytes
+    }
+
     pub fn dump_stats(&self, time_now_ns: f64) {
         let stats = self.stats.borrow();
 
