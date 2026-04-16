@@ -11,5 +11,12 @@
     ],
     "git.ignoredRepositories": [
         "gwr-perfetto-sys/perfetto_src"
-    ]
+    ],
+    "search.exclude": {
+        // Exclude explicit siblings so VS Code can still descend into protos/perfetto.
+        "gwr-perfetto-sys/perfetto_src/{.bazelignore,.bazelrc,.bazelversion,.clang-format,.clang-tidy,.git-blame-ignore-revs,.gitallowed,.gitattributes,.gitignore,.gn,.style.yapf,Android.bp,Android.bp.extras,BUILD,BUILD.extras,BUILD.gn,CHANGELOG,CONTRIBUTORS.txt,DIR_METADATA,LICENSE,METADATA,MODULE.bazel,MODULE.bazel.lock,MODULE_LICENSE_APACHE2,OWNERS,PerfettoIntegrationTests.xml,README.chromium,README.md,TEST_MAPPING,WATCHLISTS,WORKSPACE,codereview.settings,heapprofd.rc,meson.build,perfetto.rc,perfetto_flags.aconfig,persistent_cfg.pbtxt,traced_perf.rc}": true,
+        "gwr-perfetto-sys/perfetto_src/{.git,.github,bazel,build_overrides,buildtools,debian,docs,examples,gn,include,infra,python,sdk,src,test,third_party,tools,ui}/**": true,
+        "gwr-perfetto-sys/perfetto_src/protos/README.md": true,
+        "gwr-perfetto-sys/perfetto_src/protos/third_party/**": true
+    }
 }
