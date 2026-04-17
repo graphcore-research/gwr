@@ -169,6 +169,21 @@ fn setup_all_trackers(args: &Cli) -> Rc<dyn Track> {
     setup_trackers(&config).unwrap()
 }
 
+fn ensure_dump_stats_visible(args: &mut Cli) {
+    let stdout_shows_info = args.stdout && args.stdout_level >= log::Level::Info;
+    let binary_shows_info = args.binary && args.binary_level >= log::Level::Info;
+
+    if args.dump_stats && !stdout_shows_info && !binary_shows_info {
+        eprintln!(
+            "WARNING: `--dump-stats` emits info-level messages, but neither stdout nor binary output is configured to show info. Setting '--stdout --stdout-level info'."
+        );
+        args.stdout = true;
+        if args.stdout_level < log::Level::Info {
+            args.stdout_level = log::Level::Info;
+        }
+    }
+}
+
 fn write_error_mermaid(timetable: &Timetable, path: &Path) {
     let mermaid = timetable.render_mermaid();
     if let Err(err) = fs::write(path, mermaid) {
@@ -182,7 +197,8 @@ fn write_error_mermaid(timetable: &Timetable, path: &Path) {
 }
 
 fn main() -> Result<()> {
-    let args = Cli::parse();
+    let mut args = Cli::parse();
+    ensure_dump_stats_visible(&mut args);
 
     let tracker = setup_all_trackers(&args);
     let mut engine = Engine::new(&tracker);

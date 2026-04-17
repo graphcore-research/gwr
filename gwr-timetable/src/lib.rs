@@ -18,7 +18,7 @@ use gwr_models::processing_element::task::{
 };
 use gwr_platform::Platform;
 use gwr_track::entity::Entity;
-use gwr_track::{debug, trace};
+use gwr_track::{debug, info, trace};
 
 pub mod mermaid;
 pub mod timetable_file;
@@ -569,11 +569,11 @@ impl Timetable {
             }
         }
 
-        println!("Timetable:");
-        println!(
+        info!(self.entity ; "Timetable:");
+        info!(self.entity ;
             "  {num_compute_nodes} compute nodes, {num_tensor_nodes} tensor nodes, {num_memory_nodes} memory nodes"
         );
-        println!("  loads {total_load_bytes} bytes, stores {total_store_bytes} bytes");
+        info!(self.entity ; "  loads {total_load_bytes} bytes, stores {total_store_bytes} bytes");
 
         Ok(())
     }

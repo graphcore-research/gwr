@@ -377,6 +377,14 @@ pub trait Operator {
         outputs: &[Option<TensorView>],
     ) -> Result<usize, SimError>;
 
+    /// Returns the total number of FLOPs performed by the specified
+    /// computation.
+    fn compute_flops(
+        &self,
+        inputs: &[Option<TensorView>],
+        outputs: &[Option<TensorView>],
+    ) -> Result<usize, SimError>;
+
     /// Partition the operation into one or more views that can be executed in
     /// parallel. Implementations may return fewer than `num_partitions` if the
     /// operator cannot be split that finely.

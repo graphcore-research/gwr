@@ -32,18 +32,20 @@ use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::Runnable;
 use gwr_engine::types::{AccessType, SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
-use gwr_track::debug;
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
+use gwr_track::{debug, info};
 
 use crate::memory::memory_access::MemoryAccess;
 use crate::memory::memory_map::{DeviceId, MemoryMap};
 use crate::processing_element::dispatch::Dispatch;
+use crate::processing_element::flop_monitor::FlopMonitor;
 use crate::processing_element::load_store_unit::LoadStoreUnit;
 use crate::processing_element::operators::TensorView;
 use crate::processing_element::task::{ComputeTaskConfig, MemoryOp, MemoryTaskConfig, Task};
 
 pub mod dispatch;
+mod flop_monitor;
 mod load_store_unit;
 pub mod operators;
 pub mod task;
@@ -82,6 +84,11 @@ pub struct ComputeCapabilities {
     sram_bytes: usize,
 }
 
+#[derive(Default)]
+struct ProcessingElementStats {
+    total_flops: usize,
+}
+
 #[derive(EntityGet, EntityDisplay)]
 pub struct ProcessingElement {
     entity: Rc<Entity>,
@@ -90,7 +97,9 @@ pub struct ProcessingElement {
     spawner: Spawner,
 
     compute_capabilities: Rc<ComputeCapabilities>,
+    stats: Rc<RefCell<ProcessingElementStats>>,
     dispatcher: RefCell<Option<Dispatcher>>,
+    flop_monitor: Option<Rc<FlopMonitor>>,
 }
 
 impl ProcessingElement {
@@ -110,6 +119,10 @@ impl ProcessingElement {
         let lsu = LoadStoreUnit::new_and_register(
             engine, clock, &entity, aka, pe_config, memory_map, device_id,
         )?;
+        let monitor_window_size = entity.tracker.monitoring_window_size_for(entity.id);
+        let flop_monitor = monitor_window_size.map(|window_size_ticks| {
+            FlopMonitor::new_and_register(engine, &entity, clock, window_size_ticks)
+        });
 
         let rc_self = Rc::new(Self {
             entity,
@@ -122,8 +135,10 @@ impl ProcessingElement {
                 muls_per_tick: pe_config.muls_per_tick,
                 sram_bytes: pe_config.sram_bytes,
             }),
+            stats: Rc::new(RefCell::new(ProcessingElementStats::default())),
 
             dispatcher: RefCell::new(None),
+            flop_monitor,
         });
         engine.register(rc_self.clone());
         Ok(rc_self)
@@ -162,6 +177,23 @@ impl ProcessingElement {
             Some(dispatcher) => dispatcher.total_tasks_for_pe(self.entity.name.as_str()),
         }
     }
+
+    pub fn dump_stats(&self, time_now_ns: f64) {
+        let stats = self.stats.borrow();
+        let time_now_s = time_now_ns / 1e9;
+        let total_gflops = stats.total_flops as f64 / 1e9;
+        let average_gflops_per_second = if time_now_s == 0.0 {
+            0.0
+        } else {
+            total_gflops / time_now_s
+        };
+
+        info!(self.entity ; "ProcessingElement {}:", self.entity.full_name());
+        info!(self.entity ;
+            "  FLOPs: {}, {total_gflops:.2} GFLOPs, {average_gflops_per_second:.2} GFLOP/s",
+            stats.total_flops
+        );
+    }
 }
 
 #[async_trait(?Send)]
@@ -193,7 +225,9 @@ impl Runnable for ProcessingElement {
                     let dispatcher = dispatcher.clone();
                     let lsu = self.lsu.clone();
                     let compute_capabilities = self.compute_capabilities.clone();
+                    let stats = self.stats.clone();
                     let entity = self.entity.clone();
+                    let flop_monitor = self.flop_monitor.clone();
                     self.spawner.spawn(async move {
                         handle_task(
                             entity,
@@ -201,6 +235,8 @@ impl Runnable for ProcessingElement {
                             dispatcher,
                             lsu,
                             compute_capabilities,
+                            stats,
+                            flop_monitor,
                             task_idx,
                         )
                         .await
@@ -215,12 +251,15 @@ impl Runnable for ProcessingElement {
     }
 }
 
+#[expect(clippy::too_many_arguments)]
 async fn handle_task(
     entity: Rc<Entity>,
     clock: Clock,
     dispatcher: Dispatcher,
     lsu: Rc<LoadStoreUnit>,
     compute_capabilities: Rc<ComputeCapabilities>,
+    stats: Rc<RefCell<ProcessingElementStats>>,
+    flop_monitor: Option<Rc<FlopMonitor>>,
     task_idx: usize,
 ) -> SimResult {
     let task = dispatcher.task_by_id(task_idx)?;
@@ -231,6 +270,8 @@ async fn handle_task(
             lsu,
             task_idx,
             compute_capabilities,
+            stats,
+            flop_monitor,
             &config,
         )
         .await
@@ -256,12 +297,15 @@ fn tensor_view_base_addr(view: &TensorView) -> Result<u64, SimError> {
     Ok(base_addr + byte_offset)
 }
 
+#[expect(clippy::too_many_arguments)]
 async fn handle_compute_task(
     clock: Clock,
     dispatcher: Dispatcher,
     lsu: Rc<LoadStoreUnit>,
     task_idx: usize,
     compute_capabilities: Rc<ComputeCapabilities>,
+    stats: Rc<RefCell<ProcessingElementStats>>,
+    flop_monitor: Option<Rc<FlopMonitor>>,
     config: &ComputeTaskConfig,
 ) -> SimResult {
     let total_num_bytes: usize = config
@@ -296,7 +340,14 @@ async fn handle_compute_task(
             &partition.inputs,
             &partition.outputs,
         )?;
+        let compute_flops = config
+            .op
+            .compute_flops(&partition.inputs, &partition.outputs)?;
+        if let Some(flop_monitor) = &flop_monitor {
+            flop_monitor.record_interval(compute_ticks as u64, compute_flops as f64);
+        }
         clock.wait_ticks(compute_ticks as u64).await;
+        stats.borrow_mut().total_flops += compute_flops;
 
         for view in partition.outputs.iter().flatten() {
             lsu.do_access(

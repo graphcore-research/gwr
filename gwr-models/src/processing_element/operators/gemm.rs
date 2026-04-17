@@ -215,6 +215,30 @@ fn validate_input_outputs<'a, 'b, T: HasShape>(
     Ok((input_a, input_b, output))
 }
 
+fn gemm_op_counts<T: HasShape>(
+    inputs: &[Option<T>],
+    outputs: &[Option<T>],
+) -> Result<(usize, usize), SimError> {
+    let (input_a_view, input_b_view, output_view) = validate_input_outputs(inputs, outputs)?;
+    let m = get_inner_dim(input_a_view, INPUT_A_OFFSET_M);
+    let k = get_inner_dim(input_a_view, INPUT_A_OFFSET_K);
+    let n = get_inner_dim(input_b_view, INPUT_B_OFFSET_N);
+
+    let num_matmuls = output_view
+        .shape()
+        .get_dims()
+        .iter()
+        .take(output_view.num_dims().saturating_sub(2))
+        .product::<usize>();
+
+    let num_muls = m * n * k * num_matmuls;
+    let num_matmul_adds = m * n * (k - 1) * num_matmuls;
+    // When there is a C input tensor each output element has one extra add
+    let num_c_adds = usize::from(inputs.len() == 3) * output_view.shape().num_elements();
+    let num_adds = num_matmul_adds + num_c_adds;
+    Ok((num_muls, num_adds))
+}
+
 pub struct OperatorGemm {}
 
 impl Operator for OperatorGemm {
@@ -281,24 +305,19 @@ impl Operator for OperatorGemm {
         inputs: &[Option<TensorView>],
         outputs: &[Option<TensorView>],
     ) -> Result<usize, SimError> {
-        let (input_a_view, input_b_view, output_view) = validate_input_outputs(inputs, outputs)?;
-        let m = get_inner_dim(input_a_view, INPUT_A_OFFSET_M);
-        let k = get_inner_dim(input_a_view, INPUT_A_OFFSET_K);
-        let n = get_inner_dim(input_b_view, INPUT_B_OFFSET_N);
-
-        let rank = output_view.num_dims();
-        let mut num_matmuls = 1;
-        for i in 0..(rank - 2) {
-            num_matmuls *= output_view.shape.0[i];
-        }
-
-        let num_muls = m * n * k * num_matmuls;
-        let num_adds = m * n * (k - 1) * num_matmuls;
-
+        let (num_muls, num_adds) = gemm_op_counts(inputs, outputs)?;
         let compute_ticks = num_muls.div_ceil(compute_capabilities.muls_per_tick)
             + num_adds.div_ceil(compute_capabilities.adds_per_tick);
-
         Ok(compute_ticks)
+    }
+
+    fn compute_flops(
+        &self,
+        inputs: &[Option<TensorView>],
+        outputs: &[Option<TensorView>],
+    ) -> Result<usize, SimError> {
+        let (num_muls, num_adds) = gemm_op_counts(inputs, outputs)?;
+        Ok(num_muls + num_adds)
     }
 
     fn partition_views(
@@ -540,6 +559,38 @@ mod tests {
             )
             .unwrap();
         assert_eq!(delay_ticks, 17600 + 14080);
+    }
+
+    #[test]
+    fn flop_count_adds_multiplies_and_accumulates() {
+        let operator = OperatorGemm {};
+        assert_eq!(
+            operator
+                .compute_flops(
+                    &[tensor_view(&[4, 5]), tensor_view(&[5, 8])],
+                    &[tensor_view(&[4, 8])],
+                )
+                .unwrap(),
+            (4 * 5 * 8) + (4 * (5 - 1) * 8)
+        );
+    }
+
+    #[test]
+    fn flop_count_includes_optional_c_elementwise_add() {
+        let operator = OperatorGemm {};
+        assert_eq!(
+            operator
+                .compute_flops(
+                    &[
+                        tensor_view(&[4, 5]),
+                        tensor_view(&[5, 8]),
+                        tensor_view(&[4, 8]),
+                    ],
+                    &[tensor_view(&[4, 8])],
+                )
+                .unwrap(),
+            (4 * 5 * 8) + (4 * (5 - 1) * 8) + (4 * 8)
+        );
     }
 
     type ShapeOffsets = (&'static [usize], &'static [usize]);

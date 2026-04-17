@@ -20,7 +20,7 @@ use crate::traits::{Runnable, SimObject};
 use crate::types::SimResult;
 
 pub struct Monitor {
-    pub bw_entity: Rc<Entity>,
+    entity: Rc<Entity>,
     clock: Clock,
     window_size_ticks: u64,
     bytes_in_window: RefCell<usize>,
@@ -44,7 +44,7 @@ impl Monitor {
         create!(entity ; bw_entity, 0, ReqType::Value as i8);
 
         let rc_self = Rc::new(Self {
-            bw_entity: Rc::new(bw_entity),
+            entity: Rc::new(bw_entity),
             clock: clock.clone(),
             window_size_ticks,
             bytes_in_window: RefCell::new(0),
@@ -83,7 +83,7 @@ impl Runnable for Monitor {
             let per_second = Byte::from_f64(bytes_in_window as f64 / window_duration_s).unwrap();
             let gib_per_second = per_second.get_adjusted_unit(self.bw_unit);
 
-            value!(self.bw_entity ; gib_per_second.get_value());
+            value!(self.entity ; gib_per_second.get_value());
 
             *self.last_time_ns.borrow_mut() = time_now_ns;
         }
