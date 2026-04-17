@@ -116,6 +116,14 @@ fn validate_input_outputs<'a, 'b, T: HasShape>(
     Ok((input_a, input_b, output))
 }
 
+fn num_add_flops<T: HasShape>(
+    inputs: &[Option<T>],
+    outputs: &[Option<T>],
+) -> Result<usize, SimError> {
+    let (_, _, output) = validate_input_outputs(inputs, outputs)?;
+    Ok(output.num_elements())
+}
+
 impl Operator for OperatorAdd {
     fn validate_tensors(&self, inputs: &[Option<Tensor>], outputs: &[Option<Tensor>]) -> SimResult {
         validate_input_outputs(inputs, outputs)?;
@@ -187,10 +195,17 @@ impl Operator for OperatorAdd {
         inputs: &[Option<TensorView>],
         outputs: &[Option<TensorView>],
     ) -> Result<usize, SimError> {
-        validate_input_outputs(inputs, outputs)?;
-        let num_adds = outputs[0].as_ref().unwrap().num_elements();
+        let num_adds = num_add_flops(inputs, outputs)?;
         let compute_ticks = num_adds.div_ceil(compute_capabilities.adds_per_tick);
         Ok(compute_ticks)
+    }
+
+    fn compute_flops(
+        &self,
+        inputs: &[Option<TensorView>],
+        outputs: &[Option<TensorView>],
+    ) -> Result<usize, SimError> {
+        num_add_flops(inputs, outputs)
     }
 
     fn partition_views(
@@ -393,6 +408,20 @@ mod tests {
             )
             .unwrap();
         assert_eq!(delay_ticks, 100);
+    }
+
+    #[test]
+    fn flop_count_matches_output_elements() {
+        let operator = OperatorAdd {};
+        assert_eq!(
+            operator
+                .compute_flops(
+                    &[tensor_view(&[2, 3, 4]), tensor_view(&[1, 3, 1])],
+                    &[tensor_view(&[2, 3, 4])],
+                )
+                .unwrap(),
+            24
+        );
     }
 
     type ShapeOffsets = (&'static [usize], &'static [usize]);

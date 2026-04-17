@@ -191,6 +191,9 @@ impl Platform {
         for mem in &self.memories {
             mem.dump_stats(time_now_ns);
         }
+        for pe in &self.processing_elements {
+            pe.dump_stats(time_now_ns);
+        }
     }
 }
 

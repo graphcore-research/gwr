@@ -1,0 +1,31 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+description:
+  Run gwr-timetable with memory bandwidth monitoring enabled on memory rx ports
+  and FLOP reporting enabled on all processing elements.
+arguments:
+  - name: PLATFORM
+    default: gwr-platform/examples/platform_4x4.yaml
+    comment: Platform YAML file to run.
+  - name: TIMETABLE
+    default: gwr-timetable/examples/small.yaml
+    comment: Timetable YAML file to run.
+  - name: MONITOR_WINDOW_TICKS
+    default: 500
+    comment: Number of clock ticks per monitoring window.
+  - name: TRACE_FILE
+    default: trace.bin
+    comment: Binary trace file to write for gwr-spotter.
+  - name: MONITOR_FILTER_REGEX
+    default: .*::(pe_[^:]+|(hbm[^:]*|memory[^:]*)::rx)$
+    comment:
+      Regex enabling FLOP monitors on PEs and bandwidth monitors on memory rx
+      ports.
+ingredients:
+  - comment:
+      Run gwr-timetable with binary tracing plus monitor windows for PEs and
+      memories.
+    command:
+      cargo run --release --bin gwr-timetable -- --platform ${PLATFORM}
+      --timetable ${TIMETABLE} --binary --binary-file ${TRACE_FILE}
+      --monitor-window-ticks ${MONITOR_WINDOW_TICKS} --monitor-filter-regex
+      "${MONITOR_FILTER_REGEX}" --dump-stats --stdout --stdout-level info

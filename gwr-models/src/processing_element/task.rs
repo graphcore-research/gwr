@@ -43,6 +43,17 @@ impl ComputeOp {
         }
     }
 
+    pub fn compute_flops(
+        &self,
+        input_views: &[Option<TensorView>],
+        output_views: &[Option<TensorView>],
+    ) -> Result<usize, SimError> {
+        match self {
+            ComputeOp::Add => OperatorAdd {}.compute_flops(input_views, output_views),
+            ComputeOp::Gemm => OperatorGemm {}.compute_flops(input_views, output_views),
+        }
+    }
+
     pub fn create_partitions(
         &self,
         input_views: &[Option<TensorView>],
