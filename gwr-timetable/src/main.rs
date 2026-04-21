@@ -64,14 +64,14 @@ fn start_frame_dump(
     progress_bar: ProgressBar,
 ) {
     spawner.spawn(async move {
-        let mut seen_frames = 0;
+        let mut seen_completed_tasks = 0;
         loop {
             // Use the `background` wait to indicate that the simulation can end if this is
             // the only task still active.
             clock.wait_ticks_or_exit(progress_ticks as u64).await;
             let num_completed_tasks: usize = timetable.num_graph_nodes_completed();
-            progress_bar.inc((num_completed_tasks - seen_frames) as u64);
-            seen_frames = num_completed_tasks;
+            progress_bar.inc((num_completed_tasks - seen_completed_tasks) as u64);
+            seen_completed_tasks = num_completed_tasks;
             if num_completed_tasks == total_expected_tasks {
                 break;
             }
