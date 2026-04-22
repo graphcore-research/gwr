@@ -1,0 +1,35 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+memory_maps:
+  - name: pe_memory_map
+    devices:
+      - name: mem0
+
+processing_elements:
+  - name: pe0
+    memory_map: pe_memory_map
+    config:
+      lsu_access_bytes: 32
+      sram_bytes: 64KiB
+
+caches:
+  - name: l1_0
+    config:
+      bw_bytes_per_cycle: 32
+      line_size_bytes: 32
+      delay_ticks: 4
+
+memories:
+  - name: mem0
+    kind: ddr
+    base_address: 0x1_0000_0000
+    capacity_bytes: 1GiB
+    delay_ticks: 40
+
+connections:
+  - connect:
+      - pe.pe0
+      - cache.l1_0.dev
+  - connect:
+      - cache.l1_0.mem
+      - mem.mem0

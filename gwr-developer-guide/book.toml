@@ -23,6 +23,7 @@ externs = [
     "gwr_components",
     "gwr_engine",
     "gwr_model_builder",
+    "gwr_platform",
     "gwr_resources",
     "gwr_track",
 ]

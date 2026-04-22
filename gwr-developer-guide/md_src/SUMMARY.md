@@ -29,6 +29,8 @@
 
 - [Models](models/chapter.md)
 
+- [GWR Platform](gwr_platform/chapter.md)
+
 - [Applications](applications/chapter.md)
   - [Examples](applications/examples.md)
 
