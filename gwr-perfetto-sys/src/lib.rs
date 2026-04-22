@@ -1,6 +1,6 @@
 // Copyright (c) 2024 Graphcore Ltd. All rights reserved.
 
-//! This crate is provided to wrap up the download of Perfetto.
+//! This crate provides access to the Perfetto source code.
 
 mod submodule_path;
 
