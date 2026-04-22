@@ -27,24 +27,90 @@ pub struct AppRecipe {
 
 pub struct AppLogger {
     /// Log messages
-    pub messages: VecWithIndex<String>,
+    pub messages: Vec<String>,
+
+    /// First visible line in the messages pane when not auto-following output.
+    scroll_line: usize,
+
+    /// Keep the messages view pinned to the end as new output arrives.
+    follow_end: bool,
 }
 
 impl Default for AppLogger {
     fn default() -> Self {
         Self {
-            messages: VecWithIndex::new(true),
+            messages: Vec::new(),
+            scroll_line: 0,
+            follow_end: true,
         }
+    }
+}
+
+impl AppLogger {
+    fn total_lines(&self) -> usize {
+        self.messages
+            .iter()
+            .map(|message| message.lines().count().max(1))
+            .sum()
+    }
+
+    fn push_message(&mut self, message: &str) {
+        self.messages.push(message.to_string());
+        if self.follow_end {
+            self.scroll_line = self.total_lines().saturating_sub(1);
+        }
+    }
+
+    #[must_use]
+    pub fn scroll_line(&self) -> usize {
+        if self.follow_end {
+            self.total_lines().saturating_sub(1)
+        } else {
+            self.scroll_line.min(self.total_lines().saturating_sub(1))
+        }
+    }
+
+    pub fn handle_key_event(&mut self, key_event: crossterm::event::KeyEvent) {
+        use crossterm::event::{KeyCode, KeyModifiers};
+
+        let page_size = 10;
+        match (key_event.modifiers, key_event.code) {
+            (_, KeyCode::PageDown) | (KeyModifiers::CONTROL, KeyCode::Char('f')) => {
+                self.move_down(page_size);
+            }
+            (_, KeyCode::PageUp) | (KeyModifiers::CONTROL, KeyCode::Char('b')) => {
+                self.move_up(page_size);
+            }
+            (_, KeyCode::Down) | (_, KeyCode::Char('j')) => {
+                self.move_down(1);
+            }
+            (_, KeyCode::Up) | (_, KeyCode::Char('k')) => {
+                self.move_up(1);
+            }
+            _ => {}
+        }
+    }
+
+    fn move_up(&mut self, amount: usize) {
+        self.scroll_line = self.scroll_line().saturating_sub(amount);
+        self.follow_end = false;
+    }
+
+    fn move_down(&mut self, amount: usize) {
+        let max_line = self.total_lines().saturating_sub(1);
+        let next = self.scroll_line().saturating_add(amount).min(max_line);
+        self.scroll_line = next;
+        self.follow_end = next >= max_line;
     }
 }
 
 impl Logger for RefMut<'_, AppLogger> {
     fn error(&mut self, message: &str) {
-        self.messages.rows_mut().push(message.to_string());
+        self.push_message(message);
     }
 
     fn info(&mut self, message: &str) {
-        self.messages.rows_mut().push(message.to_string());
+        self.push_message(message);
     }
 }
 
@@ -340,7 +406,7 @@ impl Draw for App {
             Constraint::Length(1),
             Constraint::Min(1),
             Constraint::Min(1),
-            Constraint::Length(5),
+            Constraint::Min(2),
         ]);
         let [
             help_area,
@@ -356,7 +422,7 @@ impl Draw for App {
         render_app_string(
             frame,
             search_string_area,
-            "Selection Command",
+            "Search Recipes",
             &self.search_string,
             self.app_state == AppState::EditingSearchString,
         );
@@ -397,6 +463,6 @@ impl Draw for App {
             &self.app_state,
         );
         let logger = self.logger.borrow_mut();
-        render_messages_area(frame, messages_area, &logger.messages, &self.app_state);
+        render_messages_area(frame, messages_area, &logger, &self.app_state);
     }
 }

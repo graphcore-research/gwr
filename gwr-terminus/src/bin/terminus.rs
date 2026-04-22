@@ -29,7 +29,7 @@ struct Cli {
     debug: bool,
 
     /// Recipes folder to search for recipe
-    #[arg(short, long, default_value = "terminus/recipes")]
+    #[arg(short, long, default_value = "gwr-terminus/recipes")]
     recipes_folder: String,
 
     /// Root of tmp file names

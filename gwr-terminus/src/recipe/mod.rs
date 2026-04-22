@@ -9,7 +9,7 @@ use std::process::{ExitStatus, Stdio};
 use color_eyre::eyre::Context;
 use log::{debug, error};
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::Logger;
 use crate::command::Command;
@@ -24,6 +24,7 @@ const TAG: &str = "--------\n";
 #[derive(Serialize, Deserialize)]
 pub struct Ingredient {
     comment: String,
+    #[serde(deserialize_with = "deserialize_command")]
     command: String,
 }
 
@@ -241,11 +242,11 @@ impl Recipe {
         let mut args_to_set = HashMap::new();
         let mut arg_name = None;
         for arg in args {
-            if arg.starts_with("--") {
+            if let Some(name) = arg_name.take() {
+                args_to_set.insert(name, arg);
+            } else if arg.starts_with("--") {
                 let name: String = arg.chars().skip(2).collect();
                 arg_name = Some(name);
-            } else if let Some(name) = arg_name.take() {
-                args_to_set.insert(name, arg);
             } else {
                 error!("Cannot parse '{arg}'");
                 self.print_help();
@@ -317,7 +318,10 @@ impl Recipe {
                 bin_writer.write_all(format!("\n# {comment}\n").as_bytes())?;
             }
             let cmd = &command.command;
-            bin_writer.write_all(format!("{cmd}\n").as_bytes())?;
+            bin_writer.write_all(cmd.as_bytes())?;
+            if !cmd.ends_with('\n') {
+                bin_writer.write_all(b"\n")?;
+            }
         }
         Ok(())
     }
@@ -341,6 +345,24 @@ impl Recipe {
         python::convert_to(self, out_path)?;
         Ok(())
     }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum CommandValue {
+    Inline(String),
+    Lines(Vec<String>),
+}
+
+fn deserialize_command<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = CommandValue::deserialize(deserializer)?;
+    Ok(match value {
+        CommandValue::Inline(command) => command,
+        CommandValue::Lines(lines) => lines.join("\n"),
+    })
 }
 
 /// Run a command as if it were run in interactive mode by the user.
@@ -444,5 +466,60 @@ fn find_arguments(
     }
     for cap in arg_re_no_bracket.captures_iter(command_str) {
         arg_names.insert(cap.name("name").unwrap().as_str().to_string());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Recipe;
+
+    #[test]
+    fn parse_multiline_command_from_literal_block() {
+        let yaml = r"
+description: test
+arguments: []
+ingredients:
+  - comment: multiline
+    command: |-
+      echo one
+      echo two
+";
+
+        let recipe = serde_yaml_ng::from_str::<Recipe>(yaml).unwrap();
+        assert_eq!(recipe.ingredients()[0].command(), "echo one\necho two");
+    }
+
+    #[test]
+    fn parse_multiline_command_from_list() {
+        let yaml = r"
+description: test
+arguments: []
+ingredients:
+  - comment: multiline
+    command:
+      - echo one
+      - echo two
+";
+
+        let recipe = serde_yaml_ng::from_str::<Recipe>(yaml).unwrap();
+        assert_eq!(recipe.ingredients()[0].command(), "echo one\necho two");
+    }
+
+    #[test]
+    fn parse_cli_args_allows_values_starting_with_dashes() {
+        let yaml = r#"
+description: test
+arguments:
+  - name: EXTRA_ARGS
+    default: ""
+    comment: extra args
+ingredients: []
+"#;
+
+        let mut recipe = serde_yaml_ng::from_str::<Recipe>(yaml).unwrap();
+        let args = vec!["--EXTRA_ARGS".to_string(), "--routed".to_string()];
+        recipe.parse_cli_args(&args);
+
+        assert_eq!(recipe.arguments()[0].value(), &Some("--routed".to_string()));
     }
 }
