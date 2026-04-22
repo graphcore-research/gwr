@@ -1,5 +1,7 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+#![doc = include_str!(gwr_build::generated_crate_docs_path!())]
+
 use std::collections::HashMap;
 use std::fmt::{self, Display};
 use std::path::Path;
@@ -199,24 +201,32 @@ impl Platform {
 
 impl Display for Platform {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "ProcessingElements:")?;
-        for (i, pe) in self.processing_elements.iter().enumerate() {
-            writeln!(f, "  {i}: {}", pe.entity())?;
+        if !self.processing_elements.is_empty() {
+            writeln!(f, "\nProcessingElements:")?;
+            for (i, pe) in self.processing_elements.iter().enumerate() {
+                writeln!(f, "  {i}: {}", pe.entity())?;
+            }
         }
 
-        writeln!(f, "\nMemories:")?;
-        for (i, mem) in self.memories.iter().enumerate() {
-            writeln!(f, "  {i}: {}", mem.entity())?;
+        if !self.memories.is_empty() {
+            writeln!(f, "\nMemories:")?;
+            for (i, mem) in self.memories.iter().enumerate() {
+                writeln!(f, "  {i}: {}", mem.entity())?;
+            }
         }
 
-        writeln!(f, "\nCaches:")?;
-        for (i, cache) in self.caches.iter().enumerate() {
-            writeln!(f, "  {i}: {}", cache.entity())?;
+        if !self.caches.is_empty() {
+            writeln!(f, "\nCaches:")?;
+            for (i, cache) in self.caches.iter().enumerate() {
+                writeln!(f, "  {i}: {}", cache.entity())?;
+            }
         }
 
-        writeln!(f, "\nFabrics:")?;
-        for (i, fabric) in self.fabrics.iter().enumerate() {
-            writeln!(f, "  {i}: {}", fabric.entity())?;
+        if !self.fabrics.is_empty() {
+            writeln!(f, "\nFabrics:")?;
+            for (i, fabric) in self.fabrics.iter().enumerate() {
+                writeln!(f, "  {i}: {}", fabric.entity())?;
+            }
         }
 
         Ok(())

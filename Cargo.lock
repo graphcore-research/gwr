@@ -1225,6 +1225,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "gwr-build"
+version = "0.1.0"
+
+[[package]]
 name = "gwr-components"
 version = "0.7.0"
 dependencies = [
@@ -1355,6 +1359,7 @@ dependencies = [
  "async-trait",
  "byte-unit",
  "clap",
+ "gwr-build",
  "gwr-engine",
  "gwr-model-builder",
  "gwr-models",

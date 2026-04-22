@@ -9,6 +9,7 @@ members = [
     "examples/sim-fabric",
     "examples/sim-pipe",
     "examples/sim-ring",
+    "gwr-build",
     "gwr-components",
     "gwr-config",
     "gwr-developer-guide",

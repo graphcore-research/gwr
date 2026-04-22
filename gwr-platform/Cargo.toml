@@ -8,12 +8,12 @@ edition.workspace = true
 rust-version.workspace = true
 description = "Library for defining and building execution platforms defined by configuration files"
 documentation.workspace = true
-readme.workspace = true
+readme = "README.md"
 homepage.workspace = true
 repository.workspace = true
 license.workspace = true
 keywords.workspace = true
-categories = ["command-line-utilities", "development-tools::debugging", "parsing", "simulation"]
+categories.workspace = true
 publish.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -22,6 +22,7 @@ publish.workspace = true
 async-trait.workspace = true
 byte-unit.workspace = true
 clap.workspace = true
+gwr-build = { path = "../gwr-build", version = "0.1.0" }
 gwr-engine = { path = "../gwr-engine", version = "0.10.0" }
 gwr-model-builder = { path = "../gwr-model-builder", version = "0.2.0" }
 gwr-models = { path = "../gwr-models", version = "0.16.0" }
@@ -30,3 +31,6 @@ log.workspace = true
 regex.workspace = true
 serde.workspace = true
 serde_yaml.workspace = true
+
+[build-dependencies]
+gwr-build = { path = "../gwr-build", version = "0.1.0" }
