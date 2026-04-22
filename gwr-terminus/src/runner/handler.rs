@@ -85,6 +85,7 @@ fn handle_key_event_edit_search(key_event: KeyEvent, app: &mut App) {
             KeyCode::Esc => app.exit(),
             KeyCode::Char('?') => app.set_app_state(AppState::ShowHelp),
             KeyCode::Tab => app.set_app_state(AppState::RecipeSelection),
+            KeyCode::BackTab => app.set_app_state(AppState::ViewMessages),
             _ => {
                 app.search_string().handle_key_event(key_event);
                 app.process_search();
@@ -119,6 +120,6 @@ fn handle_key_event_view_messages(key_event: KeyEvent, app: &mut App) {
         KeyCode::BackTab => app.set_app_state(AppState::IngedientSelection),
         KeyCode::Tab => app.set_app_state(AppState::EditingSearchString),
         KeyCode::Char('?') => app.set_app_state(AppState::ShowHelp),
-        _ => app.logger().messages.handle_key_event(key_event),
+        _ => app.logger().handle_key_event(key_event),
     }
 }

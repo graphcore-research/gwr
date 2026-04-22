@@ -9,7 +9,7 @@ use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
 use crate::app_string::AppString;
 use crate::block_style;
 use crate::recipe::Recipe;
-use crate::runner::app::{AppRecipe, AppState};
+use crate::runner::app::{AppLogger, AppRecipe, AppState};
 use crate::vec_with_index::VecWithIndex;
 
 struct HelpRender<'a> {
@@ -78,7 +78,7 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
         "Edit search:",
         vec!["The tool starts in the search string editor."],
     );
-    renderer.add_command_help_line("<Tab>", "move to selection window");
+    renderer.add_command_help_line("<Tab>/shift+<Tab>", "change window");
     renderer.add_command_help_line("<Esc>", "exit application");
     renderer.add_command_help_line("left-arrow", "move left in command text");
     renderer.add_command_help_line("right-arrow", "move right in command text");
@@ -126,7 +126,7 @@ pub fn render_help_line(frame: &mut Frame, help_area: Rect, app_state: &AppState
     let mut msg = vec![
         prefix,
         "Press ".into(),
-        "Tab".bold(),
+        "Tab/Shift+Tab".bold(),
         " to change windows, ".into(),
         "?".bold(),
         " for help, ".into(),
@@ -136,6 +136,9 @@ pub fn render_help_line(frame: &mut Frame, help_area: Rect, app_state: &AppState
     let suffix = match app_state {
         AppState::RecipeSelection => {
             vec![" Enter".bold(), " to run the selected recipe.".into()]
+        }
+        AppState::ArgSelection => {
+            vec![" Enter".bold(), " to edit the selected argument.".into()]
         }
         _ => vec![],
     };
@@ -326,25 +329,18 @@ pub fn render_ingredients(
 pub fn render_messages_area(
     frame: &mut Frame,
     messages_area: Rect,
-    messages: &VecWithIndex<String>,
+    logger: &AppLogger,
     app_state: &AppState,
 ) {
-    let middle = messages_area.height / 2;
-    let current_index = messages.index();
-    let start_offset = current_index.saturating_sub(middle as usize);
+    let content = if logger.messages.is_empty() {
+        Text::from("No messages yet")
+    } else {
+        Text::from(logger.messages.join("\n"))
+    };
 
-    let message_lines: Vec<ListItem> = messages
-        .rows()
-        .iter()
-        .skip(start_offset)
-        .take(messages_area.height as usize)
-        .map(|m| {
-            let content = Line::from(Span::raw(m));
-            ListItem::new(content)
-        })
-        .collect();
-    let messages = List::new(message_lines)
+    let messages = Paragraph::new(content)
         .block(Block::bordered().title("Messages"))
-        .style(block_style(app_state == &AppState::ViewMessages));
+        .style(block_style(app_state == &AppState::ViewMessages))
+        .scroll((logger.scroll_line() as u16, 0));
     frame.render_widget(messages, messages_area);
 }
