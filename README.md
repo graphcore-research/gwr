@@ -240,7 +240,7 @@ may be opened, and doing so will cause the CI workflows to be run on every
 commit.
 
 For short lived branches pushed only at the point of opening a pull request the
-branch naming prefix `pr/` should be used, for example, `pr/new-example-app`.
+branch naming prefix `pr-` should be used, for example, `pr-new-example-app`.
 Branches named with this prefix will still cause the pull request specific CI
 workflow to run, but will avoid the push specific CI workflow from running until
 the point they are merged.
