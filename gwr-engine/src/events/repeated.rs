@@ -16,7 +16,6 @@ use futures::Future;
 use futures::future::FusedFuture;
 
 use crate::traits::{BoxFuture, Event};
-use crate::types::SimResult;
 
 pub struct RepeatedState<T>
 where
@@ -80,19 +79,17 @@ where
         }
     }
 
-    pub fn notify(&self) -> SimResult {
+    pub fn notify(&self) {
         for waker in self.state.listen_waiting.borrow_mut().drain(..) {
             waker.wake();
         }
-        Ok(())
     }
 
-    pub fn notify_result(&self, result: T) -> SimResult {
+    pub fn notify_result(&self, result: T) {
         *self.state.result.borrow_mut() = result;
         for waker in self.state.listen_waiting.borrow_mut().drain(..) {
             waker.wake();
         }
-        Ok(())
     }
 }
 

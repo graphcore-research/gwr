@@ -32,7 +32,7 @@ fn notify_one_listener() {
         let clock = clock.clone();
         engine.spawn(async move {
             clock.wait_ticks(10).await;
-            repeated.notify()?;
+            repeated.notify();
             Ok(())
         });
     }
@@ -67,7 +67,7 @@ fn notify_one_listener_result() {
         let clock = clock.clone();
         engine.spawn(async move {
             clock.wait_ticks(10).await;
-            repeated.notify_result(result)?;
+            repeated.notify_result(result);
             Ok(())
         });
     }
@@ -95,7 +95,7 @@ fn notify_before_listen() {
     }
 
     engine.spawn(async move {
-        repeated.notify()?;
+        repeated.notify();
         Ok(())
     });
 
@@ -140,7 +140,7 @@ fn notify_multiple_listeners() {
             // Should still be 0 after delay
             assert_eq!(*count.borrow(), 0);
 
-            repeated.notify()?;
+            repeated.notify();
             Ok(())
         });
     }
@@ -181,9 +181,9 @@ fn notify_listen_twice() {
         let clock = clock.clone();
         engine.spawn(async move {
             clock.wait_ticks(10).await;
-            repeated.notify()?;
+            repeated.notify();
             clock.wait_ticks(10).await;
-            repeated.notify()?;
+            repeated.notify();
             Ok(())
         });
     }
@@ -220,7 +220,7 @@ fn notify_listen_loop() {
         engine.spawn(async move {
             for i in 0..COUNTER {
                 clock.wait_ticks(10).await;
-                repeated.notify_result(i + 1)?;
+                repeated.notify_result(i + 1);
             }
             Ok(())
         });
@@ -257,7 +257,7 @@ fn notify_once_listen_twice() {
         let clock = clock.clone();
         engine.spawn(async move {
             clock.wait_ticks(10).await;
-            repeated.notify()?;
+            repeated.notify();
             Ok(())
         });
     }
@@ -301,7 +301,7 @@ fn notify_repeated_two_listeners() {
         let clock = clock.clone();
         engine.spawn(async move {
             clock.wait_ticks(10).await;
-            repeated.notify()?;
+            repeated.notify();
             Ok(())
         });
     }

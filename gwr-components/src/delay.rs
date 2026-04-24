@@ -89,7 +89,7 @@
 //!     pending.borrow_mut().push_back((value, tick));
 //!
 //!     // Wake up output if required
-//!     pending_changed.notify()?;
+//!     pending_changed.notify();
 //! }
 //!  # }
 //! ```
@@ -332,7 +332,7 @@ where
             tick.set_tick(tick.tick() + delay_ticks as u64);
 
             self.pending.borrow_mut().push_back((value, tick));
-            self.pending_changed.notify()?;
+            self.pending_changed.notify();
 
             if delay_ticks > 0 && !*self.error_on_output_stall.borrow() {
                 // Enforce back-pressure by waiting until there is room in the pending queue
@@ -378,7 +378,7 @@ where
 
                 exit!(entity ; value.id());
                 tx.put(value)?.await;
-                output_changed.notify()?;
+                output_changed.notify();
             }
             None => {
                 pending_changed.listen().await;

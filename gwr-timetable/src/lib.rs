@@ -666,7 +666,7 @@ impl Dispatch for Timetable {
     fn set_task_active(&self, node_idx: usize) -> SimResult {
         debug!(self.entity; "task{node_idx}: active");
         self.active_node_indices.borrow_mut().insert(node_idx);
-        self.ready_nodes_changed.notify()?;
+        self.ready_nodes_changed.notify();
         Ok(())
     }
 
@@ -701,7 +701,7 @@ impl Dispatch for Timetable {
             NodeSection::Tensor { .. } => {}
         }
 
-        self.ready_nodes_changed.notify()?;
+        self.ready_nodes_changed.notify();
         Ok(())
     }
 
