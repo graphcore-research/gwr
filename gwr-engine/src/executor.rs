@@ -1,6 +1,6 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::future::Future;
 use std::mem;
 use std::pin::Pin;
@@ -8,6 +8,9 @@ use std::rc::Rc;
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use gwr_track::entity::Entity;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+use rand::seq::SliceRandom;
 
 use crate::time::clock::Clock;
 use crate::time::simtime::SimTime;
@@ -56,7 +59,7 @@ unsafe fn wake_task(data: *const ()) {
 }
 
 struct Task {
-    future: RefCell<Pin<Box<dyn Future<Output = SimResult>>>>,
+    future: RefCell<Option<Pin<Box<dyn Future<Output = SimResult>>>>>,
     executor_state: Rc<ExecutorState>,
 }
 
@@ -66,13 +69,23 @@ impl Task {
         executor_state: Rc<ExecutorState>,
     ) -> Task {
         Task {
-            future: RefCell::new(Box::pin(future)),
+            future: RefCell::new(Some(Box::pin(future))),
             executor_state,
         }
     }
 
     fn poll(&self, context: &mut Context) -> Poll<SimResult> {
-        self.future.borrow_mut().as_mut().poll(context)
+        let mut future_slot = self.future.borrow_mut();
+        let Some(future) = future_slot.as_mut() else {
+            return Poll::Ready(Ok(()));
+        };
+
+        let poll_result = future.as_mut().poll(context);
+        if poll_result.is_ready() {
+            future_slot.take();
+        }
+
+        poll_result
     }
 }
 
@@ -80,6 +93,8 @@ struct ExecutorState {
     task_queue: RefCell<Vec<Rc<Task>>>,
     new_tasks: RefCell<Vec<Rc<Task>>>,
     time: RefCell<SimTime>,
+    randomize_task_order: Cell<bool>,
+    task_order_rng: RefCell<StdRng>,
 }
 
 impl ExecutorState {
@@ -88,6 +103,8 @@ impl ExecutorState {
             task_queue: RefCell::new(Vec::new()),
             new_tasks: RefCell::new(Vec::new()),
             time: RefCell::new(SimTime::new(top)),
+            randomize_task_order: Cell::new(false),
+            task_order_rng: RefCell::new(StdRng::seed_from_u64(rand::random())),
         }
     }
 }
@@ -135,6 +152,9 @@ impl Executor {
         // Append new tasks created since the last step into the task queue
         let mut task_queue = self.state.task_queue.borrow_mut();
         task_queue.append(&mut self.state.new_tasks.borrow_mut());
+        if self.state.randomize_task_order.get() {
+            task_queue.shuffle(&mut *self.state.task_order_rng.borrow_mut());
+        }
 
         // Loop over all tasks, polling them. If a task is not ready, add it to the
         // pending tasks.
@@ -171,6 +191,14 @@ impl Executor {
     #[must_use]
     pub fn time_now_ns(&self) -> f64 {
         self.state.time.borrow().time_now_ns()
+    }
+
+    pub fn set_randomize_task_order(&self, randomize: bool) {
+        self.state.randomize_task_order.set(randomize);
+    }
+
+    pub fn set_task_order_seed(&self, seed: u64) {
+        *self.state.task_order_rng.borrow_mut() = StdRng::seed_from_u64(seed);
     }
 }
 

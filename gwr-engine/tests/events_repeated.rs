@@ -2,11 +2,16 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::task::{Context, Poll};
 
+use futures::{FutureExt, select};
 use gwr_engine::events::repeated::Repeated;
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::Event;
+
+pub mod common;
+use common::{counting_waker, wake_count};
 
 #[test]
 fn notify_one_listener() {
@@ -309,4 +314,66 @@ fn notify_repeated_two_listeners() {
     run_simulation!(engine);
 
     assert_eq!(clock.time_now_ns(), 11.0);
+}
+
+#[test]
+fn repolling_listener_replaces_registered_waker() {
+    let repeated = Repeated::new(123);
+    let mut listener = repeated.listen();
+
+    let (first_wakes, first_waker) = counting_waker();
+    let (second_wakes, second_waker) = counting_waker();
+
+    let mut cx = Context::from_waker(&first_waker);
+    assert_eq!(listener.as_mut().poll(&mut cx), Poll::Pending);
+
+    let mut cx = Context::from_waker(&second_waker);
+    assert_eq!(listener.as_mut().poll(&mut cx), Poll::Pending);
+
+    repeated.notify_result(456);
+
+    assert_eq!(wake_count(&first_wakes), 0);
+    assert_eq!(wake_count(&second_wakes), 1);
+    assert_eq!(listener.as_mut().poll(&mut cx), Poll::Ready(456));
+}
+
+#[test]
+fn cancelled_listener_is_removed() {
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
+
+    let repeated = Repeated::new(usize::default());
+
+    {
+        let repeated = repeated.clone();
+        let clock = clock.clone();
+        engine.spawn(async move {
+            {
+                let mut listener = repeated.listen().fuse();
+                let mut timeout = clock.wait_ticks(5).fuse();
+
+                select! {
+                    _ = listener => panic!("listener should have been cancelled"),
+                    () = timeout => {}
+                }
+            }
+
+            clock.wait_ticks(5).await;
+            Ok(())
+        });
+    }
+
+    {
+        let repeated = repeated.clone();
+        let clock = clock.clone();
+        engine.spawn(async move {
+            clock.wait_ticks(10).await;
+            repeated.notify();
+            Ok(())
+        });
+    }
+
+    run_simulation!(engine);
+
+    assert_eq!(clock.time_now_ns(), 10.0);
 }

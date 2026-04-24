@@ -26,6 +26,7 @@ futures.workspace = true
 gwr-track = { path = "../gwr-track", version = "0.8.0" }
 log.workspace = true
 mimalloc = { version = "0.1.48", features = ["v3"], optional = true }
+rand.workspace = true
 
 [dev-dependencies]
 arc-swap = "1.6.0"

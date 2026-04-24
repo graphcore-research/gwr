@@ -4,7 +4,7 @@ use gwr_engine::events::any_of::AnyOf;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::Event;
 
-mod common;
+pub mod common;
 use common::{create_once_event_at_delay, spawn_activity};
 
 #[derive(Clone, Copy)]
