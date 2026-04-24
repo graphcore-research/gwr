@@ -224,7 +224,7 @@ impl EntityManager {
         None
     }
 
-    /// Add a filter regular expression to set matching entites to a given
+    /// Add a filter regular expression to set matching entities to a given
     /// level.
     ///
     /// # Example

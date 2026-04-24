@@ -6,11 +6,143 @@ use std::io::BufWriter;
 use std::rc::Rc;
 use std::{fs, io};
 
+use clap::Args;
+
 use crate::tracker::multi_tracker::MultiTracker;
 #[cfg(feature = "perfetto")]
 use crate::tracker::perfetto::PerfettoTracker;
 use crate::tracker::{CapnProtoTracker, EntityManager, TextTracker, TrackConfigError};
 use crate::{Tracker, Writer};
+
+/// Standard command-line arguments for tracker configuration.
+#[derive(Clone, Debug, Args)]
+pub struct TrackerArgs {
+    /// Enable logging to the console.
+    #[arg(long, default_value = "false")]
+    pub stdout: bool,
+
+    /// Level of log message to display.
+    #[arg(long, default_value = "Info")]
+    pub stdout_level: log::Level,
+
+    /// Set a regular expression for which entities should have logging level
+    /// set to `--stdout-level`. Others will have level set to `Error`.
+    #[arg(long, default_value = "")]
+    pub stdout_filter_regex: String,
+
+    /// Enable logging to binary file used by `gwr-spotter`.
+    #[arg(long, default_value = "false")]
+    pub binary: bool,
+
+    /// Level of binary trace events to record.
+    #[arg(long, default_value = "Trace")]
+    pub binary_level: log::Level,
+
+    /// Set a regular expression for which entities should have binary output
+    /// level set to `--binary-level`. Others will have level set to `Error`.
+    #[arg(long, default_value = "")]
+    pub binary_filter_regex: String,
+
+    /// The filename binary trace output is written to.
+    #[arg(long, default_value = "trace.bin")]
+    pub binary_file: String,
+
+    /// Enable logging to Perfetto file used by `gwr-spotter`.
+    #[cfg(feature = "perfetto")]
+    #[arg(long, default_value = "false")]
+    pub perfetto: bool,
+
+    /// Level of Perfetto trace events to record.
+    #[cfg(feature = "perfetto")]
+    #[arg(long, default_value = "Trace")]
+    pub perfetto_level: log::Level,
+
+    /// Set a regular expression for which entities should have Perfetto output
+    /// level set to `--perfetto-level`. Others will have level set to `Error`.
+    #[cfg(feature = "perfetto")]
+    #[arg(long, default_value = "")]
+    pub perfetto_filter_regex: String,
+
+    /// The filename Perfetto trace output is written to.
+    #[cfg(feature = "perfetto")]
+    #[arg(long, default_value = "trace.pftrace")]
+    pub perfetto_file: String,
+
+    /// Enable monitoring at the specified number of clock ticks.
+    #[arg(long)]
+    pub monitor_window_ticks: Option<u64>,
+
+    /// Set a regular expression for which ports should have monitors enabled.
+    #[arg(long, default_value = "")]
+    pub monitor_filter_regex: String,
+}
+
+impl TrackerArgs {
+    /// Return whether any tracker output has been explicitly requested.
+    #[must_use]
+    pub fn tracking_requested(&self) -> bool {
+        let requested = self.stdout || self.binary;
+        #[cfg(feature = "perfetto")]
+        let requested = requested || self.perfetto;
+        requested
+    }
+
+    /// Return whether any configured tracker will emit messages at `level`.
+    #[must_use]
+    pub fn level_enabled(&self, level: log::Level) -> bool {
+        let shown = (self.stdout && self.stdout_level >= level)
+            || (self.binary && self.binary_level >= level);
+        #[cfg(feature = "perfetto")]
+        let shown = shown || (self.perfetto && self.perfetto_level >= level);
+        shown
+    }
+
+    /// Ensure that if the specified feature is enabled then a tracker will be
+    /// showing messages of that level
+    pub fn ensure_visiblity(&mut self, feature: bool, feature_name: &str, level: log::Level) {
+        if feature && !self.level_enabled(level) {
+            self.stdout = true;
+            if self.stdout_level < log::Level::Info {
+                self.stdout_level = log::Level::Info;
+            }
+            eprintln!(
+                "WARNING: `{feature_name}` emits {level} messages, but no tracker is configured to show that level. Enabling stdout at {}.",
+                self.stdout_level
+            );
+        }
+    }
+
+    /// Convert these command-line arguments into a [`TrackersConfig`].
+    #[must_use]
+    pub fn trackers_config(&self) -> TrackersConfig<'_> {
+        TrackersConfig {
+            stdout: TrackerConfig {
+                enable: self.stdout,
+                level: self.stdout_level,
+                filter_regex: &self.stdout_filter_regex,
+                file: None,
+            },
+            binary: TrackerConfig {
+                enable: self.binary,
+                level: self.binary_level,
+                filter_regex: &self.binary_filter_regex,
+                file: Some(&self.binary_file),
+            },
+            #[cfg(feature = "perfetto")]
+            perfetto: TrackerConfig {
+                enable: self.perfetto,
+                level: self.perfetto_level,
+                filter_regex: &self.perfetto_filter_regex,
+                file: Some(&self.perfetto_file),
+            },
+            monitors: MonitorsConfig {
+                enable: self.monitor_window_ticks.is_some(),
+                window_size_ticks: self.monitor_window_ticks.unwrap_or(0),
+                filter_regex: &self.monitor_filter_regex,
+            },
+        }
+    }
+}
 
 /// Configuration options for an individual tracker.
 pub struct TrackerConfig<'a> {

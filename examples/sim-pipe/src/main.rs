@@ -18,7 +18,7 @@ use gwr_engine::types::SimError;
 use gwr_engine::{run_simulation, sim_error};
 use gwr_models::data_frame::DataFrame;
 use gwr_models::fc_pipeline::{FcPipeline, FcPipelineConfig};
-use gwr_track::builder::{MonitorsConfig, TrackerConfig, TrackersConfig, setup_trackers};
+use gwr_track::builder::{TrackerArgs, setup_trackers};
 use gwr_track::entity::{Entity, GetEntity};
 use gwr_track::{Track, error, info};
 use indicatif::ProgressBar;
@@ -28,63 +28,8 @@ use sim_pipe::frame_gen::FrameGen;
 #[derive(Parser)]
 #[command(about = "Flow controlled evaluation application")]
 struct Cli {
-    /// Enable logging to the console.
-    #[arg(long, default_value = "false")]
-    stdout: bool,
-
-    /// Level of log message to display.
-    #[arg(long, default_value = "Info")]
-    stdout_level: log::Level,
-
-    /// Set a regular expression for which entites should have logging level set
-    /// to `--stdout-level`. Others will have level set to `Error`.
-    #[arg(long, default_value = "")]
-    stdout_filter_regex: String,
-
-    /// Enable logging to binary file used by `gwr-spotter`.
-    #[arg(long, default_value = "false")]
-    binary: bool,
-
-    /// Level of binary trace events to record.
-    #[arg(long, default_value = "Trace")]
-    binary_level: log::Level,
-
-    /// Set a regular expression for which entites should have binary output
-    /// level set to `--binary-level`. Others will have level set to
-    /// `Error`.
-    #[arg(long, default_value = "")]
-    binary_filter_regex: String,
-
-    /// The filename binary trace output is written to.
-    #[arg(long, default_value = "trace.bin")]
-    binary_file: String,
-
-    /// Enable logging to Perfetto file used by `gwr-spotter`.
-    #[arg(long, default_value = "false")]
-    perfetto: bool,
-
-    /// Level of Perfetto trace events to record.
-    #[arg(long, default_value = "Trace")]
-    perfetto_level: log::Level,
-
-    /// Set a regular expression for which entites should have Perfetto output
-    /// level set to `--perfetto-level`. Others will have level set to
-    /// `Error`.
-    #[arg(long, default_value = "")]
-    perfetto_filter_regex: String,
-
-    /// The filename Perfetto trace output is written to.
-    #[arg(long, default_value = "trace.pftrace")]
-    perfetto_file: String,
-
-    /// Enable monitoring at the specified number of clock ticks.
-    #[clap(long)]
-    monitor_window_ticks: Option<u64>,
-
-    /// Set a regular expression for which ports should have monitors
-    /// enabled.
-    #[arg(long, default_value = "")]
-    monitor_filter_regex: String,
+    #[command(flatten)]
+    tracker: TrackerArgs,
 
     /// Show a progress bar for the received frame count (updated at the rate
     /// defined by `progress_ticks`).
@@ -171,38 +116,9 @@ fn start_frame_dump(
     });
 }
 
-fn setup_all_trackers(args: &Cli) -> Rc<dyn Track> {
-    let config = TrackersConfig {
-        stdout: TrackerConfig {
-            enable: args.stdout,
-            level: args.stdout_level,
-            filter_regex: &args.stdout_filter_regex,
-            file: None,
-        },
-        binary: TrackerConfig {
-            enable: args.binary,
-            level: args.binary_level,
-            filter_regex: &args.binary_filter_regex,
-            file: Some(&args.binary_file),
-        },
-        perfetto: TrackerConfig {
-            enable: args.perfetto,
-            level: args.perfetto_level,
-            filter_regex: &args.perfetto_filter_regex,
-            file: Some(&args.perfetto_file),
-        },
-        monitors: MonitorsConfig {
-            enable: args.monitor_window_ticks.is_some(),
-            window_size_ticks: args.monitor_window_ticks.unwrap_or(0),
-            filter_regex: &args.monitor_filter_regex,
-        },
-    };
-    setup_trackers(&config).unwrap()
-}
-
 fn main() -> Result<(), SimError> {
     let args = Cli::parse();
-    let tracker = setup_all_trackers(&args);
+    let tracker: Rc<dyn Track> = setup_trackers(&args.tracker.trackers_config()).unwrap();
 
     let mut engine = Engine::new(&tracker);
     let clock = engine.default_clock();
