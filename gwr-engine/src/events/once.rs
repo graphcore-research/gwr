@@ -5,11 +5,12 @@
 use std::cell::RefCell;
 use std::pin::Pin;
 use std::rc::Rc;
-use std::task::{Context, Poll, Waker};
+use std::task::{Context, Poll};
 
 use futures::Future;
 use futures::future::FusedFuture;
 
+use super::waiting::Waiting;
 use crate::sim_error;
 use crate::traits::{BoxFuture, Event};
 use crate::types::SimResult;
@@ -18,7 +19,7 @@ pub struct OnceState<T>
 where
     T: Copy,
 {
-    listen_waiting: RefCell<Vec<Waker>>,
+    waiting: Waiting,
     triggered: RefCell<bool>,
     result: T,
 }
@@ -29,7 +30,7 @@ where
 {
     pub fn new(value: T) -> Self {
         Self {
-            listen_waiting: RefCell::new(Vec::new()),
+            waiting: Waiting::new(),
             triggered: RefCell::new(false),
             result: value,
         }
@@ -56,6 +57,7 @@ where
 {
     state: Rc<OnceState<T>>,
     done: bool,
+    listener_id: Option<u64>,
 }
 
 impl<T> FusedFuture for OnceFuture<T>
@@ -82,9 +84,7 @@ where
             return sim_error!("once event already triggered");
         }
         *self.state.triggered.borrow_mut() = true;
-        for waker in self.state.listen_waiting.borrow_mut().drain(..) {
-            waker.wake();
-        }
+        self.state.waiting.wake_all();
         Ok(())
     }
 }
@@ -114,6 +114,7 @@ where
         Box::pin(OnceFuture {
             state: self.state.clone(),
             done: false,
+            listener_id: None,
         })
     }
 
@@ -132,13 +133,27 @@ where
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if *self.state.triggered.borrow() {
             self.done = true;
+            self.listener_id = None;
             Poll::Ready(self.state.result)
         } else {
-            self.state
-                .listen_waiting
-                .borrow_mut()
-                .push(cx.waker().clone());
+            if let Some(listener_id) = self.listener_id.take() {
+                self.state.waiting.remove_listener(listener_id);
+            }
+            self.listener_id = Some(self.state.waiting.register_listener(cx.waker().clone()));
             Poll::Pending
+        }
+    }
+}
+
+impl<T> Drop for OnceFuture<T>
+where
+    T: Copy,
+{
+    fn drop(&mut self) {
+        if !self.done
+            && let Some(listener_id) = self.listener_id.take()
+        {
+            self.state.waiting.remove_listener(listener_id);
         }
     }
 }

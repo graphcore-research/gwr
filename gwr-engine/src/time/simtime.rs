@@ -58,6 +58,7 @@ impl SimTime {
                     set_time!(self.entity ; next_ns);
                     self.current_ns = next_ns;
                 }
+                next_clock.advance_time(clock_time);
                 next_clock.shared_state.waiting.borrow_mut().pop()
             } else {
                 None
@@ -65,15 +66,6 @@ impl SimTime {
         } else {
             None
         }
-    }
-
-    /// Move all clocks to their next tick after the specified time.
-    pub fn advance_all_clocks_to(&mut self, time_ns: f64) {
-        for clock in &self.clocks {
-            clock.advance_to(time_ns);
-        }
-        set_time!(self.entity ; time_ns);
-        self.current_ns = time_ns;
     }
 
     #[must_use]

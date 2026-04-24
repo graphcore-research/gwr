@@ -106,9 +106,27 @@ impl Engine {
         self.spawner.spawn(future);
     }
 
+    pub fn set_randomize_task_order(&self, randomize: bool) {
+        self.executor.set_randomize_task_order(randomize);
+    }
+
+    pub fn set_task_order_seed(&self, seed: u64) {
+        self.executor.set_task_order_seed(seed);
+    }
+
     #[must_use]
     pub fn default_clock(&mut self) -> Clock {
         self.executor.get_clock(DEFAULT_CLOCK_MHZ)
+    }
+
+    #[must_use]
+    pub fn clock_hz(&mut self, freq_hz: f64) -> Clock {
+        self.executor.get_clock(freq_hz / 1_000_000.0)
+    }
+
+    #[must_use]
+    pub fn clock_khz(&mut self, freq_khz: f64) -> Clock {
+        self.executor.get_clock(freq_khz / 1000.0)
     }
 
     #[must_use]

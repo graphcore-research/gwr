@@ -5,7 +5,7 @@
 //! Time is made up of a cycle count and a phase.
 
 use core::cmp::Ordering;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -113,6 +113,9 @@ pub struct Clock {
 }
 
 pub struct TaskWaker {
+    /// Internal identifier for a scheduled clock wait.
+    pub id: u64,
+
     /// The Waker to use to make a task active again.
     pub waker: Waker,
 
@@ -126,6 +129,8 @@ pub struct TaskWaker {
 pub struct ClockState {
     now: RefCell<ClockTick>,
 
+    next_waiter_id: Cell<u64>,
+
     /// Queue of futures waiting for the right time.
     pub waiting: RefCell<Vec<Vec<TaskWaker>>>,
 
@@ -138,12 +143,16 @@ pub struct ClockState {
 }
 
 impl ClockState {
-    fn schedule(&self, schedule_time: ClockTick, cx: &mut Context<'_>, can_exit: bool) {
+    fn schedule(&self, schedule_time: ClockTick, cx: &mut Context<'_>, can_exit: bool) -> u64 {
+        let waiter_id = self.next_waiter_id.get();
+        self.next_waiter_id.set(waiter_id + 1);
+
         let mut waiting_times = self.waiting_times.borrow_mut();
         let mut waiting = self.waiting.borrow_mut();
         if let Some(index) = waiting_times.iter().position(|&x| x == schedule_time) {
             // Time already exists, add this task
             waiting[index].push(TaskWaker {
+                id: waiter_id,
                 waker: cx.waker().clone(),
                 can_exit,
             });
@@ -156,6 +165,7 @@ impl ClockState {
                     waiting.insert(
                         index,
                         vec![TaskWaker {
+                            id: waiter_id,
                             waker: cx.waker().clone(),
                             can_exit,
                         }],
@@ -165,20 +175,37 @@ impl ClockState {
                     // Insert at the head
                     waiting_times.push(schedule_time);
                     waiting.push(vec![TaskWaker {
+                        id: waiter_id,
                         waker: cx.waker().clone(),
                         can_exit,
                     }]);
                 }
             }
         }
+
+        waiter_id
+    }
+
+    fn unschedule(&self, schedule_time: ClockTick, waiter_id: u64) {
+        let mut waiting_times = self.waiting_times.borrow_mut();
+        let mut waiting = self.waiting.borrow_mut();
+
+        if let Some(time_index) = waiting_times.iter().position(|&x| x == schedule_time)
+            && let Some(waiter_index) = waiting[time_index].iter().position(|w| w.id == waiter_id)
+        {
+            waiting[time_index].remove(waiter_index);
+            if waiting[time_index].is_empty() {
+                waiting.remove(time_index);
+                waiting_times.remove(time_index);
+            }
+        }
     }
 
     fn advance_time(&self, to_time: ClockTick) {
         self.resolve();
-        if to_time != *self.now.borrow() {
-            assert!(to_time >= *self.now.borrow(), "Time moving backwards");
-            *self.now.borrow_mut() = to_time;
-        }
+
+        assert!(to_time >= *self.now.borrow(), "Time moving backwards");
+        *self.now.borrow_mut() = to_time;
     }
 
     fn resolve(&self) {
@@ -198,6 +225,7 @@ impl Clock {
                 #[cfg(feature = "phase")]
                 phase: 0,
             }),
+            next_waiter_id: Cell::new(0),
             waiting: RefCell::new(Vec::new()),
             waiting_times: RefCell::new(Vec::new()),
             to_resolve: RefCell::new(Vec::new()),
@@ -207,6 +235,11 @@ impl Clock {
             freq_mhz,
             shared_state,
         }
+    }
+
+    /// Advance the time on this clock
+    pub fn advance_time(&self, to_time: ClockTick) {
+        self.shared_state.advance_time(to_time);
     }
 
     /// Returns the clocks frequency in MHz.
@@ -252,8 +285,8 @@ impl Clock {
         ClockDelay {
             shared_state: self.shared_state.clone(),
             until,
-            state: ClockDelayState::Pending,
             can_exit: false,
+            waiter_id: None,
         }
     }
 
@@ -269,8 +302,8 @@ impl Clock {
         ClockDelay {
             shared_state: self.shared_state.clone(),
             until,
-            state: ClockDelayState::Pending,
             can_exit: true,
+            waiter_id: None,
         }
     }
 
@@ -283,8 +316,8 @@ impl Clock {
         ClockDelay {
             shared_state: self.shared_state.clone(),
             until,
-            state: ClockDelayState::Pending,
             can_exit: false,
+            waiter_id: None,
         }
     }
 
@@ -297,8 +330,8 @@ impl Clock {
         ClockDelay {
             shared_state: self.shared_state.clone(),
             until,
-            state: ClockDelayState::Pending,
             can_exit: false,
+            waiter_id: None,
         }
     }
 
@@ -353,33 +386,35 @@ impl Resolver for Clock {
     }
 }
 
-/// Possible states of a ClockDelay.
-enum ClockDelayState {
-    Pending,
-    Running,
-}
-
 /// Future returned by the clock to manage advancing time using async functions.
 pub struct ClockDelay {
     shared_state: Rc<ClockState>,
     until: ClockTick,
-    state: ClockDelayState,
     can_exit: bool,
+    waiter_id: Option<u64>,
 }
 
 impl Future for ClockDelay {
     type Output = ();
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.state {
-            ClockDelayState::Pending => {
-                self.shared_state.schedule(self.until, cx, self.can_exit);
-                self.state = ClockDelayState::Running;
-                Poll::Pending
+        if self.until > *self.shared_state.now.borrow() {
+            if let Some(waiter_id) = self.waiter_id {
+                self.shared_state.unschedule(self.until, waiter_id);
             }
-            ClockDelayState::Running => {
-                self.shared_state.advance_time(self.until);
-                Poll::Ready(())
-            }
+            let waiter_id = self.shared_state.schedule(self.until, cx, self.can_exit);
+            self.waiter_id = Some(waiter_id);
+            Poll::Pending
+        } else {
+            self.waiter_id = None;
+            Poll::Ready(())
+        }
+    }
+}
+
+impl Drop for ClockDelay {
+    fn drop(&mut self) {
+        if let Some(waiter_id) = self.waiter_id.take() {
+            self.shared_state.unschedule(self.until, waiter_id);
         }
     }
 }

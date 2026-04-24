@@ -2,11 +2,15 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::task::{Context, Poll};
 
 use gwr_engine::events::once::Once;
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::Event;
+
+pub mod common;
+use common::{counting_waker, wake_count};
 
 #[test]
 fn notify_zero_listeners() {
@@ -135,6 +139,27 @@ fn notify_multiple_listeners() {
 
     assert_eq!(clock.time_now_ns(), 10.0);
     assert_eq!(*count.borrow(), num_listen);
+}
+
+#[test]
+fn repolling_listener_replaces_registered_waker() {
+    let once = Once::new(123);
+    let mut listener = once.listen();
+
+    let (first_wakes, first_waker) = counting_waker();
+    let (second_wakes, second_waker) = counting_waker();
+
+    let mut cx = Context::from_waker(&first_waker);
+    assert_eq!(listener.as_mut().poll(&mut cx), Poll::Pending);
+
+    let mut cx = Context::from_waker(&second_waker);
+    assert_eq!(listener.as_mut().poll(&mut cx), Poll::Pending);
+
+    once.notify().unwrap();
+
+    assert_eq!(wake_count(&first_wakes), 0);
+    assert_eq!(wake_count(&second_wakes), 1);
+    assert_eq!(listener.as_mut().poll(&mut cx), Poll::Ready(123));
 }
 
 #[test]

@@ -71,6 +71,14 @@ fn main() {
 }
 ```
 
+<!-- prettier-ignore-start -->
+
+> [!Note]
+> The `Engine` makes no guarantees about the order in which tasks are
+> evaluated within the same clock tick.
+
+<!-- prettier-ignore-end -->
+
 <!-- ANCHOR_END: overview -->
 
 [clock]: ../gwr-developer-guide/md_src/gwr_engine/time/clocks.md

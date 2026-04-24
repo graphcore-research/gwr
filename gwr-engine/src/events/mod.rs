@@ -59,3 +59,4 @@ pub mod all_of;
 pub mod any_of;
 pub mod once;
 pub mod repeated;
+mod waiting;

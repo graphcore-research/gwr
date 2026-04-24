@@ -6,5 +6,8 @@ use crate::engine::Engine;
 
 #[must_use]
 pub fn start_test(full_filepath: &str) -> Engine {
-    Engine::new(&create_tracker(full_filepath))
+    let engine = Engine::new(&create_tracker(full_filepath));
+    engine.set_task_order_seed(0x2eed);
+    engine.set_randomize_task_order(true);
+    engine
 }

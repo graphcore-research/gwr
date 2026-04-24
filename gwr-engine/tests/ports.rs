@@ -73,6 +73,8 @@ fn select_on_ports() {
             let ns = clock.time_now_ns();
             assert!(ns == 1.0 || ns == 3.0);
 
+            // Wait to ensure that data from port2 will be received before we send again
+            clock.wait_ticks(3).await;
             tx_port1.put(3)?.await;
             assert_eq!(clock.time_now_ns(), 5.0);
             Ok(())
