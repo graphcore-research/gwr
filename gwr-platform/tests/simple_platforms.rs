@@ -64,14 +64,14 @@ impl Dispatch for TestDispatcher {
     fn set_task_active(&self, task_idx: usize) -> gwr_engine::types::SimResult {
         let mut handle = self.started_tasks.borrow_mut();
         handle.insert(task_idx);
-        self.change.notify()?;
+        self.change.notify();
         Ok(())
     }
 
     fn set_task_completed(&self, task_idx: usize) -> gwr_engine::types::SimResult {
         let mut handle = self.completed_tasks.borrow_mut();
         handle.insert(task_idx);
-        self.change.notify()?;
+        self.change.notify();
         Ok(())
     }
 

@@ -317,7 +317,7 @@ where
             .data_for_tx
             .borrow_mut()
             .push_back((value, tick));
-        port_states[dest_index].waiting_for_data.notify()?;
+        port_states[dest_index].waiting_for_data.notify();
     }
 }
 
@@ -339,7 +339,7 @@ where
             .borrow_mut()
             .pop_front()
         {
-            port_states[waiting_input].waiting_for_room.notify()?;
+            port_states[waiting_input].waiting_for_room.notify();
         }
 
         match next {

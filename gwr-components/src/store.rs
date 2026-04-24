@@ -183,7 +183,7 @@ where
         }
 
         self.data.borrow_mut().push_back(value);
-        self.level_change.notify_result(self.data.borrow().len())?;
+        self.level_change.notify_result(self.data.borrow().len());
         Ok(())
     }
 
@@ -192,7 +192,7 @@ where
     /// There must be an object available to remove before this is called.
     fn pop_value(&self) -> Result<T, SimError> {
         let value = self.data.borrow_mut().pop_front().unwrap();
-        self.level_change.notify_result(self.data.borrow().len())?;
+        self.level_change.notify_result(self.data.borrow().len());
         exit!(self.entity ; value.id());
         Ok(value)
     }

@@ -160,7 +160,7 @@ impl LsuState {
             .push_back(slot_idx);
 
         // Wake the port driver
-        self.new_request.notify()?;
+        self.new_request.notify();
 
         Ok(response_ready_event)
     }
@@ -170,7 +170,7 @@ impl LsuState {
         if guard[slot_idx].in_use {
             guard[slot_idx].in_use = false;
             debug!(self.entity ; "Release slot {slot_idx}");
-            self.slot_available.notify()?;
+            self.slot_available.notify();
         } else {
             return sim_error!("Response when slot {slot_idx} not in use.");
         }
@@ -220,7 +220,7 @@ impl LsuState {
             None => sim_error!("Invalid index '{idx}' in response"),
             Some(active_request) => {
                 active_request.response = Some(response);
-                active_request.response_ready_event.notify()?;
+                active_request.response_ready_event.notify();
                 Ok(())
             }
         }
