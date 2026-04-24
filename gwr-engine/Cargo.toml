@@ -23,7 +23,7 @@ async-trait.workspace = true
 byte-unit.workspace = true
 clap.workspace = true
 futures.workspace = true
-gwr-track = { path = "../gwr-track", version = "0.7.0" }
+gwr-track = { path = "../gwr-track", version = "0.8.0" }
 log.workspace = true
 mimalloc = { version = "0.1.48", features = ["v3"], optional = true }
 
