@@ -37,14 +37,13 @@ fn validate_access_in_range(
     mem_config: &MemoryConfigSection,
     tensor_config: &TensorConfigSection,
 ) -> SimResult {
-    validate_view_in_range(node_id, direction, &mem_config.view, tensor_config)
+    validate_view_in_range(node_id, direction, mem_config.view.as_ref(), tensor_config)
 }
 
-#[expect(clippy::ref_option)]
 fn validate_view_in_range(
     node_id: &str,
     direction: &str,
-    view: &Option<TensorViewSection>,
+    view: Option<&TensorViewSection>,
     tensor_config: &TensorConfigSection,
 ) -> SimResult {
     let Some(view) = view else {
@@ -89,10 +88,9 @@ fn validate_view_in_range(
     Ok(())
 }
 
-#[expect(clippy::ref_option)]
 fn tensor_view_offset(
     tensor_config: &TensorConfigSection,
-    view: &Option<TensorViewSection>,
+    view: Option<&TensorViewSection>,
 ) -> usize {
     match view {
         Some(view) => view
@@ -108,10 +106,9 @@ fn tensor_view_offset(
     }
 }
 
-#[expect(clippy::ref_option)]
 fn tensor_view_num_elements(
     tensor_config: &TensorConfigSection,
-    view: &Option<TensorViewSection>,
+    view: Option<&TensorViewSection>,
 ) -> usize {
     match view {
         Some(view) => view.num_elements(),
@@ -261,10 +258,9 @@ impl Timetable {
         Ok(timetable)
     }
 
-    #[expect(clippy::ref_option)]
     fn make_tensor_view(
         tensor_config: &TensorConfigSection,
-        view: &Option<TensorViewSection>,
+        view: Option<&TensorViewSection>,
     ) -> Result<TensorView, SimError> {
         let tensor = Tensor::new(
             &tensor_config.shape,
@@ -356,7 +352,7 @@ impl Timetable {
                     input_idx
                 );
             };
-            validate_view_in_range(id, "input", &input_views[input_idx], config)?;
+            validate_view_in_range(id, "input", input_views[input_idx].as_ref(), config)?;
         }
 
         for (output_idx, tensor_idx) in node.outputs.iter().enumerate() {
@@ -371,7 +367,7 @@ impl Timetable {
                     output_idx
                 );
             };
-            validate_view_in_range(id, "output", &output_views[output_idx], config)?;
+            validate_view_in_range(id, "output", output_views[output_idx].as_ref(), config)?;
         }
 
         Ok(())
@@ -458,8 +454,8 @@ impl Timetable {
         // Note we assume that the graph has been validated so that we can simply unwrap
         // the result
         let tensor_config = self.get_tensor_node_config(memory_node).unwrap();
-        let offset_num_elements = tensor_view_offset(tensor_config, &config.view);
-        let view_num_elements = tensor_view_num_elements(tensor_config, &config.view);
+        let offset_num_elements = tensor_view_offset(tensor_config, config.view.as_ref());
+        let view_num_elements = tensor_view_num_elements(tensor_config, config.view.as_ref());
         let address =
             tensor_config.addr + dtype_num_bytes(&tensor_config.dtype, offset_num_elements) as u64;
         let num_bytes = dtype_num_bytes(&tensor_config.dtype, view_num_elements);
@@ -492,7 +488,7 @@ impl Timetable {
                 };
                 input_tensors.push(Some(Self::make_tensor_view(
                     config,
-                    &input_views[input_idx],
+                    input_views[input_idx].as_ref(),
                 )?));
             } else {
                 input_tensors.push(None);
@@ -512,7 +508,7 @@ impl Timetable {
                 };
                 output_tensors.push(Some(Self::make_tensor_view(
                     config,
-                    &output_views[output_idx],
+                    output_views[output_idx].as_ref(),
                 )?));
             } else {
                 output_tensors.push(None);
@@ -793,7 +789,7 @@ mod tests {
     #[test]
     fn tensor_view_offset_none_view_is_zero() {
         let config = tensor_config(vec![3, 4, 5]);
-        assert_eq!(tensor_view_offset(&config, &None), 0);
+        assert_eq!(tensor_view_offset(&config, None.as_ref()), 0);
     }
 
     #[test]
@@ -803,7 +799,7 @@ mod tests {
             offsets: vec![7],
             shape: vec![2],
         });
-        assert_eq!(tensor_view_offset(&config, &view), 7);
+        assert_eq!(tensor_view_offset(&config, view.as_ref()), 7);
     }
 
     #[test]
@@ -813,7 +809,7 @@ mod tests {
             offsets: vec![2, 3],
             shape: vec![1, 1],
         });
-        assert_eq!(tensor_view_offset(&config, &view), 13);
+        assert_eq!(tensor_view_offset(&config, view.as_ref()), 13);
     }
 
     #[test]
@@ -823,6 +819,6 @@ mod tests {
             offsets: vec![1, 2, 3],
             shape: vec![1, 1, 1],
         });
-        assert_eq!(tensor_view_offset(&config, &view), 33);
+        assert_eq!(tensor_view_offset(&config, view.as_ref()), 33);
     }
 }
