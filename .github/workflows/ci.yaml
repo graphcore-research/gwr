@@ -64,12 +64,7 @@ jobs:
           submodules: true
       - uses: ./.github/actions/install-build-dependencies
       - uses: ./.github/actions/install-dev-dependencies
-      - uses: ./.github/actions/run-build-command
-        with:
-          command: pre-commit run --hook-stage manual --all-files cargo-semver-checks
-          cache-name: semver
-          paths: |
-            target/semver-checks/
+      - run: pre-commit run --hook-stage manual --all-files cargo-semver-checks
 
   build:
     strategy:
