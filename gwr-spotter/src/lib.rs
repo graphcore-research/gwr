@@ -22,6 +22,6 @@ pub mod handler;
 
 pub mod rocket;
 
-#[cfg(feature = "perfetto")]
 /// Perfetto output generator.
+#[cfg(feature = "perfetto")]
 pub mod perfetto;

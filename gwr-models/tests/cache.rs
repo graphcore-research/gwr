@@ -113,8 +113,8 @@ fn cache_dev_read_goes_to_mem() {
     assert_eq!(cache.payload_bytes_written(), 0);
 }
 
-#[expect(clippy::type_complexity)]
 /// Helper to build a cache and four ports to drive it.
+#[expect(clippy::type_complexity)]
 fn build_cache_and_all_ports() -> (
     Engine,
     Rc<Cache<MemoryAccess>>,

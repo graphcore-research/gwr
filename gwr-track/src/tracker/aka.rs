@@ -8,8 +8,8 @@ use std::rc::Rc;
 
 use crate::entity::Entity;
 
-#[macro_export]
 /// Helper function for creating local Aka derived from incoming Aka
+#[macro_export]
 macro_rules! build_aka {
     ($aka:ident, $parent:expr, $renames:expr) => {{
         let mut tmp_aka = gwr_track::tracker::aka::Aka::default();
@@ -41,8 +41,8 @@ impl Display for Aka {
     }
 }
 
-#[must_use]
 /// Lookup the renames for a given port name
+#[must_use]
 pub fn get_alternative_names<'a>(aka: Option<&'a Aka>, name: &str) -> AlternativeNames<'a> {
     if let Some(aka) = aka {
         return aka.get_alternative_names(name);

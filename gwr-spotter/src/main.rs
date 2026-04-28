@@ -37,10 +37,10 @@ struct Cli {
     #[command(flatten)]
     input: InputOptions,
 
-    #[cfg(feature = "perfetto")]
     /// Generate Perfetto output from GWR binary trace with this name
     ///
     /// gwr-spotter will exit having produced the Perfetto trace.
+    #[cfg(feature = "perfetto")]
     #[arg(long, requires = "perfetto_compat")]
     perfetto: Option<PathBuf>,
 }

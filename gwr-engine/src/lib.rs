@@ -94,8 +94,8 @@ pub mod time;
 pub mod traits;
 pub mod types;
 
-#[macro_export]
 /// Spawn all component run() functions and then run the simulation.
+#[macro_export]
 macro_rules! run_simulation {
     ($engine:ident) => {
         $engine.run().unwrap();
@@ -108,11 +108,11 @@ macro_rules! run_simulation {
     };
 }
 
-#[macro_export]
 /// Spawn a sub-component that is stored in an `RefCell<Option<>>`
 ///
 /// This removes the sub-component from the Option and then spawns the `run()`
 /// function.
+#[macro_export]
 macro_rules! spawn_subcomponent {
     ($($spawner:ident).+ ; $($block:ident).+) => {
         let sub_block = $($block).+.borrow_mut().take().unwrap();

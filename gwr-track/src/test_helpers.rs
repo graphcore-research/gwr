@@ -196,8 +196,8 @@ pub fn check_and_clear(tracker: &TestTracker, expected: &[&str]) {
     log_contents_ref.clear();
 }
 
-#[must_use]
 /// Create a tracker for tests
+#[must_use]
 pub fn create_tracker(full_filepath: &str) -> Tracker {
     // Place all trace files in one folder
     const FOLDER: &str = "traces";
