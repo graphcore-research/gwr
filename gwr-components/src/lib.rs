@@ -6,6 +6,7 @@ pub mod arbiter;
 pub mod connect;
 pub mod delay;
 pub mod flow_controls;
+pub mod queue;
 pub mod router;
 pub mod sink;
 pub mod source;
