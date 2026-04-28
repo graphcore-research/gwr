@@ -91,14 +91,14 @@ macro_rules! build_register_view {
                 }
             }
 
-            #[allow(dead_code)]
             /// Install a callback function to be called whenever a `write` completes
+            #[allow(dead_code)]
             pub fn install_write_cb(&mut self, cb: $crate::registers::register::WrittenCallback) {
                 self.write_callbacks.push(cb);
             }
 
-            #[allow(dead_code)]
             /// Install a callback function to be called whenever a `read` completes
+            #[allow(dead_code)]
             pub fn install_read_cb(&mut self, cb: $crate::registers::register::ReadCallback) {
                 self.read_callbacks.push(cb);
             }

@@ -19,8 +19,8 @@ pub enum DataType {
 }
 
 impl DataType {
-    #[must_use]
     /// Return the number of bits required
+    #[must_use]
     pub fn num_bits(&self) -> usize {
         match self {
             DataType::Fp32 => 32,

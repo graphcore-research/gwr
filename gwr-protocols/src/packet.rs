@@ -6,11 +6,11 @@
 
 pub use paste::paste;
 
-#[macro_export]
 /// Macro helper for building packet types.
 ///
 /// This macro builds the common components in a packet as well as adding all
 /// the packet-specific fields.
+#[macro_export]
 macro_rules! build_packet_type {
     ($protocol:ident, $packet_type:ident, $types:ident, $pkt_type:ident; $($field:ident : $type:ty, $bits:expr, $scale:expr),+ $(,)*) => {
         $crate::packet::paste! {

@@ -92,11 +92,11 @@ impl AsciiDoctorPreProcessor {
         line
     }
 
-    #[allow(rustdoc::broken_intra_doc_links)]
     /// Process the markdown links and replace them with AsciiDoctor ones.
     ///
     /// Markdown links should be of the form: [`Visible Text`](link)
     /// Which are replace with adoc versions: <<link, Visible Text>>
+    #[allow(rustdoc::broken_intra_doc_links)]
     fn process_links(&self, line: &str) -> String {
         let mut line = line.to_owned();
         while let Some(e) = self.link_re.captures(&line) {

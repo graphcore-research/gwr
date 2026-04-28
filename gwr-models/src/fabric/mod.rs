@@ -89,9 +89,9 @@ fn num_x_y_ports(num_columns: usize, num_rows: usize, col: usize, row: usize) ->
     num_ports
 }
 
-#[must_use]
 /// Given a col/row position of a node in a fabric, compute how many
 /// ingress/egress ports there are
+#[must_use]
 fn node_num_ingress_egress_ports(
     num_columns: usize,
     num_rows: usize,

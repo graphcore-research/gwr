@@ -109,8 +109,8 @@ use crate::fabric::FabricConfig;
 #[derive(ValueEnum, Clone, Copy, Default, Debug, Serialize, PartialEq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FabricRoutingAlgorithm {
-    #[default]
     /// Route packets to the right column first
+    #[default]
     ColumnFirst,
 
     /// Route packets to the right row first

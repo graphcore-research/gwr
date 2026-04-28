@@ -10,8 +10,8 @@ pub mod capnp;
 pub mod dev_null;
 /// Include the in-memory tracker.
 pub mod in_memory;
-#[cfg(feature = "perfetto")]
 /// Include the Perfetto tracker.
+#[cfg(feature = "perfetto")]
 pub mod perfetto;
 /// Include the text-based tracker.
 pub mod text;

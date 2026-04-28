@@ -19,8 +19,8 @@ pub struct ClockTick {
     /// Clock ticks.
     tick: u64,
 
-    #[cfg(feature = "phase")]
     /// Clock phase.
+    #[cfg(feature = "phase")]
     phase: u32,
 }
 
@@ -102,8 +102,8 @@ impl std::fmt::Display for ClockTick {
     }
 }
 
-#[derive(Clone)]
 /// State representing a clock.
+#[derive(Clone)]
 pub struct Clock {
     /// Frequency of the clock in MHz.
     /// *Note*: Should never be changed as it is registered at this frequency.

@@ -170,11 +170,11 @@ macro_rules! build_register_state {
     }}
 }
 
-#[macro_export]
 /// Allow the creation of compile-time arrays of state up to 8 elements long
 /// without needing the `Copy` trait to be implemented.
 ///
 /// Derived from: <https://danielkeep.github.io/tlborm/book/pat-push-down-accumulation.html>
+#[macro_export]
 macro_rules! array {
     (@accum (0, $($_es:expr),*) -> ($($body:tt)*))
         => {$crate::array!(@as_expr [$($body)*])};

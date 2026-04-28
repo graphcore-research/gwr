@@ -61,10 +61,10 @@ enum CommandArg {
         #[arg(short, long)]
         recipe: Option<String>,
 
-        #[expect(rustdoc::invalid_html_tags)]
         /// Lines from history file to use. Use [<MODE>[RANGE|INDEX]+;]+
         /// Where:
         ///   MODE: is one of 's'elect, 'd'eselect, 't'oggle.
+        #[expect(rustdoc::invalid_html_tags)]
         #[arg(short, long, verbatim_doc_comment)]
         select: Option<String>,
 

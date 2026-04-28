@@ -4,9 +4,9 @@
 
 pub use paste::paste;
 
-#[macro_export]
 /// Connect an [OutPort](gwr_engine::port::OutPort) port to an
 /// [InPort](gwr_engine::port::InPort)
+#[macro_export]
 macro_rules! connect_port {
     ($from:expr, $from_port_name:ident => $to:expr, $to_port_name:ident) => {
         {
@@ -46,8 +46,8 @@ macro_rules! connect_port {
     };
 }
 
-#[macro_export]
 /// Create and connect a dummy RX port
+#[macro_export]
 macro_rules! connect_dummy_rx {
     ($from:expr, $from_port_name:ident => $engine:expr, $clock:expr, $entity:expr) => {
         {
@@ -74,8 +74,8 @@ macro_rules! connect_dummy_rx {
     };
 }
 
-#[macro_export]
 /// Create and connect a dummy TX port
+#[macro_export]
 macro_rules! connect_dummy_tx {
     ($entity:expr => $to:expr, $to_port_name:ident) => {
         {
@@ -100,10 +100,10 @@ macro_rules! connect_dummy_tx {
     };
 }
 
-#[macro_export]
 /// Connect a tx port for a subcomponent.
 ///
 /// The subcomponent is expected to be stored in a `RefCell<Option<>>`
+#[macro_export]
 macro_rules! connect_tx {
     ($component:expr, $fn:ident ; $port_state:ident) => {
         $crate::connect::paste! {
@@ -116,10 +116,10 @@ macro_rules! connect_tx {
     };
 }
 
-#[macro_export]
 /// Connect a tx port for a subcomponent where the port is one of an array.
 ///
 /// The subcomponent is expected to be stored in a `RefCell<Option<>>`
+#[macro_export]
 macro_rules! connect_tx_i {
     ($component:expr, $fn:ident, $index:expr ; $port_state:ident) => {
         $component
@@ -130,44 +130,44 @@ macro_rules! connect_tx_i {
     };
 }
 
-#[macro_export]
 /// Access rx port for a subcomponent.
 ///
 /// The subcomponent is expected to be stored in a `RefCell<Option<>>`
+#[macro_export]
 macro_rules! port_rx {
     ($component:expr, $fn:ident) => {
         $component.borrow().as_ref().unwrap().$fn()
     };
 }
 
-#[macro_export]
 /// Access an individual index of an rx port array for a subcomponent.
 ///
 /// The subcomponent is expected to be stored in a `RefCell<Option<>>`
+#[macro_export]
 macro_rules! port_rx_i {
     ($component:expr, $fn:ident, $index:expr) => {
         $component.borrow().as_ref().unwrap().$fn($index)
     };
 }
 
-#[macro_export]
 /// Get a reference to a variable stored in a `RefCell<Option<>>`.
+#[macro_export]
 macro_rules! borrow_option {
     ($var:expr) => {
         $var.borrow().as_ref().unwrap()
     };
 }
 
-#[macro_export]
 /// Get a mutable reference to a variable stored in a `RefCell<Option<>>`.
+#[macro_export]
 macro_rules! borrow_option_mut {
     ($var:expr) => {
         $var.borrow_mut().as_mut().unwrap()
     };
 }
 
-#[macro_export]
 /// Take a variable out of a `RefCell<Option<>>`.
+#[macro_export]
 macro_rules! take_option {
     ($var:expr) => {
         $var.borrow_mut().take().unwrap()

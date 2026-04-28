@@ -19,8 +19,8 @@ pub type Component = Rc<dyn Runnable + 'static>;
 
 // Simulation errors
 
-#[macro_export]
 /// Build a [SimError] from a message that supports `to_string`
+#[macro_export]
 macro_rules! sim_error {
     ($($arg:tt)+) => {
         Err($crate::types::SimError(format!($($arg)+).to_string()))
