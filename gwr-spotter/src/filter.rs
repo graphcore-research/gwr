@@ -216,7 +216,6 @@ impl Filter {
                 search = search.replace(to_remove.as_str(), "");
             }
         }
-        search = search.trim().to_owned();
 
         let mut search_re = None;
         if self.use_regex
