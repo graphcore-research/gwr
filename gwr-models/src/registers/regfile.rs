@@ -32,7 +32,6 @@ macro_rules! build_register_file {
                 }
             }
 
-            #[allow(dead_code)]
             pub fn write(&self, resolver: &impl gwr_engine::traits::Resolver, index: u64, value: u64) {
                 match index {
                     $( $index => self.[< $reg_name:lower >].write(resolver, value), )+
