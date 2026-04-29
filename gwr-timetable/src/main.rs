@@ -1,11 +1,6 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-//! A simple front-end for running a `Timetable` on a `Platform`
-//!
-//! For example, run using:
-//!   cargo run --bin gwr-timetable -- --platform
-//! gwr-platform/examples/platform.yaml --graph
-//! gwr-timetable/examples/graph.yaml --stdout --stdout-level debug
+//! A simple front-end for running a [Timetable] on a [Platform].
 
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -1,5 +1,13 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+//! A library for defining a [Timetable] that can be run on a [Platform].
+//!
+//! `gwr-timetable` provides a front-end utility for running timetables. For
+//! example:
+//!   cargo run --bin gwr-timetable --
+//!     --platform gwr-platform/examples/platform.yaml
+//!     --timetable gwr-timetable/examples/small.yaml
+//!     --stdout --stdout-level debug
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;

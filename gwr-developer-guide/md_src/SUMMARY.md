@@ -3,8 +3,12 @@
 # Summary
 
 - [Getting Started](getting_started.md)
-  - [Setup](getting_started/setup.md)
-  - [Workspace](getting_started/workspace.md)
+
+- [Concepts](concepts/chapter.md)
+
+- [Applications](applications/chapter.md)
+  - [Examples](applications/examples.md)
+  - [Beyond Silicon](applications/restaurant.md)
 
 - [GWR Engine](gwr_engine/chapter.md)
   - [Time-based Simulation](gwr_engine/time/chapter.md)
@@ -31,11 +35,12 @@
 
 - [GWR Platform](gwr_platform/chapter.md)
 
-- [Applications](applications/chapter.md)
-  - [Examples](applications/examples.md)
-
 - [Documentation](docs/chapter.md)
   - [API Documentation](docs/api.md)
+
+- [Contributing to GWR](contributing/chapter.md)
+  - [Setup](contributing/setup.md)
+  - [Workspace](contributing/workspace.md)
 
 - [Rust](rust/chapter.md)
   - [Learning Rust](rust/learning.md)

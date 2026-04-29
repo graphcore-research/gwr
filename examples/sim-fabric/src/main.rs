@@ -103,7 +103,7 @@ struct Cli {
     #[clap(long, default_value = "1")]
     seed: u64,
 
-    /// Seed for random number generator.
+    /// Whether or not to use the routed model
     #[clap(long, default_value = "false")]
     routed: bool,
 

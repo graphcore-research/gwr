@@ -2,66 +2,122 @@
 
 # Examples
 
-GWR includes a number of example applications that demonstrate how components
-can be written and used for architectural exploration.
+Here is a collection of examples written using GWR.
 
-- The [Flaky Component](#flaky-component) shows how to write a component with
-  custom functionality.
-- The [Flaky with Delay](#flaky-with-delay) extends this to show how to mix
-  library components and custom functionality.
-- The [Scrambler](#scrambler) shows how to remap component ports.
-- The [Pipe simulation](#sim-pipe) provides a command-line application to
-  explore the flow-controlled pipeline.
-- The [Ring simulation](#sim-pipe) provides a command-line application to
-  explore a ring-based interconnect.
-- The [Fabric simulation](#sim-pipe) provides a command-line application to
-  explore a rectangular fabric interconnect.
+## Abstract Examples
 
-## Flaky Component
+### Flaky Component
 
-Here is an example of a full worked main with command-line argument parsing that
-uses the [component] created in the [writing a component section].
+This shows a minimal runnable simulation with custom [component] behavior.
 
-```rust,ignore
-{{#rustdoc_include ../../../examples/flaky-component/src/main.rs}}
+How to run it:
+
+```bash
+cargo run --bin flaky-component -- --seed 1 --drop 0.5 --num-packets 1000
 ```
 
-## Flaky with Delay
+Try varying `--drop` and comparing the number of packets received.
 
-Building on the [Flaky Component](#flaky-component), this example adds an
-internal delay and a buffer for any packets that aren't dropped.
+### Flaky with Delay
 
-## Scrambler
+This shows a component using explicit time delays, buffering, and custom
+functionality.
 
-The Scrambler is a very simple component that shows how it is possible to re-map
-the port connections in a component as the model is being built.
+As with all the examples, you can determine the command-line arguments by
+running with `--help`:
 
-## Sim Pipe
+```bash
+cargo run --bin flaky-with-delay -- --help
+```
 
-A basic application to show how to explore the performance trade offs of a
-flow-controlled pipeline. It provides all the command-line options necessary to
-configure all aspects of the flow-controlled pipeline and see the impact on
-performance.
+Try varying the delay as well as the drop rate.
 
-## Sim Ring
+### Scrambler
 
-A slightly more complex application that will build a ring-based interconnect.
-It allows the user to explore the performance of the ring and the impact that
-the priority in the arbiter makes.
+The scrambler shows how component can have dynamic port connections at runtime
+depending on command-line arguments.
 
-For more details, see the documentation in the source code.
+Compare running:
 
-## Sim Fabric
+```bash
+cargo run --bin scrambler
+```
 
-The fabric simulation allows the user to explore the performance of different
-sized rectangular fabrics with many different properties that can be configured.
-It is also a demonstration of how it is possible to have models at different
-levels of abstraction. The default is to use a functional model that doesn't
-bother with all the internal details of the fabric. However, using `--routed`
-changes to the model that implements all the internal routing and arbitration
-stages required to build a fabric.
+against
 
-For more details, see the documentation in the source code.
+```bash
+cargo run --bin scrambler -- -s
+```
+
+## System Exploration Examples
+
+These examples show GWR being used to build larger systems that you might find
+in silicon devices.
+
+<!-- prettier-ignore-start -->
+
+> [!Tip]
+> Most of these larger simulations support `--progress` to print a
+> progress bar if you are running them directly (not using `gwr-terminus`).
+
+<!-- prettier-ignore-end -->
+
+### Sim Pipe
+
+This simulation shows how you can model a credit-controlled pipeline in order to
+understand throughput, buffering, latency, and backpressure.
+
+Try running it and varying the data and credit delays and the size of the data
+buffer which controls the number of credits that can be issued:
+
+```bash
+cargo run --bin sim-pipe -- --stdout --pipe-data-delay 10 --pipe-buffer-entries 10 --pipe-credit-delay 10
+```
+
+If you now vary the size of the pipe buffer or the delays you will see the
+impact on pipeline throughput.
+
+### Sim Ring
+
+The ring-based interconnect simulation shows how the arbitration can cause such
+an architecture to deadlock.
+
+The Terminus recipe can be used when you want to sweep ring size, arbitration
+priority, buffer sizes, or trace settings without rebuilding a long command by
+hand.
+
+```bash
+cargo run --bin terminus -- run --recipe examples/sim-ring/recipes/explore_ring_priorities.yaml
+```
+
+You will notice how having a fair priority for ring traffic causes deadlock and
+it is essential to give priority to traffic in the ring to prevent this.
+
+### Sim Fabric
+
+This simulation demonstrates how GWR can be used to build models at different
+levels of abstraction.
+
+You can use the Terminus recipes to explore the impact of the level of
+abstraction modelled, which you will see produce quite different performance
+numbers:
+
+```bash
+cargo run --bin terminus -- run --recipe examples/sim-fabric/recipes/explore_model.yaml
+```
+
+You can show that with a different traffic pattern the two models do produce
+very similar results by running the above command again and adding:
+
+```bash
+--ARGS "--traffic-pattern all-to-one"
+```
+
+There is also a recipe to show how to explore the impact of the fabric data
+ticks per hop:
+
+```bash
+cargo run --bin terminus -- run --recipe examples/sim-fabric/recipes/explore_ticks_per_hop.yaml
+```
 
 [component]: ../components/chapter.md
-[writing a component section]: ../components/writing_a_component.md

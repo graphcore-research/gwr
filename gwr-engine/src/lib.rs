@@ -39,6 +39,8 @@
 //!  - [examples/scrambler]: a worked example of a component that registers a a
 //!    vector of subcomponents.
 //!  - [examples/sim-pipe]: simulate a flow-controlled pipeline.
+//!  - [examples/sim-restaurant]: simulate a fast food restaurant and explore
+//!    staffing profitability.
 //!  - [examples/sim-ring]: simulate a device comprising a ring of nodes.
 //!  - [examples/sim-fabric]: simulate a device comprising a rectangular fabric.
 //!
@@ -47,6 +49,7 @@
 //! [examples/flaky-with-delay]: ../flaky_with_delay/index.html
 //! [examples/scrambler]: ../scrambler/index.html
 //! [examples/sim-pipe]: ../sim_pipe/index.html
+//! [examples/sim-restaurant]: ../sim_restaurant/index.html
 //! [examples/sim-ring]: ../sim_ring/index.html
 //! [examples/sim-fabric]: ../sim_fabric/index.html
 

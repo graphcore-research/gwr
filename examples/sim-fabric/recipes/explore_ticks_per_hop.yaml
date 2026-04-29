@@ -1,0 +1,99 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+description:
+  Sweep sim-fabric across multiple ticks-per-hop values while keeping logs and
+  traces separate for each run so latency sensitivity is easy to compare.
+arguments:
+  - name: FABRIC_COLUMNS
+    default: 4
+    comment: Number of columns in the fabric
+  - name: FABRIC_ROWS
+    default: 3
+    comment: Number of rows in the fabric
+  - name: FABRIC_PORTS_PER_NODE
+    default: 2
+    comment: Number of ingress or egress ports attached to each node
+  - name: KIB_TO_SEND
+    default: 1024
+    comment: Traffic injected by each source in KiB
+  - name: TX_BUFFER_ENTRIES
+    default: 32
+    comment: Number of frames each TX port can queue
+  - name: RX_BUFFER_ENTRIES
+    default: 32
+    comment: Number of frames each RX port can queue
+  - name: PORT_BITS_PER_TICK
+    default: 128
+    comment: Link width in bits per tick
+  - name: FRAME_OVERHEAD_BYTES
+    default: 8
+    comment: Protocol overhead bytes per frame
+  - name: FRAME_PAYLOAD_BYTES
+    default: 32
+    comment: Payload bytes per generated frame
+  - name: TICKS_PER_HOPS
+    default: "1 2 4 8"
+    comment: Space-separated list of ticks-per-hop values to explore
+  - name: TICKS_OVERHEAD
+    default: 1
+    comment: Extra fixed per-frame overhead in the fabric
+  - name: TRAFFIC_PATTERN
+    default: all-to-all-fixed
+    comment: Traffic pattern used by the generated sources
+  - name: SEED
+    default: 1
+    comment: Seed controlling randomized placement and traffic choices
+  - name: MONITOR_WINDOW_TICKS
+    default: 1000
+    comment: Window size for monitor statistics
+  - name: EXTRA_ARGS
+    default: ""
+    comment:
+      Optional extra sim-fabric flags such as '--routed --fabric-routing
+      row-first'
+  - name: OUTPUT_DIR
+    default: traces/explore-sim-fabric
+    comment: Folder used to store per-hop logs, traces, and summaries
+ingredients:
+  - comment: Show the chosen exploration parameters
+    command:
+      echo "sim-fabric ${FABRIC_COLUMNS}x${FABRIC_ROWS}
+      ports=${FABRIC_PORTS_PER_NODE} send=${KIB_TO_SEND}KiB
+      traffic=${TRAFFIC_PATTERN} width=${PORT_BITS_PER_TICK}b/tick
+      payload=${FRAME_PAYLOAD_BYTES}B hops='${TICKS_PER_HOPS}'
+      output=${OUTPUT_DIR} extra='${EXTRA_ARGS}'"
+  - comment: Create the output folder for all sweep artifacts
+    command: mkdir -p ${OUTPUT_DIR}
+  - comment:
+      Run sim-fabric once per requested ticks-per-hop value, keep each log and
+      trace separate, and continue even when a configuration fails
+    command: |-
+      hop_values=(${(z)TICKS_PER_HOPS})
+      extra_args=(${(z)EXTRA_ARGS})
+      for ticks_per_hop in ${hop_values[@]}; do
+        log_file="${OUTPUT_DIR}/sim-fabric-ticks-per-hop-${ticks_per_hop}.log"
+        trace_file="${OUTPUT_DIR}/sim-fabric-ticks-per-hop-${ticks_per_hop}.pftrace"
+        status_file="${OUTPUT_DIR}/sim-fabric-ticks-per-hop-${ticks_per_hop}.status"
+        echo "Running sim-fabric with ticks-per-hop ${ticks_per_hop}"
+        if cargo run --bin sim-fabric --release -- --stdout --stdout-level info \
+          --fabric-columns ${FABRIC_COLUMNS} \
+          --fabric-rows ${FABRIC_ROWS} --fabric-ports-per-node \
+          ${FABRIC_PORTS_PER_NODE} --kib-to-send ${KIB_TO_SEND} \
+          --tx-buffer-entries ${TX_BUFFER_ENTRIES} --rx-buffer-entries \
+          ${RX_BUFFER_ENTRIES} --port-bits-per-tick ${PORT_BITS_PER_TICK} \
+          --frame-overhead-bytes ${FRAME_OVERHEAD_BYTES} \
+          --frame-payload-bytes ${FRAME_PAYLOAD_BYTES} --ticks-per-hop \
+          ${ticks_per_hop} --ticks-overhead ${TICKS_OVERHEAD} \
+          --traffic-pattern ${TRAFFIC_PATTERN} --seed ${SEED} \
+          --monitor-window-ticks ${MONITOR_WINDOW_TICKS} --perfetto \
+          --perfetto-file "${trace_file}" ${extra_args[@]} \
+          > "${log_file}" 2>&1; then
+          runtime_ns=$(sed -n 's/.*Pass: Sent .* in \([0-9.]*ns\)\./\1/p' "${log_file}" | tail -n 1)
+          if [ -n "${runtime_ns}" ]; then
+            echo "PASS ticks_per_hop=${ticks_per_hop} runtime=${runtime_ns}" | tee "${status_file}"
+          else
+            echo "PASS ticks_per_hop=${ticks_per_hop} runtime=unknown" | tee "${status_file}"
+          fi
+        else
+          echo "FAIL ticks_per_hop=${ticks_per_hop} (see ${log_file})" | tee "${status_file}"
+        fi
+      done
