@@ -18,6 +18,7 @@ members = [
     "gwr-engine",
     "gwr-model-builder",
     "gwr-models",
+    "gwr-onnx-sys",
     "gwr-perfetto-sys",
     "gwr-perfetto",
     "gwr-platform",

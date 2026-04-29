@@ -3,6 +3,7 @@
     "cSpell.words": [
         "clippy",
         "mdbook",
+        "ONNX",
         "Perfetto",
         "Perfetto's"
     ],
@@ -10,6 +11,7 @@
         "+nightly"
     ],
     "git.ignoredRepositories": [
+        "gwr-onnx-sys/onnx_src",
         "gwr-perfetto-sys/perfetto_src"
     ],
     "search.exclude": {

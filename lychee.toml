@@ -12,6 +12,7 @@ exclude_path = [
     # The licenses file is automatically generarte by cargo-about
     "^\\.\\/licenses\\.html$",
     # External sources included as submodules
+    "^\\./gwr-onnx-sys/onnx_src/.*",
     "^\\./gwr-perfetto-sys/perfetto_src/.*",
 ]
 
