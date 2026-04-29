@@ -3170,6 +3170,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "sim-restaurant"
+version = "1.0.0"
+dependencies = [
+ "clap",
+ "crossterm",
+ "futures",
+ "gwr-components",
+ "gwr-engine",
+ "gwr-track",
+ "log",
+ "rand 0.9.2",
+ "ratatui",
+]
+
+[[package]]
 name = "sim-ring"
 version = "7.0.0"
 dependencies = [

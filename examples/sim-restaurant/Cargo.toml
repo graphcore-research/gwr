@@ -1,0 +1,28 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+[package]
+name = "sim-restaurant"
+version = "1.0.0"
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Example simulation of a fast food restaurant"
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords = ["example", "gwr"]
+categories = ["asynchronous", "command-line-utilities", "simulation"]
+publish.workspace = true
+
+[dependencies]
+clap.workspace = true
+crossterm.workspace = true
+futures.workspace = true
+gwr-components = { path = "../../gwr-components", version = "0.8.0" }
+gwr-engine = { path = "../../gwr-engine", version = "0.11.0" }
+gwr-track = { path = "../../gwr-track", features = ["perfetto"], version = "0.8.0" }
+log.workspace = true
+rand.workspace = true
+ratatui.workspace = true

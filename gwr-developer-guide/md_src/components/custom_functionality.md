@@ -37,7 +37,7 @@ impl<T> Runnable for MyComponent<T> where T: SimObject {
 # fn main() {}
 ```
 
-The **examples/flaky-with_delay** gives an example of a component that uses
+The **examples/flaky-with-delay** gives an example of a component that uses
 custom `run()` functionality.
 
 ## Default Functionality

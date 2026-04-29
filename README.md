@@ -17,7 +17,9 @@
 
 # GWR
 
-<!-- ANCHOR: intro -->
+## Intro
+
+<!-- ANCHOR: intro_1 -->
 
 Welcome to the GWR project. The core GWR packages are developed as a monorepo,
 which together provide the following functionality:
@@ -27,7 +29,13 @@ which together provide the following functionality:
 - Hierarchical configuration support.
 - Documentation tooling.
 - A library of [components] and basic [models].
-- A set of [example applications].
+- A set of application [examples].
+
+<!-- ANCHOR_END: intro_1 -->
+
+![GWR Overview](https://raw.githubusercontent.com/graphcore-research/gwr/main/gwr-developer-guide/md_src/gwr_overview.png)
+
+<!-- ANCHOR: intro_2 -->
 
 ## Simple simulation example
 
@@ -56,10 +64,10 @@ fn main() {
 }
 ```
 
-<!-- ANCHOR_END: intro -->
+<!-- ANCHOR_END: intro_2 -->
 
 [components]: gwr-developer-guide/md_src/components/chapter.md
-[example applications]: gwr-developer-guide/md_src/applications/examples.md
+[examples]: gwr-developer-guide/md_src/applications/examples.md
 [log viewing]: gwr-developer-guide/md_src/gwr_spotter/chapter.md
 [Logging]: gwr-developer-guide/md_src/gwr_track/chapter.md
 [models]: gwr-developer-guide/md_src/models/chapter.md

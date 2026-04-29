@@ -1,0 +1,19 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+description: Compare the two different sim-fabric models (functional vs routed).
+arguments:
+  - name: ARGS
+    default: "--traffic-pattern random"
+    comment:
+      sim-fabric arguments that will be passed to both models. For example, try
+      using '--traffic-pattern all-to-one' instead.
+ingredients:
+  - comment: Run sim-fabric on functional version of the model.
+    command: |-
+      echo "Running sim-fabric on functional model"
+      args=(${(z)ARGS})
+      cargo run --bin sim-fabric --release -- --stdout --stdout-level info ${args[@]}
+  - comment: Run sim-fabric on the routed version of the model.
+    command: |-
+      echo "Running sim-fabric on routed model"
+      args=(${(z)ARGS})
+      cargo run --bin sim-fabric --release -- --stdout --stdout-level info ${args[@]} --routed

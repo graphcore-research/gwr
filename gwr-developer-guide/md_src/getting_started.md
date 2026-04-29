@@ -8,12 +8,16 @@
 
 # Getting Started
 
-{{#include ../../README.md:intro}}
+{{#include ../../README.md:intro_1}}
+
+![GWR Overview](gwr_overview.png)
+
+{{#include ../../README.md:intro_2}}
 
 {{#include ../../README.md:why_gwr}}
 
 [components]: components/chapter.md
-[example applications]: applications/examples.md
+[examples]: applications/examples.md
 [log viewing]: gwr_spotter/chapter.md
 [Logging]: gwr_track/chapter.md
 [models]: models/chapter.md

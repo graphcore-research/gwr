@@ -8,6 +8,7 @@ members = [
     "examples/scrambler",
     "examples/sim-fabric",
     "examples/sim-pipe",
+    "examples/sim-restaurant",
     "examples/sim-ring",
     "gwr-build",
     "gwr-components",
