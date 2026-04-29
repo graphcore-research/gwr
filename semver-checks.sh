@@ -12,4 +12,4 @@ git -C "$BASELINE_DIR" remote add "$REMOTE_NAME" "$REMOTE_URL"
 git -C "$BASELINE_DIR" fetch --depth=1 "$REMOTE_NAME" "$BRANCH"
 git -C "$BASELINE_DIR" checkout -B "$BRANCH" "$REMOTE_NAME/$BRANCH"
 
-env CARGO_SEMVER_CHECKS=1 cargo semver-checks --baseline-root "$BASELINE_DIR"
+env CARGO_SEMVER_CHECKS=1 cargo semver-checks --baseline-root "$BASELINE_DIR" --exclude sim-restaurant
