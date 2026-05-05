@@ -151,6 +151,19 @@ cargo instruments --template Allocations --time-limit 2000000 --bin flaky-compon
 
 will capture a trace file and open with the [Instruments] GUI.
 
+## Code Coverage
+
+There is a recipe added for generating code coverage for the tests in the test
+suite:
+
+```bash
+cargo run -p gwr-terminus -- run --recipe gwr-terminus/recipes/coverage.yaml
+```
+
+If needed, the recipe will tell you what tools to install and how. The recipe
+also prints the location of the HTML coverage report it generates so that you
+can open it in a browser of your choosing.
+
 [cargo-instruments]: https://crates.io/crates/cargo-instruments
 [engine]: ../gwr_engine/chapter.md
 [Instruments]: https://help.apple.com/instruments

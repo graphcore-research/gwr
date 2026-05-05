@@ -1,0 +1,36 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+description:
+  Run all workspace tests with code coverage enabled and generate an HTML
+  coverage report.
+arguments:
+  - name: REPORT_DIR
+    default: target/llvm-cov/html
+    comment: Directory to write the generated HTML coverage report into.
+  - name: EXTRA_ARGS
+    default: ""
+    comment: Additional arguments to append to `cargo llvm-cov`.
+ingredients:
+  - comment: Check that the `cargo llvm-cov` subcommand is available.
+    command: |-
+      if ! cargo llvm-cov --version >/dev/null 2>&1; then
+        echo "cargo-llvm-cov is not installed."
+        echo "Install it with: cargo binstall --disable-telemetry --no-confirm --locked cargo-llvm-cov"
+        exit 1
+      fi
+  - comment: Ensure the output directory exists before generating the report.
+    command: mkdir -p "$REPORT_DIR"
+  - comment: Clear any existing coverage artefacts from previous runs.
+    command: cargo llvm-cov clean --workspace
+  - comment:
+      Run the full workspace test suite with all features enabled and generate
+      an HTML coverage report.
+    command: |-
+      cargo llvm-cov \
+        --workspace \
+        --all-features \
+        --verbose \
+        --html \
+        --output-dir "$REPORT_DIR" \
+        $EXTRA_ARGS
+  - comment: Print the location of the generated coverage report.
+    command: echo "Coverage report generated in $REPORT_DIR/index.html"
