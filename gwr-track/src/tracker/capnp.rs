@@ -2,6 +2,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
 
 use capnp::serialize_packed;
 
@@ -180,9 +181,11 @@ impl Track for CapnProtoTracker {
         }
     }
 
-    fn time(&self, set_by: Id, time_ns: f64) {
-        self.write_event(set_by, |mut event| {
-            event.set_time(time_ns);
+    fn time(&self, set_by: Id, time: Duration) {
+        self.write_event(set_by, |event| {
+            let mut duration = event.init_time();
+            duration.set_seconds(time.as_secs().try_into().expect("Simulations should span less time than the maximum range supported by GWR Track Durations (approximately 136 years)"));
+            duration.set_nanosecs(time.subsec_nanos());
         });
     }
 

@@ -1,6 +1,7 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
 use std::rc::Rc;
+use std::time::Duration;
 
 use gwr_components::sink::Sink;
 use gwr_components::source::Source;
@@ -69,8 +70,8 @@ fn latency() {
     let num_sunk = sink_b.num_sunk();
     assert_eq!(num_sunk, num_puts_b);
 
-    let expected_time = ethernet_link::DELAY_TICKS as f64;
-    assert_eq!(clock.time_now_ns(), expected_time);
+    let expected_time = Duration::from_nanos(ethernet_link::DELAY_TICKS as u64);
+    assert_eq!(clock.time_now(), expected_time);
 }
 
 #[test]
@@ -86,14 +87,14 @@ fn throughput() {
     let num_sunk = sink_b.num_sunk();
     assert_eq!(num_sunk, num_puts_b);
 
-    let latency = ethernet_link::DELAY_TICKS as f64;
+    let latency = Duration::from_nanos(ethernet_link::DELAY_TICKS as u64);
     let frame_bits = (payload_bytes + FRAME_OVERHEAD_BYTES) * 8;
     let frame_ticks = frame_bits.div_ceil(ethernet_link::BITS_PER_TICK);
 
     // Assume each tick is 1ns (1GHz clock) and that the throughput of the last
     // frame doesn't need to be counted
-    let frames_time = (frame_ticks * (num_puts_a - 1)) as f64;
-    assert_eq!(clock.time_now_ns(), (latency + frames_time));
+    let frames_time = Duration::from_nanos((frame_ticks * (num_puts_a - 1)) as u64);
+    assert_eq!(clock.time_now(), latency + frames_time);
 }
 
 #[test]
@@ -127,6 +128,6 @@ fn change_delay() {
     let num_sunk = sink_a.num_sunk();
     assert_eq!(num_sunk, 1);
 
-    let expected_time = DELAY_TICKS as f64;
-    assert_eq!(clock.time_now_ns(), expected_time);
+    let expected_time = Duration::from_nanos(DELAY_TICKS as u64);
+    assert_eq!(clock.time_now(), expected_time);
 }

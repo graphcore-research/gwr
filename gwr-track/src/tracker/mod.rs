@@ -23,6 +23,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io;
 use std::rc::Rc;
+use std::time::Duration;
 
 pub use capnp::CapnProtoTracker;
 pub use dev_null::DevNullTracker;
@@ -91,8 +92,8 @@ pub trait Track {
     /// Track a log message of the given level.
     fn log(&self, msg_by: Id, level: log::Level, msg: std::fmt::Arguments);
 
-    /// Advance the time to the time specified in `ns`.
-    fn time(&self, set_by: Id, time_ns: f64);
+    /// Advance the time to the time specified.
+    fn time(&self, set_by: Id, time: Duration);
 
     /// Perform any pre-exit shutdown/cleanup
     fn shutdown(&self);

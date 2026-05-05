@@ -2,18 +2,21 @@
 
 //! Modules that model time within the simulations.
 
+use std::time::Duration;
+
 use byte_unit::{AdjustedByte, Byte, UnitType};
 
 pub mod clock;
+pub mod duration;
 pub mod simtime;
 
 // Convert a number of bytes to a binary-only unit (KiB, MiB, etc)
 #[must_use]
 pub fn compute_adjusted_value_and_rate(
-    time_now_ns: f64,
+    elapsed: Duration,
     num_bytes: usize,
 ) -> (AdjustedByte, AdjustedByte) {
-    let time_now_s = time_now_ns / (1000.0 * 1000.0 * 1000.0);
+    let time_now_s = elapsed.as_secs_f64();
     let count = Byte::from_u64(num_bytes as u64).get_appropriate_unit(UnitType::Binary);
     let per_second = if time_now_s == 0.0 {
         Byte::from_f64(0.0).unwrap()

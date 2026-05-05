@@ -35,12 +35,13 @@
 //! The rate limiter is configured to run on a 1GHz clock at a rate of 16 bits
 //! per tick.
 //!
-//! As a result, the total time for the simulation should be `20.0ns` because
+//! As a result, the total time for the simulation should be `20ns` because
 //! each of the 10 packets should take 2 clock ticks to pass through the
 //! [Limiter](crate::flow_controls::limiter) and be consumed by the
 //! [Sink](crate::sink::Sink).
 //!
 //! ```rust
+//! # use std::time::Duration;
 //! # use gwr_components::flow_controls::limiter::Limiter;
 //! # use gwr_components::sink::Sink;
 //! # use gwr_components::source::Source;
@@ -86,7 +87,7 @@
 //! run_simulation!(engine);
 //!
 //! // Ensure the time is as expected.
-//! assert_eq!(engine.time_now_ns(), 20.0);
+//! assert_eq!(engine.time_now(), Duration::from_nanos(20));
 //! ```
 
 use std::marker::PhantomData;

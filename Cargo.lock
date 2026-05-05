@@ -1294,7 +1294,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-engine"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1405,7 +1405,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-spotter"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "capnp",
  "clap",
@@ -1456,7 +1456,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-track"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "capnp",
  "capnpc",

@@ -2,6 +2,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use gwr_components::delay::Delay;
@@ -159,13 +160,13 @@ where
         self.config.capacity_bytes
     }
 
-    pub fn dump_stats(&self, time_now_ns: f64) {
+    pub fn dump_stats(&self, elapsed: Duration) {
         let stats = self.stats.borrow();
 
         let (read_value, read_per_second) =
-            compute_adjusted_value_and_rate(time_now_ns, stats.bytes_read);
+            compute_adjusted_value_and_rate(elapsed, stats.bytes_read);
         let (write_value, write_per_second) =
-            compute_adjusted_value_and_rate(time_now_ns, stats.bytes_written);
+            compute_adjusted_value_and_rate(elapsed, stats.bytes_written);
 
         info!(self.entity ; "Memory {}:", self.entity.full_name());
         info!(self.entity ;

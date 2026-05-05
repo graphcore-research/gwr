@@ -89,7 +89,7 @@ impl Renderer {
     }
 
     /// Return the timestamp for the current rendered line.
-    pub fn current_time(&self) -> f64 {
+    pub fn current_time(&self) -> u128 {
         self.line_time(self.current_absolute_index())
     }
 
@@ -168,11 +168,11 @@ impl Renderer {
         chunk.get(chunk_offset)
     }
 
-    pub fn line_time(&self, line_index: usize) -> f64 {
+    pub fn line_time(&self, line_index: usize) -> u128 {
         if let Some(line) = self.line_from_index(line_index) {
-            line.time()
+            line.time_ns()
         } else {
-            0.0
+            0
         }
     }
 
@@ -226,7 +226,7 @@ impl Renderer {
         let event_line = event_line.unwrap();
         let mut tmp0 = String::new();
         let mut tmp1 = String::new();
-        let (mut line, time) = match event_line {
+        let (mut line, line_time) = match event_line {
             EventLine::Enter {
                 id,
                 entered,
@@ -292,7 +292,7 @@ impl Renderer {
         };
 
         if self.print_times {
-            let _ = write!(line, " @{time:.1}ns");
+            let _ = write!(line, " @{}ns", line_time.as_nanos());
         }
 
         line

@@ -1,5 +1,7 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
+use std::time::Duration;
+
 use futures::select;
 use gwr_engine::port::{InPort, OutPort};
 use gwr_engine::run_simulation;
@@ -22,7 +24,7 @@ fn put_get_synced() {
             tx_port.put(1)?.await;
 
             // The `put()` should not have completed until the matching `get()` happens
-            assert!(clock.time_now_ns() == 1.0);
+            assert_eq!(clock.time_now(), Duration::from_nanos(1));
 
             tx_port.put(2)?.await;
             Ok(())
@@ -39,7 +41,7 @@ fn put_get_synced() {
             assert_eq!(i, 2);
 
             // Time should not change for any other reason than the `wait_ticks()`
-            assert!(clock.time_now_ns() == 1.0);
+            assert_eq!(clock.time_now(), Duration::from_nanos(1));
 
             Ok(())
         });
@@ -47,7 +49,7 @@ fn put_get_synced() {
 
     run_simulation!(engine);
 
-    assert_eq!(engine.time_now_ns(), 1.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(1));
 }
 
 #[test]
@@ -70,13 +72,13 @@ fn select_on_ports() {
             tx_port1.put(1)?.await;
 
             // Time will depend on order of select
-            let ns = clock.time_now_ns();
-            assert!(ns == 1.0 || ns == 3.0);
+            let time = clock.time_now();
+            assert!(time == Duration::from_nanos(1) || time == Duration::from_nanos(3));
 
             // Wait to ensure that data from port2 will be received before we send again
             clock.wait_ticks(3).await;
             tx_port1.put(3)?.await;
-            assert_eq!(clock.time_now_ns(), 5.0);
+            assert_eq!(clock.time_now(), Duration::from_nanos(5));
             Ok(())
         });
     }
@@ -87,11 +89,11 @@ fn select_on_ports() {
             tx_port2.put(2)?.await;
 
             // Time will depend on order of select
-            let ns = clock.time_now_ns();
-            if ns == 1.0 {
+            let time = clock.time_now();
+            if time == Duration::from_nanos(1) {
                 clock.wait_ticks(10).await;
             } else {
-                assert_eq!(ns, 3.0);
+                assert_eq!(time, Duration::from_nanos(3));
                 clock.wait_ticks(8).await;
             }
             tx_port2.put(4)?.await;
@@ -139,5 +141,5 @@ fn select_on_ports() {
 
     run_simulation!(engine);
 
-    assert_eq!(engine.time_now_ns(), 11.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(11));
 }

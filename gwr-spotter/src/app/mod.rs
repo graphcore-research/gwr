@@ -5,6 +5,7 @@ use std::error;
 use std::path::PathBuf;
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use crate::filter::{Filter, start_background_filter};
 use crate::renderer::Renderer;
@@ -21,7 +22,7 @@ pub const CHUNK_SIZE: usize = 50000;
 pub const INITIAL_SIZE: usize = CHUNK_SIZE;
 
 pub trait ToTime {
-    fn time(&self) -> f64;
+    fn time_ns(&self) -> u128;
 }
 
 pub trait ToFullness {
@@ -33,47 +34,47 @@ pub enum EventLine {
     Create {
         // Only need to keep the ID to be rendered.
         id: u64,
-        time: f64,
+        time: Duration,
     },
     Connect {
         from_id: u64,
         to_id: u64,
-        time: f64,
+        time: Duration,
     },
     Log {
         level: log::Level,
         id: u64,
         msg: String,
-        time: f64,
+        time: Duration,
     },
     Enter {
         id: u64,
         entered: u64,
         fullness: u64,
-        time: f64,
+        time: Duration,
     },
     Exit {
         id: u64,
         exited: u64,
         fullness: u64,
-        time: f64,
+        time: Duration,
     },
     Value {
         id: u64,
         value: f64,
-        time: f64,
+        time: Duration,
     },
 }
 
 impl ToTime for EventLine {
-    fn time(&self) -> f64 {
+    fn time_ns(&self) -> u128 {
         match self {
-            EventLine::Create { time, .. } => *time,
-            EventLine::Connect { time, .. } => *time,
-            EventLine::Enter { time, .. } => *time,
-            EventLine::Exit { time, .. } => *time,
-            EventLine::Value { time, .. } => *time,
-            EventLine::Log { time, .. } => *time,
+            EventLine::Create { time, .. } => time.as_nanos(),
+            EventLine::Connect { time, .. } => time.as_nanos(),
+            EventLine::Enter { time, .. } => time.as_nanos(),
+            EventLine::Exit { time, .. } => time.as_nanos(),
+            EventLine::Value { time, .. } => time.as_nanos(),
+            EventLine::Log { time, .. } => time.as_nanos(),
         }
     }
 }

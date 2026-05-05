@@ -87,9 +87,9 @@ ingredients:
           --monitor-window-ticks ${MONITOR_WINDOW_TICKS} --perfetto \
           --perfetto-file "${trace_file}" ${extra_args[@]} \
           > "${log_file}" 2>&1; then
-          runtime_ns=$(sed -n 's/.*Pass: Sent .* in \([0-9.]*ns\)\./\1/p' "${log_file}" | tail -n 1)
-          if [ -n "${runtime_ns}" ]; then
-            echo "PASS ticks_per_hop=${ticks_per_hop} runtime=${runtime_ns}" | tee "${status_file}"
+          runtime=$(sed -n 's/.*Pass: Sent .* in \([0-9.]*[mun]*s\)\./\1/p' "${log_file}" | tail -n 1)
+          if [ -n "${runtime}" ]; then
+            echo "PASS ticks_per_hop=${ticks_per_hop} runtime=${runtime}" | tee "${status_file}"
           else
             echo "PASS ticks_per_hop=${ticks_per_hop} runtime=unknown" | tee "${status_file}"
           fi

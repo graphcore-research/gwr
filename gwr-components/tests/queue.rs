@@ -2,6 +2,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
 
 use futures::executor::block_on;
 use gwr_components::queue::Queue;
@@ -122,7 +123,7 @@ fn bounded_queue_push_waits_until_space_is_available() {
 
     assert!(push_done.get());
     assert_eq!(queue.values(), vec![2]);
-    assert_eq!(clock.time_now_ns(), 1.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(1));
 }
 
 #[test]
@@ -171,5 +172,5 @@ fn queue_changed_event_fires_for_mutations() {
         *snapshots.borrow(),
         vec![vec![10], vec![10, 20], vec![20], Vec::<usize>::new()]
     );
-    assert_eq!(clock.time_now_ns(), 4.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(4));
 }

@@ -53,9 +53,9 @@ ingredients:
           --frame-payload-bytes ${FRAME_PAYLOAD_BYTES} --monitor-window-ticks \
           ${MONITOR_WINDOW_TICKS} --perfetto --perfetto-file "${trace_file}" \
           > "${log_file}" 2>&1; then
-          runtime_ns=$(sed -n 's/.*Pass (\([0-9.]*ns\)).*/\1/p' "${log_file}" | tail -n 1)
-          if [ -n "${runtime_ns}" ]; then
-            echo "PASS priority=${priority} runtime=${runtime_ns}" | tee "${status_file}"
+          runtime=$(sed -n 's/.*Pass (\([0-9.]*[mun]*s\)).*/\1/p' "${log_file}" | tail -n 1)
+          if [ -n "${runtime}" ]; then
+            echo "PASS priority=${priority} runtime=${runtime}" | tee "${status_file}"
           else
             echo "PASS priority=${priority} runtime=unknown" | tee "${status_file}"
           fi

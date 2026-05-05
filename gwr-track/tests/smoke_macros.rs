@@ -4,6 +4,7 @@
 
 use std::fmt::Display;
 use std::rc::Rc;
+use std::time::Duration;
 
 use gwr_track::entity::{Entity, toplevel};
 use gwr_track::id::Unique;
@@ -135,6 +136,6 @@ fn set_time() {
     let top = toplevel(&tracker, "top");
     test_helpers::check_and_clear(&test_tracker, &["0: created entity 321, top"]);
 
-    set_time!(top ; 10.0);
-    test_helpers::check_and_clear(&test_tracker, &["321: set time 10.0ns"]);
+    set_time!(top ; Duration::from_nanos(10));
+    test_helpers::check_and_clear(&test_tracker, &["321: set time 10ns"]);
 }

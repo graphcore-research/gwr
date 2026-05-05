@@ -2,6 +2,7 @@
 
 use std::cmp::max;
 use std::rc::Rc;
+use std::time::Duration;
 
 use gwr_components::sink::Sink;
 use gwr_components::source::Source;
@@ -85,7 +86,7 @@ fn memory_read() {
     let last_bw_limit_event = CYCLES_PER_ACCESS * num_accesses as u64;
     let last_packet_ack = CYCLES_PER_ACCESS * ((num_accesses - 1) as u64) + DELAY_TICKS as u64;
     let last_event_time = max(last_bw_limit_event, last_packet_ack);
-    assert_eq!(engine.time_now_ns(), last_event_time as f64);
+    assert_eq!(engine.time_now(), Duration::from_nanos(last_event_time));
 }
 
 #[test]
@@ -102,7 +103,7 @@ fn memory_write() {
     // delay imposed by the data it is carrying
     let last_bw_limit_event = CYCLES_PER_ACCESS * num_accesses as u64;
     let last_event_time = last_bw_limit_event;
-    assert_eq!(engine.time_now_ns(), last_event_time as f64);
+    assert_eq!(engine.time_now(), Duration::from_nanos(last_event_time));
 }
 
 #[test]
@@ -119,7 +120,7 @@ fn memory_write_np() {
     let last_bw_limit_event = CYCLES_PER_ACCESS * num_accesses as u64;
     let last_packet_ack = CYCLES_PER_ACCESS * ((num_accesses - 1) as u64) + DELAY_TICKS as u64;
     let last_event_time = max(last_bw_limit_event, last_packet_ack);
-    assert_eq!(engine.time_now_ns(), last_event_time as f64);
+    assert_eq!(engine.time_now(), Duration::from_nanos(last_event_time));
 }
 
 #[test]
@@ -165,5 +166,5 @@ fn read_becomes_read_response() {
 
     run_simulation!(engine);
 
-    assert_eq!(engine.time_now_ns(), DELAY_TICKS as f64);
+    assert_eq!(engine.time_now(), Duration::from_nanos(DELAY_TICKS as u64));
 }

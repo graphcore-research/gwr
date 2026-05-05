@@ -3,6 +3,7 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use gwr_engine::engine::Engine;
@@ -184,7 +185,7 @@ fn simple_pe_mem_one_request() {
 
     // There are two 128 bytes requested over a 32-byte interface. Each request has
     // a 10ns delay.
-    assert_eq!(clock.time_now_ns(), 80.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(80));
 }
 
 #[test]
@@ -194,7 +195,7 @@ fn simple_pe_mem_two_requests() {
     // There are 128 bytes requested over a 32-byte interface with a 10ns delay, but
     // the LSU supports two outstanding requests. So, the first two access take
     // 11ns, but the remainder take 10ns because they overlap.
-    assert_eq!(clock.time_now_ns(), 41.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(41));
 }
 
 #[test]
@@ -252,5 +253,5 @@ connections:
 
     // Expect 4 cache misses which need to go to memory (30ns each)
     // and 4 cache hits (5ns each)
-    assert_eq!(clock.time_now_ns(), 140.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(140));
 }

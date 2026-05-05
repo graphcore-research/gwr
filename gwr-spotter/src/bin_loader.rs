@@ -6,6 +6,7 @@ use std::io::BufReader;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use gwr_track::Id;
 use gwr_track::entity::Capacity;
@@ -25,7 +26,7 @@ struct BinLoader {
     id_to_name: Option<HashMap<u64, String>>,
     id_to_details: Option<HashMap<u64, String>>,
     id_to_req_type: Option<HashMap<u64, u8>>,
-    current_time_ns: f64,
+    current_time: Duration,
 }
 
 impl BinLoader {
@@ -39,7 +40,7 @@ impl BinLoader {
             id_to_name: Some(HashMap::new()),
             id_to_details: Some(HashMap::new()),
             id_to_req_type: Some(HashMap::new()),
-            current_time_ns: 0.0,
+            current_time: Duration::new(0, 0),
         }
     }
 
@@ -94,7 +95,7 @@ impl TraceVisitor for BinLoader {
             level,
             id: id.0,
             msg: message.to_owned(),
-            time: self.current_time_ns,
+            time: self.current_time,
         });
     }
 
@@ -110,7 +111,7 @@ impl TraceVisitor for BinLoader {
             .insert(id.0, name.to_owned());
         self.add_event(EventLine::Create {
             id: id.0,
-            time: self.current_time_ns,
+            time: self.current_time,
         });
     }
 
@@ -126,7 +127,7 @@ impl TraceVisitor for BinLoader {
             .insert(id.0, name.to_owned());
         self.add_event(EventLine::Create {
             id: id.0,
-            time: self.current_time_ns,
+            time: self.current_time,
         });
     }
 
@@ -159,7 +160,7 @@ impl TraceVisitor for BinLoader {
         self.id_to_req_type.as_mut().unwrap().insert(id.0, req_type);
         self.add_event(EventLine::Create {
             id: id.0,
-            time: self.current_time_ns,
+            time: self.current_time,
         });
     }
 
@@ -171,7 +172,7 @@ impl TraceVisitor for BinLoader {
             .unwrap()
             .connections
             .push(format!("{connect_from} -> {connect_to}").to_string());
-        let time = self.current_time_ns;
+        let time = self.current_time;
         self.add_event(EventLine::Connect {
             from_id: connect_from.0,
             to_id: connect_to.0,
@@ -195,7 +196,7 @@ impl TraceVisitor for BinLoader {
             }
             *fullness
         };
-        let time = self.current_time_ns;
+        let time = self.current_time;
         self.add_event(EventLine::Enter {
             id: id.0,
             entered: entered.0,
@@ -221,7 +222,7 @@ impl TraceVisitor for BinLoader {
             }
             *fullness
         };
-        let time = self.current_time_ns;
+        let time = self.current_time;
         self.add_event(EventLine::Exit {
             id: id.0,
             exited: exited.0,
@@ -231,7 +232,7 @@ impl TraceVisitor for BinLoader {
     }
 
     fn value(&mut self, id: Id, value: f64) {
-        let time = self.current_time_ns;
+        let time = self.current_time;
         self.add_event(EventLine::Value {
             id: id.0,
             value,
@@ -251,8 +252,8 @@ impl TraceVisitor for BinLoader {
             .set_capacity(id.0, capacity.value as u64, capacity.units);
     }
 
-    fn time(&mut self, _id: Id, time_ns: f64) {
-        self.current_time_ns = time_ns;
+    fn time(&mut self, _id: Id, time: Duration) {
+        self.current_time = time;
     }
 }
 

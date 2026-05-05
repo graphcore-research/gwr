@@ -6,11 +6,14 @@
 
 use core::cmp::Ordering;
 use std::cell::{Cell, RefCell};
+use std::fmt::Display;
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
+use std::time::Duration;
 
+use crate::time::duration::AppropriateUnitDisplay;
 use crate::traits::{Resolve, Resolver};
 
 /// ClockTick structure for representing a number of Clock ticks and a phase.
@@ -91,7 +94,7 @@ impl PartialOrd for ClockTick {
     }
 }
 
-impl std::fmt::Display for ClockTick {
+impl Display for ClockTick {
     #[cfg(feature = "phase")]
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}.{:?}", self.tick, self.phase)
@@ -110,6 +113,12 @@ pub struct Clock {
     freq_mhz: f64,
 
     pub shared_state: Rc<ClockState>,
+}
+
+impl Display for Clock {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.time_now().to_appropriate_unit_fmt(f)
+    }
 }
 
 pub struct TaskWaker {
@@ -254,25 +263,36 @@ impl Clock {
         *self.shared_state.now.borrow()
     }
 
-    /// Returns the current time in `ns`.
+    /// Returns the current time.
     #[must_use]
-    pub fn time_now_ns(&self) -> f64 {
+    pub fn time_now(&self) -> Duration {
         let now = *self.shared_state.now.borrow();
-        self.to_ns(&now)
+        self.to_duration(&now)
     }
 
-    /// Returns the time in `ns` of the next event registered with this clock.
+    /// Returns the time of the next event registered with this clock.
     #[must_use]
-    pub fn time_of_next(&self) -> f64 {
+    pub fn time_of_next(&self) -> Duration {
         match self.shared_state.waiting_times.borrow().first() {
-            Some(clock_time) => self.to_ns(clock_time),
+            Some(clock_time) => self.to_duration(clock_time),
+            None => Duration::MAX,
+        }
+    }
+
+    fn ns_of_next(&self) -> f64 {
+        match self.shared_state.waiting_times.borrow().first() {
+            Some(clock_time) => self.to_ns_f64(clock_time),
             None => f64::MAX,
         }
     }
 
-    /// Convert the given [ClockTick] to a time in `ns` for this clock.
+    /// Convert the given [ClockTick] to a time for this clock.
     #[must_use]
-    pub fn to_ns(&self, clock_time: &ClockTick) -> f64 {
+    pub fn to_duration(&self, clock_time: &ClockTick) -> Duration {
+        Duration::from_secs_f64(clock_time.tick as f64 / (self.freq_mhz * 1e6))
+    }
+
+    fn to_ns_f64(&self, clock_time: &ClockTick) -> f64 {
         clock_time.tick as f64 / self.freq_mhz * 1000.0
     }
 
@@ -336,11 +356,10 @@ impl Clock {
     }
 
     /// Advance to the next tick after the specified time.
-    pub fn advance_to(&self, time_ns: f64) {
-        let now_ns = self.time_now_ns();
-        assert!(now_ns < time_ns);
-        let diff_ns = time_ns - now_ns;
-        let ticks = (diff_ns * (self.freq_mhz / 1000.0)).ceil();
+    pub fn advance_to(&self, time: Duration) {
+        let now = self.time_now();
+        let diff_s = (time.checked_sub(now).unwrap()).as_secs_f64();
+        let ticks = (diff_s * self.freq_mhz * 1e6).ceil();
 
         let mut until = self.tick_now();
         until.tick += ticks as u64;
@@ -366,7 +385,7 @@ impl Eq for Clock {}
 
 impl Ord for Clock {
     fn cmp(&self, other: &Self) -> Ordering {
-        if self.time_of_next() < other.time_of_next() {
+        if self.ns_of_next() < other.ns_of_next() {
             Ordering::Less
         } else {
             Ordering::Greater
@@ -426,9 +445,15 @@ mod tests {
     #[test]
     fn convert_to_ns() {
         let clk_ghz = Clock::new(1000.0);
-        assert_eq!(1.0, clk_ghz.to_ns(&ClockTick::new().set_tick(1)));
+        assert_eq!(
+            Duration::from_nanos(1),
+            clk_ghz.to_duration(&ClockTick::new().set_tick(1))
+        );
 
         let slow_clk = Clock::new(0.5);
-        assert_eq!(2000.0, slow_clk.to_ns(&ClockTick::new().set_tick(1)));
+        assert_eq!(
+            Duration::from_nanos(2000),
+            slow_clk.to_duration(&ClockTick::new().set_tick(1))
+        );
     }
 }

@@ -4,6 +4,7 @@
 //!
 //! See `lib.rs` for details.
 use std::rc::Rc;
+use std::time::Duration;
 
 use byte_unit::{AdjustedByte, Byte, UnitType};
 use clap::Parser;
@@ -192,7 +193,7 @@ fn main() -> Result<(), SimError> {
     let total_sunk_frames = sink.num_sunk();
     if total_sunk_frames != total_expected_frames {
         error!(top ; "{}/{} frames received", total_sunk_frames, total_expected_frames);
-        error!(top ; "Deadlock detected at {:.2}ns", clock.time_now_ns());
+        error!(top ; "Deadlock detected at {clock:.2}");
 
         tracker.shutdown();
         return sim_error!("Deadlock");
@@ -204,7 +205,7 @@ fn main() -> Result<(), SimError> {
 
     print_summary(
         &top,
-        clock.time_now_ns(),
+        &clock,
         total_sunk_frames,
         args.frame_overhead_bytes,
         args.frame_payload_bytes,
@@ -214,31 +215,35 @@ fn main() -> Result<(), SimError> {
 
 fn print_summary(
     top: &Rc<Entity>,
-    time_now_ns: f64,
+    clock: &Clock,
     total_sunk_frames: usize,
     frame_overhead_bytes: usize,
     frame_payload_bytes: usize,
 ) {
-    let time_now_s = time_now_ns / (1000.0 * 1000.0 * 1000.0);
-
+    let elapsed = clock.time_now();
     let payload_bytes = (total_sunk_frames * frame_payload_bytes) as u64;
     let (payload_value, payload_per_second) =
-        compute_adjusted_value_and_rate(time_now_s, payload_bytes);
+        compute_adjusted_value_and_rate(elapsed, payload_bytes);
 
     let total_bytes = payload_bytes + (total_sunk_frames * frame_overhead_bytes) as u64;
-    let (total_value, total_per_second) = compute_adjusted_value_and_rate(time_now_s, total_bytes);
+    let (total_value, total_per_second) = compute_adjusted_value_and_rate(elapsed, total_bytes);
 
-    info!(top ; "Pass: Sent {total_sunk_frames} in {time_now_ns:.2}ns.");
+    info!(top ; "Pass: Sent {total_sunk_frames} in {clock:.2}.");
     info!(top ; "Payload: {payload_value:.2} ({payload_per_second:.2}/s). Total: {total_value:.2} ({total_per_second:.2}/s).");
 }
 
 fn compute_adjusted_value_and_rate(
-    time_now_s: f64,
+    elapsed: Duration,
     num_bytes: u64,
 ) -> (AdjustedByte, AdjustedByte) {
     // Convert to a binary-only unit (KiB, MiB, etc)
     let count = Byte::from_u64(num_bytes).get_appropriate_unit(UnitType::Binary);
-    let per_second = Byte::from_f64(num_bytes as f64 / time_now_s).unwrap();
+    let time_now_s = elapsed.as_secs_f64();
+    let per_second = if time_now_s == 0.0 {
+        Byte::from_f64(0.0).unwrap()
+    } else {
+        Byte::from_f64(num_bytes as f64 / time_now_s).unwrap()
+    };
     let count_per_second = per_second.get_appropriate_unit(UnitType::Binary);
     (count, count_per_second)
 }

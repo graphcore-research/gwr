@@ -1,5 +1,7 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
+use std::time::Duration;
+
 use gwr_engine::events::all_of::AllOf;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::Event;
@@ -20,7 +22,7 @@ fn allof_once_and_allof_once() {
     spawn_activity(&mut engine);
     engine.run_until(allof_2).unwrap();
 
-    assert_eq!(engine.time_now_ns(), 20.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(20));
 }
 
 #[test]
@@ -39,7 +41,7 @@ fn multiple_listen() {
         let clock = clock.clone();
         engine.spawn(async move {
             allof.listen().await;
-            assert_eq!(clock.time_now_ns(), 30.0);
+            assert_eq!(clock.time_now(), Duration::from_nanos(30));
             Ok(())
         });
     }
@@ -47,13 +49,13 @@ fn multiple_listen() {
     engine.spawn(async move {
         clock.wait_ticks(1).await;
         allof.listen().await;
-        assert_eq!(clock.time_now_ns(), 30.0);
+        assert_eq!(clock.time_now(), Duration::from_nanos(30));
         Ok(())
     });
 
     engine.run().unwrap();
 
-    assert_eq!(engine.time_now_ns(), 30.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(30));
 }
 
 #[test]
@@ -68,10 +70,10 @@ fn default_value() {
         let res = allof.listen().await;
         assert_eq!(res, i32::default());
 
-        assert_eq!(clock.time_now_ns(), 10.0);
+        assert_eq!(clock.time_now(), Duration::from_nanos(10));
         Ok(())
     });
 
     engine.run().unwrap();
-    assert_eq!(engine.time_now_ns(), 10.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(10));
 }
