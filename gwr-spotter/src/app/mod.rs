@@ -67,35 +67,12 @@ pub enum EventLine {
 impl ToTime for EventLine {
     fn time(&self) -> f64 {
         match self {
-            EventLine::Create { id: _, time } => *time,
-            EventLine::Connect {
-                from_id: _,
-                to_id: _,
-                time,
-            } => *time,
-            EventLine::Enter {
-                id: _,
-                entered: _,
-                fullness: _,
-                time,
-            } => *time,
-            EventLine::Exit {
-                id: _,
-                exited: _,
-                fullness: _,
-                time,
-            } => *time,
-            EventLine::Value {
-                id: _,
-                value: _,
-                time,
-            } => *time,
-            EventLine::Log {
-                level: _,
-                id: _,
-                msg: _,
-                time,
-            } => *time,
+            EventLine::Create { time, .. } => *time,
+            EventLine::Connect { time, .. } => *time,
+            EventLine::Enter { time, .. } => *time,
+            EventLine::Exit { time, .. } => *time,
+            EventLine::Value { time, .. } => *time,
+            EventLine::Log { time, .. } => *time,
         }
     }
 }
@@ -103,35 +80,12 @@ impl ToTime for EventLine {
 impl ToFullness for EventLine {
     fn fullness(&self) -> u64 {
         match self {
-            EventLine::Create { id: _, time: _ } => 0,
-            EventLine::Connect {
-                from_id: _,
-                to_id: _,
-                time: _,
-            } => 0,
-            EventLine::Enter {
-                id: _,
-                entered: _,
-                fullness,
-                time: _,
-            } => *fullness,
-            EventLine::Exit {
-                id: _,
-                exited: _,
-                fullness,
-                time: _,
-            } => *fullness,
-            EventLine::Value {
-                id: _,
-                value: _,
-                time: _,
-            } => 0,
-            EventLine::Log {
-                level: _,
-                id: _,
-                msg: _,
-                time: _,
-            } => 0,
+            EventLine::Create { .. } => 0,
+            EventLine::Connect { .. } => 0,
+            EventLine::Enter { fullness, .. } => *fullness,
+            EventLine::Exit { fullness, .. } => *fullness,
+            EventLine::Value { .. } => 0,
+            EventLine::Log { .. } => 0,
         }
     }
 }

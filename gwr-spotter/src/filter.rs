@@ -65,35 +65,14 @@ impl SearchState {
 
     pub fn search_matches(&self, line: &EventLine) -> bool {
         match line {
-            EventLine::Create { id, time: _ } => self.id_matches(id),
-            EventLine::Connect {
-                from_id,
-                to_id,
-                time: _,
-            } => self.id_matches(from_id) || self.id_matches(to_id),
-            EventLine::Enter {
-                id,
-                entered,
-                fullness: _,
-                time: _,
-            } => self.id_matches(id) || self.id_matches(entered),
-            EventLine::Exit {
-                id,
-                exited,
-                fullness: _,
-                time: _,
-            } => self.id_matches(id) || self.id_matches(exited),
-            EventLine::Value {
-                id,
-                value: _,
-                time: _,
-            } => self.id_matches(id),
-            EventLine::Log {
-                level: _,
-                id,
-                msg,
-                time: _,
-            } => self.id_matches(id) || self.text_matches(msg),
+            EventLine::Create { id, .. } => self.id_matches(id),
+            EventLine::Connect { from_id, to_id, .. } => {
+                self.id_matches(from_id) || self.id_matches(to_id)
+            }
+            EventLine::Enter { id, entered, .. } => self.id_matches(id) || self.id_matches(entered),
+            EventLine::Exit { id, exited, .. } => self.id_matches(id) || self.id_matches(exited),
+            EventLine::Value { id, .. } => self.id_matches(id),
+            EventLine::Log { id, msg, .. } => self.id_matches(id) || self.text_matches(msg),
         }
     }
 }

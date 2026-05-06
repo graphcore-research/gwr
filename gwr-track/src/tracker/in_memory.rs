@@ -92,7 +92,7 @@ impl TrackedState {
         self.events
             .iter()
             .filter(|e| e.id == id)
-            .filter(|e| matches!(e.event, Event::Enter { entered: _ }))
+            .filter(|e| matches!(e.event, Event::Enter { .. }))
             .count()
     }
 
@@ -100,7 +100,7 @@ impl TrackedState {
         self.events
             .iter()
             .filter(|e| e.id == id)
-            .filter(|e| matches!(e.event, Event::Exit { exited: _ }))
+            .filter(|e| matches!(e.event, Event::Exit { .. }))
             .count()
     }
 
@@ -179,7 +179,7 @@ impl TrackedState {
         let mut total_bytes = 0;
         for e in self.events.iter().filter(|e| e.id == id) {
             match e.event {
-                Event::Enter { entered: _ } => {
+                Event::Enter { .. } => {
                     if start_time_ns.is_none() {
                         start_time_ns = Some(e.time);
                     }
