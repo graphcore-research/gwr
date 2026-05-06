@@ -279,7 +279,7 @@ async fn handle_task(
         Task::MemoryTask { config } => handle_memory_task(dispatcher, lsu, task_idx, &config)
             .await
             .map_err(|err| SimError(format!("{entity} had error on task {}:\n{err}", config.id))),
-        Task::SyncTask { region: _ } => {
+        Task::SyncTask { .. } => {
             todo!();
         }
     }

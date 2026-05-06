@@ -300,7 +300,7 @@ impl Timetable {
                 } => {
                     self.validate_compute_node(node, id, input_views, output_views)?;
                 }
-                NodeSection::Tensor { id: _, config: _ } => {
+                NodeSection::Tensor { .. } => {
                     // Nothing for now
                 }
             }
@@ -315,7 +315,7 @@ impl Timetable {
     fn get_tensor_node_config(&self, node: &Node) -> Option<&TensorConfigSection> {
         node.get_memory_tensor_node_idx().map(|node_idx| {
             let node = &self.nodes[node_idx];
-            if let NodeSection::Tensor { id: _, config } = &node.node_section {
+            if let NodeSection::Tensor { config, .. } = &node.node_section {
                 Some(config)
             } else {
                 None
@@ -353,7 +353,7 @@ impl Timetable {
                 continue;
             };
             let tensor_node = &self.nodes[*tensor_idx];
-            let NodeSection::Tensor { id: _, config } = &tensor_node.node_section else {
+            let NodeSection::Tensor { config, .. } = &tensor_node.node_section else {
                 return sim_error!(
                     "Compute node '{}' input {} is not connected from a Tensor node",
                     id,
@@ -368,7 +368,7 @@ impl Timetable {
                 continue;
             };
             let tensor_node = &self.nodes[*tensor_idx];
-            let NodeSection::Tensor { id: _, config } = &tensor_node.node_section else {
+            let NodeSection::Tensor { config, .. } = &tensor_node.node_section else {
                 return sim_error!(
                     "Compute node '{}' output {} is not connected to a Tensor node",
                     id,
@@ -474,10 +474,9 @@ impl Timetable {
         let node = &self.nodes[node_idx];
         let NodeSection::Compute {
             id,
-            op: _,
-            pe: _,
             input_views,
             output_views,
+            ..
         } = &node.node_section
         else {
             return sim_error!("node {} is not a compute node", node.node_section.id());
@@ -487,7 +486,7 @@ impl Timetable {
         for (input_idx, input_node_idx) in node.inputs.iter().enumerate() {
             if let Some(idx) = input_node_idx {
                 let tensor_node = &self.nodes[*idx];
-                let NodeSection::Tensor { id: _, config } = &tensor_node.node_section else {
+                let NodeSection::Tensor { config, .. } = &tensor_node.node_section else {
                     return sim_error!(
                         "{}: input {} is not connected from a Tensor node",
                         id,
@@ -507,7 +506,7 @@ impl Timetable {
         for (output_idx, output_node_idx) in node.outputs.iter().enumerate() {
             if let Some(idx) = output_node_idx {
                 let tensor_node = &self.nodes[*idx];
-                let NodeSection::Tensor { id: _, config } = &tensor_node.node_section else {
+                let NodeSection::Tensor { config, .. } = &tensor_node.node_section else {
                     return sim_error!(
                         "{}: output {} is not connected to a Tensor node",
                         id,
@@ -661,7 +660,7 @@ impl Dispatch for Timetable {
                 let (address, num_bytes) = self.memory_access_address_num_bytes(node, config);
                 Ok(build_memory_task(id, *op, address, num_bytes))
             }
-            NodeSection::Tensor { id: _, config: _ } => {
+            NodeSection::Tensor { .. } => {
                 sim_error!("Task Index {task_idx} refers to a Tensor node")
             }
         }

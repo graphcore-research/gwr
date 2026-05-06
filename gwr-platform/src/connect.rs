@@ -141,7 +141,7 @@ fn connect_port(platform: &Platform, from: &PortId, to: &PortId) -> SimResult {
 
 fn connect_pe_to(platform: &Platform, pe: &Rc<ProcessingElement>, to: &PortId) -> SimResult {
     match to {
-        PortId::Pe { pe: _ } => {
+        PortId::Pe { .. } => {
             sim_error!("Cannot connect a PE directly to a PE")
         }
         PortId::Cache { cache, port } => connect_pe_to_cache(platform, pe, cache, *port),
@@ -203,7 +203,7 @@ fn connect_memory_to(
         PortId::FabricTile { fabric, port_idx } => {
             connect_memory_to_fabric(platform, memory, fabric, *port_idx)
         }
-        PortId::Mem { memory: _ } => {
+        PortId::Mem { .. } => {
             sim_error!("Cannot connect a Memory directly to a Memory")
         }
     }

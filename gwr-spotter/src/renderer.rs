@@ -180,12 +180,7 @@ impl Renderer {
                 (format!("{name}: {value}").to_owned(), time)
             }
 
-            EventLine::Log {
-                level: _,
-                id,
-                msg,
-                time,
-            } => {
+            EventLine::Log { id, msg, time, .. } => {
                 let name = self.name_id(id, &mut tmp0);
                 (format!("{name}: {msg}").to_owned(), time)
             }

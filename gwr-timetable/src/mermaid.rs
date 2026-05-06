@@ -65,11 +65,11 @@ fn render_node_label(node: &NodeSection) -> String {
             format!("([{}])", escape_mermaid_label(&tensor_label(id, config)))
         }
         NodeSection::Compute {
-            id: _,
             op,
             pe,
             input_views,
             output_views,
+            ..
         } => {
             let pe = pe.as_deref().unwrap_or("?");
             let input_str = create_view_string("input", input_views);
@@ -83,12 +83,7 @@ fn render_node_label(node: &NodeSection) -> String {
                 ))
             )
         }
-        NodeSection::Memory {
-            id: _,
-            op,
-            pe: _,
-            config,
-        } => {
+        NodeSection::Memory { op, config, .. } => {
             let extra = match &config.view {
                 Some(view) => {
                     let num_elements: usize = view.shape.iter().product();
