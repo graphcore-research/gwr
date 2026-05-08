@@ -11,10 +11,10 @@ use gwr_engine::types::{SimError, SimResult};
 use rand::Rng;
 
 use super::{Operator, Shape, Tensor, TensorPartition};
-use crate::processing_element::ComputeCapabilities;
 use crate::processing_element::operators::{
     HasShape, TensorView, apply_dim_partitions, partition_across_dimensions,
 };
+use crate::processing_element::{ComputeCapabilities, MachineOp};
 
 const NAME: &str = "Add";
 
@@ -124,13 +124,8 @@ fn num_add_flops<T: HasShape>(
     Ok(output.num_elements())
 }
 
-impl Operator for OperatorAdd {
-    fn validate_tensors(&self, inputs: &[Option<Tensor>], outputs: &[Option<Tensor>]) -> SimResult {
-        validate_input_outputs(inputs, outputs)?;
-        Ok(())
-    }
-
-    fn create_outputs(
+impl OperatorAdd {
+    pub fn create_outputs(
         &self,
         inputs: &[Option<Tensor>],
         _expand_ratio: f64,
@@ -140,19 +135,20 @@ impl Operator for OperatorAdd {
 
         let output_shape = broadcast_shapes(&input_a.shape, &input_b.shape)?;
         let output_dtype = if input_a.dtype > input_b.dtype {
-            input_a.dtype.clone()
+            input_a.dtype
         } else {
-            input_b.dtype.clone()
+            input_b.dtype
         };
 
         Ok(vec![Some(Tensor {
+            id: None,
             shape: output_shape,
             dtype: output_dtype,
             addr: 0,
         })])
     }
 
-    fn create_inputs(
+    pub fn create_inputs(
         &self,
         outputs: &[Option<Tensor>],
         expand_ratio: f64,
@@ -177,16 +173,25 @@ impl Operator for OperatorAdd {
 
         Ok(vec![
             Some(Tensor {
+                id: None,
                 shape: input_a_shape,
-                dtype: output.dtype.clone(),
+                dtype: output.dtype,
                 addr: 0,
             }),
             Some(Tensor {
+                id: None,
                 shape: input_b_shape,
-                dtype: output.dtype.clone(),
+                dtype: output.dtype,
                 addr: 0,
             }),
         ])
+    }
+}
+
+impl Operator for OperatorAdd {
+    fn validate_tensors(&self, inputs: &[Option<Tensor>], outputs: &[Option<Tensor>]) -> SimResult {
+        validate_input_outputs(inputs, outputs)?;
+        Ok(())
     }
 
     fn compute_delay_ticks(
@@ -196,8 +201,7 @@ impl Operator for OperatorAdd {
         outputs: &[Option<TensorView>],
     ) -> Result<usize, SimError> {
         let num_adds = num_add_flops(inputs, outputs)?;
-        let compute_ticks = num_adds.div_ceil(compute_capabilities.adds_per_tick);
-        Ok(compute_ticks)
+        compute_capabilities.cycles_for_ops(num_adds, MachineOp::Add)
     }
 
     fn compute_flops(
@@ -372,8 +376,9 @@ mod tests {
     #[test]
     fn delay_ticks() {
         let compute_capabilities = Rc::new(ComputeCapabilities {
-            adds_per_tick: 1,
-            muls_per_tick: 100,
+            adds_per_tick: 1.0,
+            muls_per_tick: 100.0,
+            compares_per_tick: 200.0,
             sram_bytes: 1024,
         });
         let operator = OperatorAdd {};
@@ -387,8 +392,9 @@ mod tests {
         assert_eq!(delay_ticks, 20);
 
         let compute_capabilities = Rc::new(ComputeCapabilities {
-            adds_per_tick: 2,
-            muls_per_tick: 100,
+            adds_per_tick: 2.0,
+            muls_per_tick: 100.0,
+            compares_per_tick: 100.0,
             sram_bytes: 1024,
         });
         let delay_ticks = operator
@@ -424,11 +430,11 @@ mod tests {
         );
     }
 
-    type ShapeOffsets = (&'static [usize], &'static [usize]);
+    type OffsetsShapes = (&'static [usize], &'static [usize]);
 
     // Ensure that both inputs and the output are all of the expected shape as they
     // should all be the same.
-    fn check_partitions(partitions: &[TensorPartition], expected: &[ShapeOffsets]) {
+    fn check_partitions(partitions: &[TensorPartition], expected: &[OffsetsShapes]) {
         assert_eq!(partitions.len(), expected.len());
 
         for (partition, (expected_offsets, expected_shape)) in
@@ -456,7 +462,7 @@ mod tests {
         let partitions = partition_tensors(&op, &inputs, &outputs, 5).unwrap();
         assert_eq!(partitions.len(), 5);
 
-        let expected: &[ShapeOffsets] = &[
+        let expected: &[OffsetsShapes] = &[
             (&[0, 0, 0, 0], &[1, 1, 3, 4]),
             (&[0, 1, 0, 0], &[1, 1, 3, 4]),
             (&[0, 2, 0, 0], &[1, 1, 3, 4]),
@@ -475,7 +481,7 @@ mod tests {
         let partitions = partition_tensors(&op, &inputs, &outputs, 5).unwrap();
         assert_eq!(partitions.len(), 6);
 
-        let expected: &[ShapeOffsets] = &[
+        let expected: &[OffsetsShapes] = &[
             (&[0, 0, 0], &[1, 1, 4]),
             (&[0, 1, 0], &[1, 1, 4]),
             (&[0, 2, 0], &[1, 1, 4]),
@@ -502,7 +508,7 @@ mod tests {
         let partitions = op.partition_views(&input_views, &output_views, 2).unwrap();
         assert_eq!(partitions.len(), 2);
 
-        let expected: &[ShapeOffsets] = &[(&[1, 2, 0], &[1, 2, 4]), (&[2, 2, 0], &[1, 2, 4])];
+        let expected: &[OffsetsShapes] = &[(&[1, 2, 0], &[1, 2, 4]), (&[2, 2, 0], &[1, 2, 4])];
         check_partitions(&partitions, expected);
     }
 }

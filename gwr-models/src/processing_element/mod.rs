@@ -50,9 +50,10 @@ mod load_store_unit;
 pub mod operators;
 pub mod task;
 
-#[derive(Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub enum MachineOp {
     Add,
+    Compare,
     Mul,
 }
 
@@ -72,16 +73,42 @@ pub struct ProcessingElementConfig {
     pub sram_bytes: usize,
 
     /// Number of add operations per tick
-    pub adds_per_tick: usize,
+    pub adds_per_tick: f64,
 
     /// Number of multiply operations per tick
-    pub muls_per_tick: usize,
+    pub muls_per_tick: f64,
+
+    /// Number of compare operations per tick
+    pub compares_per_tick: f64,
 }
 
 pub struct ComputeCapabilities {
-    adds_per_tick: usize,
-    muls_per_tick: usize,
+    adds_per_tick: f64,
+    muls_per_tick: f64,
+    compares_per_tick: f64,
     sram_bytes: usize,
+}
+
+impl ComputeCapabilities {
+    #[must_use]
+    pub fn ops_per_tick(&self, op: MachineOp) -> f64 {
+        match op {
+            MachineOp::Add => self.adds_per_tick,
+            MachineOp::Compare => self.compares_per_tick,
+            MachineOp::Mul => self.muls_per_tick,
+        }
+    }
+
+    pub fn cycles_for_ops(&self, num_ops: usize, op: MachineOp) -> Result<usize, SimError> {
+        let ops_per_tick = self.ops_per_tick(op);
+        if !ops_per_tick.is_finite() || ops_per_tick <= 0.0 {
+            return Err(SimError(format!(
+                "invalid compute throughput {ops_per_tick} ops/tick"
+            )));
+        }
+
+        Ok(((num_ops as f64) / ops_per_tick).ceil() as usize)
+    }
 }
 
 #[derive(Default)]
@@ -133,6 +160,7 @@ impl ProcessingElement {
             compute_capabilities: Rc::new(ComputeCapabilities {
                 adds_per_tick: pe_config.adds_per_tick,
                 muls_per_tick: pe_config.muls_per_tick,
+                compares_per_tick: pe_config.compares_per_tick,
                 sram_bytes: pe_config.sram_bytes,
             }),
             stats: Rc::new(RefCell::new(ProcessingElementStats::default())),
@@ -380,4 +408,77 @@ async fn handle_memory_task(
         .await?;
     dispatcher.set_task_completed(task_idx)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cycles_for_ops_uses_ceil_for_fractional_throughput() {
+        let compute_capabilities = ComputeCapabilities {
+            adds_per_tick: 0.5,
+            muls_per_tick: 2.5,
+            compares_per_tick: 4.0,
+            sram_bytes: 1024,
+        };
+
+        assert_eq!(
+            compute_capabilities
+                .cycles_for_ops(3, MachineOp::Add)
+                .unwrap(),
+            6
+        );
+        assert_eq!(
+            compute_capabilities
+                .cycles_for_ops(6, MachineOp::Mul)
+                .unwrap(),
+            3
+        );
+        assert_eq!(
+            compute_capabilities
+                .cycles_for_ops(0, MachineOp::Compare)
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn cycles_for_ops_rejects_invalid_throughput() {
+        let compute_capabilities = ComputeCapabilities {
+            adds_per_tick: 0.0,
+            muls_per_tick: -1.0,
+            compares_per_tick: f64::INFINITY,
+            sram_bytes: 1024,
+        };
+
+        assert!(
+            compute_capabilities
+                .cycles_for_ops(1, MachineOp::Add)
+                .is_err()
+        );
+        assert!(
+            compute_capabilities
+                .cycles_for_ops(1, MachineOp::Mul)
+                .is_err()
+        );
+        assert!(
+            compute_capabilities
+                .cycles_for_ops(1, MachineOp::Compare)
+                .is_err()
+        );
+
+        let compute_capabilities = ComputeCapabilities {
+            adds_per_tick: f64::NAN,
+            muls_per_tick: 1.0,
+            compares_per_tick: 1.0,
+            sram_bytes: 1024,
+        };
+
+        assert!(
+            compute_capabilities
+                .cycles_for_ops(1, MachineOp::Add)
+                .is_err()
+        );
+    }
 }

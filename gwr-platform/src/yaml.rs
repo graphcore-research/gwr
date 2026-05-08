@@ -134,6 +134,7 @@ fn emit_processing_elements(
                 && config.sram_bytes.is_none()
                 && config.adds_per_tick.is_none()
                 && config.muls_per_tick.is_none()
+                && config.compares_per_tick.is_none()
             {
                 emit_line(&mut out, format_args!("config: &{anchor} {{}}"), 2)?;
             } else {
@@ -159,6 +160,7 @@ fn emit_processing_elements(
                 )?;
                 emit_optional_kv(&mut out, "adds_per_tick", config.adds_per_tick, 3)?;
                 emit_optional_kv(&mut out, "muls_per_tick", config.muls_per_tick, 3)?;
+                emit_optional_kv(&mut out, "compares_per_tick", config.compares_per_tick, 3)?;
             }
         }
     }
@@ -349,16 +351,18 @@ mod tests {
             lsu_access_bytes: Some(32),
             overhead_size_bytes: None,
             sram_bytes: Some(0x0010_0000),
-            adds_per_tick: Some(16),
-            muls_per_tick: Some(4),
+            adds_per_tick: Some(16.0),
+            muls_per_tick: Some(4.0),
+            compares_per_tick: None,
         };
         let unique_config = ProcessingElementConfigSection {
             num_active_requests: Some(16),
             lsu_access_bytes: Some(64),
             overhead_size_bytes: Some(12),
             sram_bytes: Some(0x0020_0000),
-            adds_per_tick: Some(32),
-            muls_per_tick: Some(8),
+            adds_per_tick: Some(32.0),
+            muls_per_tick: Some(8.0),
+            compares_per_tick: Some(16.0),
         };
         let platform = PlatformConfig {
             memory_maps: vec![test_memory_map()],
@@ -418,6 +422,7 @@ mod tests {
             sram_bytes: None,
             adds_per_tick: None,
             muls_per_tick: None,
+            compares_per_tick: None,
         };
         let empty_cache_config = CacheConfigSection {
             bw_bytes_per_cycle: None,

@@ -1321,7 +1321,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-models"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "async-trait",
  "cfg-if",
@@ -1369,7 +1369,7 @@ version = "2.0.0"
 
 [[package]]
 name = "gwr-platform"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "async-trait",
  "byte-unit",
@@ -1437,7 +1437,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-timetable"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "byte-unit",
