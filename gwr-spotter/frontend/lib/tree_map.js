@@ -16,12 +16,44 @@
 // WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 // ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 // OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+function tree_map_fill(d, hierarchyColor) {
+  if (d.value > 0 && d.data.fullness != undefined) {
+    return fullness_color(fullness_ratio(d.data, d.value));
+  }
+
+  return hierarchyColor(d.height);
+}
+
+function tree_map_title(d, format) {
+  const capacity = format(d.value || d.data.capacity || 0);
+  const units = d.data.capacity_units ? ` ${d.data.capacity_units}` : "";
+  const fullness = format(d.data.fullness || 0);
+  const percentage = d3.format(".1%")(fullness_ratio(d.data, d.value));
+  return `${d.data.full_name}\n${capacity}${units} capacity\n${fullness} full (${percentage})`;
+}
+
+function update_tree_map_fullness() {
+  const hierarchyColor = d3.scaleSequential([0, 8], d3.interpolateGnBu);
+  const format = d3.format(",d");
+
+  d3.select(`#${chartElement}`)
+      .selectAll("rect.node")
+      .attr("fill", d => tree_map_fill(d, hierarchyColor));
+
+  d3.select(`#${chartElement}`)
+      .selectAll("g.tree-map-node title")
+      .text(d => tree_map_title(d, format));
+}
+
 function tree_map(serverUrl, data) {
   var chartDiv = document.getElementById(chartElement);
   var width = Math.max(600, chartDiv.clientWidth);
   var height = Math.max(400, chartDiv.clientHeight - buttonBarPadding);
 
-  const color = d3.scaleSequential([0, 8], d3.interpolateGnBu);
+  const hierarchyColor = d3.scaleSequential([0, 8], d3.interpolateGnBu);
+  const hasCapacity = d3.hierarchy(data)
+      .descendants()
+      .some(d => d.data.capacity> 0);
 
   // Create the treemap layout.
   const treemap = data => d3.treemap()
@@ -31,7 +63,7 @@ function tree_map(serverUrl, data) {
     .paddingInner(1)
     .round(true)
   (d3.hierarchy(data)
-      .sum(d => d.value)
+      .sum(d => hasCapacity ? d.capacity: d.value)
       .sort((a, b) => b.value - a.value));
   const root = treemap(data);
 
@@ -61,16 +93,17 @@ function tree_map(serverUrl, data) {
     .data(d => d[1])
     .join("g")
       .attr("transform", d => `translate(${d.x0},${d.y0})`)
+      .attr("class", "tree-map-node")
       .on("click", (event, d) => select_and_send(serverUrl, svg, d.id, d.data.id));
 
   const format = d3.format(",d");
   node.append("title")
-      .text(d => d.data.full_name);
+      .text(d => tree_map_title(d, format));
 
   node.append("rect")
       .attr("id", d => (d.id = `node_${d.data.id}`))
       .attr("class", "node")
-      .attr("fill", d => color(d.height))
+      .attr("fill", d => tree_map_fill(d, hierarchyColor))
       .attr("width", d => d.x1 - d.x0)
       .attr("height", d => d.y1 - d.y0);
 

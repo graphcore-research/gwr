@@ -3,6 +3,7 @@
 use std::str::FromStr;
 
 use crate::Id;
+use crate::entity::Capacity;
 use crate::tracker::Track;
 use crate::tracker::aka::AlternativeNames;
 
@@ -26,6 +27,7 @@ impl Track for DevNullTracker {
     fn exit(&self, _id: Id, _obj: Id) {}
     fn value(&self, _id: Id, _value: f64) {}
     fn create(&self, _id: Id, _obj: Id, _num_bytes: usize, _req_type: i8, _name: &str) {}
+    fn capacity(&self, _id: Id, _capacity: Capacity) {}
     fn destroy(&self, _id: Id, _obj: Id) {}
     fn connect(&self, _connect_from: Id, _connect_to: Id) {}
     fn log(&self, _id: Id, _level: log::Level, _msg: std::fmt::Arguments) {}

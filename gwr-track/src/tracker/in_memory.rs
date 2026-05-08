@@ -7,6 +7,7 @@ use num_traits::FromPrimitive;
 
 use super::types::ReqType;
 use crate::Id;
+use crate::entity::Capacity;
 use crate::tracker::aka::AlternativeNames;
 use crate::tracker::{EntityManager, Track};
 
@@ -40,12 +41,14 @@ enum Event {
     Enter { entered: Id },
     Exit { exited: Id },
     Value { value: f64 },
+    Capacity { capacity: Capacity },
 }
 
 struct TrackedState {
     events: Vec<EventCommon>,
     id_to_num_bytes: HashMap<Id, usize>,
     id_to_req_type: HashMap<Id, i8>,
+    id_to_capacity: HashMap<Id, Capacity>,
     name_to_id: HashMap<String, Id>,
 }
 
@@ -56,6 +59,7 @@ impl TrackedState {
             events: Vec::with_capacity(INITIAL_CAPACITY),
             id_to_num_bytes: HashMap::with_capacity(INITIAL_CAPACITY),
             id_to_req_type: HashMap::with_capacity(INITIAL_CAPACITY),
+            id_to_capacity: HashMap::with_capacity(INITIAL_CAPACITY),
             name_to_id: HashMap::with_capacity(INITIAL_CAPACITY),
         }
     }
@@ -70,6 +74,10 @@ impl TrackedState {
 
     fn add_id_to_req_type(&mut self, id: Id, req_type: i8) {
         self.id_to_req_type.insert(id, req_type);
+    }
+
+    fn add_id_to_capacity(&mut self, id: Id, capacity: Capacity) {
+        self.id_to_capacity.insert(id, capacity);
     }
 
     fn add_name_to_id(&mut self, name: &str, id: Id) {
@@ -340,6 +348,16 @@ impl Track for InMemoryTracker {
         state_guard.add_id_to_num_bytes(id, num_bytes);
         state_guard.add_id_to_req_type(id, req_type);
         state_guard.add_name_to_id(name, id);
+    }
+
+    fn capacity(&self, id: Id, capacity: Capacity) {
+        let time = self.time();
+        let capacity_event = Event::Capacity {
+            capacity: capacity.clone(),
+        };
+        let mut state_guard = self.state.borrow_mut();
+        state_guard.add_event(EventCommon::new(id, time, capacity_event));
+        state_guard.add_id_to_capacity(id, capacity);
     }
 
     /// Track when an entity with the given ID is destroyed.

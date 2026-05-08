@@ -3,6 +3,7 @@
 // Note that all tests need to be run serially as spotter uses a global state
 // shared between threads.
 
+use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 
@@ -46,6 +47,10 @@ fn create_test_app_with(renderer: Renderer, filter: Filter) -> App {
         filter: Arc::new(Mutex::new(filter)),
         input_state: InputState::Default,
         numbers: String::new(),
+        trace_absolute_index: 0,
+        last_renderer_absolute_index: None,
+        fullness_absolute_index: None,
+        fullness_by_id: HashMap::new(),
     }
 }
 
@@ -149,6 +154,78 @@ fn tick_does_nothing_when_no_command() {
             6,
             "tick() should not move the view when there is no command"
         );
+    }
+}
+
+#[test]
+#[serial]
+fn tick_publishes_absolute_trace_position_when_filtered() {
+    let (mut app, _rx) = create_test_app();
+
+    {
+        let mut r = app.renderer.lock().unwrap();
+        r.num_lines = 1000;
+        r.set_render_indices(vec![9, 99, 199]);
+        r.move_to_index(1);
+    }
+
+    app.tick();
+
+    {
+        let guard = SHARED_STATE.lock().unwrap();
+        assert_eq!(guard.current_line, 100);
+        assert_eq!(guard.num_lines, 1000);
+    }
+}
+
+#[test]
+#[serial]
+fn web_seek_can_move_beyond_last_filtered_line() {
+    let (mut app, _rx) = create_test_app();
+
+    {
+        let mut r = app.renderer.lock().unwrap();
+        r.num_lines = 1000;
+        r.set_render_indices(vec![9, 99, 499]);
+    }
+
+    {
+        let mut guard = SHARED_STATE.lock().unwrap();
+        guard.seek_line = Some(900);
+    }
+
+    app.tick();
+
+    {
+        let guard = SHARED_STATE.lock().unwrap();
+        assert_eq!(guard.current_line, 900);
+        assert_eq!(guard.num_lines, 1000);
+    }
+}
+
+#[test]
+#[serial]
+fn filter_command_does_not_move_global_trace_position() {
+    let (mut app, _rx) = create_test_app();
+
+    {
+        let mut r = app.renderer.lock().unwrap();
+        r.num_lines = 1000;
+        r.set_render_indices(vec![9, 99, 499]);
+    }
+    app.move_to_absolute_line(900);
+
+    {
+        let mut guard = SHARED_STATE.lock().unwrap();
+        guard.command = Some("id=1".to_string());
+    }
+
+    app.tick();
+
+    {
+        let guard = SHARED_STATE.lock().unwrap();
+        assert_eq!(guard.current_line, 900);
+        assert_eq!(guard.num_lines, 1000);
     }
 }
 

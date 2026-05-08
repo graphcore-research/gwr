@@ -9,6 +9,8 @@ const UNKNOWN: &str = "???";
 
 pub struct Renderer {
     id_to_name: HashMap<u64, String>,
+    id_to_capacity: HashMap<u64, u64>,
+    id_to_capacity_units: HashMap<u64, String>,
 
     /// Current location within the file
     render_index: usize,
@@ -38,6 +40,8 @@ impl Renderer {
         const INITIAL_FRAME_HEIGHT: usize = 60;
         Self {
             id_to_name: HashMap::with_capacity(INITIAL_SIZE),
+            id_to_capacity: HashMap::with_capacity(INITIAL_SIZE),
+            id_to_capacity_units: HashMap::with_capacity(INITIAL_SIZE),
             blocks: Vec::with_capacity(INITIAL_SIZE),
             render_indices: None,
             num_render_lines: 0,
@@ -59,7 +63,30 @@ impl Renderer {
 
     /// Return the line number at which the current rendering starts
     pub fn current_render_line_number(&self) -> usize {
-        self.render_index + 1
+        if self.num_render_lines == 0 {
+            0
+        } else {
+            self.render_index + 1
+        }
+    }
+
+    /// Return the absolute trace index for the current rendered line.
+    pub fn current_absolute_index(&self) -> usize {
+        self.render_index_to_absolute_index(self.render_index)
+    }
+
+    /// Return the absolute trace line number for the current rendered line.
+    pub fn current_absolute_line_number(&self) -> usize {
+        if self.num_lines == 0 {
+            0
+        } else {
+            self.current_absolute_index() + 1
+        }
+    }
+
+    /// Return the timestamp for the current rendered line.
+    pub fn current_time(&self) -> f64 {
+        self.line_time(self.current_absolute_index())
     }
 
     pub fn set_frame_size(&mut self, frame_height: usize) {
@@ -118,7 +145,7 @@ impl Renderer {
 
     pub fn line_from_index(&self, line_index: usize) -> Option<&EventLine> {
         let block_index = line_index / CHUNK_SIZE;
-        let chunk = &self.blocks[block_index];
+        let chunk = self.blocks.get(block_index)?;
         if chunk.is_none() {
             return None;
         }
@@ -141,6 +168,39 @@ impl Renderer {
         } else {
             0
         }
+    }
+
+    pub fn line_capacity(&self, line_index: usize) -> Option<u64> {
+        let id = match self.line_from_index(line_index)? {
+            EventLine::Create { id, .. }
+            | EventLine::Enter { id, .. }
+            | EventLine::Exit { id, .. }
+            | EventLine::Value { id, .. }
+            | EventLine::Log { id, .. } => *id,
+            EventLine::Connect { .. } => {
+                return Some(0);
+            }
+        };
+        self.id_to_capacity.get(&id).copied()
+    }
+
+    pub fn fullnesses_at(&self, absolute_index: usize) -> HashMap<u64, u64> {
+        let mut fullnesses = HashMap::new();
+        if self.num_lines == 0 {
+            return fullnesses;
+        }
+
+        let last_index = absolute_index.min(self.num_lines - 1);
+        for line_index in 0..=last_index {
+            match self.line_from_index(line_index) {
+                Some(EventLine::Enter { id, fullness, .. })
+                | Some(EventLine::Exit { id, fullness, .. }) => {
+                    fullnesses.insert(*id, *fullness);
+                }
+                _ => {}
+            }
+        }
+        fullnesses
     }
 
     pub fn render_line(&self, line_index: usize) -> String {
@@ -220,6 +280,11 @@ impl Renderer {
         self.id_to_name.extend(id_to_name);
     }
 
+    pub fn set_capacity(&mut self, id: u64, capacity: u64, units: String) {
+        self.id_to_capacity.insert(id, capacity);
+        self.id_to_capacity_units.insert(id, units);
+    }
+
     fn render_index_to_absolute_index(&self, line: usize) -> usize {
         if let Some(indices) = &self.render_indices {
             if let Some(index) = indices.get(line) {
@@ -229,7 +294,7 @@ impl Renderer {
                 return *index;
             }
         }
-        0
+        line
     }
 
     fn absoulte_index_to_render_index(&self, index: usize) -> usize {
@@ -241,7 +306,7 @@ impl Renderer {
             }
             return indices.len();
         }
-        0
+        index
     }
 
     /// Change the current indices for a new set of ones to render.
@@ -260,11 +325,18 @@ impl Renderer {
     ///
     /// Indices start at 0, line numbers shown to the user start at 1.
     pub fn move_to_index(&mut self, index: usize) {
-        if index > self.num_render_lines {
+        if self.num_render_lines == 0 {
+            self.render_index = 0;
+        } else if index >= self.num_render_lines {
             self.render_index = self.num_render_lines - 1;
         } else {
             self.render_index = index;
         }
+    }
+
+    /// Move to an absolute trace index, mapping onto the current filtered view.
+    pub fn move_to_absolute_index(&mut self, index: usize) {
+        self.move_to_index(self.absoulte_index_to_render_index(index));
     }
 
     pub fn move_top(&mut self) {

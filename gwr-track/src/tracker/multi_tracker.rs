@@ -1,6 +1,7 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
 use crate::Id;
+use crate::entity::Capacity;
 use crate::tracker::aka::AlternativeNames;
 use crate::tracker::{EntityManager, Track, Tracker};
 
@@ -85,6 +86,14 @@ impl Track for MultiTracker {
         for tracker in &self.trackers {
             if tracker.is_entity_enabled(id, log::Level::Trace) {
                 tracker.create(created_by, id, num_bytes, req_type, name);
+            }
+        }
+    }
+
+    fn capacity(&self, id: Id, capacity: Capacity) {
+        for tracker in &self.trackers {
+            if tracker.is_entity_enabled(id, log::Level::Trace) {
+                tracker.capacity(id, capacity.clone());
             }
         }
     }

@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use capnp::serialize_packed;
 
+use crate::entity::Capacity;
 use crate::gwr_track_capnp::event;
 use crate::gwr_track_capnp::log::LogLevel;
 use crate::tracker::aka::AlternativeNames;
@@ -102,6 +103,14 @@ impl Track for CapnProtoTracker {
             entity.set_num_bytes(num_bytes as u64);
             entity.set_req_type(req_type);
             entity.set_name(name);
+        });
+    }
+
+    fn capacity(&self, id: Id, capacity: Capacity) {
+        self.write_event(id, |event| {
+            let mut event_capacity = event.init_capacity();
+            event_capacity.set_value(capacity.value as u64);
+            event_capacity.set_units(&capacity.units);
         });
     }
 

@@ -192,6 +192,31 @@ li.level2 select {
   width: 50%;
 }
 
+li.trace-position-control {
+  color: var(--color-light);
+  padding: 10px 20px 4px 40px;
+  line-height: 24px;
+}
+
+li.trace-position-control label {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+li.trace-position-control input {
+  left: 0;
+  width: 100%;
+  accent-color: var(--color-hover);
+}
+
+li.trace-position-label {
+  color: var(--color-light);
+  font-size: 14px;
+  line-height: 24px;
+  padding: 0 20px 12px 40px;
+}
+
 /***********************************************************************
  * Properties of the chart render area needed to make it play nicely
  * with the sidebar

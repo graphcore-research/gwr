@@ -18,6 +18,11 @@ struct Log @0x835154066f85a612 {
   }
 }
 
+struct Capacity @0xac486acbf54c747d {
+  units    @1  :Text;
+  value    @0  :UInt64;
+}
+
 struct Entity @0xbc946b85a6484339 {
   name     @3  :Text;
   reqType  @2  :Int8;
@@ -27,6 +32,7 @@ struct Entity @0xbc946b85a6484339 {
 
 struct Event @0xc13b4d9cc5ead95b {
   union {
+    capacity @9 :Capacity;
     value   @8  :Float64;
     connect @7  :UInt64;
     time    @6  :Float64;

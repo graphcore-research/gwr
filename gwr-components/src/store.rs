@@ -234,6 +234,7 @@ where
             return sim_error!("Unsupported Store with 0 capacity");
         }
         let entity = Rc::new(Entity::new(parent, name));
+        entity.track_capacity(capacity, "objects");
         let state = Rc::new(State::new(&entity, capacity));
         let tx = OutPort::new_with_renames(&entity, "tx", aka);
         let rx = InPort::new_with_renames(engine, clock, &entity, "rx", aka);

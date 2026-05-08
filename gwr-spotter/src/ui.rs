@@ -266,16 +266,23 @@ fn render_chart(app: &mut App, frame: &mut Frame, area: Rect) {
         data.push(("", value));
     }
 
-    let mut max_value = u64::MIN;
+    let mut max_value = 0;
+    let mut max_capacity: Option<u64> = None;
     if let Some(indices) = renderer.render_indices.as_ref() {
         for index in indices {
             let value = if plot_fullness {
+                if let Some(capacity) = renderer.line_capacity(*index) {
+                    max_capacity = Some(max_capacity.map_or(capacity, |max| max.max(capacity)));
+                }
                 renderer.line_fullness(*index)
             } else {
                 renderer.line_time(*index) as u64
             };
             max_value = max(max_value, value);
         }
+    }
+    if plot_fullness && let Some(capacity) = max_capacity {
+        max_value = capacity;
     }
 
     let title = if plot_fullness { "Fullness:" } else { "Time:" };

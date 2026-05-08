@@ -3,6 +3,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::entity::Capacity;
 use crate::perfetto_trace_builder::PerfettoTraceBuilder;
 use crate::tracker::EntityManager;
 use crate::tracker::aka::AlternativeNames;
@@ -90,6 +91,10 @@ impl Track for PerfettoTracker {
         };
         let buf = guard.build_trace_to_bytes(vec![trace_packet]);
         self.writer.borrow_mut().write_all(&buf).unwrap();
+    }
+
+    fn capacity(&self, _id: Id, _capacity: Capacity) {
+        // todo!()
     }
 
     fn destroy(&self, _destroyed_by: Id, _destroyed_obj: Id) {
