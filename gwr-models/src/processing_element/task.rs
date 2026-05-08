@@ -3,11 +3,13 @@
 use std::rc::Rc;
 
 use gwr_engine::types::SimError;
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeMap;
+use serde::{Deserialize, Serialize, Serializer};
 
 use crate::processing_element::ComputeCapabilities;
 use crate::processing_element::operators::add::OperatorAdd;
 use crate::processing_element::operators::gemm::OperatorGemm;
+use crate::processing_element::operators::maxpool::OperatorMaxPool;
 use crate::processing_element::operators::{Operator, TensorPartition, TensorView};
 
 #[derive(Debug, Clone)]
@@ -19,11 +21,29 @@ pub struct ComputeTaskConfig {
     pub outputs: Vec<Option<TensorView>>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ComputeOp {
     Add,
     Gemm,
+    MaxPool(OperatorMaxPool),
+}
+
+impl Serialize for ComputeOp {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Add => serializer.serialize_str("add"),
+            Self::Gemm => serializer.serialize_str("gemm"),
+            Self::MaxPool(operator) => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("maxpool", operator)?;
+                map.end()
+            }
+        }
+    }
 }
 
 impl ComputeOp {
@@ -40,6 +60,9 @@ impl ComputeOp {
             ComputeOp::Gemm => {
                 OperatorGemm {}.compute_delay_ticks(compute_capabilities, input_views, output_views)
             }
+            ComputeOp::MaxPool(operator) => {
+                operator.compute_delay_ticks(compute_capabilities, input_views, output_views)
+            }
         }
     }
 
@@ -51,6 +74,7 @@ impl ComputeOp {
         match self {
             ComputeOp::Add => OperatorAdd {}.compute_flops(input_views, output_views),
             ComputeOp::Gemm => OperatorGemm {}.compute_flops(input_views, output_views),
+            ComputeOp::MaxPool(operator) => operator.compute_flops(input_views, output_views),
         }
     }
 
@@ -66,6 +90,9 @@ impl ComputeOp {
             }
             ComputeOp::Gemm => {
                 OperatorGemm {}.partition_views(input_views, output_views, num_partitions)
+            }
+            ComputeOp::MaxPool(operator) => {
+                operator.partition_views(input_views, output_views, num_partitions)
             }
         }
     }

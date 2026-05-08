@@ -11,10 +11,10 @@ use gwr_engine::types::{SimError, SimResult};
 use rand::Rng;
 
 use super::{Operator, Tensor, TensorPartition};
-use crate::processing_element::ComputeCapabilities;
 use crate::processing_element::operators::{
     HasShape, Shape, TensorView, apply_dim_partitions, partition_across_dimensions,
 };
+use crate::processing_element::{ComputeCapabilities, MachineOp};
 
 const NAME: &str = "Gemm";
 
@@ -49,6 +49,19 @@ fn get_inner_dim<T: HasShape>(has_shape: &T, i: usize) -> usize {
     has_shape.shape().get_dims()[has_shape.num_dims() - i].max(1)
 }
 
+/// Construct an input B shape for a Gemm consuming `input_a` as input A.
+pub fn gemm_rhs_shape<T: HasShape>(input_a: &T) -> Result<Shape, SimError> {
+    let rank = input_a.num_dims();
+    if rank < 2 {
+        return sim_error!("{NAME}: input A must be at least 2D");
+    }
+
+    let mut rhs_dims = input_a.shape().get_dims().clone();
+    rhs_dims[rank - INPUT_B_OFFSET_K] = get_inner_dim(input_a, INPUT_A_OFFSET_K);
+    rhs_dims[rank - INPUT_B_OFFSET_N] = get_inner_dim(input_a, INPUT_A_OFFSET_M);
+    Ok(Shape::new(&rhs_dims))
+}
+
 /// Choose a value for the K in a (M,K)x(K,N) -> (M,N) Gemm
 ///
 /// Starts with the maximum of M and N and then grows or shrinks depending
@@ -68,6 +81,47 @@ fn choose_gemm_k(output: &Tensor, rng: &mut impl Rng, expand_ratio: f64) -> usiz
     }
 }
 
+fn should_add_input_c(rng: &mut impl Rng, expand_ratio: f64) -> bool {
+    if !expand_ratio.is_finite() || expand_ratio <= 0.0 {
+        false
+    } else if expand_ratio >= 1.0 {
+        true
+    } else {
+        rng.random_bool(expand_ratio)
+    }
+}
+
+fn output_tensor_from_inputs(inputs: &[Option<Tensor>]) -> Result<Tensor, SimError> {
+    let (input_a, input_b) = validate_inputs(inputs)?;
+
+    let output_shape = broadcast_shapes(&input_a.shape, &input_b.shape)?;
+    let output_dtype = if input_a.dtype > input_b.dtype {
+        input_a.dtype
+    } else {
+        input_b.dtype
+    };
+
+    Ok(Tensor {
+        id: None,
+        shape: output_shape,
+        dtype: output_dtype,
+        addr: 0,
+    })
+}
+
+pub fn maybe_add_input_c(
+    inputs: &mut Vec<Option<Tensor>>,
+    expand_ratio: f64,
+    rng: &mut impl Rng,
+) -> Result<bool, SimError> {
+    if inputs.len() >= 3 || !should_add_input_c(rng, expand_ratio) {
+        return Ok(false);
+    }
+
+    inputs.push(Some(output_tensor_from_inputs(inputs)?));
+    Ok(true)
+}
+
 fn broadcast_shapes(a: &Shape, b: &Shape) -> Result<Shape, SimError> {
     let rank_a = a.num_dims();
     let rank_b = b.num_dims();
@@ -83,17 +137,17 @@ fn broadcast_shapes(a: &Shape, b: &Shape) -> Result<Shape, SimError> {
         let a_dim = a.get_dim(rank_result, i);
         let b_dim = b.get_dim(rank_result, i);
 
-        *result_i = if a_dim == b_dim {
-            a_dim
-        } else if a_dim == 1 {
-            b_dim
-        } else if b_dim == 1 {
+        *result_i = if i == (rank_result.saturating_sub(OUTPUT_OFFSET_M)) {
+            // M
             a_dim
         } else if i == (rank_result.saturating_sub(OUTPUT_OFFSET_N)) {
             // N
             b_dim
-        } else if i == (rank_result.saturating_sub(OUTPUT_OFFSET_M)) {
-            // M
+        } else if a_dim == b_dim {
+            a_dim
+        } else if a_dim == 1 {
+            b_dim
+        } else if b_dim == 1 {
             a_dim
         } else {
             return sim_error!("{NAME}: cannot broadcast shapes {:?} and {:?}", a, b);
@@ -241,34 +295,17 @@ fn gemm_op_counts<T: HasShape>(
 
 pub struct OperatorGemm {}
 
-impl Operator for OperatorGemm {
-    fn validate_tensors(&self, inputs: &[Option<Tensor>], outputs: &[Option<Tensor>]) -> SimResult {
-        validate_input_outputs(inputs, outputs)?;
-        Ok(())
-    }
-
-    fn create_outputs(
+impl OperatorGemm {
+    pub fn create_outputs(
         &self,
         inputs: &[Option<Tensor>],
         _expand_ratio: f64,
         _rng: &mut impl Rng,
     ) -> Result<Vec<Option<Tensor>>, gwr_engine::types::SimError> {
-        let (input_a, input_b) = validate_inputs(inputs)?;
-
-        let output_shape = broadcast_shapes(&input_a.shape, &input_b.shape)?;
-        let output_dtype = if input_a.dtype > input_b.dtype {
-            input_a.dtype.clone()
-        } else {
-            input_b.dtype.clone()
-        };
-        Ok(vec![Some(Tensor {
-            shape: output_shape,
-            dtype: output_dtype,
-            addr: 0,
-        })])
+        Ok(vec![Some(output_tensor_from_inputs(inputs)?)])
     }
 
-    fn create_inputs(
+    pub fn create_inputs(
         &self,
         outputs: &[Option<Tensor>],
         expand_ratio: f64,
@@ -285,18 +322,31 @@ impl Operator for OperatorGemm {
         input_a_shape.0[rank.saturating_sub(INPUT_A_OFFSET_K)] = k;
         input_b_shape.0[rank.saturating_sub(INPUT_B_OFFSET_K)] = k;
 
-        Ok(vec![
+        let mut inputs = vec![
             Some(Tensor {
+                id: None,
                 shape: input_a_shape,
-                dtype: output.dtype.clone(),
+                dtype: output.dtype,
                 addr: 0,
             }),
             Some(Tensor {
+                id: None,
                 shape: input_b_shape,
-                dtype: output.dtype.clone(),
+                dtype: output.dtype,
                 addr: 0,
             }),
-        ])
+        ];
+
+        maybe_add_input_c(&mut inputs, expand_ratio, rng)?;
+
+        Ok(inputs)
+    }
+}
+
+impl Operator for OperatorGemm {
+    fn validate_tensors(&self, inputs: &[Option<Tensor>], outputs: &[Option<Tensor>]) -> SimResult {
+        validate_input_outputs(inputs, outputs)?;
+        Ok(())
     }
 
     fn compute_delay_ticks(
@@ -306,9 +356,10 @@ impl Operator for OperatorGemm {
         outputs: &[Option<TensorView>],
     ) -> Result<usize, SimError> {
         let (num_muls, num_adds) = gemm_op_counts(inputs, outputs)?;
-        let compute_ticks = num_muls.div_ceil(compute_capabilities.muls_per_tick)
-            + num_adds.div_ceil(compute_capabilities.adds_per_tick);
-        Ok(compute_ticks)
+        Ok(
+            compute_capabilities.cycles_for_ops(num_muls, MachineOp::Mul)?
+                + compute_capabilities.cycles_for_ops(num_adds, MachineOp::Add)?,
+        )
     }
 
     fn compute_flops(
@@ -433,6 +484,25 @@ mod tests {
     }
 
     #[test]
+    fn create_outputs_uses_gemm_m_and_n_before_broadcasting() {
+        let operator = OperatorGemm {};
+        let mut rng = rand::rng();
+
+        let outputs = operator
+            .create_outputs(
+                &[tensor(&[1, 48, 1, 25]), tensor(&[1, 48, 25, 1])],
+                1.0,
+                &mut rng,
+            )
+            .unwrap();
+
+        assert_eq!(
+            outputs[0].as_ref().unwrap().shape(),
+            &Shape::new(&[1, 48, 1, 1])
+        );
+    }
+
+    #[test]
     fn validate_gemm() {
         let operator = OperatorGemm {};
 
@@ -515,11 +585,34 @@ mod tests {
     }
 
     #[test]
+    fn gemm_rhs_shape_uses_gemm_named_offsets() {
+        let input_a = Shape::new(&[19, 23, 29, 31]);
+        let input_b = gemm_rhs_shape(&input_a).unwrap();
+
+        assert_eq!(input_b, Shape::new(&[19, 23, 31, 29]));
+
+        OperatorGemm {}
+            .validate_tensors(
+                &[tensor(input_a.get_dims()), tensor(input_b.get_dims())],
+                &[tensor(&[19, 23, 29, 29])],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn gemm_rhs_shape_rejects_rank_below_two() {
+        let err = gemm_rhs_shape(&Shape::new(&[31])).unwrap_err();
+
+        assert!(format!("{err}").contains("input A must be at least 2D"));
+    }
+
+    #[test]
     fn delay_ticks_uses_m_k_and_n_from_the_innermost_dimensions() {
         let operator = OperatorGemm {};
         let compute_capabilities = Rc::new(ComputeCapabilities {
-            adds_per_tick: 1,
-            muls_per_tick: 1,
+            adds_per_tick: 1.0,
+            muls_per_tick: 1.0,
+            compares_per_tick: 100.0,
             sram_bytes: 1024,
         });
         let delay_ticks = operator
@@ -538,8 +631,9 @@ mod tests {
     fn delay_ticks() {
         let operator = OperatorGemm {};
         let compute_capabilities = Rc::new(ComputeCapabilities {
-            adds_per_tick: 1,
-            muls_per_tick: 1,
+            adds_per_tick: 1.0,
+            muls_per_tick: 1.0,
+            compares_per_tick: 100.0,
             sram_bytes: 1024,
         });
         let delay_ticks = operator
@@ -593,9 +687,40 @@ mod tests {
         );
     }
 
-    type ShapeOffsets = (&'static [usize], &'static [usize]);
-    type PartitionShapeOffsets = (ShapeOffsets, ShapeOffsets, ShapeOffsets);
-    fn check_partitions(partitions: &[TensorPartition], expected: &[PartitionShapeOffsets]) {
+    #[test]
+    fn create_inputs_with_expand_ratio_zero_omits_input_c() {
+        let operator = OperatorGemm {};
+        let mut rng = rand::rng();
+
+        let inputs = operator
+            .create_inputs(&[tensor(&[4, 8])], 0.0, &mut rng)
+            .unwrap();
+
+        assert_eq!(inputs.len(), 2);
+        operator
+            .validate_tensors(&inputs, &[tensor(&[4, 8])])
+            .unwrap();
+    }
+
+    #[test]
+    fn create_inputs_with_expand_ratio_one_adds_input_c() {
+        let operator = OperatorGemm {};
+        let mut rng = rand::rng();
+
+        let inputs = operator
+            .create_inputs(&[tensor(&[4, 8])], 1.0, &mut rng)
+            .unwrap();
+
+        assert_eq!(inputs.len(), 3);
+        assert_eq!(inputs[2].as_ref().unwrap().shape(), &Shape::new(&[4, 8]));
+        operator
+            .validate_tensors(&inputs, &[tensor(&[4, 8])])
+            .unwrap();
+    }
+
+    type OffsetsShapes = (&'static [usize], &'static [usize]);
+    type PartitionOffsetsShapes = (OffsetsShapes, OffsetsShapes, OffsetsShapes);
+    fn check_partitions(partitions: &[TensorPartition], expected: &[PartitionOffsetsShapes]) {
         assert_eq!(partitions.len(), expected.len());
         for (partition, expected_partition) in partitions.iter().zip(expected.iter()) {
             let in_a = partition.inputs[0].as_ref().unwrap();
@@ -629,7 +754,7 @@ mod tests {
         let partitions = partition_tensors(&operator, &input_tensors, &output_tensors, 4).unwrap();
         assert_eq!(partitions.len(), 6);
 
-        let expected: &[PartitionShapeOffsets] = &[
+        let expected: &[PartitionOffsetsShapes] = &[
             (
                 (&[0, 0, 0, 0], &[1, 10, 10, 5]),
                 (&[0, 0, 0, 0], &[1, 10, 5, 12]),
@@ -713,7 +838,7 @@ mod tests {
         let partitions = partition_tensors(&operator, &inputs, &outputs, 8).unwrap();
         assert_eq!(partitions.len(), 8);
 
-        let expected: &[PartitionShapeOffsets] = &[
+        let expected: &[PartitionOffsetsShapes] = &[
             ((&[0, 0], &[1, 5]), (&[0, 0], &[5, 3]), (&[0, 0], &[1, 3])),
             ((&[0, 0], &[1, 5]), (&[0, 3], &[5, 3]), (&[0, 3], &[1, 3])),
             ((&[1, 0], &[1, 5]), (&[0, 0], &[5, 3]), (&[1, 0], &[1, 3])),
@@ -744,7 +869,7 @@ mod tests {
             .unwrap();
         assert_eq!(partitions.len(), 8);
 
-        let expected: &[PartitionShapeOffsets] = &[
+        let expected: &[PartitionOffsetsShapes] = &[
             ((&[2, 0], &[1, 5]), (&[0, 3], &[5, 3]), (&[2, 3], &[1, 3])),
             ((&[2, 0], &[1, 5]), (&[0, 6], &[5, 3]), (&[2, 6], &[1, 3])),
             ((&[3, 0], &[1, 5]), (&[0, 3], &[5, 3]), (&[3, 3], &[1, 3])),

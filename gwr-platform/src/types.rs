@@ -104,15 +104,16 @@ pub struct ProcessingElementSection {
     pub config: ProcessingElementConfigSection,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct ProcessingElementConfigSection {
     pub num_active_requests: Option<usize>,
     pub lsu_access_bytes: Option<usize>,
     pub overhead_size_bytes: Option<usize>,
     #[serde(default, deserialize_with = "parse_optional_u64_byte_str")]
     pub sram_bytes: Option<u64>,
-    pub adds_per_tick: Option<usize>,
-    pub muls_per_tick: Option<usize>,
+    pub adds_per_tick: Option<f64>,
+    pub muls_per_tick: Option<f64>,
+    pub compares_per_tick: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

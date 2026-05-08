@@ -7,12 +7,17 @@ use std::rc::Rc;
 
 use gwr_engine::sim_error;
 use gwr_engine::types::{SimError, SimResult};
-use rand::Rng;
 
 use crate::processing_element::ComputeCapabilities;
 use crate::processing_element::operators::dtype::DataType;
 
 pub mod dtype;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExpansionDirection {
+    Backward,
+    Forward,
+}
 
 #[must_use]
 pub fn shape_string(dims: &[usize]) -> String {
@@ -127,6 +132,7 @@ impl Offsets {
 
 #[derive(Clone, Debug)]
 pub struct Tensor {
+    id: Option<String>,
     dtype: DataType,
     shape: Shape,
     addr: u64,
@@ -137,10 +143,26 @@ impl Tensor {
     #[must_use]
     pub fn new(dims: &[usize], dtype: &DataType, addr: u64) -> Self {
         Self {
+            id: None,
             shape: Shape(dims.to_vec()),
-            dtype: dtype.clone(),
+            dtype: *dtype,
             addr,
         }
+    }
+
+    #[must_use]
+    pub fn with_id(mut self, id: impl Into<String>) -> Self {
+        self.id = Some(id.into());
+        self
+    }
+
+    pub fn set_id(&mut self, id: impl Into<String>) {
+        self.id = Some(id.into());
+    }
+
+    #[must_use]
+    pub fn id(&self) -> Option<&str> {
+        self.id.as_deref()
     }
 
     /// Return the number of bytes this entire Tensor will consume in memory.
@@ -350,24 +372,6 @@ pub trait Operator {
     /// datatypes
     fn validate_tensors(&self, inputs: &[Option<Tensor>], outputs: &[Option<Tensor>]) -> SimResult;
 
-    /// Given the input tensor(s), return output tensor(s) of the correct shape.
-    fn create_outputs(
-        &self,
-        inputs: &[Option<Tensor>],
-        expand_ratio: f64,
-        rng: &mut impl Rng,
-    ) -> Result<Vec<Option<Tensor>>, SimError>;
-
-    /// Given the output tensor(s), return input tensor(s) of the correct shape.
-    ///
-    /// `rng` is used for random
-    fn create_inputs(
-        &self,
-        outputs: &[Option<Tensor>],
-        expand_ratio: f64,
-        rng: &mut impl Rng,
-    ) -> Result<Vec<Option<Tensor>>, SimError>;
-
     /// Returns the number of clock ticks needed to perform the
     /// specified computation give the machine capabilities
     fn compute_delay_ticks(
@@ -543,3 +547,4 @@ pub fn apply_dim_partitions(
 
 pub mod add;
 pub mod gemm;
+pub mod maxpool;

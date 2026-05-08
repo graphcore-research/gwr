@@ -654,7 +654,7 @@ impl Dispatch for Timetable {
         match &node.node_section {
             NodeSection::Compute { id, op, .. } => {
                 let (inputs, outputs) = self.get_input_output_tensors(task_idx)?;
-                Ok(build_compute_task(id, *op, inputs, outputs))
+                Ok(build_compute_task(id, op.clone(), inputs, outputs))
             }
             NodeSection::Memory { id, op, config, .. } => {
                 let (address, num_bytes) = self.memory_access_address_num_bytes(node, config);
@@ -691,8 +691,9 @@ impl Dispatch for Timetable {
 
         match node.node_section {
             NodeSection::Compute { .. } => {
-                let tensor_node_idx = node.get_output_tensor_node_idx().unwrap();
-                self.update_complete_tensor(tensor_node_idx);
+                for tensor_node_idx in node.outputs.iter().flatten() {
+                    self.update_complete_tensor(*tensor_node_idx);
+                }
             }
             NodeSection::Memory { op, .. } => {
                 if let MemoryOp::Store = op {

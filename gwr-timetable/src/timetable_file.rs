@@ -78,15 +78,6 @@ impl TimetableFile {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum NodeKind {
-    Compute,
-    Memory,
-    Sync,
-    Tensor,
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "kind")]
 pub enum NodeSection {

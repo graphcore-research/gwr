@@ -3,7 +3,7 @@
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
-#[derive(ValueEnum, Clone, Debug, Default, Deserialize, Serialize, PartialEq, PartialOrd)]
+#[derive(ValueEnum, Copy, Clone, Debug, Default, Deserialize, Serialize, PartialEq, PartialOrd)]
 #[serde(rename_all = "lowercase")]
 pub enum DataType {
     #[default]
@@ -12,6 +12,7 @@ pub enum DataType {
     Fp16,
     Fp8,
     Fp4,
+    Int64,
     Int32,
     Int16,
     Int8,
@@ -28,6 +29,7 @@ impl DataType {
             DataType::Bf16 => 16,
             DataType::Fp8 => 8,
             DataType::Fp4 => 4,
+            DataType::Int64 => 64,
             DataType::Int32 => 32,
             DataType::Int16 => 16,
             DataType::Int8 => 8,

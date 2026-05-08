@@ -10,8 +10,8 @@ use gwr_platform::builder::{
     DEFAULT_FABRIC_PORTS_PER_NODE, DEFAULT_FABRIC_ROUTING, DEFAULT_FABRIC_RX_BUFFER_ENTRIES,
     DEFAULT_FABRIC_TICKS_OVERHEAD, DEFAULT_FABRIC_TICKS_PER_HOP, DEFAULT_FABRIC_TX_BUFFER_ENTRIES,
     DEFAULT_HBM_DELAY_TICKS, DEFAULT_HBM_SIZE_BYTES, DEFAULT_PE_ADDS_PER_TICK,
-    DEFAULT_PE_LSU_ACCESS_BYTES, DEFAULT_PE_MULS_PER_TICK, DEFAULT_PE_NUM_ACTIVE_REQUESTS,
-    DEFAULT_PE_OVERHEAD_SIZE_BYTES, DEFAULT_PE_SRAM_BYTES,
+    DEFAULT_PE_COMPARES_PER_TICK, DEFAULT_PE_LSU_ACCESS_BYTES, DEFAULT_PE_MULS_PER_TICK,
+    DEFAULT_PE_NUM_ACTIVE_REQUESTS, DEFAULT_PE_OVERHEAD_SIZE_BYTES, DEFAULT_PE_SRAM_BYTES,
 };
 use gwr_platform::types::{
     CacheConfigSection, CacheSection, ConnectSection, FabricKind, FabricSection,
@@ -39,10 +39,13 @@ struct Args {
     pe_sram_bytes: u64,
 
     #[arg(long, default_value_t = DEFAULT_PE_ADDS_PER_TICK)]
-    pe_adds_per_tick: usize,
+    pe_adds_per_tick: f64,
 
     #[arg(long, default_value_t = DEFAULT_PE_MULS_PER_TICK)]
-    pe_muls_per_tick: usize,
+    pe_muls_per_tick: f64,
+
+    #[arg(long, default_value_t = DEFAULT_PE_COMPARES_PER_TICK)]
+    pe_compares_per_tick: f64,
 
     #[arg(long, default_value_t = DEFAULT_PE_OVERHEAD_SIZE_BYTES)]
     pe_overhead_size_bytes: usize,
@@ -308,6 +311,7 @@ fn build_pe_config(args: &Args) -> ProcessingElementConfigSection {
         sram_bytes: Some(args.pe_sram_bytes),
         adds_per_tick: Some(args.pe_adds_per_tick),
         muls_per_tick: Some(args.pe_muls_per_tick),
+        compares_per_tick: Some(args.pe_compares_per_tick),
     }
 }
 

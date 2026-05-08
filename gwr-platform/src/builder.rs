@@ -63,8 +63,9 @@ pub fn build_memory_maps(
 pub const DEFAULT_PE_NUM_ACTIVE_REQUESTS: usize = 8;
 pub const DEFAULT_PE_LSU_ACCESS_BYTES: usize = 32;
 pub const DEFAULT_PE_SRAM_BYTES: u64 = 1024 * 1024;
-pub const DEFAULT_PE_ADDS_PER_TICK: usize = 16;
-pub const DEFAULT_PE_MULS_PER_TICK: usize = 4;
+pub const DEFAULT_PE_ADDS_PER_TICK: f64 = 16.0;
+pub const DEFAULT_PE_MULS_PER_TICK: f64 = 4.0;
+pub const DEFAULT_PE_COMPARES_PER_TICK: f64 = DEFAULT_PE_ADDS_PER_TICK;
 pub const DEFAULT_PE_OVERHEAD_SIZE_BYTES: usize = 8;
 
 fn build_pe_config(
@@ -81,6 +82,9 @@ fn build_pe_config(
 
     let adds_per_tick = cfg.adds_per_tick.unwrap_or(DEFAULT_PE_ADDS_PER_TICK);
     let muls_per_tick = cfg.muls_per_tick.unwrap_or(DEFAULT_PE_MULS_PER_TICK);
+    let compares_per_tick = cfg
+        .compares_per_tick
+        .unwrap_or(DEFAULT_PE_COMPARES_PER_TICK);
 
     Ok(ProcessingElementConfig {
         num_active_requests,
@@ -89,6 +93,7 @@ fn build_pe_config(
         sram_bytes,
         adds_per_tick,
         muls_per_tick,
+        compares_per_tick,
     })
 }
 

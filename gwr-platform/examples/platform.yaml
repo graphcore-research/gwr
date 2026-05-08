@@ -18,8 +18,8 @@ default_pe_config: &default_pe_config
   num_active_requests: 8
   lsu_access_bytes: 32
   sram_bytes: 0x20_0000 # 2MB of SRAM
-  adds_per_tick: 128
-  muls_per_tick: 16
+  adds_per_tick: 128.0
+  muls_per_tick: 16.0
 
 processing_elements:
   - name: pe_0_0
