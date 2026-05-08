@@ -1341,6 +1341,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gwr-onnx"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "gwr-onnx-sys",
+ "prost",
+ "prost-build",
+]
+
+[[package]]
 name = "gwr-onnx-sys"
 version = "0.1.0"
 
