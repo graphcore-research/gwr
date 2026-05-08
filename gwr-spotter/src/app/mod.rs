@@ -1,5 +1,6 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
+use std::collections::HashMap;
 use std::error;
 use std::path::PathBuf;
 use std::sync::mpsc::channel;
@@ -110,6 +111,10 @@ pub struct App {
     pub filter: Arc<Mutex<Filter>>,
     pub input_state: InputState,
     pub numbers: String,
+    trace_absolute_index: usize,
+    last_renderer_absolute_index: Option<usize>,
+    fullness_absolute_index: Option<usize>,
+    fullness_by_id: HashMap<u64, u64>,
 }
 
 impl App {
@@ -141,6 +146,10 @@ impl App {
             filter,
             input_state: InputState::Default,
             numbers: String::new(),
+            trace_absolute_index: 0,
+            last_renderer_absolute_index: None,
+            fullness_absolute_index: None,
+            fullness_by_id: HashMap::new(),
         }
     }
 
@@ -152,7 +161,14 @@ impl App {
             // Move to the top. Otherwise the current line index is often after
             // the matching lines.
             self.move_top();
+            self.note_renderer_position_without_moving_trace();
         }
+
+        if let Some(line_number) = SHARED_STATE.lock().unwrap().seek_line.take() {
+            self.move_to_absolute_line(line_number);
+        }
+
+        self.publish_position();
     }
 
     /// Set running to false to quit the application.
@@ -168,6 +184,23 @@ impl App {
     pub fn move_bottom(&mut self) {
         let mut guard = self.renderer.lock().unwrap();
         guard.move_bottom();
+    }
+
+    pub fn move_to_line(&mut self, line_number: usize) {
+        let mut guard = self.renderer.lock().unwrap();
+        guard.move_to_index(line_number.saturating_sub(1));
+    }
+
+    pub fn move_to_absolute_line(&mut self, line_number: usize) {
+        self.trace_absolute_index = line_number.saturating_sub(1);
+        let mut guard = self.renderer.lock().unwrap();
+        guard.move_to_absolute_index(line_number.saturating_sub(1));
+        self.last_renderer_absolute_index = Some(guard.current_absolute_index());
+    }
+
+    fn note_renderer_position_without_moving_trace(&mut self) {
+        let renderer = self.renderer.lock().unwrap();
+        self.last_renderer_absolute_index = Some(renderer.current_absolute_index());
     }
 
     pub fn move_down_lines(&mut self, num_lines: usize) {
@@ -194,9 +227,7 @@ impl App {
 
     pub fn move_to_number(&mut self) {
         if let Ok(line_number) = self.numbers.parse::<usize>() {
-            let mut guard = self.renderer.lock().unwrap();
-            // Position is 0-based while line numbers are not (hence -1).
-            guard.move_to_index(line_number - 1);
+            self.move_to_line(line_number);
         }
         self.numbers.clear();
     }
@@ -213,9 +244,45 @@ impl App {
         if let Ok(percent) = self.numbers.parse::<usize>() {
             let mut guard = self.renderer.lock().unwrap();
             let line_number = guard.num_render_lines * percent / 100;
-            guard.move_to_index(line_number - 1);
+            guard.move_to_index(line_number.saturating_sub(1));
         }
         self.numbers.clear();
+    }
+
+    fn publish_position(&mut self) {
+        let renderer = self.renderer.lock().unwrap();
+        let renderer_absolute_index = renderer.current_absolute_index();
+        if self.last_renderer_absolute_index.is_none()
+            || self.last_renderer_absolute_index != Some(renderer_absolute_index)
+        {
+            self.trace_absolute_index = renderer_absolute_index;
+            self.last_renderer_absolute_index = Some(renderer_absolute_index);
+        }
+
+        if renderer.num_lines > 0 {
+            self.trace_absolute_index = self.trace_absolute_index.min(renderer.num_lines - 1);
+        } else {
+            self.trace_absolute_index = 0;
+        }
+
+        if self.fullness_absolute_index != Some(self.trace_absolute_index) {
+            self.fullness_by_id = renderer.fullnesses_at(self.trace_absolute_index);
+            self.fullness_absolute_index = Some(self.trace_absolute_index);
+        }
+
+        let mut shared_state = SHARED_STATE.lock().unwrap();
+        shared_state.current_line = if renderer.num_lines == 0 {
+            0
+        } else {
+            self.trace_absolute_index + 1
+        };
+        shared_state.num_lines = renderer.num_lines;
+        shared_state.current_time_ns = renderer.line_time(self.trace_absolute_index);
+        shared_state.fullnesses = self
+            .fullness_by_id
+            .iter()
+            .map(|(id, fullness)| format!("{id}={fullness}"))
+            .collect();
     }
 
     #[must_use]

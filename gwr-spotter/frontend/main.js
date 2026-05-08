@@ -1,11 +1,12 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
 // Add an entity within a hierarchical tree of nodes
-function add_entity(depth, nodes, path_remaining, full_name, id) {
+function add_entity(depth, nodes, path_remaining, full_name, id, capacities) {
   if (path_remaining.length == 0) {
     return nodes;
   }
 
+  const is_leaf = path_remaining.length == 1;
   const name = path_remaining[0];
   path_remaining = path_remaining.slice(1);
 
@@ -22,9 +23,21 @@ function add_entity(depth, nodes, path_remaining, full_name, id) {
       name: name,
       full_name: full_name,
       depth: depth,
-      id: id,
+      id: is_leaf ? id : undefined,
+      capacity: 0,
+      capacity_units: "",
     }
     nodes.push(node);
+  }
+
+  if (is_leaf && id != undefined) {
+    node.id = id;
+  }
+
+  if (is_leaf && id != undefined && capacities.has(id)) {
+    const capacity = capacities.get(id);
+    node.capacity = capacity.value;
+    node.capacity_units = capacity.units;
   }
 
   if (Object.hasOwn(node, "children")) {
@@ -32,7 +45,7 @@ function add_entity(depth, nodes, path_remaining, full_name, id) {
   } else {
     children = [];
   }
-  children = add_entity(depth + 1, children, path_remaining, full_name, id);
+  children = add_entity(depth + 1, children, path_remaining, full_name, id, capacities);
 
   if (children.length > 0) {
     node.children = children;
@@ -113,14 +126,17 @@ function set_initial_xy(node, min_x, max_x, min_y, max_y) {
 
 // Parse create messages of the form:
 //   hierarchical::name=id
-function parse_entities(text, entities) {
+function parse_entities(text, entities, capacities) {
   const lines = text.split("\n");
   let max_depth = 0;
   lines.forEach(function(line) {
+    if (line.trim().length == 0) {
+      return;
+    }
     const [name, id] = line.split("=");
     const name_path = name.split("::");
     max_depth = Math.max(max_depth, name_path.length);
-    add_entity(0, entities, name_path, name, id);
+    add_entity(0, entities, name_path, name, id, capacities);
   });
 
   annotate_num_children(entities[0]);
@@ -128,6 +144,77 @@ function parse_entities(text, entities) {
   let max_xy = entities[0].num_children * 10;
   set_initial_xy(entities[0], 0, max_xy, 0, max_xy);
   return max_depth - 1;
+}
+
+// Parse capacity messages of the form:
+//   id=capacity,units
+// Older servers may still send:
+//   id=capacity
+function parse_capacities(text) {
+  let capacities = new Map();
+  const lines = text.split("\n");
+  lines.forEach(function(line) {
+    if (line.trim().length == 0) {
+      return;
+    }
+    const [id, capacity_str] = line.split("=");
+    const [value_str, units = ""] = capacity_str.split(",");
+    const value = Number(value_str);
+    if (!Number.isNaN(value)) {
+      capacities.set(id.trim(), {
+        value: value,
+        units: units.trim(),
+      });
+    }
+  });
+  return capacities;
+}
+
+// Parse fullness messages of the form:
+//   id=fullness
+function parse_fullnesses(text) {
+  let fullnesses = new Map();
+  const lines = text.split("\n");
+  lines.forEach(function(line) {
+    if (line.trim().length == 0) {
+      return;
+    }
+    const [id, fullness_str] = line.split("=");
+    const fullness = Number(fullness_str);
+    if (!Number.isNaN(fullness)) {
+      fullnesses.set(id.trim(), fullness);
+    }
+  });
+  return fullnesses;
+}
+
+function apply_fullnesses(node, fullnesses) {
+  let fullness = 0;
+  if (node.id != undefined) {
+    fullness += fullnesses.get(String(node.id)) || 0;
+  }
+
+  (node.children || []).forEach(function(child) {
+    fullness += apply_fullnesses(child, fullnesses);
+  });
+
+  node.fullness = fullness;
+  return fullness;
+}
+
+function fullness_ratio(data, capacity) {
+  if (capacity <= 0) {
+    return 0.0;
+  }
+
+  return Math.min(1.0, Math.max(0.0, (data.fullness || 0) / capacity));
+}
+
+function fullness_color(ratio) {
+  return d3.scaleLinear()
+      .domain([0.0, 0.5, 1.0])
+      .range(["#35a853", "#f2c14e", "#d64545"])
+      .clamp(true)(ratio);
 }
 
 function add_connection(connections, line_data) {
@@ -146,9 +233,46 @@ function parse_connections(text) {
   let connections = [];
   const lines = text.split("\n")
   lines.forEach(function(line) {
+    if (line.trim().length == 0) {
+      return;
+    }
     add_connection(connections, line.split("->"));
   });
   return connections;
+}
+
+// Parse position messages of the form:
+//   line=123
+//   lines=456
+//   time=78.9
+function parse_position(text) {
+  const position = {
+    line: 0,
+    lines: 0,
+    time: 0.0,
+  };
+
+  text.split("\n").forEach(function(line) {
+    const [key, value] = line.split("=");
+    if (key == "line") {
+      position.line = Number(value);
+    } else if (key == "lines") {
+      position.lines = Number(value);
+    } else if (key == "time") {
+      position.time = Number(value);
+    }
+  });
+
+  if (Number.isNaN(position.line)) {
+    position.line = 0;
+  }
+  if (Number.isNaN(position.lines)) {
+    position.lines = 0;
+  }
+  if (Number.isNaN(position.time)) {
+    position.time = 0.0;
+  }
+  return position;
 }
 
 //---------------------------------------------------------------------------------------
@@ -170,6 +294,20 @@ class Renderer {
     this.max_depth = 0;
     this.connections = null;
     this.simulation = null;
+    this.positionSlider = null;
+    this.positionLabel = null;
+    this.positionPoll = null;
+    this.positionSeekTimer = null;
+    this.positionUserActive = false;
+    this.pendingSeekLine = null;
+    this.pendingSeekStartedAt = 0;
+    this.pendingSeekTimeoutMs = 2000;
+    this.fullnesses = new Map();
+    this.lastPosition = {
+      line: 0,
+      lines: 0,
+      time: 0.0,
+    };
   }
 
   /**
@@ -213,6 +351,136 @@ class Renderer {
     this.connections = connections;
   }
 
+  set_fullnesses(fullnesses) {
+    this.fullnesses = fullnesses;
+    if (this.entities != null) {
+      apply_fullnesses(this.entities, fullnesses);
+      if (this.controls.plot.value == "tree_map") {
+        update_tree_map_fullness(this.entities);
+      } else if (this.controls.plot.value == "force_tree") {
+        update_force_tree_fullness(this.entities);
+      }
+    }
+  }
+
+  set_position_controls(slider, label) {
+    this.positionSlider = slider;
+    this.positionLabel = label;
+
+    const renderer = this;
+    slider.on("input", function() {
+      renderer.positionUserActive = true;
+      const line = Number(slider.property("value"));
+      renderer._render_position({
+        line: line,
+        lines: renderer.lastPosition.lines,
+        time: renderer.lastPosition.time,
+      });
+      renderer._debounced_seek(line);
+    });
+    slider.on("change", function() {
+      const line = Number(slider.property("value"));
+      renderer._seek(line);
+      renderer.positionUserActive = false;
+    });
+    slider.on("pointerdown", function() {
+      renderer.positionUserActive = true;
+    });
+    slider.on("pointerup", function() {
+      const line = Number(slider.property("value"));
+      renderer._seek(line);
+      renderer.positionUserActive = false;
+    });
+  }
+
+  start_position_sync() {
+    if (this.positionPoll != null) {
+      return;
+    }
+
+    this._poll_position();
+    this.positionPoll = setInterval(() => this._poll_position(), 500);
+  }
+
+  _poll_position() {
+    if (this.positionSlider == null) {
+      return;
+    }
+
+    Promise.all([
+      d3.text(this.serverUrl + "/position"),
+      d3.text(this.serverUrl + "/fullnesses"),
+    ])
+        .then(([positionText, fullnessText]) => {
+          const position = parse_position(positionText);
+          if (!this._server_position_is_current(position)) {
+            return;
+          }
+
+          this.lastPosition = position;
+          this.set_fullnesses(parse_fullnesses(fullnessText));
+          if (!this.positionUserActive) {
+            this._render_position(position);
+          }
+        })
+        .catch(function(error) {
+          console.log(error);
+        });
+  }
+
+  _server_position_is_current(position) {
+    if (this.pendingSeekLine == null) {
+      return true;
+    }
+
+    if (position.line == this.pendingSeekLine) {
+      this.pendingSeekLine = null;
+      return true;
+    }
+
+    // If something went wrong or the TUI clamped differently, eventually trust
+    // the server again rather than freezing the control forever.
+    if (Date.now() - this.pendingSeekStartedAt > this.pendingSeekTimeoutMs) {
+      this.pendingSeekLine = null;
+      return true;
+    }
+
+    return false;
+  }
+
+  _render_position(position) {
+    if (this.positionSlider == null || this.positionLabel == null) {
+      return;
+    }
+
+    const maxLine = Math.max(0, position.lines);
+    const line = Math.min(Math.max(0, position.line), maxLine);
+    this.positionSlider
+        .attr("min", maxLine > 0 ? 1 : 0)
+        .attr("max", maxLine)
+        .property("value", line);
+    this.positionLabel.text(`${line} / ${maxLine} @ ${position.time.toFixed(1)}ns`);
+  }
+
+  _debounced_seek(line) {
+    clearTimeout(this.positionSeekTimer);
+    this.positionSeekTimer = setTimeout(() => this._seek(line), 80);
+  }
+
+  _seek(line) {
+    if (Number.isNaN(line)) {
+      return;
+    }
+
+    this.pendingSeekLine = line;
+    this.pendingSeekStartedAt = Date.now();
+
+    d3.text(this.serverUrl + `/seek/${line}`)
+        .catch(function(error) {
+          console.log(error);
+        });
+  }
+
   render() {
     if (this.entities == null) {
       console.log("Nothing to render");
@@ -229,6 +497,7 @@ class Renderer {
     const controls = this.controls;
     const guiElements = this.guiElements;
     const plot = guiElements.plotTypes.get(controls.plot.value);
+    apply_fullnesses(this.entities, this.fullnesses);
     this.simulation = plot(this.serverUrl, this.entities, this.connections, this.max_depth);
   }
 }

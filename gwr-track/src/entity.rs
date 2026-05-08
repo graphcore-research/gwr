@@ -12,6 +12,27 @@ use std::rc::Rc;
 use crate::tracker::aka::{Aka, get_alternative_names};
 use crate::{Id, Tracker, create, destroy, trace};
 
+/// A capacity value and its units.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Capacity {
+    /// Capacity value.
+    pub value: usize,
+
+    /// Capacity units, for example "objects" or "bytes".
+    pub units: String,
+}
+
+impl Capacity {
+    /// Construct a new [`Capacity`].
+    #[must_use]
+    pub fn new(value: usize, units: impl Into<String>) -> Self {
+        Self {
+            value,
+            units: units.into(),
+        }
+    }
+}
+
 /// A simulation entity
 ///
 /// An entity is a part of a hierarchical simulation in which it must have a
@@ -104,6 +125,13 @@ impl Entity {
                 name
             }
             None => self.name.clone(),
+        }
+    }
+
+    /// Emit the capacity represented by this simulation entity.
+    pub fn track_capacity(&self, value: usize, units: impl Into<String>) {
+        if self.tracker.is_entity_enabled(self.id, log::Level::Trace) {
+            self.tracker.capacity(self.id, Capacity::new(value, units));
         }
     }
 }

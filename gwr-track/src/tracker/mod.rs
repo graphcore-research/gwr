@@ -32,6 +32,7 @@ pub use in_memory::InMemoryTracker;
 use regex::Regex;
 pub use text::TextTracker;
 
+use crate::entity::Capacity;
 use crate::tracker::aka::AlternativeNames;
 use crate::{Id, ROOT};
 
@@ -66,6 +67,9 @@ pub trait Track {
 
     /// Track when an entity with the given ID is created.
     fn create(&self, created_by: Id, created_obj: Id, num_bytes: usize, req_type: i8, name: &str);
+
+    /// Track the capacity available in an entity.
+    fn capacity(&self, id: Id, capacity: Capacity);
 
     /// Track when an entity with the given ID is destroyed.
     fn destroy(&self, destroyed_by: Id, destroyed_obj: Id);

@@ -50,8 +50,13 @@ where
             return sim_error!("Unsupported Queue with 0 capacity");
         }
 
+        let entity = Rc::new(Entity::new(parent, name));
+        if let Some(capacity) = capacity {
+            entity.track_capacity(capacity, "objects");
+        }
+
         Ok(Self {
-            entity: Rc::new(Entity::new(parent, name)),
+            entity,
             capacity,
             data: RefCell::new(VecDeque::new()),
             queue_changed: Repeated::default(),

@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use gwr_track::Id;
+use gwr_track::entity::Capacity;
 use gwr_track::trace_visitor::{TraceVisitor, process_capnp};
 
 use crate::app::{CHUNK_SIZE, EventLine};
@@ -136,7 +137,7 @@ impl TraceVisitor for BinLoader {
             if *self.id_is_source.get(&id.0).unwrap() {
                 *fullness += 1;
             } else {
-                *fullness -= 1;
+                *fullness = fullness.saturating_sub(1);
             }
             *fullness
         };
@@ -160,7 +161,7 @@ impl TraceVisitor for BinLoader {
             }
 
             if *self.id_is_source.get(&id.0).unwrap() {
-                *fullness -= 1;
+                *fullness = fullness.saturating_sub(1);
             } else {
                 *fullness += 1;
             }
@@ -182,6 +183,18 @@ impl TraceVisitor for BinLoader {
             value,
             time,
         });
+    }
+
+    fn capacity(&mut self, id: Id, capacity: Capacity) {
+        SHARED_STATE
+            .lock()
+            .unwrap()
+            .capacities
+            .push(format!("{id}={},{}", capacity.value, capacity.units));
+        self.renderer
+            .lock()
+            .unwrap()
+            .set_capacity(id.0, capacity.value as u64, capacity.units);
     }
 
     fn time(&mut self, _id: Id, time_ns: f64) {

@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 pub use log;
 
+use crate::entity::Capacity;
 use crate::tracker::aka::AlternativeNames;
 use crate::tracker::{EntityManager, Track};
 use crate::{Id, SharedWriter, Writer};
@@ -74,6 +75,13 @@ impl Track for TextTracker {
                 format!("{created_by}: created {id}, {name}, {req_type}, {num_bytes} bytes\n")
                     .as_bytes(),
             )
+            .unwrap();
+    }
+
+    fn capacity(&self, id: Id, capacity: Capacity) {
+        self.writer
+            .borrow_mut()
+            .write_all(format!("{id}: capacity {} {}\n", capacity.value, capacity.units).as_bytes())
             .unwrap();
     }
 

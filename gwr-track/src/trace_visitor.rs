@@ -7,6 +7,7 @@ use std::io::BufRead;
 
 use capnp::serialize_packed;
 
+use crate::entity::Capacity;
 use crate::gwr_track_capnp::log::LogLevel;
 use crate::{Id, gwr_track_capnp};
 
@@ -106,6 +107,18 @@ pub trait TraceVisitor {
         // Remove the unused variable warnings
         let _ = id;
         let _ = value;
+    }
+
+    /// A capacity has been set for the specified ID.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The originator of this event.
+    /// * `capacity` - The entity capacity and its units.
+    fn capacity(&mut self, id: Id, capacity: Capacity) {
+        // Remove the unused variable warnings
+        let _ = id;
+        let _ = capacity;
     }
 
     /// Advance simulation time.
@@ -220,6 +233,20 @@ where
             }
             Ok(gwr_track_capnp::event::Which::Value(value)) => {
                 visitor.value(id, value);
+            }
+            Ok(gwr_track_capnp::event::Which::Capacity(capacity)) => {
+                let capacity = capacity.expect("failed to parse Capacity event");
+                visitor.capacity(
+                    id,
+                    Capacity::new(
+                        capacity.get_value() as usize,
+                        capacity
+                            .get_units()
+                            .expect("failed to parse Capacity units")
+                            .to_str()
+                            .expect("Capacity units is not a valid UTF-8 string"),
+                    ),
+                );
             }
             Ok(gwr_track_capnp::event::Which::Time(time)) => {
                 visitor.time(id, time);

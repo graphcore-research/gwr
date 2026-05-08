@@ -17,6 +17,7 @@ use std::rc::Rc;
 
 use regex::Regex;
 
+use crate::entity::Capacity;
 use crate::tracker::aka::AlternativeNames;
 use crate::tracker::{CapnProtoTracker, EntityManager};
 use crate::{Id, Track, Tracker, Writer};
@@ -82,6 +83,13 @@ impl Track for TestTracker {
     fn create(&self, created_by: Id, id: Id, num_bytes: usize, req_type: i8, name: &str) {
         self.add_event(format!(
             "{created_by}: created {id}, {name}, {req_type}, {num_bytes} bytes"
+        ));
+    }
+
+    fn capacity(&self, id: Id, capacity: Capacity) {
+        self.add_event(format!(
+            "{id}: capacity {} {}",
+            capacity.value, capacity.units
         ));
     }
 

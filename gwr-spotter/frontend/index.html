@@ -35,7 +35,23 @@
               <select id="plot"></select>
             </a>
           </li>
+        </ul>
+      </li>
 
+      <li class="level1 trace-position">
+        <a href="#" class="trace-position-btn">Trace position
+          <span class="fas fa-caret-down trace-position">+</span>
+        </a>
+        <ul class="trace-position-show level2 show rotate">
+          <li class="level2 trace-position-control">
+            <label for="trace-position">Line</label>
+            <input id="trace-position" type="range" min="0" max="0" value="0" step="1">
+          </li>
+          <li class="level2 trace-position-label" id="trace-position-label">
+            0 / 0 @ 0.0ns
+          </li>
+        </ul>
+      </li>
     </ul>
   </nav>
 
@@ -50,6 +66,11 @@ $('.menu-btn').click(function() {
   $('.chart-type-btn').click(function() {
     $('nav ul .chart-type-show').toggleClass("show");
     $('nav ul .chart-type').toggleClass("rotate");
+  });
+
+  $('.trace-position-btn').click(function() {
+    $('nav ul .trace-position-show').toggleClass("show");
+    $('nav ul .trace-position').toggleClass("rotate");
   });
 
   /***********************************************************************
@@ -98,6 +119,10 @@ $('.menu-btn').click(function() {
   const renderer = new Renderer(serverUrl);
   const controls = renderer.controls;
   const guiElements = renderer.guiElements;
+  renderer.set_position_controls(
+      d3.select("#trace-position"),
+      d3.select("#trace-position-label"));
+  renderer.start_position_sync();
 
   // Setup all the different color scales that are available
   const plotElement = d3.select(`#plot`);
@@ -135,21 +160,19 @@ function redraw() {
   renderer.render();
 }
 
-d3.text(serverUrl + "/entities")
-    .then(function(text) {
-      let root = []
-      let max_depth = parse_entities(text, root);
+Promise.all([
+  d3.text(serverUrl + "/capacities"),
+  d3.text(serverUrl + "/entities"),
+  d3.text(serverUrl + "/connections"),
+])
+    .then(function([capacity_text, entity_text, connection_text]) {
+      const capacities = parse_capacities(capacity_text);
+      const root = [];
+      const max_depth = parse_entities(entity_text, root, capacities);
+      const connections = parse_connections(connection_text);
       renderer.set_entities(root[0], max_depth);
-
-      d3.text(serverUrl + "/connections")
-          .then(function(text) {
-            let connections = parse_connections(text);
-            renderer.set_connections(connections);
-            renderer.render();
-          })
-          .catch(function(error) {
-            console.log(error);
-          });
+      renderer.set_connections(connections);
+      renderer.render();
     })
     .catch(function(error) {
       console.log(error);

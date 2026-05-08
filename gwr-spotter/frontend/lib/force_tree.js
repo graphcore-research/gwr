@@ -43,6 +43,53 @@ function define_arrow(svg) {
 // WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 // ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 // OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+function force_tree_fill(d) {
+  if (d.data.capacity > 0) {
+    return fullness_color(fullness_ratio(d.data, d.data.capacity));
+  }
+
+  return d.children ? null : "#000";
+}
+
+function force_tree_stroke(d) {
+  if (d.data.capacity > 0) {
+    return "#202020";
+  }
+
+  return d.children ? null : "#fff";
+}
+
+function force_tree_opacity(d) {
+  if (d.data.capacity > 0) {
+    return 1;
+  }
+
+  return d.children ? 0.5 : 1;
+}
+
+function force_tree_title(d) {
+  if (d.data.capacity > 0) {
+    const format = d3.format(",d");
+    const units = d.data.capacity_units ? ` ${d.data.capacity_units}` : "";
+    const percentage = d3.format(".1%")(fullness_ratio(d.data, d.data.capacity));
+    return `${d.data.full_name}\n${format(d.data.capacity)}${units} capacity\n${format(d.data.fullness || 0)} full (${percentage})`;
+  }
+
+  return d.data.full_name;
+}
+
+function update_force_tree_fullness() {
+  d3.select(`#${chartElement}`)
+      .selectAll("circle.node")
+      .attr("fill", force_tree_fill)
+      .attr("stroke", force_tree_stroke)
+      .attr("opacity", force_tree_opacity);
+
+  d3.select(`#${chartElement}`)
+      .selectAll("circle.node title")
+      .text(force_tree_title);
+}
+
 function force_tree(serverUrl, data, connections, max_depth) {
   // Specify the chart’s dimensions.
   var chartDiv = document.getElementById(chartElement);
@@ -121,14 +168,14 @@ function force_tree(serverUrl, data, connections, max_depth) {
       .each(d => d.id = `node_${d.data.id}`)
       .attr("id", d => d.id)
       .attr("class", "node")
-      .attr("fill", d => d.children ? null : "#000")
-      .attr("stroke", d => d.children ? null : "#fff")
-      .attr("opacity", d => d.children ? 0.5 : 1)
+      .attr("fill", force_tree_fill)
+      .attr("stroke", force_tree_stroke)
+      .attr("opacity", force_tree_opacity)
       .attr("r", d => d.r)
       .call(drag(simulation));
 
   node.append("title")
-      .text(d => d.data.full_name);
+      .text(force_tree_title);
 
   // When clicking on a block highlight it by setting the "selected" class
   node.on("click", d => select_and_send(serverUrl, svg, d.target.id, d.target.__data__.data.id));
