@@ -304,9 +304,14 @@ impl App {
         guard.print_names = !guard.print_names;
     }
 
-    pub fn toggle_print_packets(&mut self) {
+    pub fn toggle_print_objects(&mut self) {
         let mut guard = self.renderer.lock().unwrap();
-        guard.print_packets = !guard.print_packets;
+        guard.print_objects = !guard.print_objects;
+    }
+
+    pub fn toggle_print_details(&mut self) {
+        let mut guard = self.renderer.lock().unwrap();
+        guard.print_details = !guard.print_details;
     }
 
     pub fn toggle_print_times(&mut self) {

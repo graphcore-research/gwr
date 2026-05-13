@@ -20,7 +20,6 @@ use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
-use gwr_track::enter;
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
 
@@ -86,7 +85,7 @@ where
         let rx = take_option!(self.rx);
         loop {
             let value = rx.get()?.await;
-            enter!(self.entity ; value.id());
+            self.entity.track_enter(value.id());
             *self.sunk_count.borrow_mut() += 1;
         }
     }

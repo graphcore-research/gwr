@@ -125,7 +125,7 @@ impl MemoryAccess {
         src_device: DeviceId,
         overhead_size_bytes: usize,
     ) -> Self {
-        Self {
+        let access = Self {
             created_by: created_by.clone(),
             id: create_id!(created_by),
             access_size_bytes,
@@ -136,7 +136,15 @@ impl MemoryAccess {
             src_device,
             cache_hint: CacheHintType::Allocate,
             overhead_size_bytes,
-        }
+        };
+        created_by.track_create_object(
+            access.id,
+            access.total_bytes(),
+            "bytes",
+            access.access_type() as u8,
+            &format!("MemoryAccess: {access}"),
+        );
+        access
     }
 }
 

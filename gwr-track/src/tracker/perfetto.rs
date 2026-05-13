@@ -7,7 +7,6 @@ use crate::entity::Capacity;
 use crate::perfetto_trace_builder::PerfettoTraceBuilder;
 use crate::tracker::EntityManager;
 use crate::tracker::aka::AlternativeNames;
-use crate::tracker::types::ReqType;
 use crate::{Id, SharedWriter, Track, Writer};
 
 /// A tracker that writes Perfetto binary data
@@ -72,23 +71,46 @@ impl Track for PerfettoTracker {
         self.writer.borrow_mut().write_all(&buf).unwrap();
     }
 
-    fn create(&self, created_by: Id, id: Id, _num_bytes: usize, req_type: i8, name: &str) {
+    fn create_entity(&self, created_by: Id, id: Id, name: &str) {
         let mut guard = self.trace_builder.borrow_mut();
-        let trace_packet = if req_type == ReqType::Value as i8 {
-            guard.build_value_track_descriptor_trace_packet(
-                *self.current_time_ns.borrow(),
-                id,
-                created_by,
-                name,
-            )
-        } else {
-            guard.build_enter_exit_track_descriptor_trace_packet(
-                *self.current_time_ns.borrow(),
-                id,
-                created_by,
-                name,
-            )
-        };
+        let trace_packet = guard.build_enter_exit_track_descriptor_trace_packet(
+            *self.current_time_ns.borrow(),
+            id,
+            created_by,
+            name,
+        );
+        let buf = guard.build_trace_to_bytes(vec![trace_packet]);
+        self.writer.borrow_mut().write_all(&buf).unwrap();
+    }
+
+    fn create_monitor(&self, created_by: Id, id: Id, name: &str) {
+        let mut guard = self.trace_builder.borrow_mut();
+        let trace_packet = guard.build_value_track_descriptor_trace_packet(
+            *self.current_time_ns.borrow(),
+            id,
+            created_by,
+            name,
+        );
+        let buf = guard.build_trace_to_bytes(vec![trace_packet]);
+        self.writer.borrow_mut().write_all(&buf).unwrap();
+    }
+
+    fn create_object(
+        &self,
+        created_by: Id,
+        id: Id,
+        _size: usize,
+        _units: &str,
+        _req_type: u8,
+        details: &str,
+    ) {
+        let mut guard = self.trace_builder.borrow_mut();
+        let trace_packet = guard.build_enter_exit_track_descriptor_trace_packet(
+            *self.current_time_ns.borrow(),
+            id,
+            created_by,
+            details,
+        );
         let buf = guard.build_trace_to_bytes(vec![trace_packet]);
         self.writer.borrow_mut().write_all(&buf).unwrap();
     }

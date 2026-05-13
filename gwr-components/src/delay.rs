@@ -204,7 +204,6 @@ use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
-use gwr_track::{enter, exit};
 
 use crate::{connect_tx, port_rx, take_option};
 
@@ -325,8 +324,7 @@ where
         let delay_ticks = *self.delay_ticks.borrow();
         loop {
             let value = rx.get()?.await;
-            let value_id = value.id();
-            enter!(self.entity ; value_id);
+            self.entity.track_enter(value.id());
 
             let mut tick = self.clock.tick_now();
             tick.set_tick(tick.tick() + delay_ticks as u64);
@@ -376,7 +374,7 @@ where
                     }
                 }
 
-                exit!(entity ; value.id());
+                entity.track_exit(value.id());
                 tx.put(value)?.await;
                 output_changed.notify();
             }

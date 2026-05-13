@@ -63,7 +63,21 @@ pub trait Track {
     fn value(&self, id: Id, value: f64);
 
     /// Track when an entity with the given ID is created.
-    fn create(&self, created_by: Id, created_obj: Id, num_bytes: usize, req_type: i8, name: &str);
+    fn create_entity(&self, created_by: Id, id: Id, name: &str);
+
+    /// Track when a monitor with the given ID is created.
+    fn create_monitor(&self, created_by: Id, id: Id, name: &str);
+
+    /// Track when an object with the given ID is created.
+    fn create_object(
+        &self,
+        created_by: Id,
+        id: Id,
+        size: usize,
+        units: &str,
+        req_type: u8,
+        details: &str,
+    );
 
     /// Track the capacity available in an entity.
     fn capacity(&self, id: Id, capacity: Capacity);

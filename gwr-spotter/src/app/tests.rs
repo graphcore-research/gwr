@@ -445,20 +445,23 @@ fn toggles_flip_renderer_flags() {
         let r = app.renderer.lock().unwrap();
         assert!(!r.plot_fullness);
         assert!(r.print_names);
-        assert!(!r.print_packets);
+        assert!(!r.print_objects);
+        assert!(r.print_details);
         assert!(r.print_times);
     }
 
     app.toggle_plot_fullness();
     app.toggle_print_names();
-    app.toggle_print_packets();
+    app.toggle_print_objects();
+    app.toggle_print_details();
     app.toggle_print_times();
 
     {
         let r = app.renderer.lock().unwrap();
         assert!(r.plot_fullness, "plot_fullness should be toggled on");
         assert!(!r.print_names, "print_names should be toggled off");
-        assert!(r.print_packets, "print_packets should be toggled on");
+        assert!(r.print_objects, "print_objects should be toggled on");
+        assert!(!r.print_details, "print_details should be toggled off");
         assert!(!r.print_times, "print_times should be toggled off");
     }
 }

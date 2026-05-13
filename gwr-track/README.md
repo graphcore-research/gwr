@@ -23,16 +23,28 @@ top::processor0::cpu102::memory
 Tracing can be configured globally or enabled/disabled depending on regular
 expressions matching entity names.
 
+## EntitiyMonitor
+
+The `EntityMonitor` allows the user to create helper structs that can monitor an
+`Entity` and emit useful statistics through `track_value()` calls.
+
+## Objects
+
+For short-lived parts of the simulations (like an Ethernet frame or a memory
+access) the user can create a track object. These are given unique `Id`s like
+`Entities` and `Entities` so that their lifecycle can be tracked across the
+simulation.
+
 ## IDs
 
 Each [`Entity`] will have a unique 64-bit [`Id`]. This ID is used throughout the
 log/bin files in order to identify the originator of messages and to reduce the
 size of the files.
 
-`Id`s are also assigned to all packets. Packets do not contain an [`Entity`]
-because they flow through the simulation and so their location within the
-simulation changes. However, the logging of packets is controlled by the
-[`Entity`] that creates the packet.
+`Id`s are also assigned to track `Objects`. `Objects` do not contain an
+[`Entity`] because they flow through the simulation and so their location within
+the simulation changes. However, the logging of packets is controlled by the
+[`Entity`] that creates the object.
 
 ## Macros
 
@@ -51,16 +63,6 @@ There are the macros that map to log messages of the specified level:
 
 **Note:** the logging level is controlled globally with the ability to configure
 it at the level of any [`Entity`] within the simulation hierarchy.
-
-And then there are macros that map to simulation events:
-
-- `create!` - used when a new [`Id`] is created.
-- `destroy!` - used when a [`Id`] is destroyed.
-- `connect!` - used when an [`Entity`] is connected to another [`Entity`].
-- `enter!` - used when an [`Entity`] enters another [`Entity`]. For example, a
-  packet enters a buffer.
-- `exit!` - used when an [`Entity`] leaves another [`Entity`]. For example a
-  packet leaves a pipeline.
 
 [Cap'n Proto]: https://capnproto.org
 [`Entity`]: #entities

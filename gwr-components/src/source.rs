@@ -20,7 +20,6 @@ use gwr_engine::traits::{Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::entity::Entity;
-use gwr_track::exit;
 use gwr_track::tracker::aka::Aka;
 
 #[macro_export]
@@ -109,7 +108,7 @@ where
         loop {
             let value = data_generator.next();
             if let Some(value) = value {
-                exit!(self.entity ; value.id());
+                self.entity.track_exit(value.id());
                 tx.put(value)?.await;
             } else {
                 break;

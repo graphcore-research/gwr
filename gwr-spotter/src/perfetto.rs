@@ -7,7 +7,6 @@ use std::path::Path;
 use gwr_track::Id;
 use gwr_track::perfetto_trace_builder::PerfettoTraceBuilder;
 use gwr_track::trace_visitor::{TraceVisitor, process_capnp};
-use gwr_track::tracker::types::ReqType;
 
 struct PerfettoGenerator {
     output: File,
@@ -39,24 +38,48 @@ impl TraceVisitor for PerfettoGenerator {
         // todo!()
     }
 
-    fn create(&mut self, created_by: Id, id: Id, _num_bytes: usize, req_type: i8, name: &str) {
-        let trace_packet = if req_type == ReqType::Value as i8 {
-            self.trace_builder
-                .build_value_track_descriptor_trace_packet(
-                    self.current_time_ns,
-                    id,
-                    created_by,
-                    name,
-                )
-        } else {
-            self.trace_builder
-                .build_enter_exit_track_descriptor_trace_packet(
-                    self.current_time_ns,
-                    id,
-                    created_by,
-                    name,
-                )
-        };
+    fn create_entity(&mut self, created_by: Id, id: Id, name: &str) {
+        let trace_packet = self
+            .trace_builder
+            .build_enter_exit_track_descriptor_trace_packet(
+                self.current_time_ns,
+                id,
+                created_by,
+                name,
+            );
+        let buf = self.trace_builder.build_trace_to_bytes(vec![trace_packet]);
+        self.output
+            .write_all(&buf)
+            .expect("`output` should be writable file");
+    }
+
+    fn create_monitor(&mut self, created_by: Id, id: Id, name: &str) {
+        let trace_packet = self
+            .trace_builder
+            .build_value_track_descriptor_trace_packet(self.current_time_ns, id, created_by, name);
+        let buf = self.trace_builder.build_trace_to_bytes(vec![trace_packet]);
+        self.output
+            .write_all(&buf)
+            .expect("`output` should be writable file");
+    }
+
+    fn create_object(
+        &mut self,
+        created_by: Id,
+        id: Id,
+        _size: usize,
+        _units: &str,
+        _req_type: u8,
+        details: &str,
+    ) {
+        let trace_packet = self
+            .trace_builder
+            .build_enter_exit_track_descriptor_trace_packet(
+                self.current_time_ns,
+                id,
+                created_by,
+                details,
+            );
         let buf = self.trace_builder.build_trace_to_bytes(vec![trace_packet]);
         self.output
             .write_all(&buf)

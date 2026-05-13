@@ -23,8 +23,8 @@ struct BinLoader {
     id_to_fullness: HashMap<u64, u64>,
     id_is_source: HashMap<u64, bool>,
     id_to_name: Option<HashMap<u64, String>>,
-    id_to_num_bytes: Option<HashMap<u64, usize>>,
-    id_to_req_type: Option<HashMap<u64, i8>>,
+    id_to_details: Option<HashMap<u64, String>>,
+    id_to_req_type: Option<HashMap<u64, u8>>,
     current_time_ns: f64,
 }
 
@@ -37,7 +37,7 @@ impl BinLoader {
             id_to_fullness: HashMap::new(),
             id_is_source: HashMap::new(),
             id_to_name: Some(HashMap::new()),
-            id_to_num_bytes: Some(HashMap::new()),
+            id_to_details: Some(HashMap::new()),
             id_to_req_type: Some(HashMap::new()),
             current_time_ns: 0.0,
         }
@@ -65,14 +65,24 @@ impl BinLoader {
             .unwrap()
             .add_chunk(self.events.take().unwrap());
         let id_to_name = self.id_to_name.take().unwrap();
+        let id_to_details = self.id_to_details.take().unwrap();
         self.renderer
             .lock()
             .unwrap()
             .extend_id_to_name(id_to_name.clone());
+        self.renderer
+            .lock()
+            .unwrap()
+            .extend_id_to_details(id_to_details.clone());
         self.filter.lock().unwrap().extend_id_to_name(id_to_name);
+        self.filter
+            .lock()
+            .unwrap()
+            .extend_id_to_details(id_to_details);
 
         self.events = Some(Vec::with_capacity(CHUNK_SIZE));
         self.id_to_name = Some(HashMap::new());
+        self.id_to_details = Some(HashMap::new());
     }
 }
 
@@ -88,7 +98,7 @@ impl TraceVisitor for BinLoader {
         });
     }
 
-    fn create(&mut self, _created_by: Id, id: Id, num_bytes: usize, req_type: i8, name: &str) {
+    fn create_entity(&mut self, _created_by: Id, id: Id, name: &str) {
         SHARED_STATE
             .lock()
             .unwrap()
@@ -98,10 +108,54 @@ impl TraceVisitor for BinLoader {
             .as_mut()
             .unwrap()
             .insert(id.0, name.to_owned());
-        self.id_to_num_bytes
+        self.add_event(EventLine::Create {
+            id: id.0,
+            time: self.current_time_ns,
+        });
+    }
+
+    fn create_monitor(&mut self, _created_by: Id, id: Id, name: &str) {
+        SHARED_STATE
+            .lock()
+            .unwrap()
+            .entity_names
+            .push(format!("{name}={id}"));
+        self.id_to_name
             .as_mut()
             .unwrap()
-            .insert(id.0, num_bytes);
+            .insert(id.0, name.to_owned());
+        self.add_event(EventLine::Create {
+            id: id.0,
+            time: self.current_time_ns,
+        });
+    }
+
+    fn create_object(
+        &mut self,
+        _created_by: Id,
+        id: Id,
+        _size: usize,
+        units: &str,
+        req_type: u8,
+        details: &str,
+    ) {
+        SHARED_STATE
+            .lock()
+            .unwrap()
+            .entity_names
+            .push(format!("object={id}: {details}"));
+        self.id_to_name
+            .as_mut()
+            .unwrap()
+            .insert(id.0, "object".to_owned());
+        self.id_to_details.as_mut().unwrap().insert(
+            id.0,
+            if units.is_empty() {
+                details.to_owned()
+            } else {
+                format!("{details} [{units}]")
+            },
+        );
         self.id_to_req_type.as_mut().unwrap().insert(id.0, req_type);
         self.add_event(EventLine::Create {
             id: id.0,

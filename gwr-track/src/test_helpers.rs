@@ -80,9 +80,25 @@ impl Track for TestTracker {
         self.add_event(format!("{id}: {value}"));
     }
 
-    fn create(&self, created_by: Id, id: Id, num_bytes: usize, req_type: i8, name: &str) {
+    fn create_entity(&self, created_by: Id, id: Id, name: &str) {
+        self.add_event(format!("{created_by}: created entity {id}, {name}"));
+    }
+
+    fn create_monitor(&self, created_by: Id, id: Id, name: &str) {
+        self.add_event(format!("{created_by}: created monitor {id}, {name}"));
+    }
+
+    fn create_object(
+        &self,
+        created_by: Id,
+        id: Id,
+        size: usize,
+        units: &str,
+        req_type: u8,
+        details: &str,
+    ) {
         self.add_event(format!(
-            "{created_by}: created {id}, {name}, {req_type}, {num_bytes} bytes"
+            "{created_by}: created object {id}, {req_type}, {size}, {units}, {details}"
         ));
     }
 

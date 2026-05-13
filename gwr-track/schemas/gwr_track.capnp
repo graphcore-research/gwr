@@ -5,8 +5,8 @@
 # Tracked state ################################################################
 
 struct Log @0x835154066f85a612 {
-  level     @1  :LogLevel;
-  message   @0  :Text;
+  level     @1 :LogLevel;
+  message   @0 :Text;
 
   # Logging levels to match those of the Rust log::Level
   enum LogLevel {
@@ -23,11 +23,28 @@ struct Capacity @0xac486acbf54c747d {
   value    @0  :UInt64;
 }
 
+struct Object @0xa7fb0080384f0095 {
+  details  @3 :Text;
+  type     @2 :UInt8;
+  units    @1 :Text;
+  size     @0 :UInt64;
+}
+
+struct Monitor @0xa021bdb26d110114 {
+  name     @0 :Text;
+}
+
 struct Entity @0xbc946b85a6484339 {
-  name     @3  :Text;
-  reqType  @2  :Int8;
-  numBytes @1  :UInt64;
-  id       @0  :UInt64;
+  name     @0 :Text;
+}
+
+struct Create @0xc95443fd58b475bb {
+  union {
+    object  @3 :Object;
+    monitor @2 :Monitor;
+    entity  @1 :Entity;
+  }
+  id        @0 :UInt64;
 }
 
 struct Event @0xc13b4d9cc5ead95b {
@@ -39,7 +56,7 @@ struct Event @0xc13b4d9cc5ead95b {
     enter   @5  :UInt64;
     exit    @4  :UInt64;
     destroy @3  :UInt64;
-    create  @2  :Entity;
+    create  @2  :Create;
     log     @1  :Log;
   }
   id        @0 :UInt64;

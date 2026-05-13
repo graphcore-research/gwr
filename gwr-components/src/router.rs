@@ -63,8 +63,8 @@ use gwr_engine::traits::{Routable, Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::entity::Entity;
+use gwr_track::trace;
 use gwr_track::tracker::aka::Aka;
-use gwr_track::{enter, exit, trace};
 
 use crate::take_option;
 
@@ -169,10 +169,10 @@ where
 
         loop {
             let value = rx.get()?.await;
-            enter!(self.entity ; value.id());
+            self.entity.track_enter(value.id());
 
             let tx_index = algorithm.route(&value)?;
-            trace!(self.entity ; "Route {} to {}", value, tx_index);
+            trace!(self.entity ; "Route {} to {}", value.id(), tx_index);
 
             match tx.get(tx_index) {
                 None => {
@@ -181,7 +181,7 @@ where
                     );
                 }
                 Some(tx) => {
-                    exit!(self.entity ; value.id());
+                    self.entity.track_exit(value.id());
                     tx.put(value)?.await;
                 }
             }

@@ -21,7 +21,6 @@ use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
-use gwr_track::{enter, exit};
 
 use super::rate_limiter::RateLimiter;
 use crate::{connect_tx, port_rx, take_option};
@@ -100,11 +99,11 @@ where
 
             let value_id = value.id();
             let ticks = limiter.ticks(&value);
-            enter!(self.entity ; value_id);
+            self.entity.track_enter(value_id);
 
             tx.put(value)?.await;
             limiter.delay_ticks(ticks).await;
-            exit!(self.entity ; value_id);
+            self.entity.track_exit(value_id);
 
             // Allow the OutPort to complete
             rx.finish_get();

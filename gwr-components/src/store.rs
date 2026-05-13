@@ -138,7 +138,6 @@ use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
-use gwr_track::{enter, exit};
 
 use crate::{connect_tx, port_rx, take_option};
 
@@ -173,7 +172,7 @@ where
     ///
     /// There must be room before this is called.
     fn push_value(&self, value: T) -> SimResult {
-        enter!(self.entity ; value.id());
+        self.entity.track_enter(value.id());
         if *self.error_on_overflow.borrow() {
             if self.data.borrow().len() >= self.capacity {
                 return sim_error!("Overflow in {:?}", self.entity.full_name());
@@ -193,7 +192,7 @@ where
     fn pop_value(&self) -> Result<T, SimError> {
         let value = self.data.borrow_mut().pop_front().unwrap();
         self.level_change.notify_result(self.data.borrow().len());
-        exit!(self.entity ; value.id());
+        self.entity.track_exit(value.id());
         Ok(value)
     }
 }

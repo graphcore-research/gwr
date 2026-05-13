@@ -10,9 +10,7 @@ use std::rc::Rc;
 
 use async_trait::async_trait;
 use byte_unit::{Byte, Unit};
-use gwr_track::entity::Entity;
-use gwr_track::tracker::types::ReqType;
-use gwr_track::{create, value};
+use gwr_track::entity::{Entity, EntityMonitor};
 
 use crate::engine::Engine;
 use crate::time::clock::Clock;
@@ -20,7 +18,7 @@ use crate::traits::{Runnable, SimObject};
 use crate::types::SimResult;
 
 pub struct Monitor {
-    entity: Rc<Entity>,
+    entity: EntityMonitor,
     clock: Clock,
     window_size_ticks: u64,
     bytes_in_window: RefCell<usize>,
@@ -38,13 +36,10 @@ impl Monitor {
         window_size_ticks: u64,
     ) -> Rc<Self> {
         let bw_unit = Unit::GiB;
-        let bw_entity = Entity::new_without_create(entity, &format!("bw_{bw_unit}/s"));
-
-        // Need to use custom create! in order to trackers know the data type.
-        create!(entity ; bw_entity, 0, ReqType::Value as i8);
+        let bw_entity = EntityMonitor::new(entity, &format!("bw_{bw_unit}/s"));
 
         let rc_self = Rc::new(Self {
-            entity: Rc::new(bw_entity),
+            entity: bw_entity,
             clock: clock.clone(),
             window_size_ticks,
             bytes_in_window: RefCell::new(0),
@@ -83,7 +78,7 @@ impl Runnable for Monitor {
             let per_second = Byte::from_f64(bytes_in_window as f64 / window_duration_s).unwrap();
             let gib_per_second = per_second.get_adjusted_unit(self.bw_unit);
 
-            value!(self.entity ; gib_per_second.get_value());
+            self.entity.track_value(gib_per_second.get_value());
 
             *self.last_time_ns.borrow_mut() = time_now_ns;
         }
