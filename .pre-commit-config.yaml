@@ -34,7 +34,8 @@ repos:
             d3.*.js|
             jquery.*.js|
             .*\.png|
-            .*\.json
+            .*\.json|
+            onnx*.proto
           )
         stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: lychee-check-links

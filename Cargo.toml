@@ -30,6 +30,7 @@ members = [
     "gwr-terminus",
     "gwr-timetable",
     "gwr-track",
+    "tools/onnx-opset-dump",
 ]
 resolver = "2"
 
