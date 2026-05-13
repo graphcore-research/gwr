@@ -11,6 +11,7 @@ pub struct Renderer {
     id_to_name: HashMap<u64, String>,
     id_to_capacity: HashMap<u64, u64>,
     id_to_capacity_units: HashMap<u64, String>,
+    id_to_details: HashMap<u64, String>,
 
     /// Current location within the file
     render_index: usize,
@@ -31,7 +32,8 @@ pub struct Renderer {
     pub plot_fullness: bool,
 
     pub print_names: bool,
-    pub print_packets: bool,
+    pub print_objects: bool,
+    pub print_details: bool,
     pub print_times: bool,
 }
 
@@ -42,6 +44,7 @@ impl Renderer {
             id_to_name: HashMap::with_capacity(INITIAL_SIZE),
             id_to_capacity: HashMap::with_capacity(INITIAL_SIZE),
             id_to_capacity_units: HashMap::with_capacity(INITIAL_SIZE),
+            id_to_details: HashMap::with_capacity(INITIAL_SIZE),
             blocks: Vec::with_capacity(INITIAL_SIZE),
             render_indices: None,
             num_render_lines: 0,
@@ -56,7 +59,8 @@ impl Renderer {
             plot_fullness: false,
 
             print_names: true,
-            print_packets: false,
+            print_objects: false,
+            print_details: true,
             print_times: true,
         }
     }
@@ -125,19 +129,29 @@ impl Renderer {
         tmp.as_str()
     }
 
-    fn packet_id<'a>(&'a self, id: &u64, tmp: &'a mut String) -> &'a str {
+    fn object_id<'a>(&'a self, id: &u64, tmp: &'a mut String) -> &'a str {
         tmp.clear();
         tmp.push_str(id.to_string().as_str());
 
-        if self.print_packets {
+        if self.print_objects {
             tmp.push_str(": ");
             match id {
                 0 => tmp.push_str("root"),
-                _ => match self.id_to_name.get(id) {
-                    Some(name) => tmp.push_str(name),
+                _ => match self.id_to_details.get(id) {
+                    Some(details) => tmp.push_str(details),
                     None => tmp.push_str(UNKNOWN),
                 },
             }
+        }
+        tmp.push(' ');
+        tmp.as_str()
+    }
+
+    fn details<'a>(&'a self, id: &u64, tmp: &'a mut String) -> &'a str {
+        tmp.clear();
+
+        if let Some(details) = self.id_to_details.get(id) {
+            tmp.push_str(details);
         }
 
         tmp.as_str()
@@ -220,8 +234,8 @@ impl Renderer {
                 time,
             } => {
                 let name = self.name_id(id, &mut tmp0);
-                let packet = self.packet_id(entered, &mut tmp1);
-                (format!("{name}: <= {packet} ({fullness})").to_owned(), time)
+                let object = self.object_id(entered, &mut tmp1);
+                (format!("{name}: <= {object}({fullness})").to_owned(), time)
             }
 
             EventLine::Exit {
@@ -231,8 +245,8 @@ impl Renderer {
                 time,
             } => {
                 let name = self.name_id(id, &mut tmp0);
-                let packet = self.packet_id(exited, &mut tmp1);
-                (format!("{name}: => {packet} ({fullness})").to_owned(), time)
+                let object = self.object_id(exited, &mut tmp1);
+                (format!("{name}: => {object}({fullness})").to_owned(), time)
             }
 
             EventLine::Value { id, value, time } => {
@@ -246,8 +260,21 @@ impl Renderer {
             }
 
             EventLine::Create { id, time } => {
-                let name = self.name_id(id, &mut tmp0);
-                (format!("{name}: created").to_owned(), time)
+                let details = self.details(id, &mut tmp1);
+                if self.id_to_name.get(id).map(String::as_str) == Some("object") {
+                    if !self.print_details || details.is_empty() {
+                        (format!("{id}: created object").to_owned(), time)
+                    } else {
+                        (format!("{id}: created object ({details})").to_owned(), time)
+                    }
+                } else {
+                    let name = self.name_id(id, &mut tmp0);
+                    if !self.print_details || details.is_empty() {
+                        (format!("{name}: created").to_owned(), time)
+                    } else {
+                        (format!("{name}: created ({details})").to_owned(), time)
+                    }
+                }
             }
 
             EventLine::Connect {
@@ -283,6 +310,10 @@ impl Renderer {
     pub fn set_capacity(&mut self, id: u64, capacity: u64, units: String) {
         self.id_to_capacity.insert(id, capacity);
         self.id_to_capacity_units.insert(id, units);
+    }
+
+    pub fn extend_id_to_details(&mut self, id_to_details: HashMap<u64, String>) {
+        self.id_to_details.extend(id_to_details);
     }
 
     fn render_index_to_absolute_index(&self, line: usize) -> usize {

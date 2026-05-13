@@ -62,8 +62,11 @@ pub fn handle_key_events_default(key_event: KeyEvent, app: &mut App) -> AppResul
             KeyCode::Char('n') => {
                 app.toggle_print_names();
             }
-            KeyCode::Char('p') => {
-                app.toggle_print_packets();
+            KeyCode::Char('o') => {
+                app.toggle_print_objects();
+            }
+            KeyCode::Char('d') => {
+                app.toggle_print_details();
             }
             KeyCode::Char('t') => {
                 app.toggle_print_times();

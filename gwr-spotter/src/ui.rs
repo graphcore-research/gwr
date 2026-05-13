@@ -235,7 +235,8 @@ fn render_help(_app: &mut App, frame: &mut Frame, area: Rect) {
 
     renderer.add_header("Display:", vec![]);
     renderer.add_command_help_line("n", "toggle show names");
-    renderer.add_command_help_line("p", "toggle show packet contents");
+    renderer.add_command_help_line("o", "toggle show objects");
+    renderer.add_command_help_line("d", "toggle show object details on creation");
     renderer.add_command_help_line("f", "toggle plot fullness / times");
 
     frame.render_widget(

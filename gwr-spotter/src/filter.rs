@@ -23,6 +23,8 @@ pub struct Filter {
 
     id_to_name: Option<HashMap<u64, String>>,
     id_to_name_updates: Vec<HashMap<u64, String>>,
+    id_to_details: Option<HashMap<u64, String>>,
+    id_to_details_updates: Vec<HashMap<u64, String>>,
 }
 
 struct SearchState {
@@ -30,6 +32,7 @@ struct SearchState {
     search_re: Option<Regex>,
     search: String,
     id_to_name: HashMap<u64, String>,
+    id_to_details: HashMap<u64, String>,
     filter_id: Option<u64>,
 }
 
@@ -51,16 +54,30 @@ impl SearchState {
         }
     }
 
+    fn id_text_matches(&self, id: &u64) -> bool {
+        self.text_matches(id.to_string().as_str())
+    }
+
     fn id_matches(&self, id: &u64) -> bool {
         if let Some(filter_id) = &self.filter_id {
             return filter_id == id;
         }
 
-        if let Some(name) = self.id_to_name.get(id) {
-            self.text_matches(name)
-        } else {
-            false
+        if self.id_text_matches(id) {
+            return true;
         }
+
+        if let Some(name) = self.id_to_name.get(id)
+            && self.text_matches(name)
+        {
+            return true;
+        }
+
+        if let Some(details) = self.id_to_details.get(id) {
+            return self.text_matches(details);
+        }
+
+        false
     }
 
     pub fn search_matches(&self, line: &EventLine) -> bool {
@@ -85,6 +102,8 @@ impl Filter {
 
             id_to_name: Some(HashMap::with_capacity(INITIAL_SIZE)),
             id_to_name_updates: Vec::new(),
+            id_to_details: Some(HashMap::with_capacity(INITIAL_SIZE)),
+            id_to_details_updates: Vec::new(),
 
             filter: String::new(),
             search: String::new(),
@@ -104,6 +123,15 @@ impl Filter {
             self.notify_filter.send(()).unwrap();
         } else {
             self.id_to_name_updates.push(update);
+        }
+    }
+
+    pub fn extend_id_to_details(&mut self, update: HashMap<u64, String>) {
+        if let Some(id_to_details) = &mut self.id_to_details {
+            id_to_details.extend(update);
+            self.notify_filter.send(()).unwrap();
+        } else {
+            self.id_to_details_updates.push(update);
         }
     }
 
@@ -209,14 +237,23 @@ impl Filter {
             search_re,
             search,
             id_to_name: self.id_to_name.take().unwrap(),
+            id_to_details: self.id_to_details.take().unwrap(),
         }
     }
 
-    fn search_done(&mut self, mut id_to_name: HashMap<u64, String>) {
+    fn search_done(
+        &mut self,
+        mut id_to_name: HashMap<u64, String>,
+        mut id_to_details: HashMap<u64, String>,
+    ) {
         for update in self.id_to_name_updates.drain(..) {
             id_to_name.extend(update);
         }
+        for update in self.id_to_details_updates.drain(..) {
+            id_to_details.extend(update);
+        }
         self.id_to_name = Some(id_to_name);
+        self.id_to_details = Some(id_to_details);
     }
 
     /// Returns whether the user has specified a ID
@@ -279,7 +316,47 @@ pub fn start_background_filter(
                 .unwrap()
                 .set_render_indices(matching_indices);
 
-            filter.lock().unwrap().search_done(search_state.id_to_name);
+            filter
+                .lock()
+                .unwrap()
+                .search_done(search_state.id_to_name, search_state.id_to_details);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::SearchState;
+    use crate::app::EventLine;
+
+    fn build_search_state(search: &str) -> SearchState {
+        SearchState {
+            use_regex: false,
+            search_re: None,
+            search: search.to_owned(),
+            id_to_name: HashMap::new(),
+            id_to_details: HashMap::new(),
+            filter_id: None,
+        }
+    }
+
+    #[test]
+    fn plain_text_search_matches_numeric_ids() {
+        let search_state = build_search_state("41");
+
+        assert!(search_state.search_matches(&EventLine::Create { id: 41, time: 0.0 }));
+        assert!(search_state.search_matches(&EventLine::Enter {
+            id: 40,
+            entered: 41,
+            fullness: 1,
+            time: 0.0,
+        }));
+        assert!(search_state.search_matches(&EventLine::Connect {
+            from_id: 41,
+            to_id: 99,
+            time: 0.0,
+        }));
+    }
 }

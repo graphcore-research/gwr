@@ -51,7 +51,14 @@ macro_rules! build_packet_type {
                         $field: (cfg.$field >> $scale) & ((1 << $bits) - 1),
                     )+
                 };
-                gwr_track::create!(created_by ; pkt, pkt.total_bytes(), pkt.req_type() as i8);
+                let details = format!("{pkt:?}");
+                created_by.create_object(
+                    pkt.id(),
+                    pkt.total_bytes(),
+                    "bytes",
+                    pkt.req_type() as u8,
+                    &format!("{}: {details}", stringify!($packet_type)),
+                );
                 pkt
             }
 

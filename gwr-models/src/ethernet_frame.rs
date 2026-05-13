@@ -9,7 +9,7 @@ use gwr_engine::traits::{Routable, SimObject, TotalBytes};
 use gwr_engine::types::AccessType;
 use gwr_track::entity::Entity;
 use gwr_track::id::Unique;
-use gwr_track::{Id, create, create_id};
+use gwr_track::{Id, create_id};
 
 pub const PREAMBLE_BYTES: usize = 7;
 pub const SFD_BYTES: usize = 1;
@@ -41,7 +41,6 @@ pub fn u64_to_mac(value: u64) -> [u8; DEST_MAC_BYTES] {
 
 #[derive(Clone, Debug)]
 pub struct EthernetFrame {
-    created_by: Rc<Entity>,
     id: Id,
 
     // We don't include the Preamble / SFD bytes in the frame contents
@@ -56,14 +55,19 @@ impl EthernetFrame {
     #[must_use]
     pub fn new(created_by: &Rc<Entity>, payload_size_bytes: usize) -> Self {
         let frame = Self {
-            created_by: created_by.clone(),
             id: create_id!(created_by),
             dst_mac: [0; DEST_MAC_BYTES],
             src_mac: [0; DEST_MAC_BYTES],
             payload_size_bytes,
         };
         // Having just created the frame the req_type must be valid
-        create!(created_by ; frame, frame.total_bytes(), frame.access_type() as i8);
+        created_by.track_create_object(
+            frame.id,
+            frame.total_bytes(),
+            "bytes",
+            frame.access_type() as u8,
+            &format!("EthernetFrame: {frame}"),
+        );
         frame
     }
 
@@ -96,8 +100,8 @@ impl Display for EthernetFrame {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "{}: {:?} -> {:?} ({} bytes)",
-            self.created_by, self.src_mac, self.dst_mac, self.payload_size_bytes
+            "{:?} -> {:?} ({} bytes)",
+            self.src_mac, self.dst_mac, self.payload_size_bytes
         )
     }
 }

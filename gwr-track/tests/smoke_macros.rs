@@ -6,10 +6,36 @@ use std::fmt::Display;
 use std::rc::Rc;
 
 use gwr_track::entity::{Entity, toplevel};
+use gwr_track::id::Unique;
 use gwr_track::{
-    Id, create, create_and_track_id, debug, destroy_id, enter, error, exit, info, set_time,
-    test_helpers, test_init, trace, warn,
+    Id, create_id, debug, destroy_id, error, info, set_time, test_helpers, test_init, trace, warn,
 };
+
+#[derive(Debug)]
+struct TestObject {
+    pub id: Id,
+}
+
+impl TestObject {
+    fn new(entity: &Rc<Entity>, size: usize) -> Self {
+        let id = create_id!(entity);
+        let object = Self { id };
+        entity.track_create_object(id, size, "bytes", u8::MAX, &format!("{object}"));
+        object
+    }
+}
+
+impl Display for TestObject {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Object {{ id: {} }}", self.id)
+    }
+}
+
+impl Unique for TestObject {
+    fn id(&self) -> Id {
+        self.id
+    }
+}
 
 macro_rules! build_with_entity {
     ($name:ident, $macro:ident, $slvl:expr) => (
@@ -18,7 +44,7 @@ macro_rules! build_with_entity {
             let (test_tracker, tracker) = test_init!(100);
 
             let top = toplevel(&tracker, "top");
-            test_helpers::check_and_clear(&test_tracker, &["0: created 100, top, 127, 0 bytes"]);
+            test_helpers::check_and_clear(&test_tracker, &["0: created entity 100, top"]);
             assert_eq!(top.id, Id(100));
 
             $macro!(top ; "Loc with no args");
@@ -48,14 +74,17 @@ fn create_destroy() {
 
     let top = toplevel(&tracker, "top");
 
-    test_helpers::check_and_clear(&test_tracker, &["0: created 10, top, 127, 0 bytes"]);
+    test_helpers::check_and_clear(&test_tracker, &["0: created entity 10, top"]);
     assert_eq!(top.id, Id(10));
 
-    let id1 = create_and_track_id!(top);
-    test_helpers::check_and_clear(&test_tracker, &["10: created 11, id, 127, 0 bytes"]);
-    assert_eq!(id1, Id(11));
+    let obj = TestObject::new(&top, 0);
+    test_helpers::check_and_clear(
+        &test_tracker,
+        &[r"10: created object 11, 255, 0, bytes, Object \{ id: 11 \}"],
+    );
+    assert_eq!(obj.id, Id(11));
 
-    destroy_id!(top ; id1);
+    destroy_id!(top ; obj.id);
     test_helpers::check_and_clear(&test_tracker, &["10: destroyed 11"]);
 
     drop(top);
@@ -67,40 +96,22 @@ fn enter_exit_basics() {
     let (test_tracker, tracker) = test_init!(40);
 
     let top = toplevel(&tracker, "top");
-    let obj = create_and_track_id!(top);
-    enter!(top ; obj);
+    let obj = TestObject::new(&top, 0);
+    top.track_enter(obj.id);
     test_helpers::check_and_clear(
         &test_tracker,
         &[
-            "0: created 40, top, 127, 0 bytes",
-            "40: created 41, id, 127, 0 bytes",
+            "0: created entity 40, top",
+            r"40: created object 41, 255, 0, bytes, Object \{ id: 41 \}",
             "40: 41 entered",
         ],
     );
 
-    exit!(top ; obj);
+    top.track_exit(obj.id);
     test_helpers::check_and_clear(&test_tracker, &["40: 41 exited"]);
 
     drop(top);
     test_helpers::check_and_clear(&test_tracker, &["40: destroyed"]);
-}
-
-#[derive(Debug)]
-struct Packet {
-    pub id: Id,
-}
-
-impl Packet {
-    fn new(entity: &Rc<Entity>) -> Self {
-        let id = create_and_track_id!(entity);
-        Self { id }
-    }
-}
-
-impl Display for Packet {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Packet {{ id: {} }}", self.id)
-    }
 }
 
 #[test]
@@ -108,16 +119,12 @@ fn num_bytes() {
     let (test_tracker, tracker) = test_init!(121);
 
     let top = toplevel(&tracker, "top");
-    test_helpers::check_and_clear(&test_tracker, &["0: created 121, top, 127, 0 bytes"]);
+    test_helpers::check_and_clear(&test_tracker, &["0: created entity 121, top"]);
 
-    let pkt = Packet::new(&top);
-    create!(top ; pkt, 10);
+    let _ = TestObject::new(&top, 10);
     test_helpers::check_and_clear(
         &test_tracker,
-        &[
-            "121: created 122, id, 127, 0 bytes",
-            r"121: created 122, Packet \{ id: 122 \}, 127, 10 bytes",
-        ],
+        &[r"121: created object 122, 255, 10, bytes, Object \{ id: 122 \}"],
     );
 }
 
@@ -126,7 +133,7 @@ fn set_time() {
     let (test_tracker, tracker) = test_init!(321);
 
     let top = toplevel(&tracker, "top");
-    test_helpers::check_and_clear(&test_tracker, &["0: created 321, top, 127, 0 bytes"]);
+    test_helpers::check_and_clear(&test_tracker, &["0: created entity 321, top"]);
 
     set_time!(top ; 10.0);
     test_helpers::check_and_clear(&test_tracker, &["321: set time 10.0ns"]);

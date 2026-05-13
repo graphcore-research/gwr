@@ -36,9 +36,9 @@ use gwr_engine::time::clock::{Clock, ClockTick};
 use gwr_engine::traits::{Event, Routable, Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
+use gwr_track::build_aka;
 use gwr_track::entity::{Entity, GetEntity};
 use gwr_track::tracker::aka::Aka;
-use gwr_track::{build_aka, enter, exit};
 
 use crate::fabric::{Fabric, FabricConfig};
 
@@ -297,7 +297,7 @@ where
     loop {
         let value = internal_rx.get()?.await;
         let value_id = value.id();
-        enter!(entity ; value_id);
+        entity.track_enter(value_id);
 
         let dest_index = routing_algorithm.route(&value)?;
         let delay_ticks = manhatten_rx_to_tx_cycles(&config, port_index, dest_index);
@@ -350,7 +350,7 @@ where
                     clock.wait_ticks(tick.tick() - tick_now.tick()).await;
                 }
 
-                exit!(entity ; value.id());
+                entity.track_exit(value.id());
                 internal_tx.put(value)?.await;
             }
             None => {

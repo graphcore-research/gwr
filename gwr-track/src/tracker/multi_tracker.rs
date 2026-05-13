@@ -60,73 +60,75 @@ impl Track for MultiTracker {
 
     fn enter(&self, id: Id, object: Id) {
         for tracker in &self.trackers {
-            if tracker.is_entity_enabled(id, log::Level::Trace) {
-                tracker.enter(id, object);
-            }
+            tracker.enter(id, object);
         }
     }
 
     fn exit(&self, id: Id, object: Id) {
         for tracker in &self.trackers {
-            if tracker.is_entity_enabled(id, log::Level::Trace) {
-                tracker.exit(id, object);
-            }
+            tracker.exit(id, object);
         }
     }
 
     fn value(&self, id: Id, value: f64) {
         for tracker in &self.trackers {
-            if tracker.is_entity_enabled(id, log::Level::Trace) {
-                tracker.value(id, value);
-            }
+            tracker.value(id, value);
         }
     }
 
-    fn create(&self, created_by: Id, id: Id, num_bytes: usize, req_type: i8, name: &str) {
+    fn create_entity(&self, created_by: Id, id: Id, name: &str) {
         for tracker in &self.trackers {
-            if tracker.is_entity_enabled(id, log::Level::Trace) {
-                tracker.create(created_by, id, num_bytes, req_type, name);
-            }
+            tracker.create_entity(created_by, id, name);
+        }
+    }
+
+    fn create_monitor(&self, created_by: Id, id: Id, name: &str) {
+        for tracker in &self.trackers {
+            tracker.create_monitor(created_by, id, name);
+        }
+    }
+
+    fn create_object(
+        &self,
+        created_by: Id,
+        id: Id,
+        size: usize,
+        units: &str,
+        req_type: u8,
+        details: &str,
+    ) {
+        for tracker in &self.trackers {
+            tracker.create_object(created_by, id, size, units, req_type, details);
         }
     }
 
     fn capacity(&self, id: Id, capacity: Capacity) {
         for tracker in &self.trackers {
-            if tracker.is_entity_enabled(id, log::Level::Trace) {
-                tracker.capacity(id, capacity.clone());
-            }
+            tracker.capacity(id, capacity.clone());
         }
     }
 
     fn destroy(&self, destroyed_by: Id, id: Id) {
         for tracker in &self.trackers {
-            if tracker.is_entity_enabled(id, log::Level::Trace) {
-                tracker.destroy(destroyed_by, id);
-            }
+            tracker.destroy(destroyed_by, id);
         }
     }
 
     fn connect(&self, connect_from: Id, connect_to: Id) {
         for tracker in &self.trackers {
-            if tracker.is_entity_enabled(connect_from, log::Level::Trace) {
-                tracker.connect(connect_from, connect_to);
-            }
+            tracker.connect(connect_from, connect_to);
         }
     }
 
     fn log(&self, id: Id, level: log::Level, msg: std::fmt::Arguments) {
         for tracker in &self.trackers {
-            if tracker.is_entity_enabled(id, level) {
-                tracker.log(id, level, msg);
-            }
+            tracker.log(id, level, msg);
         }
     }
 
     fn time(&self, set_by: Id, time_ns: f64) {
         for tracker in &self.trackers {
-            if tracker.is_entity_enabled(set_by, log::Level::Trace) {
-                tracker.time(set_by, time_ns);
-            }
+            tracker.time(set_by, time_ns);
         }
     }
 

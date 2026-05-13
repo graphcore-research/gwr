@@ -31,22 +31,57 @@ pub trait TraceVisitor {
         let _ = message;
     }
 
-    /// The creation of a unique ID.
+    /// The creation of an entity.
     ///
     /// # Arguments
     ///
     /// * `created_by` - ID of the entity causing the creation.
     /// * `id` - The originator of this event.
-    /// * `num_bytes` - Size of the created entity in bytes.
-    /// * `req_type` - The type of request being traced (Read, Write, etc).
     /// * `name` - Name of the entity being created.
-    fn create(&mut self, created_by: Id, id: Id, num_bytes: usize, req_type: i8, name: &str) {
-        // Remove the unused variable warnings
+    fn create_entity(&mut self, created_by: Id, id: Id, name: &str) {
         let _ = created_by;
         let _ = id;
-        let _ = num_bytes;
-        let _ = req_type;
         let _ = name;
+    }
+
+    /// The creation of a monitor.
+    ///
+    /// # Arguments
+    ///
+    /// * `created_by` - ID of the entity causing the creation.
+    /// * `id` - The originator of this event.
+    /// * `name` - Name of the monitor being created.
+    fn create_monitor(&mut self, created_by: Id, id: Id, name: &str) {
+        let _ = created_by;
+        let _ = id;
+        let _ = name;
+    }
+
+    /// The creation of an object.
+    ///
+    /// # Arguments
+    ///
+    /// * `created_by` - ID of the entity causing the creation.
+    /// * `id` - The originator of this event.
+    /// * `size` - Size of the created object.
+    /// * `units` - Units for the created object size.
+    /// * `req_type` - The type of request being traced (Read, Write, etc).
+    /// * `details` - Additional detail for the created object.
+    fn create_object(
+        &mut self,
+        created_by: Id,
+        id: Id,
+        size: usize,
+        units: &str,
+        req_type: u8,
+        details: &str,
+    ) {
+        let _ = created_by;
+        let _ = id;
+        let _ = size;
+        let _ = units;
+        let _ = req_type;
+        let _ = details;
     }
 
     /// The destruction of a unique ID.
@@ -158,14 +193,7 @@ pub trait TraceVisitor {
 /// }
 ///
 /// impl TraceVisitor for IdCounter {
-///     fn create(
-///         &mut self,
-///         _created_by: Id,
-///         _id: Id,
-///         _num_bytes: usize,
-///         _req_type: i8,
-///         _name: &str,
-///     ) {
+///     fn create_entity(&mut self, _created_by: Id, _id: Id, _name: &str) {
 ///         self.count += 1;
 ///     }
 /// }
@@ -189,73 +217,151 @@ where
     {
         let event = event_reader
             .get_root::<gwr_track_capnp::event::Reader>()
-            .expect("failed to parse event");
+            .expect("should be able to parse event");
 
         let id = Id(event.get_id());
         match event.which() {
-            Ok(gwr_track_capnp::event::Which::Log(builder)) => {
-                let access = builder.expect("failed to parse Log event");
-                visitor.log(
-                    id,
-                    to_log_level(access.get_level().expect("failed to parse Log event")),
-                    access
-                        .get_message()
-                        .expect("failed to parse Message event")
-                        .to_str()
-                        .expect("Message is not a valid UTF-8 string"),
-                );
-            }
+            Ok(gwr_track_capnp::event::Which::Log(builder)) => handle_log(visitor, id, builder),
             Ok(gwr_track_capnp::event::Which::Create(builder)) => {
-                let access = builder.expect("failed to parse Entity event");
-                visitor.create(
-                    id,
-                    Id(access.get_id()),
-                    access.get_num_bytes() as usize,
-                    access.get_req_type(),
-                    access
-                        .get_name()
-                        .expect("failed to parse Name")
-                        .to_str()
-                        .expect("Name is not a valid UTF-8 string"),
-                );
+                handle_create(visitor, id, builder);
             }
             Ok(gwr_track_capnp::event::Which::Destroy(destroyed_by)) => {
-                visitor.destroy(id, Id(destroyed_by));
+                handle_destroy(visitor, id, destroyed_by);
             }
             Ok(gwr_track_capnp::event::Which::Connect(connect_to)) => {
-                visitor.connect(id, Id(connect_to));
+                handle_connect(visitor, id, connect_to);
             }
-            Ok(gwr_track_capnp::event::Which::Enter(entered)) => {
-                visitor.enter(id, Id(entered));
-            }
-            Ok(gwr_track_capnp::event::Which::Exit(exited)) => {
-                visitor.exit(id, Id(exited));
-            }
-            Ok(gwr_track_capnp::event::Which::Value(value)) => {
-                visitor.value(id, value);
-            }
+            Ok(gwr_track_capnp::event::Which::Enter(entered)) => handle_enter(visitor, id, entered),
+            Ok(gwr_track_capnp::event::Which::Exit(exited)) => handle_exit(visitor, id, exited),
+            Ok(gwr_track_capnp::event::Which::Value(value)) => handle_value(visitor, id, value),
             Ok(gwr_track_capnp::event::Which::Capacity(capacity)) => {
-                let capacity = capacity.expect("failed to parse Capacity event");
-                visitor.capacity(
-                    id,
-                    Capacity::new(
-                        capacity.get_value() as usize,
-                        capacity
-                            .get_units()
-                            .expect("failed to parse Capacity units")
-                            .to_str()
-                            .expect("Capacity units is not a valid UTF-8 string"),
-                    ),
-                );
+                handle_capacity(visitor, id, capacity);
             }
-            Ok(gwr_track_capnp::event::Which::Time(time)) => {
-                visitor.time(id, time);
-            }
+            Ok(gwr_track_capnp::event::Which::Time(time)) => handle_time(visitor, id, time),
             Err(e) => {
-                panic!("failed to parse event ({e})");
+                panic!("should be able to parse event ({e})");
             }
         }
     }
+}
+
+fn handle_log(
+    visitor: &mut dyn TraceVisitor,
+    id: Id,
+    builder: capnp::Result<gwr_track_capnp::log::Reader<'_>>,
+) {
+    let access = builder.expect("should be able to parse Log event");
+    visitor.log(
+        id,
+        to_log_level(
+            access
+                .get_level()
+                .expect("should be able to parse Log level"),
+        ),
+        access
+            .get_message()
+            .expect("should be able to parse Log message")
+            .to_str()
+            .expect("Log message should be valid UTF-8 string"),
+    );
+}
+
+fn handle_create(
+    visitor: &mut dyn TraceVisitor,
+    id: Id,
+    builder: capnp::Result<gwr_track_capnp::create::Reader<'_>>,
+) {
+    let access = builder.expect("should be able to parse Create event");
+    let created_id = Id(access.get_id());
+    match access.which() {
+        Ok(gwr_track_capnp::create::Which::Entity(entity)) => {
+            let entity = entity.expect("should be able to parse Create Entity");
+            visitor.create_entity(
+                id,
+                created_id,
+                entity
+                    .get_name()
+                    .expect("should be able to parse Entity name")
+                    .to_str()
+                    .expect("Create Entity name should be valid UTF-8 string"),
+            );
+        }
+        Ok(gwr_track_capnp::create::Which::Monitor(monitor)) => {
+            let monitor = monitor.expect("should be able to parse Create Monitor");
+            visitor.create_monitor(
+                id,
+                created_id,
+                monitor
+                    .get_name()
+                    .expect("should be able to parse Monitor name")
+                    .to_str()
+                    .expect("Create Monitor name should be valid UTF-8 string"),
+            );
+        }
+        Ok(gwr_track_capnp::create::Which::Object(object)) => {
+            let object = object.expect("should be able to parse Create Object");
+            visitor.create_object(
+                id,
+                created_id,
+                object.get_size() as usize,
+                object
+                    .get_units()
+                    .expect("should be able to parse Object units")
+                    .to_str()
+                    .expect("Create Object units should be valid UTF-8 string"),
+                object.get_type(),
+                object
+                    .get_details()
+                    .expect("should be able to parse Object details")
+                    .to_str()
+                    .expect("Create Object details should be valid UTF-8 string"),
+            );
+        }
+        Err(e) => panic!("should be able to parse create event ({e})"),
+    }
+}
+
+fn handle_destroy(visitor: &mut dyn TraceVisitor, id: Id, destroyed_by: u64) {
+    visitor.destroy(id, Id(destroyed_by));
+}
+
+fn handle_connect(visitor: &mut dyn TraceVisitor, id: Id, connect_to: u64) {
+    visitor.connect(id, Id(connect_to));
+}
+
+fn handle_enter(visitor: &mut dyn TraceVisitor, id: Id, entered: u64) {
+    visitor.enter(id, Id(entered));
+}
+
+fn handle_exit(visitor: &mut dyn TraceVisitor, id: Id, exited: u64) {
+    visitor.exit(id, Id(exited));
+}
+
+fn handle_value(visitor: &mut dyn TraceVisitor, id: Id, value: f64) {
+    visitor.value(id, value);
+}
+
+fn handle_capacity(
+    visitor: &mut dyn TraceVisitor,
+    id: Id,
+    capacity: capnp::Result<gwr_track_capnp::capacity::Reader<'_>>,
+) {
+    let capacity = capacity.expect("should be able to parse Capacity event");
+    visitor.capacity(
+        id,
+        Capacity::new(
+            capacity.get_value() as usize,
+            capacity
+                .get_units()
+                .expect("should be able to parse Capacity units")
+                .to_str()
+                .expect("Capacity units should be valid UTF-8 string"),
+        ),
+    );
+}
+
+fn handle_time(visitor: &mut dyn TraceVisitor, id: Id, time: f64) {
+    visitor.time(id, time);
 }
 
 fn to_log_level(level: LogLevel) -> log::Level {

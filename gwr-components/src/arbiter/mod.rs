@@ -21,8 +21,8 @@ use gwr_engine::traits::{Event, Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::entity::Entity;
+use gwr_track::trace;
 use gwr_track::tracker::aka::Aka;
-use gwr_track::{enter, exit, trace};
 
 use crate::{connect_tx, take_option};
 
@@ -158,7 +158,7 @@ where
                     let t = policy.arbitrate(&self.entity, &mut input_values);
                     match t {
                         Some((i, t)) => {
-                            trace!(self.entity ; "grant {}: {}", i, t);
+                            trace!(self.entity ; "grant {}: {}", i, t.id());
                             wake_event = self.shared_state.waiting_put[i].borrow_mut().take();
                             value = t;
                         }
@@ -175,7 +175,7 @@ where
                 if let Some(event) = wake_event {
                     event.notify()?;
                 }
-                exit!(self.entity ; value.id());
+                self.entity.track_exit(value.id());
                 tx.put(value)?.await;
             }
             wait_event.listen().await;
@@ -191,7 +191,7 @@ async fn run_input<T: SimObject>(
 ) -> SimResult {
     loop {
         let value = rx.get()?.await;
-        enter!(entity ; value.id());
+        entity.track_enter(value.id());
 
         // Check if this input needs to wait for the previous value to be handled
         let wait_for_space = match shared_state.input_values.borrow()[input_idx].as_ref() {

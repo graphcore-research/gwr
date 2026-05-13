@@ -68,12 +68,36 @@ impl Track for TextTracker {
             .unwrap();
     }
 
-    fn create(&self, created_by: Id, id: Id, num_bytes: usize, req_type: i8, name: &str) {
+    fn create_entity(&self, created_by: Id, id: Id, name: &str) {
+        self.writer
+            .borrow_mut()
+            .write_all(format!("{created_by}: created entity {id}, {name}\n").as_bytes())
+            .unwrap();
+    }
+
+    fn create_monitor(&self, created_by: Id, id: Id, name: &str) {
+        self.writer
+            .borrow_mut()
+            .write_all(format!("{created_by}: created monitor {id}, {name}\n").as_bytes())
+            .unwrap();
+    }
+
+    fn create_object(
+        &self,
+        created_by: Id,
+        id: Id,
+        size: usize,
+        units: &str,
+        req_type: u8,
+        details: &str,
+    ) {
         self.writer
             .borrow_mut()
             .write_all(
-                format!("{created_by}: created {id}, {name}, {req_type}, {num_bytes} bytes\n")
-                    .as_bytes(),
+                format!(
+                    "{created_by}: created object {id}, {req_type}, {size}, {units}, {details}\n"
+                )
+                .as_bytes(),
             )
             .unwrap();
     }

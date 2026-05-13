@@ -10,7 +10,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use crate::tracker::aka::{Aka, get_alternative_names};
-use crate::{Id, Tracker, create, destroy, trace};
+use crate::{Id, Tracker, create_id, destroy, log, trace};
 
 /// A capacity value and its units.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -61,37 +61,19 @@ impl Entity {
     /// Create a new entity.
     #[must_use]
     pub fn new(parent: &Rc<Entity>, name: &str) -> Self {
-        Self::new_with_renames_and_optional_create(parent, name, None, true)
+        Self::new_with_renames(parent, name, None)
     }
 
     /// Create a new entity with a potential list of alternative names
     #[must_use]
     pub fn new_with_renames(parent: &Rc<Entity>, name: &str, aka: Option<&Aka>) -> Self {
-        Self::new_with_renames_and_optional_create(parent, name, aka, true)
-    }
-
-    /// Create a new entity but let the user do their own call to the
-    /// `create!()` macro.
-    #[must_use]
-    pub fn new_without_create(parent: &Rc<Entity>, name: &str) -> Self {
-        Self::new_with_renames_and_optional_create(parent, name, None, false)
-    }
-
-    /// Create a new entity with a potential list of alternative names
-    #[must_use]
-    pub fn new_with_renames_and_optional_create(
-        parent: &Rc<Entity>,
-        name: &str,
-        aka: Option<&Aka>,
-        do_create: bool,
-    ) -> Self {
         let alternative_names = get_alternative_names(aka, name);
         let mut full_name = parent.full_name();
         full_name.push_str(JOIN);
         full_name.push_str(name);
 
         let tracker = parent.tracker.clone();
-        let id = tracker.unique_id();
+        let id = create_id!(parent);
         tracker.add_entity(id, &full_name, alternative_names);
 
         let entity = Self {
@@ -100,10 +82,7 @@ impl Entity {
             id,
             tracker,
         };
-
-        if do_create {
-            create!(entity);
-        }
+        entity.track_create(parent.id, &full_name);
 
         if let Some(alternative_names) = alternative_names {
             for name in alternative_names {
@@ -133,6 +112,45 @@ impl Entity {
         if self.tracker.is_entity_enabled(self.id, log::Level::Trace) {
             self.tracker.capacity(self.id, Capacity::new(value, units));
         }
+    }
+
+    /// Emit an enter event for an object.
+    pub fn track_enter(&self, entered: Id) {
+        if self.tracker.is_entity_enabled(self.id, log::Level::Trace) {
+            self.tracker.enter(self.id, entered);
+        }
+    }
+
+    /// Emit an exit event for an object.
+    pub fn track_exit(&self, exited: Id) {
+        if self.tracker.is_entity_enabled(self.id, log::Level::Trace) {
+            self.tracker.exit(self.id, exited);
+        }
+    }
+
+    /// Emit an object creation event.
+    pub fn track_create_object(
+        &self,
+        created: Id,
+        size: usize,
+        units: &str,
+        req_type: u8,
+        details: &str,
+    ) {
+        if self.tracker.is_entity_enabled(self.id, log::Level::Trace) {
+            self.tracker
+                .create_object(self.id, created, size, units, req_type, details);
+        } else {
+            // If trace isn't enabled on the source this object may still travel through
+            // other enabled entities. This will allow the user to know which
+            // source to enable if they need more details on the objects.
+            self.tracker
+                .create_object(self.id, created, size, units, req_type, "");
+        }
+    }
+
+    fn track_create(&self, created_by: Id, full_name: &str) {
+        self.tracker.create_entity(created_by, self.id, full_name);
     }
 }
 
@@ -174,12 +192,70 @@ pub fn toplevel(tracker: &Tracker, name: &str) -> Rc<Entity> {
         id,
         tracker: tracker.clone(),
     });
-    create!(top);
+    top.track_create(crate::NO_ID, name);
     top
+}
+
+/// A monitor entity that is only allowed to emit value events.
+pub struct EntityMonitor {
+    /// The wrapped tracked entity.
+    pub entity: Rc<Entity>,
+
+    /// Unique simulation identifier used for bin/log messages.
+    pub id: Id,
+
+    /// Name of this monitor.
+    pub name: String,
+}
+
+impl EntityMonitor {
+    /// Create a new monitor entity.
+    #[must_use]
+    pub fn new(parent: &Rc<Entity>, name: &str) -> Self {
+        let mut full_name = parent.full_name();
+        full_name.push_str(JOIN);
+        full_name.push_str(name);
+
+        let id = create_id!(parent);
+        parent.tracker.add_entity(id, &full_name, None);
+
+        let monitor = Self {
+            entity: parent.clone(),
+            id,
+            name: String::from(name),
+        };
+
+        monitor.track_create(parent.id, &full_name);
+
+        monitor
+    }
+
+    fn track_create(&self, created_by: Id, full_name: &str) {
+        self.entity
+            .tracker
+            .create_monitor(created_by, self.id, full_name);
+    }
+
+    /// Emit a value event for this monitor.
+    pub fn track_value(&self, value: f64) {
+        if self
+            .entity
+            .tracker
+            .is_entity_enabled(self.entity.id, log::Level::Trace)
+        {
+            self.entity.tracker.value(self.entity.id, value);
+        }
+    }
 }
 
 /// The `GetEntity` trait is used to provide access to an objects [Entity]
 pub trait GetEntity {
     /// Return the [Entity]
     fn entity(&self) -> &Rc<Entity>;
+}
+
+impl GetEntity for EntityMonitor {
+    fn entity(&self) -> &Rc<Entity> {
+        &self.entity
+    }
 }

@@ -66,78 +66,16 @@ pub const NO_ID: Id = id::Id(0);
 /// The root ID from which all other IDs are derived
 pub const ROOT: Id = id::Id(1);
 
-// Track an enter event.
-#[doc(hidden)]
-#[macro_export]
-macro_rules! enter {
-    ($entity:expr ; $enter_id:expr) => {
-        if $entity
-            .tracker
-            .is_entity_enabled($entity.id, log::Level::Trace)
-        {
-            $entity.tracker.enter($entity.id, $enter_id);
-        }
-    };
-}
-
-// Track an exit event.
-#[doc(hidden)]
-#[macro_export]
-macro_rules! exit {
-    ($entity:expr ; $exit_id:expr) => {
-        if $entity
-            .tracker
-            .is_entity_enabled($entity.id, log::Level::Trace)
-        {
-            $entity.tracker.exit($entity.id, $exit_id);
-        }
-    };
-}
-
-// Track a value event.
-#[doc(hidden)]
-#[macro_export]
-macro_rules! value {
-    ($entity:expr ; $value:expr) => {
-        if $entity
-            .tracker
-            .is_entity_enabled($entity.id, log::Level::Trace)
-        {
-            $entity.tracker.value($entity.id, $value);
-        }
-    };
-}
-
 /// Create a unique ID for tracking.
 ///
 /// The user must specify an entity with a [`Tracker`] to create the ID.
 ///
 /// **Note:** this macro should be used when the object being assigned the
-///           [`Id`] will have its creation tracked with [`create`].
+///           [`Id`] will have its creation tracked with the
+///           [crate::entity::Entity::track_create_object] function.
 #[macro_export]
 macro_rules! create_id {
     ($entity:expr) => {{ $entity.tracker.unique_id() }};
-}
-
-/// Create a unique ID for tracking and track the creation.
-///
-/// The user must specify an entity with a [`Tracker`] to create the ID.
-/// The creation event will be tracked if the entity has trace enabled.
-///
-/// **Note:** this macro should only be used if the object being assigned the
-///           [`Id`] will not have its creation tracked with [`create`].
-#[macro_export]
-macro_rules! create_and_track_id {
-    ($entity:expr) => {{
-        let id = $entity.tracker.unique_id();
-        if $entity
-            .tracker
-            .is_entity_enabled($entity.id, log::Level::Trace)
-        {
-            $entity.tracker.create($entity.id, id, 0, i8::MAX, "id");
-        }
-        id
-    }};
 }
 
 /// Destroy an ID
@@ -154,57 +92,6 @@ macro_rules! destroy_id {
             .is_entity_enabled($entity.id, log::Level::Trace)
         {
             $entity.tracker.destroy($entity.id, $id);
-        }
-    }};
-}
-
-/// Add an entity creation event
-#[macro_export]
-macro_rules! create {
-    ($entity:expr) => {{
-        if $entity
-            .tracker
-            .is_entity_enabled($entity.id, log::Level::Trace)
-        {
-            let parent_id = match &$entity.parent {
-                Some(parent) => parent.id,
-                None => $crate::NO_ID,
-            };
-            $entity.tracker.create(
-                parent_id,
-                $entity.id,
-                0,
-                i8::MAX,
-                $entity.full_name().as_str(),
-            );
-        }
-    }};
-    ($entity:expr ; $created:expr, $num_bytes:expr, $req_type:expr) => {{
-        if $entity
-            .tracker
-            .is_entity_enabled($entity.id, log::Level::Trace)
-        {
-            $entity.tracker.create(
-                $entity.id,
-                $created.id,
-                $num_bytes,
-                $req_type,
-                &format!("{}", $created),
-            );
-        }
-    }};
-    ($entity:expr ; $created:expr, $num_bytes:expr) => {{
-        if $entity
-            .tracker
-            .is_entity_enabled($entity.id, log::Level::Trace)
-        {
-            $entity.tracker.create(
-                $entity.id,
-                $created.id,
-                $num_bytes,
-                i8::MAX,
-                &format!("{}", $created),
-            );
         }
     }};
 }

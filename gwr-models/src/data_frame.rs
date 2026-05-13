@@ -12,11 +12,10 @@ use gwr_engine::traits::{Routable, SimObject, TotalBytes};
 use gwr_engine::types::AccessType;
 use gwr_track::entity::Entity;
 use gwr_track::id::Unique;
-use gwr_track::{Id, create, create_id};
+use gwr_track::{Id, create_id};
 
 #[derive(Clone, Debug)]
 pub struct DataFrame {
-    created_by: Rc<Entity>,
     id: Id,
     dest: u64,
     /// User-set value to aid debug tracking
@@ -34,7 +33,6 @@ impl DataFrame {
         payload_size_bytes: usize,
     ) -> Self {
         let frame = Self {
-            created_by: created_by.clone(),
             id: create_id!(created_by),
             payload_size_bytes,
             overhead_size_bytes,
@@ -42,7 +40,13 @@ impl DataFrame {
             dest: 0,
             access_type: AccessType::Control,
         };
-        create!(created_by ; frame, frame.total_bytes());
+        created_by.track_create_object(
+            frame.id,
+            frame.total_bytes(),
+            "bytes",
+            frame.access_type() as u8,
+            &format!("DataFrame: {frame}"),
+        );
         frame
     }
 
@@ -71,12 +75,8 @@ impl Display for DataFrame {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "{}: 0x{:x} -> 0x{:x} ({},{} bytes)",
-            self.created_by,
-            self.label,
-            self.dest,
-            self.overhead_size_bytes,
-            self.payload_size_bytes
+            "0x{:x} -> 0x{:x} ({},{} bytes)",
+            self.label, self.dest, self.overhead_size_bytes, self.payload_size_bytes
         )
     }
 }

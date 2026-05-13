@@ -96,13 +96,39 @@ impl Track for CapnProtoTracker {
         });
     }
 
-    fn create(&self, created_by: Id, id: Id, num_bytes: usize, req_type: i8, name: &str) {
+    fn create_entity(&self, created_by: Id, id: Id, name: &str) {
         self.write_event(created_by, |event| {
-            let mut entity = event.init_create();
-            entity.set_id(id.0);
-            entity.set_num_bytes(num_bytes as u64);
-            entity.set_req_type(req_type);
-            entity.set_name(name);
+            let mut create = event.init_create();
+            create.set_id(id.0);
+            create.init_entity().set_name(name);
+        });
+    }
+
+    fn create_monitor(&self, created_by: Id, id: Id, name: &str) {
+        self.write_event(created_by, |event| {
+            let mut create = event.init_create();
+            create.set_id(id.0);
+            create.init_monitor().set_name(name);
+        });
+    }
+
+    fn create_object(
+        &self,
+        created_by: Id,
+        id: Id,
+        size: usize,
+        units: &str,
+        req_type: u8,
+        details: &str,
+    ) {
+        self.write_event(created_by, |event| {
+            let mut create = event.init_create();
+            create.set_id(id.0);
+            let mut object = create.init_object();
+            object.set_size(size as u64);
+            object.set_units(units);
+            object.set_type(req_type);
+            object.set_details(details);
         });
     }
 

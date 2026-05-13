@@ -11,12 +11,10 @@ use gwr_engine::engine::Engine;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::Runnable;
 use gwr_engine::types::SimResult;
-use gwr_track::entity::Entity;
-use gwr_track::tracker::types::ReqType;
-use gwr_track::{create, value};
+use gwr_track::entity::{Entity, EntityMonitor};
 
 pub struct FlopMonitor {
-    entity: Rc<Entity>,
+    entity: EntityMonitor,
     clock: Clock,
     window_size_ticks: u64,
     flops_by_window: RefCell<HashMap<u64, f64>>,
@@ -32,11 +30,10 @@ impl FlopMonitor {
         window_size_ticks: u64,
     ) -> Rc<Self> {
         let window_size_ticks = window_size_ticks.max(1);
-        let flop_entity = Entity::new_without_create(entity, "gflops");
-        create!(entity ; flop_entity, 0, ReqType::Value as i8);
+        let flop_entity = EntityMonitor::new(entity, "gflops");
 
         let rc_self = Rc::new(Self {
-            entity: Rc::new(flop_entity),
+            entity: flop_entity,
             clock: clock.clone(),
             window_size_ticks,
             flops_by_window: RefCell::new(HashMap::new()),
@@ -83,7 +80,7 @@ impl FlopMonitor {
         } else {
             0.0
         };
-        value!(self.entity ; gflops_per_second);
+        self.entity.track_value(gflops_per_second);
     }
 }
 

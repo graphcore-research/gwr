@@ -13,7 +13,6 @@ use gwr_engine::traits::{Event, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::EntityDisplay;
 use gwr_track::entity::Entity;
-use gwr_track::{enter, exit};
 
 /// A generic queue for simulation objects.
 #[derive(EntityDisplay)]
@@ -107,7 +106,7 @@ where
     }
 
     fn push_now(&self, value: T) {
-        enter!(self.entity ; value.id());
+        self.entity.track_enter(value.id());
         self.data.borrow_mut().push_back(value);
         self.queue_changed.notify();
     }
@@ -117,7 +116,7 @@ where
     pub fn pop_front(&self) -> Option<T> {
         let value = self.data.borrow_mut().pop_front();
         if let Some(ref value) = value {
-            exit!(self.entity ; value.id());
+            self.entity.track_exit(value.id());
             self.queue_changed.notify();
         }
         value
@@ -134,7 +133,7 @@ where
         let value = queue.remove(index)?;
         drop(queue);
 
-        exit!(self.entity ; value.id());
+        self.entity.track_exit(value.id());
         self.queue_changed.notify();
         Some(value)
     }
