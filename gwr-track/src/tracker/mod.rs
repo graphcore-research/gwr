@@ -8,8 +8,6 @@ pub mod aka;
 pub mod capnp;
 /// Include the /dev/null tracker.
 pub mod dev_null;
-/// Include the in-memory tracker.
-pub mod in_memory;
 /// Include the Perfetto tracker.
 #[cfg(feature = "perfetto")]
 pub mod perfetto;
@@ -28,7 +26,6 @@ use std::rc::Rc;
 
 pub use capnp::CapnProtoTracker;
 pub use dev_null::DevNullTracker;
-pub use in_memory::InMemoryTracker;
 use regex::Regex;
 pub use text::TextTracker;
 
@@ -127,9 +124,6 @@ pub struct EntityManager {
     /// Used to assign unique IDs.
     unique_id: RefCell<u64>,
 
-    /// Keep track of the current time.
-    current_time: RefCell<f64>,
-
     /// Keep track of entities that have trace enable/log levels different to
     /// the default.
     log_entity_lookup: RefCell<HashMap<Id, log::Level>>,
@@ -147,7 +141,6 @@ impl EntityManager {
             regex_to_entity_level: Vec::new(),
             regex_to_enable_monitors_for: Vec::new(),
             unique_id: RefCell::new(ROOT.0 + 1),
-            current_time: RefCell::new(0.0),
             log_entity_lookup: RefCell::new(HashMap::new()),
             monitor_window_size_lookup: RefCell::new(HashMap::new()),
         }
@@ -280,16 +273,6 @@ impl EntityManager {
             }
         }
         Ok(())
-    }
-
-    fn time(&self) -> f64 {
-        *self.current_time.borrow()
-    }
-
-    fn set_time(&self, new_time: f64) {
-        let mut time_guard = self.current_time.borrow_mut();
-        assert!(new_time >= *time_guard);
-        *time_guard = new_time;
     }
 }
 
