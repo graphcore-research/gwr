@@ -35,7 +35,7 @@ jobs:
 
   lint:
     runs-on: macos-latest
-    needs: [warm-build-deps-cache, warm-dev-deps-cache]
+    needs: warm-dev-deps-cache
     env:
       RUSTFLAGS: -D warnings
 
@@ -47,7 +47,6 @@ jobs:
         with:
           path: .lycheecache
           key: lycheecache-${{ hashFiles('lychee.toml') }}
-      - uses: ./.github/actions/install-build-dependencies
       - uses: ./.github/actions/install-dev-dependencies
 
       - name: Lint with pre-commit
@@ -55,14 +54,13 @@ jobs:
 
   check-semantic-versioning:
     runs-on: ubuntu-latest
-    needs: [warm-build-deps-cache, warm-dev-deps-cache]
+    needs: warm-dev-deps-cache
 
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0 # Required to cause the main branch to also be fetched
           submodules: true
-      - uses: ./.github/actions/install-build-dependencies
       - uses: ./.github/actions/install-dev-dependencies
       - run: pre-commit run --hook-stage manual --all-files cargo-semver-checks
 
