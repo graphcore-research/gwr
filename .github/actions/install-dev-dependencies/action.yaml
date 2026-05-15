@@ -16,12 +16,16 @@ runs:
           ~/.cargo/registry/index/
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
-        key: ${{ runner.os }}-cargo-dev-deps-${{ hashFiles('./.github/actions/install-dev-dependencies/**') }}
+        key: ${{ runner.os }}-cargo-dev-deps-${{ hashFiles('./.github/actions/install-dev-dependencies/**','./.github/actions/install-build-dependencies/**') }}
         restore-keys: |
           ${{ runner.os }}-cargo-dev-deps-
           ${{ runner.os }}-cargo-build-deps-
 
-    - name: Run install.sh
-      id: run-install
+    - name: Run build dependencies install.sh
+      id: run-build-deps-install
+      run: ./.github/actions/install-build-dependencies/install.sh
+      shell: bash
+    - name: Run dev dependencies install.sh
+      id: run-dev-deps-install
       run: ./.github/actions/install-dev-dependencies/install.sh
       shell: bash
