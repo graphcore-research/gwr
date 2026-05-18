@@ -48,51 +48,70 @@ impl Track for PerfettoTracker {
     }
 
     fn enter(&self, id: Id, entered: Id) {
-        let guard = self.trace_builder.borrow_mut();
-        let trace_packet =
-            guard.build_enter_track_event_trace_packet(*self.current_time_ns.borrow(), id, entered);
-        let buf = guard.build_trace_to_bytes(vec![trace_packet]);
-        self.writer.borrow_mut().write_all(&buf).unwrap();
+        if self.is_entity_enabled(id, log::Level::Trace) {
+            let guard = self.trace_builder.borrow_mut();
+            let trace_packet = guard.build_enter_track_event_trace_packet(
+                *self.current_time_ns.borrow(),
+                id,
+                entered,
+            );
+            let buf = guard.build_trace_to_bytes(vec![trace_packet]);
+            self.writer.borrow_mut().write_all(&buf).unwrap();
+        }
     }
 
     fn exit(&self, id: Id, exited: Id) {
-        let guard = self.trace_builder.borrow_mut();
-        let trace_packet =
-            guard.build_exit_track_event_trace_packet(*self.current_time_ns.borrow(), id, exited);
-        let buf = guard.build_trace_to_bytes(vec![trace_packet]);
-        self.writer.borrow_mut().write_all(&buf).unwrap();
+        if self.is_entity_enabled(id, log::Level::Trace) {
+            let guard = self.trace_builder.borrow_mut();
+            let trace_packet = guard.build_exit_track_event_trace_packet(
+                *self.current_time_ns.borrow(),
+                id,
+                exited,
+            );
+            let buf = guard.build_trace_to_bytes(vec![trace_packet]);
+            self.writer.borrow_mut().write_all(&buf).unwrap();
+        }
     }
 
     fn value(&self, id: Id, value: f64) {
-        let guard = self.trace_builder.borrow_mut();
-        let trace_packet =
-            guard.build_value_track_event_trace_packet(*self.current_time_ns.borrow(), id, value);
-        let buf = guard.build_trace_to_bytes(vec![trace_packet]);
-        self.writer.borrow_mut().write_all(&buf).unwrap();
+        if self.is_entity_enabled(id, log::Level::Trace) {
+            let guard = self.trace_builder.borrow_mut();
+            let trace_packet = guard.build_value_track_event_trace_packet(
+                *self.current_time_ns.borrow(),
+                id,
+                value,
+            );
+            let buf = guard.build_trace_to_bytes(vec![trace_packet]);
+            self.writer.borrow_mut().write_all(&buf).unwrap();
+        }
     }
 
     fn create_entity(&self, created_by: Id, id: Id, name: &str) {
-        let mut guard = self.trace_builder.borrow_mut();
-        let trace_packet = guard.build_enter_exit_track_descriptor_trace_packet(
-            *self.current_time_ns.borrow(),
-            id,
-            created_by,
-            name,
-        );
-        let buf = guard.build_trace_to_bytes(vec![trace_packet]);
-        self.writer.borrow_mut().write_all(&buf).unwrap();
+        if self.is_entity_enabled(id, log::Level::Trace) {
+            let mut guard = self.trace_builder.borrow_mut();
+            let trace_packet = guard.build_enter_exit_track_descriptor_trace_packet(
+                *self.current_time_ns.borrow(),
+                id,
+                created_by,
+                name,
+            );
+            let buf = guard.build_trace_to_bytes(vec![trace_packet]);
+            self.writer.borrow_mut().write_all(&buf).unwrap();
+        }
     }
 
     fn create_monitor(&self, created_by: Id, id: Id, name: &str) {
-        let mut guard = self.trace_builder.borrow_mut();
-        let trace_packet = guard.build_value_track_descriptor_trace_packet(
-            *self.current_time_ns.borrow(),
-            id,
-            created_by,
-            name,
-        );
-        let buf = guard.build_trace_to_bytes(vec![trace_packet]);
-        self.writer.borrow_mut().write_all(&buf).unwrap();
+        if self.is_entity_enabled(id, log::Level::Trace) {
+            let mut guard = self.trace_builder.borrow_mut();
+            let trace_packet = guard.build_value_track_descriptor_trace_packet(
+                *self.current_time_ns.borrow(),
+                id,
+                created_by,
+                name,
+            );
+            let buf = guard.build_trace_to_bytes(vec![trace_packet]);
+            self.writer.borrow_mut().write_all(&buf).unwrap();
+        }
     }
 
     fn create_object(
@@ -104,15 +123,17 @@ impl Track for PerfettoTracker {
         _req_type: u8,
         details: &str,
     ) {
-        let mut guard = self.trace_builder.borrow_mut();
-        let trace_packet = guard.build_enter_exit_track_descriptor_trace_packet(
-            *self.current_time_ns.borrow(),
-            id,
-            created_by,
-            details,
-        );
-        let buf = guard.build_trace_to_bytes(vec![trace_packet]);
-        self.writer.borrow_mut().write_all(&buf).unwrap();
+        if self.is_entity_enabled(created_by, log::Level::Trace) {
+            let mut guard = self.trace_builder.borrow_mut();
+            let trace_packet = guard.build_enter_exit_track_descriptor_trace_packet(
+                *self.current_time_ns.borrow(),
+                id,
+                created_by,
+                details,
+            );
+            let buf = guard.build_trace_to_bytes(vec![trace_packet]);
+            self.writer.borrow_mut().write_all(&buf).unwrap();
+        }
     }
 
     fn capacity(&self, _id: Id, _capacity: Capacity) {

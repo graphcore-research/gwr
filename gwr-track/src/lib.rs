@@ -87,12 +87,7 @@ macro_rules! create_id {
 #[macro_export]
 macro_rules! destroy_id {
     ($entity:expr ; $id:expr) => {{
-        if $entity
-            .tracker
-            .is_entity_enabled($entity.id, log::Level::Trace)
-        {
-            $entity.tracker.destroy($entity.id, $id);
-        }
+        $entity.tracker.destroy($entity.id, $id);
     }};
 }
 
@@ -100,15 +95,10 @@ macro_rules! destroy_id {
 #[macro_export]
 macro_rules! destroy {
     ($entity:expr) => {{
-        if $entity
-            .tracker
-            .is_entity_enabled($entity.id, log::Level::Trace)
-        {
-            match &$entity.parent {
-                Some(parent) => $entity.tracker.destroy($entity.id, parent.id),
-                None => $entity.tracker.destroy($entity.id, $crate::NO_ID),
-            };
-        }
+        match &$entity.parent {
+            Some(parent) => $entity.tracker.destroy($entity.id, parent.id),
+            None => $entity.tracker.destroy($entity.id, $crate::NO_ID),
+        };
     }};
 }
 
@@ -116,12 +106,7 @@ macro_rules! destroy {
 #[macro_export]
 macro_rules! connect {
     ($from_entity:expr ; $to_entity:expr) => {{
-        if $from_entity
-            .tracker
-            .is_entity_enabled($from_entity.id, log::Level::Trace)
-        {
-            $from_entity.tracker.connect($from_entity.id, $to_entity.id);
-        }
+        $from_entity.tracker.connect($from_entity.id, $to_entity.id);
     }};
 }
 
@@ -129,12 +114,7 @@ macro_rules! connect {
 #[macro_export]
 macro_rules! set_time {
     ($entity:expr ; $time_ns:expr) => {{
-        if $entity
-            .tracker
-            .is_entity_enabled($entity.id, log::Level::Trace)
-        {
-            $entity.tracker.time($entity.id, $time_ns);
-        }
+        $entity.tracker.time($entity.id, $time_ns);
     }};
 }
 
@@ -147,9 +127,7 @@ macro_rules! set_time {
 #[macro_export]
 macro_rules! log_base {
     ($entity:expr ; $lvl:expr, $($arg:tt)+) => (
-        if $entity.tracker.is_entity_enabled($entity.id, $lvl) {
-            $entity.tracker.log($entity.id, $lvl, format_args!($($arg)+));
-        }
+        $entity.tracker.log($entity.id, $lvl, format_args!($($arg)+));
     );
 }
 

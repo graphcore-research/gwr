@@ -22,7 +22,7 @@ publish.workspace = true
 capnp.workspace = true
 clap.workspace = true
 crossterm.workspace = true
-gwr-track = { path = "../gwr-track", version = "0.10.0" }
+gwr-track = { path = "../gwr-track", version = "0.11.0" }
 itertools.workspace = true
 log.workspace = true
 ratatui.workspace = true

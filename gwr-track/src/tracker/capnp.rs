@@ -79,24 +79,31 @@ impl Track for CapnProtoTracker {
     }
 
     fn enter(&self, id: Id, object: Id) {
-        self.write_event(id, |mut event| {
-            event.set_enter(object.0);
-        });
+        if self.is_entity_enabled(id, log::Level::Trace) {
+            self.write_event(id, |mut event| {
+                event.set_enter(object.0);
+            });
+        }
     }
 
     fn exit(&self, id: Id, object: Id) {
-        self.write_event(id, |mut event| {
-            event.set_exit(object.0);
-        });
+        if self.is_entity_enabled(id, log::Level::Trace) {
+            self.write_event(id, |mut event| {
+                event.set_exit(object.0);
+            });
+        }
     }
 
     fn value(&self, id: Id, value: f64) {
-        self.write_event(id, |mut event| {
-            event.set_value(value);
-        });
+        if self.is_entity_enabled(id, log::Level::Trace) {
+            self.write_event(id, |mut event| {
+                event.set_value(value);
+            });
+        }
     }
 
     fn create_entity(&self, created_by: Id, id: Id, name: &str) {
+        // Don't filter this event as it could be required by a GUI
         self.write_event(created_by, |event| {
             let mut create = event.init_create();
             create.set_id(id.0);
@@ -105,6 +112,7 @@ impl Track for CapnProtoTracker {
     }
 
     fn create_monitor(&self, created_by: Id, id: Id, name: &str) {
+        // Don't filter this event as it could be required by a GUI
         self.write_event(created_by, |event| {
             let mut create = event.init_create();
             create.set_id(id.0);
@@ -121,18 +129,21 @@ impl Track for CapnProtoTracker {
         req_type: u8,
         details: &str,
     ) {
-        self.write_event(created_by, |event| {
-            let mut create = event.init_create();
-            create.set_id(id.0);
-            let mut object = create.init_object();
-            object.set_size(size as u64);
-            object.set_units(units);
-            object.set_type(req_type);
-            object.set_details(details);
-        });
+        if self.is_entity_enabled(created_by, log::Level::Trace) {
+            self.write_event(created_by, |event| {
+                let mut create = event.init_create();
+                create.set_id(id.0);
+                let mut object = create.init_object();
+                object.set_size(size as u64);
+                object.set_units(units);
+                object.set_type(req_type);
+                object.set_details(details);
+            });
+        }
     }
 
     fn capacity(&self, id: Id, capacity: Capacity) {
+        // Don't filter this event as it could be required by a GUI
         self.write_event(id, |event| {
             let mut event_capacity = event.init_capacity();
             event_capacity.set_value(capacity.value as u64);
@@ -141,24 +152,32 @@ impl Track for CapnProtoTracker {
     }
 
     fn destroy(&self, destroyed_by: Id, id: Id) {
-        self.write_event(destroyed_by, |mut event| {
-            event.set_destroy(id.0);
-        });
+        if self.is_entity_enabled(id, log::Level::Trace) {
+            self.write_event(destroyed_by, |mut event| {
+                event.set_destroy(id.0);
+            });
+        }
     }
 
     fn connect(&self, connect_from: Id, connect_to: Id) {
-        self.write_event(connect_from, |mut event| {
-            event.set_connect(connect_to.0);
-        });
+        if self.is_entity_enabled(connect_from, log::Level::Trace)
+            || self.is_entity_enabled(connect_to, log::Level::Trace)
+        {
+            self.write_event(connect_from, |mut event| {
+                event.set_connect(connect_to.0);
+            });
+        }
     }
 
     fn log(&self, id: Id, level: log::Level, msg: std::fmt::Arguments) {
-        self.write_event(id, |event| {
-            let mut log = event.init_log();
-            let txt = format!("{msg}");
-            log.set_message(&txt);
-            log.set_level(to_capnp_log_level(level));
-        });
+        if self.is_entity_enabled(id, level) {
+            self.write_event(id, |event| {
+                let mut log = event.init_log();
+                let txt = format!("{msg}");
+                log.set_message(&txt);
+                log.set_level(to_capnp_log_level(level));
+            });
+        }
     }
 
     fn time(&self, set_by: Id, time_ns: f64) {

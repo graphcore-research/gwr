@@ -48,38 +48,48 @@ impl Track for TextTracker {
     }
 
     fn enter(&self, id: Id, object: Id) {
-        self.writer
-            .borrow_mut()
-            .write_all(format!("{id}: enter {object}\n").as_bytes())
-            .unwrap();
+        if self.is_entity_enabled(id, log::Level::Trace) {
+            self.writer
+                .borrow_mut()
+                .write_all(format!("{id}: enter {object}\n").as_bytes())
+                .unwrap();
+        }
     }
 
     fn exit(&self, id: Id, object: Id) {
-        self.writer
-            .borrow_mut()
-            .write_all(format!("{id}: exit {object}\n").as_bytes())
-            .unwrap();
+        if self.is_entity_enabled(id, log::Level::Trace) {
+            self.writer
+                .borrow_mut()
+                .write_all(format!("{id}: exit {object}\n").as_bytes())
+                .unwrap();
+        }
     }
 
     fn value(&self, id: Id, value: f64) {
-        self.writer
-            .borrow_mut()
-            .write_all(format!("{id}: value {value}\n").as_bytes())
-            .unwrap();
+        if self.is_entity_enabled(id, log::Level::Trace) {
+            self.writer
+                .borrow_mut()
+                .write_all(format!("{id}: value {value}\n").as_bytes())
+                .unwrap();
+        }
     }
 
     fn create_entity(&self, created_by: Id, id: Id, name: &str) {
-        self.writer
-            .borrow_mut()
-            .write_all(format!("{created_by}: created entity {id}, {name}\n").as_bytes())
-            .unwrap();
+        if self.is_entity_enabled(created_by, log::Level::Trace) {
+            self.writer
+                .borrow_mut()
+                .write_all(format!("{created_by}: created entity {id}, {name}\n").as_bytes())
+                .unwrap();
+        }
     }
 
     fn create_monitor(&self, created_by: Id, id: Id, name: &str) {
-        self.writer
-            .borrow_mut()
-            .write_all(format!("{created_by}: created monitor {id}, {name}\n").as_bytes())
-            .unwrap();
+        if self.is_entity_enabled(created_by, log::Level::Trace) {
+            self.writer
+                .borrow_mut()
+                .write_all(format!("{created_by}: created monitor {id}, {name}\n").as_bytes())
+                .unwrap();
+        }
     }
 
     fn create_object(
@@ -91,50 +101,66 @@ impl Track for TextTracker {
         req_type: u8,
         details: &str,
     ) {
-        self.writer
-            .borrow_mut()
-            .write_all(
-                format!(
-                    "{created_by}: created object {id}, {req_type}, {size}, {units}, {details}\n"
+        if self.is_entity_enabled(created_by, log::Level::Trace) {
+            self.writer
+                .borrow_mut()
+                .write_all(
+                    format!(
+                        "{created_by}: created object {id}, {req_type}, {size}, {units}, {details}\n"
+                    )
+                    .as_bytes(),
                 )
-                .as_bytes(),
-            )
-            .unwrap();
+                .unwrap();
+        }
     }
 
     fn capacity(&self, id: Id, capacity: Capacity) {
-        self.writer
-            .borrow_mut()
-            .write_all(format!("{id}: capacity {} {}\n", capacity.value, capacity.units).as_bytes())
-            .unwrap();
+        if self.is_entity_enabled(id, log::Level::Trace) {
+            self.writer
+                .borrow_mut()
+                .write_all(
+                    format!("{id}: capacity {} {}\n", capacity.value, capacity.units).as_bytes(),
+                )
+                .unwrap();
+        }
     }
 
     fn destroy(&self, destroyed_by: Id, id: Id) {
-        self.writer
-            .borrow_mut()
-            .write_all(format!("{destroyed_by}: destroyed {id}\n").as_bytes())
-            .unwrap();
+        if self.is_entity_enabled(id, log::Level::Trace) {
+            self.writer
+                .borrow_mut()
+                .write_all(format!("{destroyed_by}: destroyed {id}\n").as_bytes())
+                .unwrap();
+        }
     }
 
     fn connect(&self, connect_from: Id, connect_to: Id) {
-        self.writer
-            .borrow_mut()
-            .write_all(format!("{connect_from}: connect to {connect_to}\n").as_bytes())
-            .unwrap();
+        if self.is_entity_enabled(connect_from, log::Level::Trace)
+            || self.is_entity_enabled(connect_to, log::Level::Trace)
+        {
+            self.writer
+                .borrow_mut()
+                .write_all(format!("{connect_from}: connect to {connect_to}\n").as_bytes())
+                .unwrap();
+        }
     }
 
     fn log(&self, id: Id, level: log::Level, msg: std::fmt::Arguments) {
-        self.writer
-            .borrow_mut()
-            .write_all(format!("{id}:{level}: {msg}\n").as_bytes())
-            .unwrap();
+        if self.is_entity_enabled(id, level) {
+            self.writer
+                .borrow_mut()
+                .write_all(format!("{id}:{level}: {msg}\n").as_bytes())
+                .unwrap();
+        }
     }
 
     fn time(&self, set_by: Id, time_ns: f64) {
-        self.writer
-            .borrow_mut()
-            .write_all(format!("{set_by}: set time to {time_ns:.1}ns\n").as_bytes())
-            .unwrap();
+        if self.is_entity_enabled(set_by, log::Level::Trace) {
+            self.writer
+                .borrow_mut()
+                .write_all(format!("{set_by}: set time to {time_ns:.1}ns\n").as_bytes())
+                .unwrap();
+        }
     }
 
     fn shutdown(&self) {
