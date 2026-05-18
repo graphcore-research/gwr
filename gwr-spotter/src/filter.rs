@@ -36,6 +36,11 @@ struct SearchState {
     filter_id: Option<u64>,
 }
 
+enum FilterPass {
+    Completed(Vec<usize>),
+    RestartRequested,
+}
+
 impl SearchState {
     fn text_matches(&self, text: &str) -> bool {
         if self.search.is_empty() {
@@ -272,56 +277,75 @@ pub fn start_background_filter(
     filter: Arc<Mutex<Filter>>,
 ) {
     thread::spawn(move || {
+        let mut wait_for_notification = true;
         loop {
-            if receiver.recv().is_err() {
-                return;
-            }
+            if wait_for_notification {
+                if receiver.recv().is_err() {
+                    return;
+                }
 
-            // Drain any notifications that have built up
-            while receiver.try_recv().is_ok() {}
+                // Drain any notifications that have built up
+                while receiver.try_recv().is_ok() {}
+            }
 
             // Get the current filter state for the duration of the filtering process.
             let search_state = filter.lock().unwrap().start_search();
 
-            let mut matching_indices = Vec::with_capacity(INITIAL_SIZE);
-            let mut chunk_index = 0;
-            loop {
-                let chunk_offset = chunk_index * CHUNK_SIZE;
-
-                // Take a chunk of lines out of the renderer to be filtered.
-                let chunk = renderer.lock().unwrap().take_chunk(chunk_index);
-                if chunk.is_none() {
-                    break;
-                }
-
-                let block_ref = chunk.as_ref().unwrap();
-
-                for (index, line) in block_ref.iter().enumerate() {
-                    if search_state.search_matches(line) {
-                        matching_indices.push(index + chunk_offset);
-                    }
-                }
-
-                // Restore the chunk of lines
-                renderer.lock().unwrap().restore_chunk(chunk_index, chunk);
-                chunk_index += 1;
-
-                // Somthing has notified us, so break out and start again.
-                if receiver.try_recv().is_ok() {
-                    break;
-                }
-            }
-            renderer
-                .lock()
-                .unwrap()
-                .set_render_indices(matching_indices);
-
+            let filter_pass = run_filter_pass(&receiver, &renderer, &search_state);
             filter
                 .lock()
                 .unwrap()
                 .search_done(search_state.id_to_name, search_state.id_to_details);
+
+            match filter_pass {
+                FilterPass::Completed(matching_indices) => {
+                    renderer
+                        .lock()
+                        .unwrap()
+                        .set_render_indices(matching_indices);
+                    wait_for_notification = true;
+                }
+                FilterPass::RestartRequested => {
+                    wait_for_notification = false;
+                }
+            }
         }
     });
+}
+
+fn run_filter_pass(
+    receiver: &Receiver<()>,
+    renderer: &Arc<Mutex<Renderer>>,
+    search_state: &SearchState,
+) -> FilterPass {
+    let mut matching_indices = Vec::with_capacity(INITIAL_SIZE);
+    let mut chunk_index = 0;
+    loop {
+        let chunk_offset = chunk_index * CHUNK_SIZE;
+
+        // Take a chunk of lines out of the renderer to be filtered.
+        let chunk = renderer.lock().unwrap().take_chunk(chunk_index);
+        if chunk.is_none() {
+            return FilterPass::Completed(matching_indices);
+        }
+
+        let block_ref = chunk.as_ref().unwrap();
+
+        for (index, line) in block_ref.iter().enumerate() {
+            if search_state.search_matches(line) {
+                matching_indices.push(index + chunk_offset);
+            }
+        }
+
+        // Restore the chunk of lines before deciding whether to restart.
+        renderer.lock().unwrap().restore_chunk(chunk_index, chunk);
+        chunk_index += 1;
+
+        // Something has notified us, so discard the partial result and start again.
+        if receiver.try_recv().is_ok() {
+            return FilterPass::RestartRequested;
+        }
+    }
 }
 
 #[cfg(test)]
