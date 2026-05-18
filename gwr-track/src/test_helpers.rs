@@ -27,6 +27,7 @@ pub struct TestTracker {
     events: RefCell<Vec<String>>,
 
     unique_id: RefCell<u64>,
+    level: log::Level,
 }
 
 impl TestTracker {
@@ -34,10 +35,11 @@ impl TestTracker {
     ///
     /// This keeps the track events in memory for checking later.
     #[must_use]
-    pub fn new(initial_id: u64) -> Self {
+    pub fn new(initial_id: u64, level: log::Level) -> Self {
         Self {
             events: RefCell::new(Vec::new()),
             unique_id: RefCell::new(initial_id),
+            level,
         }
     }
 
@@ -56,8 +58,8 @@ impl Track for TestTracker {
         Id(id)
     }
 
-    fn is_entity_enabled(&self, _id: Id, _level: log::Level) -> bool {
-        true
+    fn is_entity_enabled(&self, _id: Id, level: log::Level) -> bool {
+        level <= self.level
     }
 
     fn monitoring_window_size_for(&self, _id: Id) -> Option<u64> {
@@ -161,7 +163,10 @@ impl Track for TestTracker {
 #[macro_export]
 macro_rules! test_init {
     ($start_id:expr) => {{
-        let test_tracker = std::rc::Rc::new($crate::test_helpers::TestTracker::new($start_id));
+        let test_tracker = std::rc::Rc::new($crate::test_helpers::TestTracker::new(
+            $start_id,
+            $crate::log::Level::Trace,
+        ));
         let tracker: $crate::Tracker = test_tracker.clone();
         (test_tracker, tracker)
     }};

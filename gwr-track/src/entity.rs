@@ -10,7 +10,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use crate::tracker::aka::{Aka, get_alternative_names};
-use crate::{Id, Tracker, create_id, destroy, log, trace};
+use crate::{Id, Tracker, create_id, destroy, trace};
 
 /// A capacity value and its units.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -109,23 +109,17 @@ impl Entity {
 
     /// Emit the capacity represented by this simulation entity.
     pub fn track_capacity(&self, value: usize, units: impl Into<String>) {
-        if self.tracker.is_entity_enabled(self.id, log::Level::Trace) {
-            self.tracker.capacity(self.id, Capacity::new(value, units));
-        }
+        self.tracker.capacity(self.id, Capacity::new(value, units));
     }
 
     /// Emit an enter event for an object.
     pub fn track_enter(&self, entered: Id) {
-        if self.tracker.is_entity_enabled(self.id, log::Level::Trace) {
-            self.tracker.enter(self.id, entered);
-        }
+        self.tracker.enter(self.id, entered);
     }
 
     /// Emit an exit event for an object.
     pub fn track_exit(&self, exited: Id) {
-        if self.tracker.is_entity_enabled(self.id, log::Level::Trace) {
-            self.tracker.exit(self.id, exited);
-        }
+        self.tracker.exit(self.id, exited);
     }
 
     /// Emit an object creation event.
@@ -137,16 +131,8 @@ impl Entity {
         req_type: u8,
         details: &str,
     ) {
-        if self.tracker.is_entity_enabled(self.id, log::Level::Trace) {
-            self.tracker
-                .create_object(self.id, created, size, units, req_type, details);
-        } else {
-            // If trace isn't enabled on the source this object may still travel through
-            // other enabled entities. This will allow the user to know which
-            // source to enable if they need more details on the objects.
-            self.tracker
-                .create_object(self.id, created, size, units, req_type, "");
-        }
+        self.tracker
+            .create_object(self.id, created, size, units, req_type, details);
     }
 
     fn track_create(&self, created_by: Id, full_name: &str) {
@@ -238,13 +224,7 @@ impl EntityMonitor {
 
     /// Emit a value event for this monitor.
     pub fn track_value(&self, value: f64) {
-        if self
-            .entity
-            .tracker
-            .is_entity_enabled(self.entity.id, log::Level::Trace)
-        {
-            self.entity.tracker.value(self.entity.id, value);
-        }
+        self.entity.tracker.value(self.entity.id, value);
     }
 }
 

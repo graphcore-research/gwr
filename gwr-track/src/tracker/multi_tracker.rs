@@ -138,3 +138,35 @@ impl Track for MultiTracker {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use log::Level;
+
+    use super::MultiTracker;
+    use crate::Id;
+    use crate::test_helpers::{TestTracker, check_and_clear};
+    use crate::tracker::{Track, Tracker};
+
+    #[test]
+    fn log_events_are_delivered_to_all_sub_trackers_even_if_only_one_enables_the_level() {
+        let trace_tracker = Rc::new(TestTracker::new(100, Level::Trace));
+        let error_tracker = Rc::new(TestTracker::new(200, Level::Error));
+
+        let mut multi_tracker = MultiTracker::default();
+        let trace_tracker_dyn: Tracker = trace_tracker.clone();
+        let error_tracker_dyn: Tracker = error_tracker.clone();
+        multi_tracker.add_tracker(trace_tracker_dyn);
+        multi_tracker.add_tracker(error_tracker_dyn);
+
+        let entity_id = Id(42);
+        assert!(multi_tracker.is_entity_enabled(entity_id, Level::Trace));
+
+        multi_tracker.log(entity_id, Level::Trace, format_args!("fanout"));
+
+        check_and_clear(&trace_tracker, &["42:TRACE: fanout"]);
+        check_and_clear(&error_tracker, &["42:TRACE: fanout"]);
+    }
+}
