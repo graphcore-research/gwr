@@ -3,6 +3,7 @@
 use std::fs::File;
 use std::io::{BufReader, Write};
 use std::path::Path;
+use std::time::Duration;
 
 use gwr_track::Id;
 use gwr_track::perfetto_trace_builder::PerfettoTraceBuilder;
@@ -130,8 +131,8 @@ impl TraceVisitor for PerfettoGenerator {
             .expect("`output` should be writable file");
     }
 
-    fn time(&mut self, _id: Id, time_ns: f64) {
-        self.current_time_ns = time_ns as u64;
+    fn time(&mut self, _id: Id, time: Duration) {
+        self.current_time_ns = time.as_nanos().try_into().expect("Simulations should span less time than the maximum range supported by Perfetto timestamps (approximately 584 years)");
     }
 }
 

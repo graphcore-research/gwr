@@ -5,6 +5,7 @@
 //! Time is made up of a cycle count and a phase.
 
 use std::rc::Rc;
+use std::time::Duration;
 
 use gwr_track::entity::Entity;
 use gwr_track::set_time;
@@ -14,12 +15,12 @@ use crate::time::clock::TaskWaker;
 
 /// The overall owner of time within a simulation.
 ///
-/// Contains all Clocks and the current simulation time in ns.
+/// Contains all Clocks and the current simulation time.
 #[derive(Clone)]
 pub struct SimTime {
     entity: Rc<Entity>,
 
-    current_ns: f64,
+    current_time: Duration,
 
     /// Clocks are auto-created as required and kept in a HashMap.
     ///
@@ -33,7 +34,7 @@ impl SimTime {
     pub fn new(parent: &Rc<Entity>) -> Self {
         Self {
             entity: Rc::new(Entity::new(parent, "time")),
-            current_ns: 0.0,
+            current_time: Duration::ZERO,
             clocks: Vec::new(),
         }
     }
@@ -53,10 +54,10 @@ impl SimTime {
     pub fn advance_time(&mut self) -> Option<Vec<TaskWaker>> {
         if let Some(next_clock) = self.clocks.iter().min_by(|a, b| a.cmp(b)) {
             if let Some(clock_time) = next_clock.shared_state.waiting_times.borrow_mut().pop() {
-                let next_ns = next_clock.to_ns(&clock_time);
-                if self.current_ns != next_ns {
-                    set_time!(self.entity ; next_ns);
-                    self.current_ns = next_ns;
+                let next_time = next_clock.to_duration(&clock_time);
+                if self.current_time != next_time {
+                    set_time!(self.entity ; next_time);
+                    self.current_time = next_time;
                 }
                 next_clock.advance_time(clock_time);
                 next_clock.shared_state.waiting.borrow_mut().pop()
@@ -69,8 +70,8 @@ impl SimTime {
     }
 
     #[must_use]
-    pub fn time_now_ns(&self) -> f64 {
-        self.current_ns
+    pub fn time_now(&self) -> Duration {
+        self.current_time
     }
 
     /// The simulation can exit if all scheduled tasks can exit.

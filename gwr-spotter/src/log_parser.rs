@@ -7,6 +7,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use itertools::Itertools;
 use log::Level;
@@ -29,7 +30,7 @@ struct LogParser {
     time_re: Regex,
     text_re: Regex,
 
-    current_time: f64,
+    current_time: Duration,
 }
 
 impl LogParser {
@@ -56,7 +57,7 @@ impl LogParser {
             time_re: Regex::new(r"\d+: set time to ([^n]+)ns").unwrap(),
             text_re: Regex::new(r"(\d+): (\d+) entered$").unwrap(),
 
-            current_time: 0.0,
+            current_time: Duration::new(0, 0),
         }
     }
 
@@ -219,7 +220,8 @@ impl LogParser {
             return false;
         };
         let time_str = e.get(1).unwrap().as_str();
-        self.current_time = time_str.parse().unwrap();
+        let nanos: u128 = time_str.parse().unwrap();
+        self.current_time = Duration::from_nanos_u128(nanos);
         true
     }
 
@@ -385,7 +387,7 @@ pub fn start_background_load(
                             level: log::Level::Error,
                             id: 0,
                             msg: e.to_string(),
-                            time: 0.0,
+                            time: Duration::new(0, 0),
                         };
                         events.push(err_line);
                     }

@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::fmt::{self, Display};
 use std::path::Path;
 use std::rc::Rc;
+use std::time::Duration;
 
 use gwr_engine::engine::Engine;
 use gwr_engine::sim_error;
@@ -189,12 +190,12 @@ impl Platform {
         }
     }
 
-    pub fn dump_stats(&self, time_now_ns: f64) {
+    pub fn dump_stats(&self, elapsed: Duration) {
         for mem in &self.memories {
-            mem.dump_stats(time_now_ns);
+            mem.dump_stats(elapsed);
         }
         for pe in &self.processing_elements {
-            pe.dump_stats(time_now_ns);
+            pe.dump_stats(elapsed);
         }
     }
 }

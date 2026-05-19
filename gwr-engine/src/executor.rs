@@ -6,6 +6,7 @@ use std::mem;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+use std::time::Duration;
 
 use gwr_track::entity::Entity;
 use rand::SeedableRng;
@@ -189,8 +190,8 @@ impl Executor {
     }
 
     #[must_use]
-    pub fn time_now_ns(&self) -> f64 {
-        self.state.time.borrow().time_now_ns()
+    pub fn time_now(&self) -> Duration {
+        self.state.time.borrow().time_now()
     }
 
     pub fn set_randomize_task_order(&self, randomize: bool) {

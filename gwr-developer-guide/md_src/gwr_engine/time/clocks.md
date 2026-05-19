@@ -26,8 +26,7 @@ let clock_b = engine.clock_mhz(1000.0);
 ## Advancing Time
 
 Time is advanced by waiting an integer number of ticks on a clock. In the
-snippet below the `println!` will be called when the time has advanced to
-`1.0ns`
+snippet below the `println!` will be called when the time has advanced to `1ns`
 
 ```rust,no_run
 # use gwr_engine::engine::Engine;
@@ -37,7 +36,7 @@ snippet below the `println!` will be called when the time has advanced to
 let clock = engine.clock_ghz(1.0);
 # spawner.spawn(async move {
 clock.wait_ticks(1).await;
-println!("Time now {:.2}", clock.time_now_ns());
+println!("Time now {clock:.2}");
 # Ok(())
 #  });
 # }
@@ -52,8 +51,7 @@ needs to run as long as the rest of the simulation.
 In order to do this the `wait_ticks_or_exit` function can be called. This lets
 the engine know that it does not have to keep running if this is the only thread
 of activity left. For example, the code below will start a thread of activity
-that prints the current time in `ns` periodically as long as the simulation is
-running:
+that prints the current time periodically as long as the simulation is running:
 
 ```rust,no_run
 # use gwr_engine::engine::Engine;
@@ -64,7 +62,7 @@ let clock = engine.clock_ghz(1.0);
 spawner.spawn(async move {
   loop {
     clock.wait_ticks_or_exit(1000).await;
-    println!("Time now {:.2}", clock.time_now_ns());
+    println!("Time now {clock:.2}");
   }
 });
 # }

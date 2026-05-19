@@ -144,7 +144,7 @@ fn main() -> Result<()> {
         return Err(err.into());
     }
 
-    println!("Ran simulation. Time now {}ns", clock.time_now_ns());
+    println!("Ran simulation. Time now {clock:.2}");
 
     if let Err(err) = timetable.check_tasks_complete() {
         write_error_mermaid(&timetable, &args.error_mermaid);
@@ -153,7 +153,7 @@ fn main() -> Result<()> {
 
     if args.dump_stats {
         timetable.dump_stats()?;
-        platform.dump_stats(clock.time_now_ns());
+        platform.dump_stats(clock.time_now());
     }
 
     Ok(())

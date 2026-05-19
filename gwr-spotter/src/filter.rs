@@ -351,6 +351,7 @@ fn run_filter_pass(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::time::Duration;
 
     use super::SearchState;
     use crate::app::EventLine;
@@ -370,17 +371,20 @@ mod tests {
     fn plain_text_search_matches_numeric_ids() {
         let search_state = build_search_state("41");
 
-        assert!(search_state.search_matches(&EventLine::Create { id: 41, time: 0.0 }));
+        assert!(search_state.search_matches(&EventLine::Create {
+            id: 41,
+            time: Duration::new(0, 0)
+        }));
         assert!(search_state.search_matches(&EventLine::Enter {
             id: 40,
             entered: 41,
             fullness: 1,
-            time: 0.0,
+            time: Duration::new(0, 0),
         }));
         assert!(search_state.search_matches(&EventLine::Connect {
             from_id: 41,
             to_id: 99,
-            time: 0.0,
+            time: Duration::new(0, 0),
         }));
     }
 }

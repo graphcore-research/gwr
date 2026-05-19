@@ -23,6 +23,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use gwr_engine::engine::Engine;
@@ -178,9 +179,9 @@ impl ProcessingElement {
         }
     }
 
-    pub fn dump_stats(&self, time_now_ns: f64) {
+    pub fn dump_stats(&self, elapsed: Duration) {
         let stats = self.stats.borrow();
-        let time_now_s = time_now_ns / 1e9;
+        let time_now_s = elapsed.as_secs_f64();
         let total_gflops = stats.total_flops as f64 / 1e9;
         let average_gflops_per_second = if time_now_s == 0.0 {
             0.0

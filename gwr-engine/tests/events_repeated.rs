@@ -3,6 +3,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use futures::{FutureExt, select};
 use gwr_engine::events::repeated::Repeated;
@@ -28,7 +29,7 @@ fn notify_one_listener() {
             assert_eq!(res, usize::default());
 
             // Ensure this hasn't completed early
-            assert_eq!(clock.time_now_ns(), 10.0);
+            assert_eq!(clock.time_now(), Duration::from_nanos(10));
             Ok(())
         });
     }
@@ -44,7 +45,7 @@ fn notify_one_listener() {
 
     run_simulation!(engine);
 
-    assert_eq!(clock.time_now_ns(), 10.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(10));
 }
 
 #[test]
@@ -63,7 +64,7 @@ fn notify_one_listener_result() {
             assert_eq!(res, result);
 
             // Ensure this hasn't completed early
-            assert_eq!(clock.time_now_ns(), 10.0);
+            assert_eq!(clock.time_now(), Duration::from_nanos(10));
             Ok(())
         });
     }
@@ -79,7 +80,7 @@ fn notify_one_listener_result() {
 
     run_simulation!(engine);
 
-    assert_eq!(clock.time_now_ns(), 10.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(10));
 }
 
 #[test]
@@ -106,7 +107,7 @@ fn notify_before_listen() {
 
     run_simulation!(engine);
 
-    assert_eq!(clock.time_now_ns(), 10.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(10));
 }
 
 #[test]
@@ -128,7 +129,7 @@ fn notify_multiple_listeners() {
             assert_eq!(res, "");
 
             // Ensure this hasn't completed early
-            assert_eq!(clock.time_now_ns(), 10.0);
+            assert_eq!(clock.time_now(), Duration::from_nanos(10));
             *count.borrow_mut() += 1;
             Ok(())
         });
@@ -152,7 +153,7 @@ fn notify_multiple_listeners() {
 
     run_simulation!(engine);
 
-    assert_eq!(clock.time_now_ns(), 10.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(10));
     assert_eq!(*count.borrow(), num_listen);
 }
 
@@ -170,13 +171,13 @@ fn notify_listen_twice() {
             let res = repeated.listen().await;
 
             // Ensure this hasn't completed early
-            assert_eq!(clock.time_now_ns(), 10.0);
+            assert_eq!(clock.time_now(), Duration::from_nanos(10));
             assert_eq!(res, usize::default());
 
             let res = repeated.listen().await;
 
             // Ensure this hasn't completed early
-            assert_eq!(clock.time_now_ns(), 20.0);
+            assert_eq!(clock.time_now(), Duration::from_nanos(20));
             assert_eq!(res, usize::default());
             Ok(())
         });
@@ -195,7 +196,7 @@ fn notify_listen_twice() {
 
     run_simulation!(engine);
 
-    assert_eq!(clock.time_now_ns(), 20.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(20));
 }
 
 #[test]
@@ -214,7 +215,10 @@ fn notify_listen_loop() {
             for i in 0..COUNTER {
                 let res = repeated.listen().await;
                 assert_eq!(res, i + 1);
-                assert_eq!(clock.time_now_ns(), 10.0 * (i + 1) as f64);
+                assert_eq!(
+                    clock.time_now(),
+                    Duration::from_nanos((10 * (i + 1)) as u64)
+                );
             }
             Ok(())
         });
@@ -233,7 +237,10 @@ fn notify_listen_loop() {
 
     run_simulation!(engine);
 
-    assert_eq!(clock.time_now_ns(), 10.0 * COUNTER as f64);
+    assert_eq!(
+        clock.time_now(),
+        Duration::from_nanos((10 * COUNTER) as u64)
+    );
 }
 
 #[test]
@@ -251,7 +258,7 @@ fn notify_once_listen_twice() {
             assert_eq!(res, usize::default());
 
             // Ensure this hasn't completed early
-            assert_eq!(clock.time_now_ns(), 10.0);
+            assert_eq!(clock.time_now(), Duration::from_nanos(10));
 
             let _ = repeated.listen().await;
             panic!("I should not be awoken twice");
@@ -269,7 +276,7 @@ fn notify_once_listen_twice() {
 
     run_simulation!(engine);
 
-    assert_eq!(clock.time_now_ns(), 10.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(10));
 }
 
 #[test]
@@ -286,7 +293,7 @@ fn notify_repeated_two_listeners() {
         engine.spawn(async move {
             let res = repeated.listen().await;
             assert_eq!(res, usize::default());
-            assert_eq!(clock.time_now_ns(), 10.0);
+            assert_eq!(clock.time_now(), Duration::from_nanos(10));
             Ok(())
         });
     }
@@ -313,7 +320,7 @@ fn notify_repeated_two_listeners() {
 
     run_simulation!(engine);
 
-    assert_eq!(clock.time_now_ns(), 11.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(11));
 }
 
 #[test]
@@ -375,5 +382,5 @@ fn cancelled_listener_is_removed() {
 
     run_simulation!(engine);
 
-    assert_eq!(clock.time_now_ns(), 10.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(10));
 }

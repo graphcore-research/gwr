@@ -258,7 +258,7 @@ fn main() -> Result<(), SimError> {
 
     if total_sunk_frames != total_expected_frames {
         error!(top ; "{}/{} frames received", total_sunk_frames, total_expected_frames);
-        error!(top ; "Deadlock detected at {:.2}ns", clock.time_now_ns());
+        error!(top ; "Deadlock detected at {:.2}", clock);
 
         tracker.shutdown();
         return sim_error!("Deadlock");
@@ -270,7 +270,7 @@ fn main() -> Result<(), SimError> {
 
     print_summary(
         &top,
-        clock.time_now_ns(),
+        &clock,
         total_sunk_frames,
         args.frame_overhead_bytes,
         args.frame_payload_bytes,
@@ -280,18 +280,19 @@ fn main() -> Result<(), SimError> {
 
 fn print_summary(
     top: &Rc<Entity>,
-    time_now_ns: f64,
+    clock: &Clock,
     total_sunk_frames: usize,
     frame_overhead_bytes: usize,
     frame_payload_bytes: usize,
 ) {
+    let elapsed = clock.time_now();
     let payload_bytes = total_sunk_frames * frame_payload_bytes;
     let (payload_value, payload_per_second) =
-        compute_adjusted_value_and_rate(time_now_ns, payload_bytes);
+        compute_adjusted_value_and_rate(elapsed, payload_bytes);
 
     let total_bytes = payload_bytes + (total_sunk_frames * frame_overhead_bytes);
-    let (total_value, total_per_second) = compute_adjusted_value_and_rate(time_now_ns, total_bytes);
+    let (total_value, total_per_second) = compute_adjusted_value_and_rate(elapsed, total_bytes);
 
-    info!(top ; "Pass: Sent {total_sunk_frames} in {time_now_ns:.2}ns.");
+    info!(top ; "Pass: Sent {total_sunk_frames} in {clock:.2}.");
     info!(top ; "Payload: {payload_value:.2} ({payload_per_second:.2}/s). Total: {total_value:.2} ({total_per_second:.2}/s).");
 }

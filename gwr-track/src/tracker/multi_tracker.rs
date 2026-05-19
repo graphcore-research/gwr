@@ -1,5 +1,7 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
+use std::time::Duration;
+
 use crate::Id;
 use crate::entity::Capacity;
 use crate::tracker::aka::AlternativeNames;
@@ -126,9 +128,9 @@ impl Track for MultiTracker {
         }
     }
 
-    fn time(&self, set_by: Id, time_ns: f64) {
+    fn time(&self, set_by: Id, time: Duration) {
         for tracker in &self.trackers {
-            tracker.time(set_by, time_ns);
+            tracker.time(set_by, time);
         }
     }
 

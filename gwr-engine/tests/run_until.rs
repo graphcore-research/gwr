@@ -1,5 +1,7 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
+use std::time::Duration;
+
 use gwr_engine::events::all_of::AllOf;
 use gwr_engine::events::any_of::AnyOf;
 use gwr_engine::test_helpers::start_test;
@@ -16,7 +18,7 @@ fn run_until_once() {
     spawn_activity(&mut engine);
     engine.run_until(once).unwrap();
 
-    assert_eq!(engine.time_now_ns(), 5.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(5));
 }
 
 #[test]
@@ -30,7 +32,7 @@ fn run_until_allof_5_10() {
     spawn_activity(&mut engine);
     engine.run_until(allof).unwrap();
 
-    assert_eq!(engine.time_now_ns(), 10.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(10));
 }
 
 #[test]
@@ -44,7 +46,7 @@ fn run_until_allof_10_5() {
     spawn_activity(&mut engine);
     engine.run_until(allof).unwrap();
 
-    assert_eq!(engine.time_now_ns(), 10.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(10));
 }
 
 #[test]
@@ -58,7 +60,7 @@ fn run_until_any_of_5_10() {
     spawn_activity(&mut engine);
     engine.run_until(anyf).unwrap();
 
-    assert_eq!(engine.time_now_ns(), 5.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(5));
 }
 
 #[test]
@@ -72,5 +74,5 @@ fn run_until_any_of_10_5() {
     spawn_activity(&mut engine);
     engine.run_until(anyof).unwrap();
 
-    assert_eq!(engine.time_now_ns(), 5.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(5));
 }

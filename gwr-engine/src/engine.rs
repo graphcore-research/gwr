@@ -3,6 +3,7 @@
 use std::cell::RefCell;
 use std::future::Future;
 use std::rc::Rc;
+use std::time::Duration;
 
 use gwr_track::entity::{Entity, toplevel};
 use gwr_track::tracker::stdout_tracker;
@@ -140,8 +141,8 @@ impl Engine {
     }
 
     #[must_use]
-    pub fn time_now_ns(&self) -> f64 {
-        self.executor.time_now_ns()
+    pub fn time_now(&self) -> Duration {
+        self.executor.time_now()
     }
 
     #[must_use]

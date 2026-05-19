@@ -2,6 +2,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
 
 use crate::entity::Capacity;
 use crate::perfetto_trace_builder::PerfettoTraceBuilder;
@@ -152,8 +153,8 @@ impl Track for PerfettoTracker {
         // todo!()
     }
 
-    fn time(&self, _set_by: Id, time_ns: f64) {
-        *self.current_time_ns.borrow_mut() = time_ns as u64;
+    fn time(&self, _set_by: Id, time: Duration) {
+        *self.current_time_ns.borrow_mut() = time.as_nanos().try_into().expect("");
     }
 
     fn shutdown(&self) {

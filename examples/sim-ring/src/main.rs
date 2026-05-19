@@ -193,7 +193,7 @@ fn main() -> Result<(), SimError> {
     for sink in &sinks {
         if sink.num_sunk() != config.num_send_frames {
             error!(top ; "{}/{} frames received", sink.num_sunk(), config.num_send_frames);
-            error!(top ; "Deadlock detected at {:.2}ns", clock.time_now_ns());
+            error!(top ; "Deadlock detected at {clock:.2}");
 
             tracker.shutdown();
             return sim_error!("Deadlock");
@@ -202,6 +202,6 @@ fn main() -> Result<(), SimError> {
     if let Some(progress_bar) = progress_bar {
         progress_bar.finish();
     }
-    info!(top ; "Pass ({:.2}ns)", clock.time_now_ns());
+    info!(top ; "Pass ({clock:.2})");
     Ok(())
 }

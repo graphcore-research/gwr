@@ -7,6 +7,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use byte_unit::{Byte, Unit};
@@ -23,7 +24,7 @@ pub struct Monitor {
     window_size_ticks: u64,
     bytes_in_window: RefCell<usize>,
     bytes_total: RefCell<usize>,
-    last_time_ns: RefCell<f64>,
+    last_time: RefCell<Duration>,
     bw_unit: Unit,
 }
 
@@ -44,7 +45,7 @@ impl Monitor {
             window_size_ticks,
             bytes_in_window: RefCell::new(0),
             bytes_total: RefCell::new(0),
-            last_time_ns: RefCell::new(clock.time_now_ns()),
+            last_time: RefCell::new(clock.time_now()),
             bw_unit,
         });
 
@@ -71,16 +72,16 @@ impl Runnable for Monitor {
             *self.bytes_in_window.borrow_mut() = 0;
             *self.bytes_total.borrow_mut() += bytes_in_window;
 
-            let time_now_ns = self.clock.time_now_ns();
+            let time_now = self.clock.time_now();
             let window_duration_s =
-                (time_now_ns - *self.last_time_ns.borrow()) / (1000.0 * 1000.0 * 1000.0);
+                (time_now.checked_sub(*self.last_time.borrow()).unwrap()).as_secs_f64();
 
             let per_second = Byte::from_f64(bytes_in_window as f64 / window_duration_s).unwrap();
             let gib_per_second = per_second.get_adjusted_unit(self.bw_unit);
 
             self.entity.track_value(gib_per_second.get_value());
 
-            *self.last_time_ns.borrow_mut() = time_now_ns;
+            *self.last_time.borrow_mut() = time_now;
         }
     }
 }

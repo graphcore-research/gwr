@@ -16,7 +16,7 @@ pub struct SharedState {
     pub selected: Option<u64>,
     pub current_line: usize,
     pub num_lines: usize,
-    pub current_time_ns: f64,
+    pub current_time_ns: u128,
     pub seek_line: Option<usize>,
 }
 
@@ -31,7 +31,7 @@ impl SharedState {
             selected: None,
             current_line: 0,
             num_lines: 0,
-            current_time_ns: 0.0,
+            current_time_ns: 0,
             seek_line: None,
         }
     }
@@ -45,7 +45,7 @@ impl SharedState {
         self.selected = None;
         self.current_line = 0;
         self.num_lines = 0;
-        self.current_time_ns = 0.0;
+        self.current_time_ns = 0;
         self.seek_line = None;
     }
 }
