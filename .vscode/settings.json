@@ -15,10 +15,15 @@
         "gwr-perfetto-sys/perfetto_src"
     ],
     "search.exclude": {
-        // Exclude explicit siblings so VS Code can still descend into protos/perfetto.
+        // Explicitly exclude sibling files and directories so VS Code can still descend into protos/perfetto.
         "gwr-perfetto-sys/perfetto_src/{.bazelignore,.bazelrc,.bazelversion,.clang-format,.clang-tidy,.git-blame-ignore-revs,.gitallowed,.gitattributes,.gitignore,.gn,.style.yapf,Android.bp,Android.bp.extras,BUILD,BUILD.extras,BUILD.gn,CHANGELOG,CONTRIBUTORS.txt,DIR_METADATA,LICENSE,METADATA,MODULE.bazel,MODULE.bazel.lock,MODULE_LICENSE_APACHE2,OWNERS,PerfettoIntegrationTests.xml,README.chromium,README.md,TEST_MAPPING,WATCHLISTS,WORKSPACE,codereview.settings,heapprofd.rc,meson.build,perfetto.rc,perfetto_flags.aconfig,persistent_cfg.pbtxt,traced_perf.rc}": true,
         "gwr-perfetto-sys/perfetto_src/{.git,.github,bazel,build_overrides,buildtools,debian,docs,examples,gn,include,infra,python,sdk,src,test,third_party,tools,ui}/**": true,
         "gwr-perfetto-sys/perfetto_src/protos/README.md": true,
-        "gwr-perfetto-sys/perfetto_src/protos/third_party/**": true
+        "gwr-perfetto-sys/perfetto_src/protos/third_party/**": true,
+        // Explicitly exclude sibling files and directories so VS Code can still descend into onnx/*.proto*.
+        "gwr-onnx-sys/onnx_src/{.clang-format,.clang-tidy,.editorconfig,.git-blame-ignore-revs,.gitattributes,.gitignore,.gitmodules,.lintrunner.toml,CMakeLists.txt,CODEOWNERS,CODE_OF_CONDUCT.md,CONTRIBUTING.md,CPPLINT.cfg,INSTALL.md,LICENSE,MANIFEST.in,README.md,RELEASE-MANAGEMENT.md,REUSE.toml,SECURITY.md,VERSION_NUMBER,backend.py,codecov.yml,pixi.lock,pixi.toml,pyproject.toml,renovate.json5,requirements-dev.txt,requirements-lintrunner.txt,requirements-min.txt,requirements-reference.txt,requirements-release_build.txt,requirements-release_test.txt,requirements.txt,setup.py}": true,
+        "gwr-onnx-sys/onnx_src/{.git,.github,LICENSES,cmake,community,docs,examples,tools,workflow_scripts}/**": true,
+        "gwr-onnx-sys/onnx_src/onnx/{backend,bin,common,defs,frontend,inliner,onnx_cpp2py_export,reference,shape_inference,test,tools,version_converter}/**": true,
+        "gwr-onnx-sys/onnx_src/onnx/{__init__.py,_mapping.py,checker.cc,checker.h,checker.py,compose.py,cpp2py_export.cc,external_data_helper.py,gen_proto.py,helper.py,inliner.py,model_container.py,numpy_helper.py,onnx-operators_pb.h,onnx_pb.h,parser.py,printer.py,proto_utils.h,py.typed,py_utils.h,serialization.py,shape_inference.py,string_utils.h,utils.py,version_converter.py}": true
     }
 }
