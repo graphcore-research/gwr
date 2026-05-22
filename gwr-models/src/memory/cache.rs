@@ -399,6 +399,11 @@ where
     pub fn num_misses(&self) -> usize {
         self.metrics.borrow().num_misses
     }
+
+    #[must_use]
+    pub fn bw_bytes_per_cycle(&self) -> usize {
+        self.bw_bytes_per_cycle
+    }
 }
 
 struct RxHandlingState<T>

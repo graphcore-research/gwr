@@ -206,6 +206,10 @@ where
         self.config
             .col_row_port_to_fabric_port_index(col, row, port)
     }
+
+    fn port_bits_per_tick(&self) -> usize {
+        self.config.port_bits_per_tick()
+    }
 }
 
 #[async_trait(?Send)]

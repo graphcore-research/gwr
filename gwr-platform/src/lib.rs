@@ -141,13 +141,37 @@ impl Platform {
     }
 
     #[must_use]
+    pub fn cache_names(&self) -> Vec<String> {
+        self.caches_idx_by_id
+            .keys()
+            .map(|cache_name| cache_name.to_string())
+            .collect()
+    }
+
+    #[must_use]
     pub fn num_fabrics(&self) -> usize {
         self.fabrics_idx_by_id.keys().len()
     }
 
     #[must_use]
+    pub fn fabric_names(&self) -> Vec<String> {
+        self.fabrics_idx_by_id
+            .keys()
+            .map(|fabric_name| fabric_name.to_string())
+            .collect()
+    }
+
+    #[must_use]
     pub fn num_memories(&self) -> usize {
         self.memories_idx_by_id.keys().len()
+    }
+
+    #[must_use]
+    pub fn memory_names(&self) -> Vec<String> {
+        self.memories_idx_by_id
+            .keys()
+            .map(|memory_name| memory_name.to_string())
+            .collect()
     }
 
     #[must_use]
@@ -176,6 +200,17 @@ impl Platform {
     pub fn memory(&self, memory_name: &str) -> Result<&Rc<Memory<MemoryAccess>>, SimError> {
         let idx = self.memory_idx_from_name(memory_name)?;
         Ok(&self.memories[idx])
+    }
+
+    pub fn memory_name_for_address(&self, addr: u64) -> Result<String, SimError> {
+        self.memory_names()
+            .into_iter()
+            .find(|memory_name| {
+                self.memory(memory_name)
+                    .map(|memory| memory.contains_addr(addr))
+                    .unwrap_or(false)
+            })
+            .ok_or_else(|| SimError(format!("No memory range contains address 0x{addr:x}")))
     }
 
     pub fn pe(&self, pe_name: &str) -> Result<&Rc<ProcessingElement>, SimError> {

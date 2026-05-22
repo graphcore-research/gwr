@@ -159,6 +159,17 @@ where
         self.config.capacity_bytes
     }
 
+    #[must_use]
+    pub fn bw_bytes_per_cycle(&self) -> usize {
+        self.config.bw_bytes_per_cycle
+    }
+
+    #[must_use]
+    pub fn contains_addr(&self, addr: u64) -> bool {
+        let end = self.config.base_address + self.config.capacity_bytes as u64;
+        addr >= self.config.base_address && addr < end
+    }
+
     pub fn dump_stats(&self, time_now_ns: f64) {
         let stats = self.stats.borrow();
 

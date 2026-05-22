@@ -11,10 +11,11 @@ use gwr_engine::types::{SimError, SimResult};
 use rand::Rng;
 
 use super::{Operator, Tensor, TensorPartition};
+use crate::processing_element::ComputeCapabilities;
 use crate::processing_element::operators::{
-    HasShape, Shape, TensorView, apply_dim_partitions, partition_across_dimensions,
+    HasShape, MachineOp, MachineOps, Shape, TensorView, apply_dim_partitions,
+    partition_across_dimensions,
 };
-use crate::processing_element::{ComputeCapabilities, MachineOp};
 
 const NAME: &str = "Gemm";
 
@@ -366,9 +367,12 @@ impl Operator for OperatorGemm {
         &self,
         inputs: &[Option<TensorView>],
         outputs: &[Option<TensorView>],
-    ) -> Result<usize, SimError> {
+    ) -> Result<MachineOps, SimError> {
         let (num_muls, num_adds) = gemm_op_counts(inputs, outputs)?;
-        Ok(num_muls + num_adds)
+        let mut machine_ops = MachineOps::new();
+        machine_ops.add_op(MachineOp::Mul, num_muls);
+        machine_ops.add_op(MachineOp::Add, num_adds);
+        Ok(machine_ops)
     }
 
     fn partition_views(
@@ -658,31 +662,37 @@ mod tests {
     #[test]
     fn flop_count_adds_multiplies_and_accumulates() {
         let operator = OperatorGemm {};
-        assert_eq!(
-            operator
-                .compute_flops(
-                    &[tensor_view(&[4, 5]), tensor_view(&[5, 8])],
-                    &[tensor_view(&[4, 8])],
-                )
-                .unwrap(),
-            (4 * 5 * 8) + (4 * (5 - 1) * 8)
-        );
+        let machine_ops = operator
+            .compute_flops(
+                &[tensor_view(&[4, 5]), tensor_view(&[5, 8])],
+                &[tensor_view(&[4, 8])],
+            )
+            .unwrap();
+        assert_eq!(machine_ops.get(&MachineOp::Mul), Some(&(4 * 5 * 8)));
+        assert_eq!(machine_ops.get(&MachineOp::Add), Some(&(4 * (5 - 1) * 8)));
+        assert_eq!(machine_ops.total_flops(), (4 * 5 * 8) + (4 * (5 - 1) * 8));
     }
 
     #[test]
     fn flop_count_includes_optional_c_elementwise_add() {
         let operator = OperatorGemm {};
+        let machine_ops = operator
+            .compute_flops(
+                &[
+                    tensor_view(&[4, 5]),
+                    tensor_view(&[5, 8]),
+                    tensor_view(&[4, 8]),
+                ],
+                &[tensor_view(&[4, 8])],
+            )
+            .unwrap();
+        assert_eq!(machine_ops.get(&MachineOp::Mul), Some(&(4 * 5 * 8)));
         assert_eq!(
-            operator
-                .compute_flops(
-                    &[
-                        tensor_view(&[4, 5]),
-                        tensor_view(&[5, 8]),
-                        tensor_view(&[4, 8]),
-                    ],
-                    &[tensor_view(&[4, 8])],
-                )
-                .unwrap(),
+            machine_ops.get(&MachineOp::Add),
+            Some(&((4 * (5 - 1) * 8) + (4 * 8)))
+        );
+        assert_eq!(
+            machine_ops.total_flops(),
             (4 * 5 * 8) + (4 * (5 - 1) * 8) + (4 * 8)
         );
     }

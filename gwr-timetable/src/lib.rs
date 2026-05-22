@@ -9,7 +9,7 @@
 //!     --timetable gwr-timetable/examples/small.yaml
 //!     --stdout --stdout-level debug
 use std::cell::RefCell;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
 
@@ -20,7 +20,7 @@ use gwr_engine::traits::Event;
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::EntityGet;
 use gwr_models::processing_element::dispatch::Dispatch;
-use gwr_models::processing_element::operators::{Tensor, TensorView};
+use gwr_models::processing_element::operators::{MachineOp, MachineOps, Tensor, TensorView};
 use gwr_models::processing_element::task::{
     ComputeOp, ComputeTaskConfig, MemoryOp, MemoryTaskConfig, Task,
 };
@@ -28,9 +28,11 @@ use gwr_platform::Platform;
 use gwr_track::entity::Entity;
 use gwr_track::{debug, info, trace};
 
+pub mod analysis;
 pub mod mermaid;
 pub mod timetable_file;
 pub mod types;
+pub use analysis::ComputeNodeAnalysis;
 use timetable_file::{NodeSection, TimetableFile};
 use types::Node;
 
@@ -181,6 +183,43 @@ fn update_edge_indices(
 }
 
 type InOutTensorViews = (Vec<Option<TensorView>>, Vec<Option<TensorView>>);
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct TimetableStats {
+    pub total_load_bytes: usize,
+    pub total_store_bytes: usize,
+    pub num_compute_nodes: usize,
+    pub num_tensor_nodes: usize,
+    pub num_memory_nodes: usize,
+    pub machine_ops: MachineOps,
+    pub total_machine_ops: usize,
+}
+
+#[must_use]
+pub fn format_machine_ops(machine_ops: &MachineOps) -> String {
+    let counts = MachineOp::ALL
+        .into_iter()
+        .filter_map(|machine_op| {
+            machine_ops
+                .get(&machine_op)
+                .map(|count| format!("{machine_op}={count}"))
+        })
+        .collect::<Vec<_>>();
+
+    if counts.is_empty() {
+        "none".to_string()
+    } else {
+        counts.join(", ")
+    }
+}
+
+fn accumulate_machine_ops(total: &mut MachineOps, addend: &MachineOps) {
+    for machine_op in MachineOp::ALL {
+        if let Some(count) = addend.get(&machine_op) {
+            total.add_op(machine_op, *count);
+        }
+    }
+}
 
 impl Timetable {
     /// Create a Timetable from a TimetableFile and validate it
@@ -542,41 +581,120 @@ impl Timetable {
         Ok(())
     }
 
-    pub fn dump_stats(&self) -> SimResult {
-        let mut total_load_bytes = 0;
-        let mut total_store_bytes = 0;
-        let mut num_compute_nodes = 0;
-        let mut num_tensor_nodes = 0;
-        let mut num_memory_nodes = 0;
+    pub fn stats(&self) -> Result<TimetableStats, SimError> {
+        let mut stats = TimetableStats::default();
         for (idx, node) in self.nodes.iter().enumerate() {
             match &node.node_section {
                 NodeSection::Memory { op, config, .. } => {
                     let (_, num_bytes) = self.memory_access_address_num_bytes(node, config);
                     match op {
-                        MemoryOp::Load => total_load_bytes += num_bytes,
-                        MemoryOp::Store => total_store_bytes += num_bytes,
+                        MemoryOp::Load => stats.total_load_bytes += num_bytes,
+                        MemoryOp::Store => stats.total_store_bytes += num_bytes,
                     }
-                    num_memory_nodes += 1;
+                    stats.num_memory_nodes += 1;
                 }
-                NodeSection::Compute { .. } => {
+                NodeSection::Compute { op, .. } => {
                     let (inputs, outputs) = self.get_input_output_tensors(idx)?;
                     for input_view in inputs.iter().flatten() {
-                        total_load_bytes += input_view.num_bytes();
+                        stats.total_load_bytes += input_view.num_bytes();
                     }
                     for output_view in outputs.iter().flatten() {
-                        total_store_bytes += output_view.num_bytes();
+                        stats.total_store_bytes += output_view.num_bytes();
                     }
-                    num_compute_nodes += 1;
+                    let machine_ops = op.compute_flops(&inputs, &outputs)?;
+                    accumulate_machine_ops(&mut stats.machine_ops, &machine_ops);
+                    stats.total_machine_ops += machine_ops.total_flops();
+                    stats.num_compute_nodes += 1;
                 }
-                NodeSection::Tensor { .. } => num_tensor_nodes += 1,
+                NodeSection::Tensor { .. } => stats.num_tensor_nodes += 1,
             }
         }
 
+        Ok(stats)
+    }
+
+    pub fn compute_node_analyses(&self) -> Result<Vec<ComputeNodeAnalysis>, SimError> {
+        let mut analyses = Vec::new();
+
+        for (idx, node) in self.nodes.iter().enumerate() {
+            let NodeSection::Compute { id, pe, op, .. } = &node.node_section else {
+                continue;
+            };
+
+            let (inputs, outputs) = self.get_input_output_tensors(idx)?;
+            let input_bytes = inputs.iter().flatten().map(TensorView::num_bytes).sum();
+            let output_bytes = outputs.iter().flatten().map(TensorView::num_bytes).sum();
+            let machine_ops = op.compute_flops(&inputs, &outputs)?;
+            let flops = machine_ops.total_flops();
+            let mut bytes_by_memory = BTreeMap::new();
+            let mut tensor_access_addrs = Vec::new();
+            for view in inputs.iter().chain(outputs.iter()).flatten() {
+                let addr = view.tensor().addr();
+                let memory_name = self.platform.memory_name_for_address(addr)?;
+                *bytes_by_memory.entry(memory_name).or_insert(0) += view.num_bytes();
+                tensor_access_addrs.push(addr);
+            }
+
+            let mut predecessor_compute_node_indices = BTreeSet::new();
+            for tensor_node_idx in node.inputs.iter().flatten() {
+                let tensor_node = &self.nodes[*tensor_node_idx];
+                for producer_node_idx in tensor_node.inputs.iter().flatten() {
+                    if matches!(
+                        self.nodes[*producer_node_idx].node_section,
+                        NodeSection::Compute { .. }
+                    ) {
+                        predecessor_compute_node_indices.insert(*producer_node_idx);
+                    }
+                }
+            }
+
+            let predecessor_compute_node_indices = predecessor_compute_node_indices
+                .into_iter()
+                .collect::<Vec<_>>();
+            let predecessor_compute_node_ids = predecessor_compute_node_indices
+                .iter()
+                .map(|producer_node_idx| self.nodes[*producer_node_idx].node_section.id().clone())
+                .collect::<Vec<_>>();
+
+            analyses.push(ComputeNodeAnalysis {
+                node_idx: idx,
+                id: id.clone(),
+                pe_name: pe.clone(),
+                op: op.clone(),
+                machine_ops,
+                flops,
+                input_bytes,
+                output_bytes,
+                bytes_by_memory,
+                tensor_access_addrs,
+                predecessor_compute_node_indices,
+                predecessor_compute_node_ids,
+            });
+        }
+
+        Ok(analyses)
+    }
+
+    pub fn dump_stats(&self) -> SimResult {
+        let stats = self.stats()?;
+
         info!(self.entity ; "Timetable:");
         info!(self.entity ;
-            "  {num_compute_nodes} compute nodes, {num_tensor_nodes} tensor nodes, {num_memory_nodes} memory nodes"
+            "  {} compute nodes, {} tensor nodes, {} memory nodes",
+            stats.num_compute_nodes,
+            stats.num_tensor_nodes,
+            stats.num_memory_nodes
         );
-        info!(self.entity ; "  loads {total_load_bytes} bytes, stores {total_store_bytes} bytes");
+        info!(self.entity ;
+            "  loads {} bytes, stores {} bytes",
+            stats.total_load_bytes,
+            stats.total_store_bytes
+        );
+        info!(self.entity ;
+            "  machine ops: {} ({})",
+            stats.total_machine_ops,
+            format_machine_ops(&stats.machine_ops)
+        );
 
         Ok(())
     }

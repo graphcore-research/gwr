@@ -12,12 +12,12 @@ use rand::Rng;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::{Operator, Shape, Tensor, TensorPartition};
+use crate::processing_element::ComputeCapabilities;
 use crate::processing_element::operators::dtype::DataType;
 use crate::processing_element::operators::{
-    DimPartition, ExpansionDirection, HasShape, TensorView, apply_dim_partitions,
-    partition_across_dimensions,
+    DimPartition, ExpansionDirection, HasShape, MachineOp, MachineOps, TensorView,
+    apply_dim_partitions, partition_across_dimensions,
 };
-use crate::processing_element::{ComputeCapabilities, MachineOp};
 
 const NAME: &str = "MaxPool";
 const BATCH_DIM: usize = 0;
@@ -729,8 +729,11 @@ impl Operator for OperatorMaxPool {
         &self,
         inputs: &[Option<TensorView>],
         outputs: &[Option<TensorView>],
-    ) -> Result<usize, SimError> {
-        maxpool_comparisons(self, inputs, outputs)
+    ) -> Result<MachineOps, SimError> {
+        Ok(MachineOps::from_op(
+            MachineOp::Compare,
+            maxpool_comparisons(self, inputs, outputs)?,
+        ))
     }
 
     fn partition_views(

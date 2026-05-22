@@ -305,6 +305,16 @@ impl LoadStoreUnit {
         port_rx!(self.rx, state)
     }
 
+    #[must_use]
+    pub fn max_access_size_bytes(&self) -> usize {
+        self.max_access_size_bytes
+    }
+
+    #[must_use]
+    pub fn can_access_addr(&self, addr: u64) -> bool {
+        self.state.memory_map.lookup(addr).is_some()
+    }
+
     /// Perform a memory access
     ///
     /// This will break a larger request down into requests of the maximum size

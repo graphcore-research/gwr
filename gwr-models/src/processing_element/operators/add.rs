@@ -11,10 +11,10 @@ use gwr_engine::types::{SimError, SimResult};
 use rand::Rng;
 
 use super::{Operator, Shape, Tensor, TensorPartition};
+use crate::processing_element::ComputeCapabilities;
 use crate::processing_element::operators::{
-    HasShape, TensorView, apply_dim_partitions, partition_across_dimensions,
+    HasShape, MachineOp, MachineOps, TensorView, apply_dim_partitions, partition_across_dimensions,
 };
-use crate::processing_element::{ComputeCapabilities, MachineOp};
 
 const NAME: &str = "Add";
 
@@ -208,8 +208,11 @@ impl Operator for OperatorAdd {
         &self,
         inputs: &[Option<TensorView>],
         outputs: &[Option<TensorView>],
-    ) -> Result<usize, SimError> {
-        num_add_flops(inputs, outputs)
+    ) -> Result<MachineOps, SimError> {
+        Ok(MachineOps::from_op(
+            MachineOp::Add,
+            num_add_flops(inputs, outputs)?,
+        ))
     }
 
     fn partition_views(
@@ -426,7 +429,7 @@ mod tests {
                     &[tensor_view(&[2, 3, 4])],
                 )
                 .unwrap(),
-            24
+            MachineOps::from_op(MachineOp::Add, 24)
         );
     }
 

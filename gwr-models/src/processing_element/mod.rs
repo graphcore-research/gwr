@@ -41,7 +41,7 @@ use crate::memory::memory_map::{DeviceId, MemoryMap};
 use crate::processing_element::dispatch::Dispatch;
 use crate::processing_element::flop_monitor::FlopMonitor;
 use crate::processing_element::load_store_unit::LoadStoreUnit;
-use crate::processing_element::operators::TensorView;
+use crate::processing_element::operators::{MachineOp, MachineOps, TensorView};
 use crate::processing_element::task::{ComputeTaskConfig, MemoryOp, MemoryTaskConfig, Task};
 
 pub mod dispatch;
@@ -49,13 +49,6 @@ mod flop_monitor;
 mod load_store_unit;
 pub mod operators;
 pub mod task;
-
-#[derive(Clone, Copy, Eq, Hash, PartialEq)]
-pub enum MachineOp {
-    Add,
-    Compare,
-    Mul,
-}
 
 type Dispatcher = Rc<dyn Dispatch>;
 
@@ -196,6 +189,39 @@ impl ProcessingElement {
 
     pub fn port_rx(&self) -> PortStateResult<MemoryAccess> {
         self.lsu.port_rx()
+    }
+
+    #[must_use]
+    pub fn compute_capabilities(&self) -> &ComputeCapabilities {
+        self.compute_capabilities.as_ref()
+    }
+
+    #[must_use]
+    pub fn lsu_access_bytes_per_tick(&self) -> usize {
+        self.lsu.max_access_size_bytes()
+    }
+
+    #[must_use]
+    pub fn can_access_addr(&self, addr: u64) -> bool {
+        self.lsu.can_access_addr(addr)
+    }
+
+    pub fn compute_ticks_for_ops(&self, machine_ops: &MachineOps) -> Result<f64, SimError> {
+        let mut total = 0.0;
+        for machine_op in MachineOp::ALL {
+            let Some(count) = machine_ops.get(&machine_op) else {
+                continue;
+            };
+            let ops_per_tick = self.compute_capabilities.ops_per_tick(machine_op);
+            if !ops_per_tick.is_finite() || ops_per_tick <= 0.0 {
+                return Err(SimError(format!(
+                    "{}: invalid compute throughput {ops_per_tick} ops/tick for {machine_op}",
+                    self.entity.name
+                )));
+            }
+            total += (*count as f64) / ops_per_tick;
+        }
+        Ok(total)
     }
 
     #[must_use]
@@ -340,7 +366,7 @@ async fn handle_compute_task(
         .inputs
         .iter()
         .chain(config.outputs.iter())
-        .filter_map(|view| view.as_ref())
+        .flatten()
         .map(tensor_view_num_bytes)
         .sum();
 
@@ -372,10 +398,10 @@ async fn handle_compute_task(
             .op
             .compute_flops(&partition.inputs, &partition.outputs)?;
         if let Some(flop_monitor) = &flop_monitor {
-            flop_monitor.record_interval(compute_ticks as u64, compute_flops as f64);
+            flop_monitor.record_interval(compute_ticks as u64, compute_flops.total_flops() as f64);
         }
         clock.wait_ticks(compute_ticks as u64).await;
-        stats.borrow_mut().total_flops += compute_flops;
+        stats.borrow_mut().total_flops += compute_flops.total_flops();
 
         for view in partition.outputs.iter().flatten() {
             lsu.do_access(
