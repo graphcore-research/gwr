@@ -2,6 +2,7 @@
 
 //! The Operators define what operations a Processing Element can perform
 
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::rc::Rc;
 
@@ -12,11 +13,64 @@ use crate::processing_element::operators::dtype::DataType;
 use crate::processing_element::{ComputeCapabilities, MachineOpCounts};
 
 pub mod dtype;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExpansionDirection {
     Backward,
     Forward,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum MachineOp {
+    Add,
+    Compare,
+    Mul,
+}
+
+impl MachineOp {
+    pub const ALL: [Self; 3] = [Self::Add, Self::Compare, Self::Mul];
+}
+
+impl Display for MachineOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Add => write!(f, "add"),
+            Self::Compare => write!(f, "compare"),
+            Self::Mul => write!(f, "mul"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MachineOps {
+    machine_ops: HashMap<MachineOp, usize>,
+}
+
+impl MachineOps {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn from_op(machine_op: MachineOp, count: usize) -> Self {
+        let mut machine_ops = HashMap::new();
+        machine_ops.insert(machine_op, count);
+        Self { machine_ops }
+    }
+
+    pub fn add_op(&mut self, machine_op: MachineOp, count: usize) {
+        *self.machine_ops.entry(machine_op).or_insert(0) += count;
+    }
+
+    #[must_use]
+    pub fn get(&self, machine_op: &MachineOp) -> Option<&usize> {
+        self.machine_ops.get(machine_op)
+    }
+
+    #[must_use]
+    pub fn total_flops(&self) -> usize {
+        self.machine_ops.values().sum()
+    }
 }
 
 #[must_use]

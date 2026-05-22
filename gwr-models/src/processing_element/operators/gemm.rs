@@ -12,9 +12,9 @@ use rand::Rng;
 
 use super::{Operator, Tensor, TensorPartition};
 use crate::processing_element::operators::{
-    HasShape, Shape, TensorView, apply_dim_partitions, partition_across_dimensions,
+    HasShape, MachineOp, Shape, TensorView, apply_dim_partitions, partition_across_dimensions,
 };
-use crate::processing_element::{ComputeCapabilities, MachineOp, MachineOpCounts};
+use crate::processing_element::{ComputeCapabilities, MachineOpCounts};
 
 const NAME: &str = "Gemm";
 
@@ -662,31 +662,34 @@ mod tests {
     #[test]
     fn flop_count_adds_multiplies_and_accumulates() {
         let operator = OperatorGemm {};
-        assert_eq!(
-            operator
-                .compute_flops(
-                    &[tensor_view(&[4, 5]), tensor_view(&[5, 8])],
-                    &[tensor_view(&[4, 8])],
-                )
-                .unwrap(),
-            (4 * 5 * 8) + (4 * (5 - 1) * 8)
-        );
+        let machine_ops = operator
+            .compute_machine_ops(
+                &[tensor_view(&[4, 5]), tensor_view(&[5, 8])],
+                &[tensor_view(&[4, 8])],
+            )
+            .unwrap();
+        assert_eq!(machine_ops.muls, (4 * 5 * 8));
+        assert_eq!(machine_ops.adds, (4 * (5 - 1) * 8));
+        assert_eq!(machine_ops.total(), (4 * 5 * 8) + (4 * (5 - 1) * 8));
     }
 
     #[test]
     fn flop_count_includes_optional_c_elementwise_add() {
         let operator = OperatorGemm {};
+        let machine_ops = operator
+            .compute_machine_ops(
+                &[
+                    tensor_view(&[4, 5]),
+                    tensor_view(&[5, 8]),
+                    tensor_view(&[4, 8]),
+                ],
+                &[tensor_view(&[4, 8])],
+            )
+            .unwrap();
+        assert_eq!(machine_ops.muls, (4 * 5 * 8));
+        assert_eq!(machine_ops.adds, ((4 * (5 - 1) * 8) + (4 * 8)));
         assert_eq!(
-            operator
-                .compute_flops(
-                    &[
-                        tensor_view(&[4, 5]),
-                        tensor_view(&[5, 8]),
-                        tensor_view(&[4, 8]),
-                    ],
-                    &[tensor_view(&[4, 8])],
-                )
-                .unwrap(),
+            machine_ops.total(),
             (4 * 5 * 8) + (4 * (5 - 1) * 8) + (4 * 8)
         );
     }

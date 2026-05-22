@@ -240,6 +240,19 @@ fn invalid_to_edge_pe() {
 }
 
 #[test]
+fn graph_cycle() {
+    let (top, platform, mut timetable_file) = create_default_timetable_file();
+    timetable_file.edges.push(EdgeSection {
+        from: "load0".to_string(),
+        to: "tensor0".to_string(),
+        kind: EdgeKind::Data,
+    });
+
+    let err = Timetable::new(&top, timetable_file, &platform).unwrap_err();
+    assert!(format!("{err}").contains("Timetable graph contains a cycle"));
+}
+
+#[test]
 fn memory_op_too_big() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();

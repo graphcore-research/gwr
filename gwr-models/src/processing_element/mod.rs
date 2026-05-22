@@ -41,7 +41,7 @@ use crate::memory::memory_map::{DeviceId, MemoryMap};
 use crate::processing_element::dispatch::Dispatch;
 use crate::processing_element::flop_monitor::FlopMonitor;
 use crate::processing_element::load_store_unit::LoadStoreUnit;
-use crate::processing_element::operators::TensorView;
+use crate::processing_element::operators::{MachineOp, TensorView};
 use crate::processing_element::task::{ComputeTaskConfig, MemoryOp, MemoryTaskConfig, Task};
 
 pub mod dispatch;
@@ -49,13 +49,6 @@ mod flop_monitor;
 mod load_store_unit;
 pub mod operators;
 pub mod task;
-
-#[derive(Clone, Copy, Eq, Hash, PartialEq)]
-pub enum MachineOp {
-    Add,
-    Compare,
-    Mul,
-}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct MachineOpCounts {
@@ -323,6 +316,54 @@ impl ProcessingElement {
     }
 
     #[must_use]
+    pub fn compute_capabilities(&self) -> &ComputeCapabilities {
+        self.compute_capabilities.as_ref()
+    }
+
+    #[must_use]
+    pub fn lsu_access_bytes_per_tick(&self) -> usize {
+        self.lsu.max_access_size_bytes()
+    }
+
+    #[must_use]
+    pub fn lsu_access_bytes(&self) -> usize {
+        self.lsu.max_access_size_bytes()
+    }
+
+    #[must_use]
+    pub fn overhead_size_bytes(&self) -> usize {
+        self.lsu.overhead_size_bytes()
+    }
+
+    #[must_use]
+    pub fn can_access_addr(&self, addr: u64) -> bool {
+        self.lsu.can_access_addr(addr)
+    }
+
+    pub fn compute_ticks_for_ops(&self, machine_ops: &MachineOpCounts) -> Result<f64, SimError> {
+        let ops = [
+            (MachineOp::Add, machine_ops.adds),
+            (MachineOp::Compare, machine_ops.compares),
+            (MachineOp::Mul, machine_ops.muls),
+        ];
+        let mut total = 0.0;
+        for (machine_op, count) in ops {
+            if count == 0 {
+                continue;
+            }
+            let ops_per_tick = self.compute_capabilities.ops_per_tick(machine_op);
+            if !ops_per_tick.is_finite() || ops_per_tick <= 0.0 {
+                return Err(SimError(format!(
+                    "{}: invalid compute throughput {ops_per_tick} ops/tick for {machine_op}",
+                    self.entity.name
+                )));
+            }
+            total += (count as f64) / ops_per_tick;
+        }
+        Ok(total)
+    }
+
+    #[must_use]
     pub fn total_graph_nodes(&self) -> usize {
         match self.dispatcher.borrow().as_ref() {
             None => 0,
@@ -491,7 +532,7 @@ async fn handle_compute_task(
         .inputs
         .iter()
         .chain(config.outputs.iter())
-        .filter_map(|view| view.as_ref())
+        .flatten()
         .map(tensor_view_num_bytes)
         .sum();
 

@@ -12,9 +12,9 @@ use rand::Rng;
 
 use super::{Operator, Shape, Tensor, TensorPartition};
 use crate::processing_element::operators::{
-    HasShape, TensorView, apply_dim_partitions, partition_across_dimensions,
+    HasShape, MachineOp, TensorView, apply_dim_partitions, partition_across_dimensions,
 };
-use crate::processing_element::{ComputeCapabilities, MachineOp, MachineOpCounts};
+use crate::processing_element::{ComputeCapabilities, MachineOpCounts};
 
 const NAME: &str = "Add";
 
@@ -473,12 +473,15 @@ mod tests {
         let operator = OperatorAdd {};
         assert_eq!(
             operator
-                .compute_flops(
+                .compute_machine_ops(
                     &[tensor_view(&[2, 3, 4]), tensor_view(&[1, 3, 1])],
                     &[tensor_view(&[2, 3, 4])],
                 )
                 .unwrap(),
-            24
+            MachineOpCounts {
+                adds: 24,
+                ..MachineOpCounts::default()
+            }
         );
     }
 

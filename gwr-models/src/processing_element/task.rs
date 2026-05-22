@@ -75,18 +75,6 @@ impl ComputeOp {
         }
     }
 
-    pub fn compute_flops(
-        &self,
-        input_views: &[Option<TensorView>],
-        output_views: &[Option<TensorView>],
-    ) -> Result<usize, SimError> {
-        match self {
-            ComputeOp::Add => OperatorAdd {}.compute_flops(input_views, output_views),
-            ComputeOp::Gemm => OperatorGemm {}.compute_flops(input_views, output_views),
-            ComputeOp::MaxPool(operator) => operator.compute_flops(input_views, output_views),
-        }
-    }
-
     pub fn compute_machine_ops(
         &self,
         input_views: &[Option<TensorView>],

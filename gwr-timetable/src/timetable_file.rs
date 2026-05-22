@@ -2,7 +2,7 @@
 
 //! Types that map directly to the YAML file contents
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::rc::Rc;
 
@@ -68,13 +68,62 @@ impl TimetableFile {
             }
         }
 
-        // TODO:
-        // - check for cycles in graph
+        if errors.is_empty()
+            && let Some(cycle_nodes) = self.cycle_node_ids()
+        {
+            errors.push(format!(
+                "Timetable graph contains a cycle involving: {}",
+                cycle_nodes.join(", ")
+            ));
+        }
 
         if !errors.is_empty() {
             return sim_error!("Failed to validate graph:\n{}", errors.join("\n"));
         }
         Ok(())
+    }
+
+    fn cycle_node_ids(&self) -> Option<Vec<String>> {
+        let node_idx_by_id = self
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(idx, node)| (node.id().as_str(), idx))
+            .collect::<HashMap<_, _>>();
+        let mut indegree = vec![0usize; self.nodes.len()];
+        let mut successors = vec![Vec::new(); self.nodes.len()];
+
+        for edge in &self.edges {
+            let from_idx = *node_idx_by_id.get(edge.from_node_id())?;
+            let to_idx = *node_idx_by_id.get(edge.to_node_id())?;
+            successors[from_idx].push(to_idx);
+            indegree[to_idx] += 1;
+        }
+
+        let mut ready = indegree
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, degree)| (*degree == 0).then_some(idx))
+            .collect::<Vec<_>>();
+        let mut visited = 0;
+        while let Some(node_idx) = ready.pop() {
+            visited += 1;
+            for successor in &successors[node_idx] {
+                indegree[*successor] -= 1;
+                if indegree[*successor] == 0 {
+                    ready.push(*successor);
+                }
+            }
+        }
+
+        (visited != self.nodes.len()).then(|| {
+            self.nodes
+                .iter()
+                .enumerate()
+                .filter(|&(idx, _)| indegree[idx] > 0)
+                .map(|(_, node)| node.id().clone())
+                .collect()
+        })
     }
 }
 
