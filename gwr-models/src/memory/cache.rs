@@ -486,6 +486,11 @@ where
             ),
         );
     }
+
+    #[must_use]
+    pub fn bw_bytes_per_cycle(&self) -> usize {
+        self.bw_bytes_per_cycle
+    }
 }
 
 struct RxHandlingState<T>

@@ -12,11 +12,31 @@ use crate::processing_element::operators::dtype::DataType;
 use crate::processing_element::{ComputeCapabilities, MachineOpCounts};
 
 pub mod dtype;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExpansionDirection {
     Backward,
     Forward,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum MachineOp {
+    Add,
+    Compare,
+    Mul,
+}
+
+impl MachineOp {
+    pub const ALL: [Self; 3] = [Self::Add, Self::Compare, Self::Mul];
+}
+
+impl Display for MachineOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Add => write!(f, "add"),
+            Self::Compare => write!(f, "compare"),
+            Self::Mul => write!(f, "mul"),
+        }
+    }
 }
 
 #[must_use]

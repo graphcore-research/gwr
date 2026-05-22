@@ -9,7 +9,7 @@
 //!     --timetable gwr-timetable/examples/small.yaml
 //!     --stdout --stdout-level debug
 use std::cell::RefCell;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
 
@@ -29,9 +29,11 @@ use gwr_platform::Platform;
 use gwr_track::entity::Entity;
 use gwr_track::{debug, info, trace};
 
+pub mod analysis;
 pub mod mermaid;
 pub mod timetable_file;
 pub mod types;
+pub use analysis::{ComputeNodeAnalysis, TensorAccessKind, TensorMemoryAccess};
 use timetable_file::{NodeSection, TimetableFile};
 use types::Node;
 
@@ -125,6 +127,40 @@ fn tensor_view_num_elements(
     }
 }
 
+struct TensorViewMemoryAccess {
+    memory_name: String,
+    start_addr: u64,
+    end_addr: u64,
+}
+
+fn checked_memory_access_for_view(
+    platform: &Platform,
+    view: &TensorView,
+) -> Result<TensorViewMemoryAccess, SimError> {
+    let element_offset = view.element_offset()?;
+    let bit_offset = element_offset * view.tensor().dtype().num_bits();
+    let start_addr = view.tensor().addr() + bit_offset.div_ceil(8) as u64;
+    let end_addr = if let Some(last_byte_offset) = view.num_bytes().checked_sub(1) {
+        start_addr
+            .checked_add(last_byte_offset as u64)
+            .ok_or_else(|| SimError(format!("Tensor view at 0x{start_addr:x} overflows u64")))?
+    } else {
+        start_addr
+    };
+    let start_memory = platform.memory_name_for_address(start_addr)?;
+    let end_memory = platform.memory_name_for_address(end_addr)?;
+    if start_memory != end_memory {
+        return sim_error!(
+            "Tensor view spans memories: start 0x{start_addr:x} is in {start_memory}, end 0x{end_addr:x} is in {end_memory}"
+        );
+    }
+    Ok(TensorViewMemoryAccess {
+        memory_name: start_memory,
+        start_addr,
+        end_addr,
+    })
+}
+
 #[derive(EntityGet)]
 pub struct Timetable {
     entity: Rc<Entity>,
@@ -186,6 +222,36 @@ fn update_edge_indices(
 }
 
 type InOutTensorViews = (Vec<Option<TensorView>>, Vec<Option<TensorView>>);
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TimetableStats {
+    pub total_load_bytes: usize,
+    pub total_store_bytes: usize,
+    pub num_compute_nodes: usize,
+    pub num_tensor_nodes: usize,
+    pub num_memory_nodes: usize,
+    pub machine_ops: MachineOpCounts,
+    pub total_machine_ops: usize,
+}
+
+#[must_use]
+pub fn format_machine_ops(machine_ops: &MachineOpCounts) -> String {
+    let counts = [
+        ("add", machine_ops.adds),
+        ("compare", machine_ops.compares),
+        ("mul", machine_ops.muls),
+    ]
+    .into_iter()
+    .filter(|&(_, count)| count > 0)
+    .map(|(name, count)| format!("{name}={count}"))
+    .collect::<Vec<_>>();
+
+    if counts.is_empty() {
+        "none".to_string()
+    } else {
+        counts.join(", ")
+    }
+}
 
 impl Timetable {
     /// Create a Timetable from a TimetableFile and validate it
@@ -630,49 +696,152 @@ impl Timetable {
         Ok(())
     }
 
-    pub fn dump_stats(&self) -> SimResult {
-        let mut total_load_bytes = 0;
-        let mut total_store_bytes = 0;
-        let mut machine_ops = MachineOpCounts::default();
-        let mut num_compute_nodes = 0;
-        let mut num_tensor_nodes = 0;
-        let mut num_memory_nodes = 0;
+    pub fn stats(&self) -> Result<TimetableStats, SimError> {
+        let mut stats = TimetableStats::default();
         for (idx, node) in self.nodes.iter().enumerate() {
             match &node.node_section {
                 NodeSection::Memory { op, config, .. } => {
                     let (_, num_bytes) = self.memory_access_address_num_bytes(node, config);
                     match op {
-                        MemoryOp::Load => total_load_bytes += num_bytes,
-                        MemoryOp::Store => total_store_bytes += num_bytes,
+                        MemoryOp::Load => stats.total_load_bytes += num_bytes,
+                        MemoryOp::Store => stats.total_store_bytes += num_bytes,
                     }
-                    num_memory_nodes += 1;
+                    stats.num_memory_nodes += 1;
                 }
                 NodeSection::Compute { op, .. } => {
                     let (inputs, outputs) = self.get_input_output_tensors(idx)?;
-                    machine_ops.add_assign(op.compute_machine_ops(&inputs, &outputs)?);
                     for input_view in inputs.iter().flatten() {
-                        total_load_bytes += input_view.num_bytes();
+                        stats.total_load_bytes += input_view.num_bytes();
                     }
                     for output_view in outputs.iter().flatten() {
-                        total_store_bytes += output_view.num_bytes();
+                        stats.total_store_bytes += output_view.num_bytes();
                     }
-                    num_compute_nodes += 1;
+                    let machine_ops = op.compute_machine_ops(&inputs, &outputs)?;
+                    stats.machine_ops.add_assign(machine_ops);
+                    stats.total_machine_ops += machine_ops.total();
+                    stats.num_compute_nodes += 1;
                 }
-                NodeSection::Tensor { .. } => num_tensor_nodes += 1,
+                NodeSection::Tensor { .. } => stats.num_tensor_nodes += 1,
             }
         }
 
+        Ok(stats)
+    }
+
+    pub fn compute_node_analyses(&self) -> Result<Vec<ComputeNodeAnalysis>, SimError> {
+        let mut analyses = Vec::new();
+
+        for (idx, node) in self.nodes.iter().enumerate() {
+            let NodeSection::Compute { id, pe, op, .. } = &node.node_section else {
+                continue;
+            };
+
+            let (inputs, outputs) = self.get_input_output_tensors(idx)?;
+            let input_bytes = inputs.iter().flatten().map(TensorView::num_bytes).sum();
+            let output_bytes = outputs.iter().flatten().map(TensorView::num_bytes).sum();
+            let machine_ops = op.compute_machine_ops(&inputs, &outputs)?;
+            let flops = machine_ops.total();
+            let mut bytes_by_memory = BTreeMap::new();
+            let platform_pe = pe
+                .as_deref()
+                .map(|pe_name| self.platform.pe(pe_name).map(|pe| (pe_name, pe)))
+                .transpose()?;
+            let mut tensor_memory_accesses = Vec::new();
+            for (kind, view) in inputs
+                .iter()
+                .flatten()
+                .map(|view| (TensorAccessKind::Read, view))
+                .chain(
+                    outputs
+                        .iter()
+                        .flatten()
+                        .map(|view| (TensorAccessKind::Write, view)),
+                )
+            {
+                let memory_access = checked_memory_access_for_view(&self.platform, view)?;
+                if let Some((pe_name, platform_pe)) = platform_pe
+                    && (!platform_pe.can_access_addr(memory_access.start_addr)
+                        || !platform_pe.can_access_addr(memory_access.end_addr))
+                {
+                    return sim_error!(
+                        "Compute node '{}' on PE '{}' accesses view range 0x{:x}..=0x{:x} which is not in the PE memory map",
+                        id,
+                        pe_name,
+                        memory_access.start_addr,
+                        memory_access.end_addr
+                    );
+                }
+                *bytes_by_memory
+                    .entry(memory_access.memory_name.clone())
+                    .or_insert(0) += view.num_bytes();
+                tensor_memory_accesses.push(TensorMemoryAccess {
+                    kind,
+                    memory_name: memory_access.memory_name,
+                    start_addr: memory_access.start_addr,
+                    end_addr: memory_access.end_addr,
+                    num_bytes: view.num_bytes(),
+                });
+            }
+
+            let mut predecessor_compute_node_indices = BTreeSet::new();
+            for tensor_node_idx in node.inputs.iter().flatten() {
+                let tensor_node = &self.nodes[*tensor_node_idx];
+                for producer_node_idx in tensor_node.inputs.iter().flatten() {
+                    if matches!(
+                        self.nodes[*producer_node_idx].node_section,
+                        NodeSection::Compute { .. }
+                    ) {
+                        predecessor_compute_node_indices.insert(*producer_node_idx);
+                    }
+                }
+            }
+
+            let predecessor_compute_node_indices = predecessor_compute_node_indices
+                .into_iter()
+                .collect::<Vec<_>>();
+            let predecessor_compute_node_ids = predecessor_compute_node_indices
+                .iter()
+                .map(|producer_node_idx| self.nodes[*producer_node_idx].node_section.id().clone())
+                .collect::<Vec<_>>();
+
+            analyses.push(ComputeNodeAnalysis {
+                node_idx: idx,
+                id: id.clone(),
+                pe_name: pe.clone(),
+                op: op.clone(),
+                machine_ops,
+                flops,
+                input_bytes,
+                output_bytes,
+                bytes_by_memory,
+                tensor_memory_accesses,
+                predecessor_compute_node_indices,
+                predecessor_compute_node_ids,
+            });
+        }
+
+        Ok(analyses)
+    }
+
+    pub fn dump_stats(&self) -> SimResult {
+        let stats = self.stats()?;
+
         info!(self.entity ; "Timetable:");
         info!(self.entity ;
-            "  {num_compute_nodes} compute nodes, {num_tensor_nodes} tensor nodes, {num_memory_nodes} memory nodes"
+            "  {} compute nodes, {} tensor nodes, {} memory nodes",
+            stats.num_compute_nodes,
+            stats.num_tensor_nodes,
+            stats.num_memory_nodes
         );
-        info!(self.entity ; "  loads {total_load_bytes} bytes, stores {total_store_bytes} bytes");
         info!(self.entity ;
-            "  machine ops {} total, {} add, {} mul, {} compare",
-            machine_ops.total(),
-            machine_ops.adds,
-            machine_ops.muls,
-            machine_ops.compares
+            "  loads {} bytes, stores {} bytes",
+            stats.total_load_bytes,
+            stats.total_store_bytes
+        );
+        info!(self.entity ;
+            "  machine ops: {} ({})",
+            stats.total_machine_ops,
+            format_machine_ops(&stats.machine_ops)
         );
 
         Ok(())

@@ -14,10 +14,10 @@ use serde::{Deserialize, Deserializer, Serialize};
 use super::{Operator, Shape, Tensor, TensorPartition};
 use crate::processing_element::operators::dtype::DataType;
 use crate::processing_element::operators::{
-    DimPartition, ExpansionDirection, HasShape, TensorView, apply_dim_partitions,
+    DimPartition, ExpansionDirection, HasShape, MachineOp, TensorView, apply_dim_partitions,
     partition_across_dimensions,
 };
-use crate::processing_element::{ComputeCapabilities, MachineOp, MachineOpCounts};
+use crate::processing_element::{ComputeCapabilities, MachineOpCounts};
 
 const NAME: &str = "MaxPool";
 const BATCH_DIM: usize = 0;

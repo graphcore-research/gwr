@@ -76,7 +76,7 @@ where
     Ok(Some(parse_u64_byte_str(deserializer)?))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct PlatformConfig {
     pub memory_maps: Vec<MemoryMapSection>,
@@ -88,7 +88,7 @@ pub struct PlatformConfig {
     pub connections: Option<Vec<ConnectSection>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct DefaultsSection {
     pub pe_config: Option<ProcessingElementConfigSection>,
     pub cache_config: Option<CacheConfigSection>,

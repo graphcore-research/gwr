@@ -254,15 +254,19 @@ fn connect_cache_to_fabric(
     fabric: &Rc<dyn Fabric<MemoryAccess>>,
     fabric_port_idx: usize,
 ) -> SimResult {
-    if let Some(cache_port) = cache_port
-        && cache_port != "mem"
-    {
-        return sim_error!("Cache should connect the 'mem' port to a Fabric");
+    match cache_port.unwrap_or("mem") {
+        "dev" => {
+            debug!(platform.entity() ; "Connect {}.dev to {}.{}", cache, fabric, fabric_port_idx);
+            cache.connect_port_dev_tx(fabric.port_ingress_i(fabric_port_idx))?;
+            fabric.connect_port_egress_i(fabric_port_idx, cache.port_dev_rx())
+        }
+        "mem" => {
+            debug!(platform.entity() ; "Connect {}.mem to {}.{}", cache, fabric, fabric_port_idx);
+            cache.connect_port_mem_tx(fabric.port_ingress_i(fabric_port_idx))?;
+            fabric.connect_port_egress_i(fabric_port_idx, cache.port_mem_rx())
+        }
+        _ => sim_error!("Cache should connect the 'dev' or 'mem' port to a Fabric"),
     }
-
-    debug!(platform.entity() ; "Connect {}.mem to {}.{}", cache, fabric, fabric_port_idx);
-    cache.connect_port_mem_tx(fabric.port_ingress_i(fabric_port_idx))?;
-    fabric.connect_port_egress_i(fabric_port_idx, cache.port_mem_rx())
 }
 
 fn connect_cache_to_memory(
