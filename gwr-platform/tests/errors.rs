@@ -3,6 +3,17 @@
 use gwr_engine::test_helpers::start_test;
 use gwr_platform::Platform;
 
+fn assert_error_contains<T: std::fmt::Debug, E: std::fmt::Display>(
+    result: Result<T, E>,
+    expected: &str,
+) {
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string().contains(expected),
+        "expected '{expected}' in '{err}'"
+    );
+}
+
 #[test]
 fn unknown_top_level_field_is_rejected() {
     let mut engine = start_test(file!());
@@ -92,14 +103,14 @@ defaults:
 }
 
 #[test]
-#[should_panic(expected = "Duplicate device")]
 fn duplicate_pe_name() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
-    Platform::from_string(
-        &engine,
-        &clock,
-        "
+    assert_error_contains(
+        Platform::from_string(
+            &engine,
+            &clock,
+            "
 memory_maps:
   - name: mm0
     devices: []
@@ -112,19 +123,20 @@ processing_elements:
     memory_map: mm0
     config:
 ",
-    )
-    .unwrap();
+        ),
+        "Duplicate device",
+    );
 }
 
 #[test]
-#[should_panic(expected = "Duplicate device")]
 fn duplicate_mem_name() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
-    Platform::from_string(
-        &engine,
-        &clock,
-        "
+    assert_error_contains(
+        Platform::from_string(
+            &engine,
+            &clock,
+            "
 memory_maps: []
 
 memories:
@@ -137,19 +149,20 @@ memories:
     base_address: 0
     capacity_bytes: 0
 ",
-    )
-    .unwrap();
+        ),
+        "Duplicate device",
+    );
 }
 
 #[test]
-#[should_panic(expected = "Duplicate device")]
 fn duplicate_device_name() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
-    Platform::from_string(
-        &engine,
-        &clock,
-        "
+    assert_error_contains(
+        Platform::from_string(
+            &engine,
+            &clock,
+            "
 memory_maps:
   - name: mm0
     devices: []
@@ -164,16 +177,197 @@ memories:
     base_address: 0
     capacity_bytes: 0
 ",
-    )
-    .unwrap();
+        ),
+        "Duplicate device",
+    );
 }
 
 #[test]
-#[should_panic(expected = "Started without dispatcher")]
+fn duplicate_coherency_manager_name() {
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
+    assert_error_contains(
+        Platform::from_string(
+            &engine,
+            &clock,
+            "
+memory_maps:
+  - name: mm0
+    devices: []
+
+coherency_managers:
+  - name: cm0
+    memory_map: mm0
+    config:
+  - name: cm0
+    memory_map: mm0
+    config:
+",
+        ),
+        "Duplicate device",
+    );
+}
+
+#[test]
+fn unknown_coherency_manager_config_field_is_rejected() {
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
+    let err = Platform::from_string(
+        &engine,
+        &clock,
+        "
+memory_maps:
+  - name: mm0
+    devices: []
+
+coherency_managers:
+  - name: cm0
+    memory_map: mm0
+    config:
+      line_siz_bytes: 64
+",
+    )
+    .unwrap_err();
+
+    assert!(format!("{err}").contains("unknown field `line_siz_bytes`"));
+}
+
+#[test]
+fn unknown_coherency_manager_on_cache() {
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
+    assert_error_contains(
+        Platform::from_string(
+            &engine,
+            &clock,
+            "
+memory_maps:
+  - name: mm0
+    devices:
+      - name: hbm0
+
+caches:
+  - name: c0
+    memory_map: mm0
+    coherency_manager: cm_missing
+    config:
+
+memories:
+  - name: hbm0
+    kind: hbm
+    base_address: 0x1_0000_0000
+    capacity_bytes: 16GiB
+",
+        ),
+        "Unknown coherency manager 'cm_missing'",
+    );
+}
+
+#[test]
+fn unknown_coherency_manager_in_cache_list() {
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
+    assert_error_contains(
+        Platform::from_string(
+            &engine,
+            &clock,
+            "
+memory_maps:
+  - name: mm0
+    devices:
+      - name: hbm0
+
+caches:
+  - name: c0
+    memory_map: mm0
+    coherency_managers:
+      - cm_missing
+    config:
+
+memories:
+  - name: hbm0
+    kind: hbm
+    base_address: 0x1_0000_0000
+    capacity_bytes: 16GiB
+",
+        ),
+        "Unknown coherency manager 'cm_missing'",
+    );
+}
+
+#[test]
+fn cache_cannot_set_single_and_multiple_coherency_managers() {
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
+    assert_error_contains(
+        Platform::from_string(
+            &engine,
+            &clock,
+            "
+memory_maps:
+  - name: mm0
+    devices:
+      - name: hbm0
+
+caches:
+  - name: c0
+    memory_map: mm0
+    coherency_manager: cm0
+    coherency_managers:
+      - cm0
+    config:
+
+coherency_managers:
+  - name: cm0
+    memory_map: mm0
+    config:
+
+memories:
+  - name: hbm0
+    kind: hbm
+    base_address: 0x1_0000_0000
+    capacity_bytes: 16GiB
+",
+        ),
+        "cannot set both coherency_manager and coherency_managers",
+    );
+}
+
+#[test]
+fn unknown_memory_map_on_cache() {
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
+    assert_error_contains(
+        Platform::from_string(
+            &engine,
+            &clock,
+            "
+memory_maps:
+  - name: mm0
+    devices:
+      - name: hbm0
+
+caches:
+  - name: c0
+    memory_map: mm_missing
+    config:
+
+memories:
+  - name: hbm0
+    kind: hbm
+    base_address: 0x1_0000_0000
+    capacity_bytes: 16GiB
+",
+        ),
+        "Unknown memory map 'mm_missing'",
+    );
+}
+
+#[test]
 fn no_dispatcher() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
-    Platform::from_string(
+    let _platform = Platform::from_string(
         &engine,
         &clock,
         "
@@ -202,18 +396,18 @@ connections:
 ",
     )
     .unwrap();
-    engine.run().unwrap();
+    assert_error_contains(engine.run(), "Started without dispatcher");
 }
 
 #[test]
-#[should_panic(expected = "Unknown memory 'hbm_missing'")]
 fn unknown_memory_in_memory_map() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
-    Platform::from_string(
-        &engine,
-        &clock,
-        "
+    assert_error_contains(
+        Platform::from_string(
+            &engine,
+            &clock,
+            "
 memory_maps:
   - name: mm0
     devices:
@@ -231,19 +425,20 @@ memories:
     base_address: 0
     capacity_bytes: 1024
 ",
-    )
-    .unwrap();
+        ),
+        "Unknown memory 'hbm_missing'",
+    );
 }
 
 #[test]
-#[should_panic(expected = "Invalid 'connect'")]
 fn invalid_connect_1() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
-    Platform::from_string(
-        &engine,
-        &clock,
-        "
+    assert_error_contains(
+        Platform::from_string(
+            &engine,
+            &clock,
+            "
 memory_maps:
   - name: mm0
     devices: []
@@ -260,19 +455,20 @@ connections:
   - connect:
     - pe.pe0
 ",
-    )
-    .unwrap();
+        ),
+        "Invalid 'connect'",
+    );
 }
 
 #[test]
-#[should_panic(expected = "Invalid 'connect'")]
 fn invalid_connect_3() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
-    Platform::from_string(
-        &engine,
-        &clock,
-        "
+    assert_error_contains(
+        Platform::from_string(
+            &engine,
+            &clock,
+            "
 memory_maps:
   - name: mm0
     devices: []
@@ -294,6 +490,7 @@ connections:
     - pe.pe1
     - pe.pe2
 ",
-    )
-    .unwrap();
+        ),
+        "Invalid 'connect'",
+    );
 }

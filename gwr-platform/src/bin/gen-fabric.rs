@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
@@ -14,7 +15,8 @@ use gwr_platform::builder::{
     DEFAULT_PE_NUM_ACTIVE_REQUESTS, DEFAULT_PE_OVERHEAD_SIZE_BYTES, DEFAULT_PE_SRAM_BYTES,
 };
 use gwr_platform::types::{
-    CacheConfigSection, CacheSection, ConnectSection, FabricKind, FabricSection,
+    CacheConfigSection, CacheSection, CoherencyManagerConfigSection, CoherencyManagerSection,
+    ConnectSection, FabricKind, FabricPortDevicesSection, FabricPortLocation, FabricSection,
     MemoryDeviceSection, MemoryKind, MemoryMapSection, MemorySection, PlatformConfig,
     ProcessingElementConfigSection, ProcessingElementSection,
 };
@@ -22,6 +24,8 @@ use gwr_platform::yaml::platform_to_yaml_str;
 
 const FABRIC_NAME: &str = "fabric0";
 const PE_MEMORY_MAP_NAME: &str = "default_memory_map";
+const COHERENCY_MEMORY_MAP_NAME_PREFIX: &str = "coherency_memory_map";
+const COHERENCY_MANAGER_NAME_PREFIX: &str = "cm";
 
 #[derive(Debug, Parser)]
 #[command(about = "Build a platform file based around a 2D fabric")]
@@ -94,6 +98,9 @@ struct Args {
 
     #[arg(long, default_value_t = 20)]
     l2_latency: usize,
+
+    #[arg(long, default_value_t = false)]
+    use_coherency_managers: bool,
 }
 
 impl Args {
@@ -108,6 +115,10 @@ impl Args {
                 "num-hbms ({}) cannot exceed number of fabric nodes ({num_nodes})",
                 self.num_hbms
             ));
+        }
+
+        if self.use_coherency_managers && self.l1_kib == 0 && self.l2_kib == 0 {
+            return Err("Cannot enable coherency managers without an L1 or L2 cache".to_string());
         }
 
         Ok(())
@@ -188,7 +199,14 @@ fn build_fabrics(args: &Args) -> Vec<FabricSection> {
         kind: args.fabric_model,
         columns: args.num_columns,
         rows: args.num_rows,
-        fabric_ports_per_node: Some(DEFAULT_FABRIC_PORTS_PER_NODE),
+        fabric_ports_per_node: Some(if args.use_coherency_managers {
+            2
+        } else {
+            DEFAULT_FABRIC_PORTS_PER_NODE
+        }),
+        port_devices: Some(
+            build_fabric_port_devices(args).expect("validated args should build fabric port map"),
+        ),
         ticks_per_hop: Some(DEFAULT_FABRIC_TICKS_PER_HOP),
         ticks_overhead: Some(DEFAULT_FABRIC_TICKS_OVERHEAD),
         rx_buffer_bytes: Some(DEFAULT_FABRIC_RX_BUFFER_BYTES),
@@ -198,16 +216,66 @@ fn build_fabrics(args: &Args) -> Vec<FabricSection> {
     }]
 }
 
+fn build_fabric_port_devices(args: &Args) -> Result<Vec<FabricPortDevicesSection>, String> {
+    let mut port_devices = Vec::new();
+
+    for (column, row) in PeIdGen::new(args)? {
+        let mut devices = vec![create_name("pe", column, row)];
+        if args.l1_kib != 0 {
+            devices.push(create_name("l1", column, row));
+        }
+        if args.l2_kib != 0 {
+            devices.push(create_name("l2", column, row));
+        }
+        port_devices.push(FabricPortDevicesSection {
+            port: FabricPortLocation {
+                column,
+                row,
+                port: 0,
+            },
+            devices,
+        });
+    }
+
+    for (i, (column, row)) in HbmIdGen::new(args)?.enumerate() {
+        port_devices.push(FabricPortDevicesSection {
+            port: FabricPortLocation {
+                column,
+                row,
+                port: 0,
+            },
+            devices: vec![format!("hbm{i}")],
+        });
+        if args.use_coherency_managers {
+            port_devices.push(FabricPortDevicesSection {
+                port: FabricPortLocation {
+                    column,
+                    row,
+                    port: 1,
+                },
+                devices: vec![format!("{COHERENCY_MANAGER_NAME_PREFIX}{i}")],
+            });
+        }
+    }
+
+    Ok(port_devices)
+}
+
 fn build_cache(
     name: String,
     kib: usize,
     bytes_per_cycle: usize,
     num_ways: usize,
     latency: usize,
+    coherency_manager: Option<String>,
+    coherency_managers: Option<Vec<String>>,
 ) -> CacheSection {
     let num_sets = (kib * 1024) / num_ways / DEFAULT_CACHE_LINE_SIZE_BYTES;
     CacheSection {
         name,
+        memory_map: PE_MEMORY_MAP_NAME.to_string(),
+        coherency_manager,
+        coherency_managers,
         config: CacheConfigSection {
             bw_bytes_per_cycle: Some(bytes_per_cycle),
             line_size_bytes: Some(DEFAULT_CACHE_LINE_SIZE_BYTES),
@@ -224,25 +292,61 @@ fn build_caches(args: &Args) -> Result<Option<Vec<CacheSection>>, String> {
     }
 
     let mut caches = Vec::new();
+    let coherency_manager_names = if args.use_coherency_managers {
+        Some(
+            (0..args.num_hbms)
+                .map(|i| format!("{COHERENCY_MANAGER_NAME_PREFIX}{i}"))
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        None
+    };
 
     for (column, row) in PeIdGen::new(args)? {
         if args.l1_kib != 0 {
+            let (coherency_manager, coherency_managers) = if args.l2_kib == 0 {
+                if let Some(names) = &coherency_manager_names {
+                    if names.len() == 1 {
+                        (Some(names[0].clone()), None)
+                    } else {
+                        (None, Some(names.clone()))
+                    }
+                } else {
+                    (None, None)
+                }
+            } else {
+                (None, None)
+            };
             caches.push(build_cache(
                 create_name("l1", column, row),
                 args.l1_kib,
                 args.l1_bytes_per_cycle,
                 args.l1_num_ways,
                 args.l1_latency,
+                coherency_manager,
+                coherency_managers,
             ));
         }
 
         if args.l2_kib != 0 {
+            let (coherency_manager, coherency_managers) =
+                if let Some(names) = &coherency_manager_names {
+                    if names.len() == 1 {
+                        (Some(names[0].clone()), None)
+                    } else {
+                        (None, Some(names.clone()))
+                    }
+                } else {
+                    (None, None)
+                };
             caches.push(build_cache(
                 create_name("l2", column, row),
                 args.l2_kib,
                 args.l2_bytes_per_cycle,
                 args.l2_num_ways,
                 args.l2_latency,
+                coherency_manager,
+                coherency_managers,
             ));
         }
     }
@@ -271,6 +375,7 @@ fn build_memories(args: &Args) -> Vec<MemorySection> {
 
 fn build_connections(args: &Args) -> Result<Vec<ConnectSection>, String> {
     let mut connections = Vec::new();
+    let mut occupied_ports = HashSet::new();
 
     for (column, row) in PeIdGen::new(args)? {
         let mut entities = vec![format!("pe.{}", create_name("pe", column, row))];
@@ -283,6 +388,7 @@ fn build_connections(args: &Args) -> Result<Vec<ConnectSection>, String> {
         }
 
         entities.push(format!("fabric.{FABRIC_NAME}@({column},{row})"));
+        occupied_ports.insert((column, row, 0usize));
 
         for pair in entities.windows(2) {
             connections.push(ConnectSection {
@@ -292,12 +398,41 @@ fn build_connections(args: &Args) -> Result<Vec<ConnectSection>, String> {
     }
 
     for (i, (column, row)) in HbmIdGen::new(args)?.enumerate() {
+        occupied_ports.insert((column, row, 0usize));
         connections.push(ConnectSection {
             connect: vec![
                 format!("mem.hbm{i}"),
                 format!("fabric.{FABRIC_NAME}@({column},{row})"),
             ],
         });
+        if args.use_coherency_managers {
+            occupied_ports.insert((column, row, 1usize));
+            connections.push(ConnectSection {
+                connect: vec![
+                    format!("coherency_manager.{COHERENCY_MANAGER_NAME_PREFIX}{i}"),
+                    format!("fabric.{FABRIC_NAME}@({column},{row}).1"),
+                ],
+            });
+        }
+    }
+
+    let fabric_ports_per_node = if args.use_coherency_managers { 2 } else { 1 };
+    for column in 0..args.num_columns {
+        for row in 0..args.num_rows {
+            for port in 0..fabric_ports_per_node {
+                if occupied_ports.contains(&(column, row, port)) {
+                    continue;
+                }
+                let fabric_endpoint = if port == 0 {
+                    format!("fabric.{FABRIC_NAME}@({column},{row})")
+                } else {
+                    format!("fabric.{FABRIC_NAME}@({column},{row}).{port}")
+                };
+                connections.push(ConnectSection {
+                    connect: vec!["null".to_string(), fabric_endpoint],
+                });
+            }
+        }
     }
 
     Ok(connections)
@@ -323,6 +458,35 @@ fn build_memory_map_ranges(args: &Args) -> Vec<MemoryDeviceSection> {
         .collect()
 }
 
+fn build_coherency_memory_maps(args: &Args) -> Vec<MemoryMapSection> {
+    (0..args.num_hbms)
+        .map(|i| MemoryMapSection {
+            name: format!("{COHERENCY_MEMORY_MAP_NAME_PREFIX}{i}"),
+            devices: vec![MemoryDeviceSection {
+                name: format!("hbm{i}"),
+            }],
+        })
+        .collect()
+}
+
+fn build_coherency_managers(args: &Args) -> Option<Vec<CoherencyManagerSection>> {
+    if !args.use_coherency_managers {
+        return None;
+    }
+
+    Some(
+        (0..args.num_hbms)
+            .map(|i| CoherencyManagerSection {
+                name: format!("{COHERENCY_MANAGER_NAME_PREFIX}{i}"),
+                memory_map: format!("{COHERENCY_MEMORY_MAP_NAME_PREFIX}{i}"),
+                config: CoherencyManagerConfigSection {
+                    line_size_bytes: Some(DEFAULT_CACHE_LINE_SIZE_BYTES),
+                },
+            })
+            .collect(),
+    )
+}
+
 fn build_processing_elements(
     args: &Args,
     pe_config: &ProcessingElementConfigSection,
@@ -337,17 +501,21 @@ fn build_processing_elements(
 }
 
 fn build_platform(args: &Args) -> Result<PlatformConfig, String> {
-    let memory_map = MemoryMapSection {
+    let mut memory_maps = vec![MemoryMapSection {
         name: PE_MEMORY_MAP_NAME.to_string(),
         devices: build_memory_map_ranges(args),
-    };
+    }];
+    if args.use_coherency_managers {
+        memory_maps.extend(build_coherency_memory_maps(args));
+    }
     let pe_config = build_pe_config(args);
 
     Ok(PlatformConfig {
-        memory_maps: vec![memory_map],
+        memory_maps,
         defaults: None,
         processing_elements: Some(build_processing_elements(args, &pe_config)?),
         caches: build_caches(args)?,
+        coherency_managers: build_coherency_managers(args),
         fabrics: Some(build_fabrics(args)),
         memories: Some(build_memories(args)),
         connections: Some(build_connections(args)?),

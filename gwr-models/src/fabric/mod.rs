@@ -8,11 +8,12 @@
 //! ingress/egress ports will be populated.
 
 use std::cmp::min;
+use std::collections::HashMap;
 use std::fmt::Display;
 
 use gwr_engine::port::PortStateResult;
 use gwr_engine::traits::{Routable, SimObject};
-use gwr_engine::types::SimResult;
+use gwr_engine::types::{SimError, SimResult};
 use gwr_track::entity::GetEntity;
 
 pub trait Fabric<T>: GetEntity + Display
@@ -62,6 +63,10 @@ pub struct FabricConfig {
 
     /// Indices of populated ingress/egress ports
     fabric_port_indices: Vec<usize>,
+
+    /// Optional mapping from protocol destinations, such as device IDs, to
+    /// fabric egress port indices.
+    destination_port_map: HashMap<u64, usize>,
 }
 
 #[must_use]
@@ -77,6 +82,8 @@ fn col_row_port_to_fabric_port_index(
 
 #[must_use]
 fn num_x_y_ports(num_columns: usize, num_rows: usize, col: usize, row: usize) -> usize {
+    // Assume there is one port for each direction to the left/right, up/down
+    // neighbours
     let mut num_ports = 4;
     if col == 0 || col == num_columns - 1 {
         // Left/right edge
@@ -172,7 +179,14 @@ impl FabricConfig {
             tx_buffer_bytes,
             port_bits_per_tick,
             fabric_port_indices,
+            destination_port_map: HashMap::new(),
         }
+    }
+
+    #[must_use]
+    pub fn with_destination_port_map(mut self, destination_port_map: HashMap<u64, usize>) -> Self {
+        self.destination_port_map = destination_port_map;
+        self
     }
 
     /// Returns the maximum number of ports in the fabric
@@ -264,6 +278,21 @@ impl FabricConfig {
     #[must_use]
     pub fn port_bits_per_tick(&self) -> usize {
         self.port_bits_per_tick
+    }
+
+    pub fn resolve_destination_port(&self, destination: u64) -> Result<usize, SimError> {
+        if self.destination_port_map.is_empty() {
+            return Ok(destination as usize);
+        }
+
+        self.destination_port_map
+            .get(&destination)
+            .copied()
+            .ok_or_else(|| {
+                SimError(format!(
+                    "No fabric egress port mapped for destination {destination}"
+                ))
+            })
     }
 }
 

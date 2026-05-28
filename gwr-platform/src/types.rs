@@ -1,5 +1,7 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+use std::fmt;
+
 use byte_unit::Byte;
 use clap::ValueEnum;
 use gwr_models::fabric::node::FabricRoutingAlgorithm;
@@ -83,11 +85,15 @@ pub struct PlatformConfig {
     pub defaults: Option<DefaultsSection>,
     pub processing_elements: Option<Vec<ProcessingElementSection>>,
     pub caches: Option<Vec<CacheSection>>,
+    pub coherency_managers: Option<Vec<CoherencyManagerSection>>,
     pub fabrics: Option<Vec<FabricSection>>,
     pub memories: Option<Vec<MemorySection>>,
     pub connections: Option<Vec<ConnectSection>>,
 }
 
+// Defaults intentionally accepts unknown fields so users can define custom
+// YAML anchors for reuse elsewhere in the platform file. Do not add
+// `#[serde(deny_unknown_fields)]` here.
 #[derive(Debug, Deserialize)]
 pub struct DefaultsSection {
     pub pe_config: Option<ProcessingElementConfigSection>,
@@ -132,6 +138,9 @@ pub struct ProcessingElementConfigSection {
 #[serde(deny_unknown_fields)]
 pub struct CacheSection {
     pub name: String,
+    pub memory_map: String,
+    pub coherency_manager: Option<String>,
+    pub coherency_managers: Option<Vec<String>>,
     pub config: CacheConfigSection,
 }
 
@@ -147,18 +156,116 @@ pub struct CacheConfigSection {
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
+pub struct CoherencyManagerSection {
+    pub name: String,
+    pub memory_map: String,
+    pub config: CoherencyManagerConfigSection,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CoherencyManagerConfigSection {
+    pub line_size_bytes: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct FabricSection {
     pub name: String,
     pub kind: FabricKind,
     pub columns: usize,
     pub rows: usize,
     pub fabric_ports_per_node: Option<usize>,
+    pub port_devices: Option<Vec<FabricPortDevicesSection>>,
     pub ticks_per_hop: Option<usize>,
     pub ticks_overhead: Option<usize>,
     pub rx_buffer_bytes: Option<usize>,
     pub tx_buffer_bytes: Option<usize>,
     pub port_bits_per_tick: Option<usize>,
     pub routing: Option<FabricRoutingAlgorithm>,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct FabricPortDevicesSection {
+    pub port: FabricPortLocation,
+    pub devices: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FabricPortLocation {
+    pub column: usize,
+    pub row: usize,
+    pub port: usize,
+}
+
+impl fmt::Display for FabricPortLocation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.port == 0 {
+            write!(f, "({},{})", self.column, self.row)
+        } else {
+            write!(f, "({},{}).{}", self.column, self.row, self.port)
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for FabricPortLocation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        let value: Value = Deserialize::deserialize(deserializer)?;
+        let s = value.as_str().ok_or_else(|| {
+            de::Error::custom(format!(
+                "'{value:?}': Unsupported type for fabric port (should be a string like '(0,1)')"
+            ))
+        })?;
+        parse_fabric_port_location(s).map_err(de::Error::custom)
+    }
+}
+
+fn parse_fabric_port_location(s: &str) -> Result<FabricPortLocation, String> {
+    let Some(open) = s.find('(') else {
+        return Err(format!("Invalid fabric port '{s}': missing '('"));
+    };
+    let Some(close) = s.find(')') else {
+        return Err(format!("Invalid fabric port '{s}': missing ')'"));
+    };
+    if open != 0 || close <= open + 1 {
+        return Err(format!("Invalid fabric port '{s}'"));
+    }
+
+    let coords = &s[open + 1..close];
+    let mut parts = coords.split(',').map(str::trim);
+    let column = parts
+        .next()
+        .ok_or_else(|| format!("Invalid fabric port '{s}': missing column"))?
+        .parse()
+        .map_err(|e| format!("Invalid fabric port '{s}' column: {e}"))?;
+    let row = parts
+        .next()
+        .ok_or_else(|| format!("Invalid fabric port '{s}': missing row"))?
+        .parse()
+        .map_err(|e| format!("Invalid fabric port '{s}' row: {e}"))?;
+    if parts.next().is_some() {
+        return Err(format!("Invalid fabric port '{s}': too many coordinates"));
+    }
+
+    let suffix = s[close + 1..].trim();
+    let port = if suffix.is_empty() {
+        0
+    } else {
+        let Some(port_suffix) = suffix.strip_prefix('.') else {
+            return Err(format!(
+                "Invalid fabric port '{s}': expected optional '.<port>' suffix"
+            ));
+        };
+        port_suffix
+            .parse()
+            .map_err(|e| format!("Invalid fabric port '{s}' port: {e}"))?
+    };
+
+    Ok(FabricPortLocation { column, row, port })
 }
 
 #[derive(Debug, Deserialize, Clone)]

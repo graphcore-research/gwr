@@ -24,6 +24,7 @@ processing_elements:
 
 caches:
   - name: l1_0
+    memory_map: pe_memory_map
     config:
       bw_bytes_per_cycle: 32
       line_size_bytes: 32
