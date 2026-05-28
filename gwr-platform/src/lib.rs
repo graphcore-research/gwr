@@ -13,9 +13,10 @@ use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::types::{DeviceId, SimError, SimResult};
 use gwr_model_builder::EntityGet;
+use gwr_models::cache::coherency_manager::CoherencyManager;
+use gwr_models::cache::{Cache, CacheStatsDisplay};
 use gwr_models::fabric::Fabric;
 use gwr_models::log_stats;
-use gwr_models::memory::cache::{Cache, CacheStatsDisplay};
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::{Memory, MemoryStatsDisplay};
 use gwr_models::processing_element::dispatch::Dispatch;
@@ -59,6 +60,7 @@ pub struct Platform {
     pes_idx_by_id: NameToIdxMap,
     caches: Caches,
     caches_idx_by_id: NameToIdxMap,
+    coherency_managers: HashMap<String, Rc<CoherencyManager>>,
     fabrics: Fabrics,
     fabrics_idx_by_id: NameToIdxMap,
     memories: Memories,
@@ -112,8 +114,17 @@ impl Platform {
             &memory_maps,
             &device_ids,
         )?;
-        let (caches, caches_idx_by_id) =
-            build_caches_from_configs(engine, clock, top, cfg, &effective.caches)?;
+        let (caches, caches_idx_by_id) = build_caches_from_configs(
+            engine,
+            clock,
+            top,
+            cfg,
+            &effective.caches,
+            &memory_maps,
+            &device_ids,
+        )?;
+        let coherency_managers =
+            builder::build_coherency_managers(engine, clock, top, cfg, &memory_maps, &device_ids)?;
         let fabric_destination_port_maps = build_fabric_destination_port_maps(cfg, &device_ids)?;
         let (fabrics, fabrics_idx_by_id) =
             crate::builder::build_fabrics(engine, clock, top, cfg, &fabric_destination_port_maps)?;
@@ -130,6 +141,7 @@ impl Platform {
             pes_idx_by_id,
             caches,
             caches_idx_by_id,
+            coherency_managers,
             fabrics,
             fabrics_idx_by_id,
             memories,
@@ -140,32 +152,10 @@ impl Platform {
         Ok(platform)
     }
 
-    pub fn cache_idx_from_name(&self, cache_name: &str) -> Result<usize, SimError> {
-        match self.caches_idx_by_id.get(cache_name) {
-            Some(idx) => Ok(*idx),
-            None => sim_error!("No Cache '{cache_name}'"),
-        }
-    }
-
-    pub fn fabric_idx_from_name(&self, fabric_name: &str) -> Result<usize, SimError> {
-        match self.fabrics_idx_by_id.get(fabric_name) {
-            Some(idx) => Ok(*idx),
-            None => sim_error!("No Fabric '{fabric_name}'"),
-        }
-    }
-
-    pub fn memory_idx_from_name(&self, memory_name: &str) -> Result<usize, SimError> {
-        match self.memories_idx_by_id.get(memory_name) {
-            Some(idx) => Ok(*idx),
-            None => sim_error!("No Memory '{memory_name}'"),
-        }
-    }
-
-    pub fn pe_idx_from_name(&self, pe_name: &str) -> Result<usize, SimError> {
-        match self.pes_idx_by_id.get(pe_name) {
-            Some(idx) => Ok(*idx),
-            None => sim_error!("No PE '{pe_name}'"),
-        }
+    pub fn coherency_manager(&self, name: &str) -> Result<&Rc<CoherencyManager>, SimError> {
+        self.coherency_managers
+            .get(name)
+            .ok_or_else(|| SimError(format!("No Coherency Manager '{name}'")))
     }
 
     #[must_use]
@@ -201,9 +191,23 @@ impl Platform {
         Ok(&self.caches[idx])
     }
 
+    pub fn cache_idx_from_name(&self, cache_name: &str) -> Result<usize, SimError> {
+        match self.caches_idx_by_id.get(cache_name) {
+            Some(idx) => Ok(*idx),
+            None => sim_error!("No Cache '{cache_name}'"),
+        }
+    }
+
     pub fn fabric(&self, fabric_name: &str) -> Result<&Rc<dyn Fabric<MemoryAccess>>, SimError> {
         let idx = self.fabric_idx_from_name(fabric_name)?;
         Ok(&self.fabrics[idx])
+    }
+
+    pub fn fabric_idx_from_name(&self, fabric_name: &str) -> Result<usize, SimError> {
+        match self.fabrics_idx_by_id.get(fabric_name) {
+            Some(idx) => Ok(*idx),
+            None => sim_error!("No Fabric '{fabric_name}'"),
+        }
     }
 
     pub fn memory(&self, memory_name: &str) -> Result<&Rc<Memory<MemoryAccess>>, SimError> {
@@ -211,9 +215,23 @@ impl Platform {
         Ok(&self.memories[idx])
     }
 
+    pub fn memory_idx_from_name(&self, memory_name: &str) -> Result<usize, SimError> {
+        match self.memories_idx_by_id.get(memory_name) {
+            Some(idx) => Ok(*idx),
+            None => sim_error!("No Memory '{memory_name}'"),
+        }
+    }
+
     pub fn pe(&self, pe_name: &str) -> Result<&Rc<ProcessingElement>, SimError> {
         let idx = self.pe_idx_from_name(pe_name)?;
         Ok(&self.processing_elements[idx])
+    }
+
+    pub fn pe_idx_from_name(&self, pe_name: &str) -> Result<usize, SimError> {
+        match self.pes_idx_by_id.get(pe_name) {
+            Some(idx) => Ok(*idx),
+            None => sim_error!("No PE '{pe_name}'"),
+        }
     }
 
     pub fn attach_dispatcher(&self, dispatcher: &Rc<dyn Dispatch>) {
@@ -227,6 +245,9 @@ impl Platform {
         self.dump_memory_totals(time_now_ns);
         self.dump_cache_totals(time_now_ns);
         self.dump_pe_totals(time_now_ns, machine_ops, bytes_consumed, bytes_produced);
+        for manager in self.coherency_managers.values() {
+            manager.dump_stats(time_now_ns);
+        }
         for mem in &self.memories {
             mem.dump_stats(time_now_ns);
         }
@@ -292,13 +313,6 @@ impl Platform {
         );
     }
 
-    fn total_cache_stat<F>(&self, stat_fn: F) -> usize
-    where
-        F: Fn(&Cache<MemoryAccess>) -> usize,
-    {
-        self.caches.iter().map(|cache| stat_fn(cache)).sum()
-    }
-
     fn dump_cache_totals(&self, time_now_ns: f64) {
         let total_payload_bytes_read = self.total_cache_stat(Cache::payload_bytes_read);
         let total_payload_bytes_written = self.total_cache_stat(Cache::payload_bytes_written);
@@ -315,6 +329,13 @@ impl Platform {
                 total_misses,
             ),
         );
+    }
+
+    fn total_cache_stat<F>(&self, stat_fn: F) -> usize
+    where
+        F: Fn(&Cache<MemoryAccess>) -> usize,
+    {
+        self.caches.iter().map(|cache| stat_fn(cache)).sum()
     }
 
     fn processing_element_totals(&self) -> Result<(MachineOpCounts, usize, usize), SimError> {
@@ -413,6 +434,27 @@ fn assign_device_ids(cfg: &PlatformConfig) -> Result<DeviceIds, SimError> {
             }
             device_id += 1;
         }
+    }
+    for name in cfg
+        .caches
+        .iter()
+        .flatten()
+        .filter(|cache| cache.coherency_managers.is_some())
+        .map(|cache| &cache.name)
+        .chain(
+            cfg.coherency_managers
+                .iter()
+                .flatten()
+                .map(|manager| &manager.name),
+        )
+    {
+        if device_ids
+            .insert(name.clone(), DeviceId(device_id))
+            .is_some()
+        {
+            return sim_error!("Duplicate device name {name}");
+        }
+        device_id += 1;
     }
     Ok(device_ids)
 }

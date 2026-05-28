@@ -5,7 +5,7 @@ use std::rc::Rc;
 use gwr_components::connect_port;
 use gwr_engine::engine::Engine;
 use gwr_models::build_model_harness;
-use gwr_models::memory::cache::{Cache, CacheConfig};
+use gwr_models::cache::{Cache, CacheConfig};
 use gwr_models::memory::{Memory, MemoryConfig};
 use gwr_models::test_helpers::{MemoryTxn, create_default_memory_map, create_read};
 use gwr_track::entity::GetEntity;
@@ -54,8 +54,8 @@ fn run_read(
     use_nested_cache: bool,
 ) -> (
     u64,
-    gwr_models::memory::cache::CacheInflightFills,
-    gwr_models::memory::cache::CacheTraffic,
+    gwr_models::cache::CacheInflightFills,
+    gwr_models::cache::CacheTraffic,
 ) {
     let mut engine = Engine::new(&gwr_track::tracker::dev_null_tracker());
     let clock = engine.default_clock();
