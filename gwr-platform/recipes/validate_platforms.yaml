@@ -1,22 +1,11 @@
 # Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 description:
-  Run the commands that ensure gwr-platform example files all still parse and
-  build into valid platforms.
+  Run the commands that ensure every gwr-platform example file still parses and
+  builds into a valid platform.
 arguments: []
 ingredients:
-  - comment: Validate the simple PE-cache-memory platform.
-    command:
-      cargo run --bin validate-platform -p gwr-platform -- --platform
-      gwr-platform/examples/simple_pe_cache_mem.yaml
-  - comment: Validate the default platform example.
-    command:
-      cargo run --bin validate-platform -p gwr-platform -- --platform
-      gwr-platform/examples/platform.yaml
-  - comment: Validate the 4x4 platform example.
-    command:
-      cargo run --bin validate-platform -p gwr-platform -- --platform
-      gwr-platform/examples/platform_4x4.yaml
-  - comment: Validate the 4x4 platform with 4 HBMs example.
-    command:
-      cargo run --bin validate-platform -p gwr-platform -- --platform
-      gwr-platform/examples/platform_4x4_4xhbm.yaml
+  - comment: Validate every platform example in gwr-platform/examples.
+    command: |-
+      for platform in gwr-platform/examples/*.yaml; do
+        cargo run --bin validate-platform -p gwr-platform -- --platform "${platform}"
+      done

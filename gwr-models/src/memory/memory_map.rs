@@ -1,12 +1,19 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
 use std::collections::BTreeMap;
+use std::fmt::Display;
 
 use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct DeviceId(pub u64);
+
+impl Display for DeviceId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct MemoryRegion {
@@ -15,6 +22,7 @@ pub struct MemoryRegion {
     pub device: DeviceId,
 }
 
+#[derive(Clone)]
 pub struct MemoryMap {
     // key = start address of region
     regions: BTreeMap<u64, MemoryRegion>,
@@ -32,6 +40,14 @@ impl MemoryMap {
         Self {
             regions: BTreeMap::new(),
         }
+    }
+
+    pub fn from_regions(regions: &[(u64, u64, DeviceId)]) -> Result<MemoryMap, SimError> {
+        let mut memory_map = Self::new();
+        for (start, size, device_id) in regions {
+            memory_map.insert(*start, *size, *device_id)?;
+        }
+        Ok(memory_map)
     }
 
     /// Map a [start, start+size-1] region to a device.
@@ -96,11 +112,12 @@ mod tests {
     use crate::memory::memory_map::{DeviceId, MemoryMap};
 
     fn setup_map() -> MemoryMap {
-        let mut memory_map = MemoryMap::new();
-        memory_map.insert(0x0000_0000, 0x1000, DeviceId(1)).unwrap();
-        memory_map.insert(0x0000_2000, 0x1000, DeviceId(2)).unwrap();
-        memory_map.insert(0x0000_4000, 0x1000, DeviceId(3)).unwrap();
-        memory_map
+        MemoryMap::from_regions(&[
+            (0x0000_0000, 0x1000, DeviceId(1)),
+            (0x0000_2000, 0x1000, DeviceId(2)),
+            (0x0000_4000, 0x1000, DeviceId(3)),
+        ])
+        .unwrap()
     }
 
     #[test]

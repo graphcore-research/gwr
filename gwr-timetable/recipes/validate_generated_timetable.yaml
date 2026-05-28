@@ -1,0 +1,72 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+description:
+  Generate a platform, generate a timetable for it, then run the timetable on
+  the platform to validate the full flow end to end.
+arguments:
+  - name: NUM_COLUMNS
+    default: "2"
+    comment: Number of fabric columns to generate.
+  - name: NUM_ROWS
+    default: "2"
+    comment: Number of fabric rows to generate.
+  - name: NUM_HBMS
+    default: "1"
+    comment: Number of HBM memories to place on the generated fabric.
+  - name: L1_KIB
+    default: "0"
+    comment: L1 cache capacity in KiB per PE. Use 0 to disable L1 caches.
+  - name: L2_KIB
+    default: "0"
+    comment: L2 cache capacity in KiB per PE. Use 0 to disable L2 caches.
+  - name: USE_COHERENCY_MANAGERS
+    default: "false"
+    comment:
+      Set to true to generate per-HBM coherency managers for the last-level
+      cache.
+  - name: TIMETABLE_DEPTH
+    default: "4"
+    comment: Depth of the generated timetable graph.
+  - name: TIMETABLE_GRAPH_SIZE
+    default: "10"
+    comment:
+      Approximate number of compute nodes in the generated timetable graph.
+  - name: OUTPUT_DIR
+    default: traces/validate-generated-timetable
+    comment: Folder used to store all generated files
+ingredients:
+  - comment: Create the output folder
+    command: mkdir -p ${OUTPUT_DIR}
+  - comment:
+      Generate a platform, generate a timetable from it, then run the timetable.
+    command: |-
+      platform_yaml="${OUTPUT_DIR}/platform.yaml"
+      timetable_yaml="${OUTPUT_DIR}/timetable.yaml"
+
+      platform_args=(
+        --out "$platform_yaml"
+        --num-columns "$NUM_COLUMNS"
+        --num-rows "$NUM_ROWS"
+        --num-hbms "$NUM_HBMS"
+        --l1-kib "$L1_KIB"
+        --l2-kib "$L2_KIB"
+      )
+
+      if [[ "${USE_COHERENCY_MANAGERS:l}" == "true" ]]; then
+        platform_args+=(--use-coherency-managers)
+      fi
+
+      echo "Generating platform: ${platform_yaml}"
+      cargo run --bin gen-fabric -p gwr-platform -- "${platform_args[@]}"
+
+      echo "Generating timetable: ${timetable_yaml}"
+      cargo run --bin gen-timetable -p gwr-timetable -- \
+        --platform "$platform_yaml" \
+        --out "$timetable_yaml" \
+        --depth "$TIMETABLE_DEPTH" \
+        --graph-size "$TIMETABLE_GRAPH_SIZE"
+
+      echo "Running generated timetable on generated platform"
+      cargo run --bin gwr-timetable -p gwr-timetable -- \
+        --platform "$platform_yaml" \
+        --timetable "$timetable_yaml" \
+        --dump-stats --stdout --stdout-level info

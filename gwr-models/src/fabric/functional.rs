@@ -24,7 +24,6 @@ use std::rc::Rc;
 
 use async_trait::async_trait;
 use gwr_components::flow_controls::limiter::Limiter;
-use gwr_components::router::{DefaultAlgorithm, Route};
 use gwr_components::store::{ByteStore, Store};
 use gwr_components::{connect_port, rc_limiter};
 use gwr_engine::engine::Engine;
@@ -36,9 +35,9 @@ use gwr_engine::time::clock::{Clock, ClockTick};
 use gwr_engine::traits::{Event, Routable, Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
-use gwr_track::build_aka;
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
+use gwr_track::{build_aka, debug};
 
 use crate::fabric::{Fabric, FabricConfig};
 
@@ -227,26 +226,14 @@ where
         }
         let port_states = Rc::new(port_states);
 
-        let routing_algorithm: Rc<Box<dyn Route<T>>> = Rc::new(Box::new(DefaultAlgorithm {}));
-
         for (i, internal_rx) in self.internal_rx.borrow_mut().drain(..).enumerate() {
             let entity = self.entity.clone();
             let clock = self.clock.clone();
             let port_states = port_states.clone();
-            let routing_algorithm = routing_algorithm.clone();
             let config = self.config.clone();
 
             self.spawner.spawn(async move {
-                run_rx(
-                    entity,
-                    clock,
-                    i,
-                    internal_rx,
-                    port_states,
-                    routing_algorithm,
-                    config,
-                )
-                .await
+                run_rx(entity, clock, i, internal_rx, port_states, config).await
             });
         }
 
@@ -292,7 +279,6 @@ async fn run_rx<T>(
     port_index: usize,
     mut internal_rx: InPort<T>,
     port_states: Rc<Vec<PortState<T>>>,
-    routing_algorithm: Rc<Box<dyn Route<T>>>,
     config: Rc<FabricConfig>,
 ) -> SimResult
 where
@@ -307,7 +293,8 @@ where
         entity.track_enter(value_id);
         let value_bytes = value.total_bytes();
 
-        let dest_index = routing_algorithm.route(&value)?;
+        let dest_index = config.resolve_destination_port(value.destination())?;
+        debug!(entity ; "Route {value_id} from {port_index} -> {dest_index}");
         let delay_ticks = manhatten_rx_to_tx_cycles(&config, port_index, dest_index);
 
         let mut tick = clock.tick_now();

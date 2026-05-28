@@ -1297,7 +1297,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-engine"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1324,7 +1324,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-models"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "async-trait",
  "cfg-if",
@@ -1373,12 +1373,13 @@ version = "2.0.0"
 
 [[package]]
 name = "gwr-platform"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "async-trait",
  "byte-unit",
  "clap",
  "gwr-build",
+ "gwr-components",
  "gwr-engine",
  "gwr-model-builder",
  "gwr-models",
@@ -1409,7 +1410,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-spotter"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "capnp",
  "clap",

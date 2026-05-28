@@ -7,19 +7,25 @@ use std::rc::Rc;
 use gwr_engine::engine::Engine;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::types::SimError;
+use gwr_models::cache::coherency_manager::{CoherencyManager, CoherencyManagerConfig};
+use gwr_models::cache::{Cache, CacheConfig};
 use gwr_models::fabric::functional::FunctionalFabric;
 use gwr_models::fabric::node::FabricRoutingAlgorithm;
 use gwr_models::fabric::routed::RoutedFabric;
 use gwr_models::fabric::{Fabric, FabricConfig};
-use gwr_models::memory::cache::{Cache, CacheConfig};
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::memory_map::MemoryMap;
 use gwr_models::memory::{Memory, MemoryConfig};
 use gwr_models::processing_element::{ProcessingElement, ProcessingElementConfig};
 use gwr_track::entity::{Entity, GetEntity};
 
-use crate::types::{FabricKind, MemoryMapSection, PlatformConfig, ProcessingElementConfigSection};
-use crate::{Caches, DeviceIds, Fabrics, Memories, NameToIdxMap, ProcessingElements};
+use crate::types::{
+    CacheSection, CoherencyManagerSection, FabricKind, FabricSection, MemoryMapSection,
+    PlatformConfig, ProcessingElementConfigSection,
+};
+use crate::{
+    Caches, CoherencyManagers, DeviceIds, Fabrics, Memories, NameToIdxMap, ProcessingElements,
+};
 
 pub fn build_memory_map(
     cfg: &MemoryMapSection,
@@ -141,12 +147,89 @@ pub const DEFAULT_CACHE_BW_BYTES_PER_CYCLE: usize = 32;
 pub const DEFAULT_CACHE_NUM_WAYS: usize = 4;
 pub const DEFAULT_CACHE_NUM_SETS: usize = 128;
 pub const DEFAULT_CACHE_LATENCY_TICKS: usize = 20;
+pub const DEFAULT_COHERENCY_MANAGER_LINE_SIZE_BYTES: usize = 32;
 
-pub fn build_caches(
+fn cache_coherency_manager_names(cache_section: &CacheSection) -> Result<Vec<&str>, SimError> {
+    if cache_section.coherency_manager.is_some() && cache_section.coherency_managers.is_some() {
+        return Err(SimError(format!(
+            "Cache '{}' cannot set both coherency_manager and coherency_managers",
+            cache_section.name
+        )));
+    }
+
+    if let Some(coherency_manager) = &cache_section.coherency_manager {
+        return Ok(vec![coherency_manager.as_str()]);
+    }
+
+    Ok(cache_section
+        .coherency_managers
+        .as_ref()
+        .map(|names| names.iter().map(String::as_str).collect())
+        .unwrap_or_default())
+}
+
+fn coherency_manager_section<'a>(
+    cfg: &'a PlatformConfig,
+    manager_name: &str,
+) -> Result<&'a CoherencyManagerSection, SimError> {
+    cfg.coherency_managers
+        .as_ref()
+        .and_then(|managers| managers.iter().find(|manager| manager.name == manager_name))
+        .ok_or_else(|| SimError(format!("Unknown coherency manager '{manager_name}'")))
+}
+
+fn build_cache_coherency_manager_memory_map<S: BuildHasher>(
+    cfg: &PlatformConfig,
+    cache_section: &CacheSection,
+    memory_maps: &HashMap<String, Rc<MemoryMap>, S>,
+    device_ids: &DeviceIds,
+) -> Result<Option<MemoryMap>, SimError> {
+    let manager_names = cache_coherency_manager_names(cache_section)?;
+    if manager_names.is_empty() {
+        return Ok(None);
+    }
+
+    let mut routing_map = MemoryMap::new();
+    for manager_name in manager_names {
+        let manager_section = coherency_manager_section(cfg, manager_name)?;
+        let manager_device_id = *device_ids
+            .get(manager_name)
+            .ok_or_else(|| SimError(format!("Unknown device '{manager_name}'")))?;
+        let backing_memory_map = memory_maps
+            .get(manager_section.memory_map.as_str())
+            .ok_or_else(|| {
+                SimError(format!(
+                    "Unknown memory map '{}'",
+                    manager_section.memory_map
+                ))
+            })?;
+
+        for region in backing_memory_map.regions() {
+            routing_map
+                .insert(
+                    region.start,
+                    region.end - region.start + 1,
+                    manager_device_id,
+                )
+                .map_err(|err| {
+                    SimError(format!(
+                        "Cache '{}' has overlapping coherency manager routes: {err}",
+                        cache_section.name
+                    ))
+                })?;
+        }
+    }
+
+    Ok(Some(routing_map))
+}
+
+pub fn build_caches<S: BuildHasher>(
     engine: &Engine,
     clock: &Clock,
     parent: &Rc<Entity>,
     cfg: &PlatformConfig,
+    memory_maps: &HashMap<String, Rc<MemoryMap>, S>,
+    device_ids: &DeviceIds,
 ) -> Result<(Caches, NameToIdxMap), SimError> {
     let mut caches = Vec::new();
     if let Some(caches_sections) = &cfg.caches {
@@ -172,13 +255,34 @@ pub fn build_caches(
                 .delay_ticks
                 .unwrap_or(DEFAULT_CACHE_LATENCY_TICKS);
 
+            let device_id = *device_ids
+                .get(&cache_section.name)
+                .ok_or_else(|| SimError(format!("Unknown device '{}'", cache_section.name)))?;
+            let memory_map = memory_maps
+                .get(cache_section.memory_map.as_str())
+                .ok_or_else(|| {
+                    SimError(format!("Unknown memory map '{}'", cache_section.memory_map))
+                })?;
             let config = CacheConfig::new(
+                device_id,
                 line_size_bytes,
                 bw_bytes_per_cycle,
                 num_sets,
                 num_ways,
                 delay_ticks,
+                memory_map,
             );
+            let config = if let Some(coherency_manager_memory_map) =
+                build_cache_coherency_manager_memory_map(
+                    cfg,
+                    cache_section,
+                    memory_maps,
+                    device_ids,
+                )? {
+                config.with_coherency_manager_memory_map(&Rc::new(coherency_manager_memory_map))
+            } else {
+                config
+            };
             caches.push(Cache::new_and_register(
                 engine,
                 clock,
@@ -198,6 +302,56 @@ pub fn build_caches(
     Ok((caches, caches_idx_by_id))
 }
 
+pub fn build_coherency_managers<S: BuildHasher>(
+    engine: &Engine,
+    clock: &Clock,
+    parent: &Rc<Entity>,
+    cfg: &PlatformConfig,
+    memory_maps: &HashMap<String, Rc<MemoryMap>, S>,
+    device_ids: &DeviceIds,
+) -> Result<(CoherencyManagers, NameToIdxMap), SimError> {
+    let mut coherency_managers = Vec::new();
+    if let Some(managers_section) = &cfg.coherency_managers {
+        for manager_section in managers_section {
+            let backing_memory_map = memory_maps
+                .get(manager_section.memory_map.as_str())
+                .ok_or_else(|| {
+                    SimError(format!(
+                        "Unknown memory map '{}'",
+                        manager_section.memory_map
+                    ))
+                })?;
+            let device_id = *device_ids
+                .get(&manager_section.name)
+                .ok_or_else(|| SimError(format!("Unknown device '{}'", manager_section.name)))?;
+            let line_size_bytes = manager_section
+                .config
+                .line_size_bytes
+                .unwrap_or(DEFAULT_COHERENCY_MANAGER_LINE_SIZE_BYTES);
+            let config = CoherencyManagerConfig::new(
+                line_size_bytes,
+                device_id,
+                backing_memory_map.as_ref().clone(),
+            );
+            coherency_managers.push(CoherencyManager::new_and_register(
+                engine,
+                clock,
+                parent,
+                manager_section.name.as_str(),
+                config,
+            )?);
+        }
+    }
+
+    let mut coherency_managers_idx_by_id = HashMap::new();
+    for (i, manager) in coherency_managers.iter().enumerate() {
+        let name = manager.entity().name.to_string();
+        coherency_managers_idx_by_id.insert(name, i);
+    }
+
+    Ok((coherency_managers, coherency_managers_idx_by_id))
+}
+
 pub const DEFAULT_FABRIC_PORTS_PER_NODE: usize = 1;
 pub const DEFAULT_FABRIC_TICKS_PER_HOP: usize = 2;
 pub const DEFAULT_FABRIC_TICKS_OVERHEAD: usize = 10;
@@ -211,6 +365,7 @@ pub fn build_fabrics(
     clock: &Clock,
     parent: &Rc<Entity>,
     cfg: &PlatformConfig,
+    device_ids: &DeviceIds,
 ) -> Result<(Fabrics, NameToIdxMap), SimError> {
     let mut fabrics = Vec::new();
     if let Some(fabric_sections) = &cfg.fabrics {
@@ -237,7 +392,7 @@ pub fn build_fabrics(
                 .unwrap_or(DEFAULT_FABRIC_PORT_BITS_PER_TICK);
             let fabric_algorithm = fabric_section.routing.unwrap_or(DEFAULT_FABRIC_ROUTING);
 
-            let config = Rc::new(FabricConfig::new(
+            let config = FabricConfig::new(
                 fabric_columns,
                 fabric_rows,
                 fabric_ports_per_node,
@@ -247,7 +402,10 @@ pub fn build_fabrics(
                 rx_buffer_bytes,
                 tx_buffer_bytes,
                 port_bits_per_tick,
-            ));
+            );
+            let destination_port_map =
+                build_fabric_destination_port_map(fabric_section, &config, device_ids)?;
+            let config = Rc::new(config.with_destination_port_map(destination_port_map));
 
             let fabric: Rc<dyn Fabric<MemoryAccess>> = match fabric_section.kind {
                 FabricKind::Functional => FunctionalFabric::new_and_register(
@@ -277,6 +435,63 @@ pub fn build_fabrics(
     }
 
     Ok((fabrics, fabrics_idx_by_id))
+}
+
+fn build_fabric_destination_port_map(
+    fabric_section: &FabricSection,
+    config: &FabricConfig,
+    device_ids: &DeviceIds,
+) -> Result<HashMap<u64, usize>, SimError> {
+    let mut destination_port_map = HashMap::new();
+
+    let Some(port_devices) = &fabric_section.port_devices else {
+        return Ok(destination_port_map);
+    };
+
+    for port_device in port_devices {
+        let location = &port_device.port;
+        if location.column >= fabric_section.columns {
+            return Err(SimError(format!(
+                "Fabric '{}' column {} is out of range",
+                fabric_section.name, location.column
+            )));
+        }
+        if location.row >= fabric_section.rows {
+            return Err(SimError(format!(
+                "Fabric '{}' row {} is out of range",
+                fabric_section.name, location.row
+            )));
+        }
+        if location.port >= config.node_num_ingress_egress_ports(location.column, location.row) {
+            return Err(SimError(format!(
+                "Fabric '{}' port ({},{},{}) is not populated",
+                fabric_section.name, location.column, location.row, location.port
+            )));
+        }
+
+        let fabric_port_index =
+            config.col_row_port_to_fabric_port_index(location.column, location.row, location.port);
+
+        for device_name in &port_device.devices {
+            let device_id = device_ids.get(device_name).ok_or_else(|| {
+                SimError(format!(
+                    "Fabric '{}' references unknown device '{}'",
+                    fabric_section.name, device_name
+                ))
+            })?;
+            if destination_port_map
+                .insert(device_id.0, fabric_port_index)
+                .is_some()
+            {
+                return Err(SimError(format!(
+                    "Fabric '{}' maps device '{}' more than once",
+                    fabric_section.name, device_name
+                )));
+            }
+        }
+    }
+
+    Ok(destination_port_map)
 }
 
 pub const DEFAULT_HBM_DELAY_TICKS: usize = 10;
@@ -350,6 +565,7 @@ mod tests {
             defaults: None,
             processing_elements: None,
             caches: None,
+            coherency_managers: None,
             fabrics: None,
             memories: Some(vec![MemorySection {
                 name: "hbm0".to_string(),

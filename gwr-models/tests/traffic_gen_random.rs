@@ -6,10 +6,11 @@ use gwr_components::connect_port;
 use gwr_engine::engine::Engine;
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
-use gwr_models::memory::cache::{Cache, CacheConfig};
+use gwr_models::cache::{Cache, CacheConfig};
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::memory_access_gen::MemoryAccessGen;
 use gwr_models::memory::memory_access_gen::random::Random;
+use gwr_models::memory::memory_map::DeviceId;
 use gwr_models::memory::{Memory, MemoryConfig};
 use gwr_models::test_helpers::create_default_memory_map;
 
@@ -62,11 +63,13 @@ fn build_system(
         MemoryAccessGen::new_and_register(&engine, &clock, top, "gen", data_generator).unwrap();
 
     let config = CacheConfig::new(
+        DeviceId(0),
         LINE_SIZE_BYTES,
         BW_BYTES_PER_CYCLE,
         NUM_SETS,
         NUM_WAYS,
         DELAY_TICKS,
+        &memory_map,
     );
     let cache = Cache::new_and_register(&engine, &clock, top, "cache", config).unwrap();
 

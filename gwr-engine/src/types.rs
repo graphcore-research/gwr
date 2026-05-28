@@ -49,8 +49,10 @@ pub enum AccessType {
     ReadRequest,
     WriteRequest,
     WriteNonPostedRequest,
+    BarrierRequest,
     ReadResponse,
     WriteNonPostedResponse,
+    BarrierResponse,
     Control,
 }
 
@@ -66,11 +68,17 @@ impl fmt::Display for AccessType {
             AccessType::WriteNonPostedRequest => {
                 write!(f, "WriteNonPostedRequest")
             }
+            AccessType::BarrierRequest => {
+                write!(f, "BarrierRequest")
+            }
             AccessType::ReadResponse => {
                 write!(f, "ReadResponse")
             }
             AccessType::WriteNonPostedResponse => {
                 write!(f, "WriteNonPostedResponse")
+            }
+            AccessType::BarrierResponse => {
+                write!(f, "BarrierResponse")
             }
             AccessType::Control => {
                 write!(f, "Control")
