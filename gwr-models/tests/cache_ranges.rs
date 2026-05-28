@@ -5,7 +5,7 @@ use std::rc::Rc;
 use gwr_components::connect_port;
 use gwr_engine::engine::Engine;
 use gwr_models::build_model_harness;
-use gwr_models::memory::cache::{Cache, CacheConfig};
+use gwr_models::cache::{Cache, CacheConfig};
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::{Memory, MemoryConfig};
 use gwr_models::test_helpers::{
@@ -200,6 +200,57 @@ fn write_invalidates_a_whole_pending_line() {
     let traffic = cache.traffic_snapshot();
     assert_eq!(traffic.fill_requests, 2);
     assert_eq!(traffic.request_hits, 1);
+}
+
+#[test]
+fn full_set_replacement_evicts_only_the_oldest_way() {
+    let line_size_bytes = 32;
+    let num_ways = 4;
+    let (mut harness, cache, memory, _) = hierarchy(
+        CacheConfig::new(line_size_bytes, 32, 1, num_ways, 1),
+        None,
+        None,
+    );
+    let map = Rc::new(create_default_memory_map());
+    let mut steps = Vec::new();
+    // Fill every way, then replace the oldest line with one additional line.
+    // Probe the survivors before revisiting the evicted line.
+    for (lines, expected_hits) in [(0..=num_ways, 0), (1..=num_ways, num_ways)] {
+        for line in lines {
+            let address = 0x80000 + (line * line_size_bytes) as u64;
+            steps.push(send_dev_rx!(create_read(
+                cache.entity(),
+                &map,
+                1,
+                address,
+                0x81000,
+                16,
+            )));
+            steps.push(expect_dev_tx!(MemoryTxn::read_rsp(address).with_bytes(1)));
+        }
+        let observed_cache = cache.clone();
+        steps.push(script! {
+            ports {}
+            async {
+                assert_eq!(observed_cache.num_hits(), expected_hits);
+                assert_eq!(observed_cache.num_misses(), num_ways + 1);
+                Ok(())
+            }
+        });
+    }
+    steps.push(send_dev_rx!(create_read(
+        cache.entity(),
+        &map,
+        1,
+        0x80000,
+        0x81000,
+        16
+    )));
+    steps.push(expect_dev_tx!(MemoryTxn::read_rsp(0x80000).with_bytes(1)));
+    harness.run_steps(steps);
+    assert_eq!(cache.num_hits(), num_ways);
+    assert_eq!(cache.num_misses(), num_ways + 2);
+    assert_eq!(memory.bytes_read(), (num_ways + 2) * line_size_bytes);
 }
 
 #[test]

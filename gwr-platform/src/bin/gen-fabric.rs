@@ -97,10 +97,18 @@ struct Args {
 
     #[arg(long, default_value_t = 20)]
     l2_latency: usize,
+
+    #[arg(long, default_value_t = false)]
+    use_coherency_managers: bool,
 }
 
 impl Args {
     fn validate(&self) -> Result<(), String> {
+        if self.use_coherency_managers
+            && (self.l1_kib == 0 || self.l2_kib != 0 || self.num_hbms == 0)
+        {
+            return Err("Coherency requires L1 caches, at least one HBM, and no L2 cache (hierarchical coherence is unsupported)".into());
+        }
         if self.l2_kib != 0 && self.l1_kib == 0 {
             return Err("Cannot have an L2 cache without an L1 cache".to_string());
         }
@@ -181,8 +189,49 @@ impl Iterator for HbmIdGen {
     }
 }
 
-fn create_name(prefix: &str, column: usize, row: usize) -> String {
-    format!("{prefix}_{column}_{row}")
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+    let platform = build_platform(&args)?;
+    let yaml = platform_to_yaml_str(&platform)?;
+    if let Some(parent) = args.out.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&args.out, yaml)?;
+
+    Ok(())
+}
+
+fn build_platform(args: &Args) -> Result<PlatformConfig, String> {
+    let memory_map = MemoryMapSection {
+        name: PE_MEMORY_MAP_NAME.to_string(),
+        devices: build_memory_map_devices(args),
+    };
+    let pe_config = build_pe_config(args);
+
+    let mut caches = build_caches(args)?;
+    if args.use_coherency_managers {
+        for cache in caches.iter_mut().flatten() {
+            cache.coherency_managers = Some(vec!["cm0".to_owned()]);
+        }
+    }
+    Ok(PlatformConfig {
+        coherency_managers: args.use_coherency_managers.then(|| {
+            vec![gwr_platform::types::CoherencyManagerSection {
+                name: "cm0".to_owned(),
+                memory_map: PE_MEMORY_MAP_NAME.to_owned(),
+                config: gwr_platform::types::CoherencyManagerConfigSection {
+                    line_size_bytes: Some(DEFAULT_CACHE_LINE_SIZE_BYTES),
+                },
+            }]
+        }),
+        memory_maps: vec![memory_map],
+        defaults: None,
+        processing_elements: Some(build_processing_elements(args, &pe_config)?),
+        caches,
+        fabrics: Some(build_fabrics(args)),
+        memories: Some(build_memories(args)),
+        connections: Some(build_connections(args)?),
+    })
 }
 
 fn build_fabrics(args: &Args) -> Vec<FabricSection> {
@@ -192,7 +241,11 @@ fn build_fabrics(args: &Args) -> Vec<FabricSection> {
         columns: args.num_columns,
         rows: args.num_rows,
         config: FabricConfigSection {
-            fabric_ports_per_node: Some(DEFAULT_FABRIC_PORTS_PER_NODE),
+            fabric_ports_per_node: Some(if args.use_coherency_managers {
+                2
+            } else {
+                DEFAULT_FABRIC_PORTS_PER_NODE
+            }),
             ticks_per_hop: Some(DEFAULT_FABRIC_TICKS_PER_HOP),
             ticks_overhead: Some(DEFAULT_FABRIC_TICKS_OVERHEAD),
             rx_buffer_bytes: Some(DEFAULT_FABRIC_RX_BUFFER_BYTES),
@@ -203,28 +256,6 @@ fn build_fabrics(args: &Args) -> Vec<FabricSection> {
             port_selection: None,
         },
     }]
-}
-
-fn build_cache(
-    name: String,
-    kib: usize,
-    bytes_per_tick: usize,
-    num_ways: usize,
-    latency: usize,
-) -> CacheSection {
-    let num_sets = (kib * 1024) / num_ways / DEFAULT_CACHE_LINE_SIZE_BYTES;
-    CacheSection {
-        name,
-        config: CacheConfigSection {
-            bw_bytes_per_tick: Some(bytes_per_tick),
-            line_size_bytes: Some(DEFAULT_CACHE_LINE_SIZE_BYTES),
-            max_inflight_parents: None,
-            max_inflight_fills: None,
-            num_ways: Some(num_ways),
-            num_sets: Some(num_sets),
-            delay_ticks: Some(latency),
-        },
-    }
 }
 
 fn build_caches(args: &Args) -> Result<Option<Vec<CacheSection>>, String> {
@@ -257,6 +288,29 @@ fn build_caches(args: &Args) -> Result<Option<Vec<CacheSection>>, String> {
     }
 
     Ok(Some(caches))
+}
+
+fn build_cache(
+    name: String,
+    kib: usize,
+    bytes_per_tick: usize,
+    num_ways: usize,
+    latency: usize,
+) -> CacheSection {
+    let num_sets = (kib * 1024) / num_ways / DEFAULT_CACHE_LINE_SIZE_BYTES;
+    CacheSection {
+        coherency_managers: None,
+        name,
+        config: CacheConfigSection {
+            bw_bytes_per_tick: Some(bytes_per_tick),
+            line_size_bytes: Some(DEFAULT_CACHE_LINE_SIZE_BYTES),
+            max_inflight_parents: None,
+            max_inflight_fills: None,
+            num_ways: Some(num_ways),
+            num_sets: Some(num_sets),
+            delay_ticks: Some(latency),
+        },
+    }
 }
 
 fn build_memories(args: &Args) -> Vec<MemorySection> {
@@ -311,6 +365,22 @@ fn build_connections(args: &Args) -> Result<Vec<ConnectSection>, String> {
         });
     }
 
+    if args.use_coherency_managers {
+        for column in 0..args.num_columns {
+            for row in 0..args.num_rows {
+                connections.push(ConnectSection {
+                    connect: vec![
+                        if column == 0 && row == 0 {
+                            "coherency_manager.cm0".to_owned()
+                        } else {
+                            "null".to_owned()
+                        },
+                        fabric_port_endpoint_id(FABRIC_NAME, column, row, 1),
+                    ],
+                });
+            }
+        }
+    }
     Ok(connections)
 }
 
@@ -343,32 +413,6 @@ fn build_processing_elements(
         .collect())
 }
 
-fn build_platform(args: &Args) -> Result<PlatformConfig, String> {
-    let memory_map = MemoryMapSection {
-        name: PE_MEMORY_MAP_NAME.to_string(),
-        devices: build_memory_map_devices(args),
-    };
-    let pe_config = build_pe_config(args);
-
-    Ok(PlatformConfig {
-        memory_maps: vec![memory_map],
-        defaults: None,
-        processing_elements: Some(build_processing_elements(args, &pe_config)?),
-        caches: build_caches(args)?,
-        fabrics: Some(build_fabrics(args)),
-        memories: Some(build_memories(args)),
-        connections: Some(build_connections(args)?),
-    })
-}
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = Args::parse();
-    let platform = build_platform(&args)?;
-    let yaml = platform_to_yaml_str(&platform)?;
-    if let Some(parent) = args.out.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(&args.out, yaml)?;
-
-    Ok(())
+fn create_name(prefix: &str, column: usize, row: usize) -> String {
+    format!("{prefix}_{column}_{row}")
 }

@@ -49,7 +49,16 @@ A model of a memory to handle read/write accesses.
 
 ## Cache
 
-A basic model of a n-way set associative cache.
+A whole-line n-way set associative cache with bounded parent requests and line
+fills. The implementation and constructors live in `cache`; ordinary packets
+need only implement `CacheAccess`.
+
+`Cache::new_coherent_and_register` additionally takes a `CoherenceConfig` and
+requires `CoherentAccess`. The same cache core then models directory-managed
+shared/exclusive permissions, dirty writeback, invalidations, and scoped
+barriers. `cache::coherency_manager` provides the directory endpoint. Cache and
+manager line sizes must match; platform construction validates this
+relationship.
 
 **Interfaces:**
 

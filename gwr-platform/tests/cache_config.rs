@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use gwr_engine::engine::Engine;
 use gwr_models::build_model_harness;
-use gwr_models::memory::cache::Cache;
+use gwr_models::cache::Cache;
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::test_helpers::{MemoryTxn, create_default_memory_map, create_read};
 use gwr_platform::Platform;

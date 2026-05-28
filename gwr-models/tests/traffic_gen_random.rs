@@ -6,7 +6,7 @@ use gwr_components::connect_port;
 use gwr_engine::engine::Engine;
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
-use gwr_models::memory::cache::{Cache, CacheConfig};
+use gwr_models::cache::{Cache, CacheConfig};
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::memory_access_gen::MemoryAccessGen;
 use gwr_models::memory::memory_access_gen::random::Random;
@@ -24,6 +24,40 @@ const CACHE_CAPACITY_BYTES: usize = NUM_SETS * NUM_WAYS * LINE_SIZE_BYTES;
 const DELAY_TICKS: usize = 20;
 
 const OVERHEAD_SIZE_BYTES: usize = 16;
+
+#[test]
+fn basics() {
+    // Test sweeping across the entire cache contents
+    let num_reads = (CACHE_CAPACITY_BYTES / LINE_SIZE_BYTES) + 10;
+    let aligment_mask = !0xf;
+    let (mut engine, cache, memory, traffic_gen) = build_system(
+        0x123,
+        BASE_ADDRESS,
+        BASE_ADDRESS + CACHE_CAPACITY_BYTES as u64,
+        aligment_mask,
+        num_reads,
+    );
+
+    run_simulation!(engine);
+
+    let num_hits = cache.num_hits();
+    let num_misses = cache.num_misses();
+    println!("Accesses: {num_reads}, hits: {num_hits}, misses: {num_misses}");
+
+    assert_eq!(num_reads, num_hits + num_misses);
+
+    // An unaligned parent may touch two units or join pending units. Parent
+    // miss counts therefore do not determine downstream physical traffic.
+    let traffic = cache.traffic_snapshot();
+    assert_eq!(traffic.fill_requests * LINE_SIZE_BYTES, memory.bytes_read());
+    assert_eq!(traffic.line_misses, traffic.fill_requests);
+    assert_eq!(traffic.downstream_read_bytes, memory.bytes_read());
+
+    assert_eq!(
+        traffic_gen.payload_bytes_received(),
+        num_reads * LINE_SIZE_BYTES
+    );
+}
 
 /// Helper to build a cache and the device-side ports to drive it.
 #[expect(clippy::type_complexity)]
@@ -85,38 +119,4 @@ fn build_system(
     connect_port!(memory, tx => cache, mem_rx).unwrap();
 
     (engine, cache, memory, traffic_gen)
-}
-
-#[test]
-fn basics() {
-    // Test sweeping across the entire cache contents
-    let num_reads = (CACHE_CAPACITY_BYTES / LINE_SIZE_BYTES) + 10;
-    let aligment_mask = !0xf;
-    let (mut engine, cache, memory, traffic_gen) = build_system(
-        0x123,
-        BASE_ADDRESS,
-        BASE_ADDRESS + CACHE_CAPACITY_BYTES as u64,
-        aligment_mask,
-        num_reads,
-    );
-
-    run_simulation!(engine);
-
-    let num_hits = cache.num_hits();
-    let num_misses = cache.num_misses();
-    println!("Accesses: {num_reads}, hits: {num_hits}, misses: {num_misses}");
-
-    assert_eq!(num_reads, num_hits + num_misses);
-
-    // An unaligned parent may touch two units or join pending units. Parent
-    // miss counts therefore do not determine downstream physical traffic.
-    let traffic = cache.traffic_snapshot();
-    assert_eq!(traffic.fill_requests * LINE_SIZE_BYTES, memory.bytes_read());
-    assert_eq!(traffic.line_misses, traffic.fill_requests);
-    assert_eq!(traffic.downstream_read_bytes, memory.bytes_read());
-
-    assert_eq!(
-        traffic_gen.payload_bytes_received(),
-        num_reads * LINE_SIZE_BYTES
-    );
 }
