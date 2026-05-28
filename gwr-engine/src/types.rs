@@ -51,8 +51,14 @@ impl Error for SimError {}
 /// The SimResult is the return type for most simulation functions
 pub type SimResult = Result<(), SimError>;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DeviceId(pub u64);
+
+impl fmt::Display for DeviceId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 /// Generic access types
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
@@ -64,6 +70,8 @@ pub enum AccessType {
     ReadResponse,
     WriteNonPostedResponse,
     Control,
+    BarrierRequest,
+    BarrierResponse,
 }
 
 impl fmt::Display for AccessType {
@@ -84,6 +92,8 @@ impl fmt::Display for AccessType {
             AccessType::WriteNonPostedResponse => {
                 write!(f, "WriteNonPostedResponse")
             }
+            AccessType::BarrierRequest => write!(f, "BarrierRequest"),
+            AccessType::BarrierResponse => write!(f, "BarrierResponse"),
             AccessType::Control => {
                 write!(f, "Control")
             }

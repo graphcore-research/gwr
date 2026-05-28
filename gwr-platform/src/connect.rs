@@ -7,9 +7,10 @@ use gwr_engine::port::{InPort, OutPort};
 use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::types::{SimError, SimResult};
+use gwr_models::cache::Cache;
+use gwr_models::cache::coherency_manager::CoherencyManager;
 use gwr_models::fabric::Fabric;
 use gwr_models::memory::Memory;
-use gwr_models::memory::cache::Cache;
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::processing_element::ProcessingElement;
 use gwr_track::debug;
@@ -20,6 +21,9 @@ use crate::connection_id::{CachePortId, ConnectionEndpointId, parse_connection_e
 use crate::types::PlatformConfig;
 
 pub enum PortId<'a> {
+    Manager {
+        manager: &'a Rc<CoherencyManager>,
+    },
     Null,
     Pe {
         pe: &'a Rc<ProcessingElement>,
@@ -35,40 +39,6 @@ pub enum PortId<'a> {
         fabric: &'a Rc<dyn Fabric<MemoryAccess>>,
         port_idx: usize,
     },
-}
-
-pub fn parse_port_id<'a>(platform: &'a Platform, s: &str) -> Result<PortId<'a>, SimError> {
-    let endpoint = parse_connection_endpoint_id(s)?;
-    resolve_port_id(platform, &endpoint)
-}
-
-fn resolve_port_id<'a>(
-    platform: &'a Platform,
-    endpoint: &ConnectionEndpointId,
-) -> Result<PortId<'a>, SimError> {
-    Ok(match endpoint {
-        ConnectionEndpointId::Null => PortId::Null,
-        ConnectionEndpointId::Pe { name } => PortId::Pe {
-            pe: platform.pe(name)?,
-        },
-        ConnectionEndpointId::Cache { name, port } => PortId::Cache {
-            cache: platform.cache(name)?,
-            port: port.clone(),
-        },
-        ConnectionEndpointId::Mem { name } => PortId::Mem {
-            memory: platform.memory(name)?,
-        },
-        ConnectionEndpointId::FabricPort {
-            fabric,
-            column,
-            row,
-            port,
-        } => {
-            let fabric = platform.fabric(fabric)?;
-            let port_idx = fabric.col_row_port_to_fabric_port_index(*column, *row, *port);
-            PortId::FabricTile { fabric, port_idx }
-        }
-    })
 }
 
 pub fn connect_ports(
@@ -94,6 +64,43 @@ pub fn connect_ports(
     Ok(())
 }
 
+pub fn parse_port_id<'a>(platform: &'a Platform, s: &str) -> Result<PortId<'a>, SimError> {
+    let endpoint = parse_connection_endpoint_id(s)?;
+    resolve_port_id(platform, &endpoint)
+}
+
+fn resolve_port_id<'a>(
+    platform: &'a Platform,
+    endpoint: &ConnectionEndpointId,
+) -> Result<PortId<'a>, SimError> {
+    Ok(match endpoint {
+        ConnectionEndpointId::Null => PortId::Null,
+        ConnectionEndpointId::CoherencyManager { name } => PortId::Manager {
+            manager: platform.coherency_manager(name)?,
+        },
+        ConnectionEndpointId::Pe { name } => PortId::Pe {
+            pe: platform.pe(name)?,
+        },
+        ConnectionEndpointId::Cache { name, port } => PortId::Cache {
+            cache: platform.cache(name)?,
+            port: port.clone(),
+        },
+        ConnectionEndpointId::Mem { name } => PortId::Mem {
+            memory: platform.memory(name)?,
+        },
+        ConnectionEndpointId::FabricPort {
+            fabric,
+            column,
+            row,
+            port,
+        } => {
+            let fabric = platform.fabric(fabric)?;
+            let port_idx = fabric.col_row_port_to_fabric_port_index(*column, *row, *port);
+            PortId::FabricTile { fabric, port_idx }
+        }
+    })
+}
+
 fn connect_port(
     engine: &Engine,
     clock: &Clock,
@@ -116,6 +123,13 @@ fn connect_port(
         _ => {}
     }
     match from {
+        PortId::Manager { manager } => match to {
+            PortId::FabricTile { fabric, port_idx } => {
+                manager.connect_port_tx(fabric.port_ingress_i(*port_idx))?;
+                fabric.connect_port_egress_i(*port_idx, manager.port_rx())
+            }
+            _ => sim_error!("Coherency Managers must connect to a Fabric"),
+        },
         PortId::Null => unreachable!("null connections handled above"),
         PortId::Pe { pe } => connect_pe_to(platform, pe, to),
         PortId::Cache { cache, port } => connect_cache_to(platform, cache, port.as_ref(), to),
@@ -167,6 +181,7 @@ fn connect_fabric_to_null(
 
 fn connect_pe_to(platform: &Platform, pe: &Rc<ProcessingElement>, to: &PortId) -> SimResult {
     match to {
+        PortId::Manager { .. } => sim_error!("Coherency Managers must connect to a Fabric"),
         PortId::Null => unreachable!("null connections handled above"),
         PortId::Pe { .. } => {
             sim_error!("Cannot connect a PE directly to a PE")
@@ -186,6 +201,7 @@ fn connect_cache_to(
     to: &PortId,
 ) -> SimResult {
     match to {
+        PortId::Manager { .. } => sim_error!("Coherency Managers must connect to a Fabric"),
         PortId::Null => unreachable!("null connections handled above"),
         PortId::Pe { pe } => connect_pe_to_cache(platform, pe, cache, cache_port),
         PortId::Cache {
@@ -206,6 +222,10 @@ fn connect_fabric_to(
     to: &PortId,
 ) -> SimResult {
     match to {
+        PortId::Manager { manager } => {
+            manager.connect_port_tx(fabric.port_ingress_i(fabric_port_idx))?;
+            fabric.connect_port_egress_i(fabric_port_idx, manager.port_rx())
+        }
         PortId::Null => unreachable!("null connections handled above"),
         PortId::Pe { pe } => connect_pe_to_fabric(platform, pe, fabric, fabric_port_idx),
         PortId::Cache { cache, port } => {
@@ -227,6 +247,7 @@ fn connect_memory_to(
     to: &PortId,
 ) -> SimResult {
     match to {
+        PortId::Manager { .. } => sim_error!("Coherency Managers must connect to a Fabric"),
         PortId::Null => unreachable!("null connections handled above"),
         PortId::Pe { pe } => connect_pe_to_memory(platform, pe, memory),
         PortId::Cache { cache, port } => {

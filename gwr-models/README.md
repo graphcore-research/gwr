@@ -49,7 +49,47 @@ A model of a memory to handle read/write accesses.
 
 ## Cache
 
-A basic model of a n-way set associative cache.
+A whole-line n-way set associative cache with bounded parent requests and line
+fills. The implementation and constructors live in `cache`; ordinary packets
+need only implement `CacheAccess`.
+
+In coherent and incoherent caches, parents completed by memory responses use a
+separate return worker and retain admission through response service.
+Outstanding fills can finish ingress while the requesting device is blocked,
+with completed parents bounded by the admission limit. Forwarded nonposted-write
+acknowledgements also use the return worker; their ingress waits for completion,
+allowing at most one extra queued response.
+
+`Cache::new_coherent_and_register` additionally takes a `CoherenceConfig` and
+requires `CoherentAccess`. The same cache core then models directory-managed
+shared/exclusive permissions, dirty writeback, invalidations, and scoped
+barriers. `cache::coherency_manager` provides the directory endpoint. Cache and
+manager line sizes must match; platform construction validates this
+relationship.
+
+Barriers carry a destination address. When coherence is enabled, the cache
+drains its prior requests, then forwards the barrier to the coherence manager
+responsible for that address, as selected by the manager map in
+`CoherenceConfig`. The cache waits for that manager's acknowledgement before
+completing the barrier and processing later device requests. The selected
+manager drains its prior operations across all address ranges managed by it. A
+barrier is scoped to the receiving cache and the selected manager; it is not
+broadcast to other managers and does not flush resident dirty cache lines.
+
+Coherence managers process work without a clock-rate limit by default. Use
+`CoherencyManagerConfig::with_operations_per_tick(n)` to set a positive shared
+processing budget. Handling an incoming packet, starting a queued request, or
+completing a barrier each consumes one operation. Requests that initially wait
+for a line or barrier consume another operation when they are replayed. The
+budget resets each clock tick; unused operations do not accumulate.
+
+Responses, writebacks, and invalidation acknowledgements have priority over
+ordinary requests and queued replay work, but consume the same budget. Ingress
+and output run independently of processing, so output backpressure does not
+prevent the manager from handling protocol traffic. The limit controls directory
+processing, not queue capacity or packet bandwidth. Generating several
+invalidations is one processing operation; fabric bandwidth limits their
+transmission.
 
 **Interfaces:**
 

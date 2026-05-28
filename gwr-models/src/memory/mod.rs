@@ -23,7 +23,6 @@ use gwr_track::{build_aka, debug};
 use crate::log_stats;
 use crate::memory::traits::{AccessMemory, ReadMemory};
 
-pub mod cache;
 pub mod memory_access;
 pub mod memory_access_gen;
 pub mod memory_map;
@@ -165,6 +164,16 @@ impl<T> Memory<T>
 where
     T: SimObject + AccessMemory,
 {
+    pub fn new_and_register(
+        engine: &Engine,
+        clock: &Clock,
+        parent: &Rc<Entity>,
+        name: &str,
+        config: MemoryConfig,
+    ) -> Result<Rc<Self>, SimError> {
+        Self::new_and_register_with_renames(engine, clock, parent, name, None, config)
+    }
+
     pub fn new_and_register_with_renames(
         engine: &Engine,
         clock: &Clock,
@@ -211,16 +220,6 @@ where
         });
         engine.register(rc_self.clone());
         Ok(rc_self)
-    }
-
-    pub fn new_and_register(
-        engine: &Engine,
-        clock: &Clock,
-        parent: &Rc<Entity>,
-        name: &str,
-        config: MemoryConfig,
-    ) -> Result<Rc<Self>, SimError> {
-        Self::new_and_register_with_renames(engine, clock, parent, name, None, config)
     }
 
     pub fn connect_port_tx(&self, port_state: PortStateResult<T>) -> SimResult {
@@ -311,10 +310,13 @@ where
                 }
                 AccessType::WriteNonPostedRequest => {
                     self.stats.borrow_mut().bytes_written += payload_bytes;
-                    let response = access.to_response(self)?;
+                    let response = access.to_ack()?;
                     response_tx.put(response)?.await;
                 }
-                AccessType::ReadResponse | AccessType::WriteNonPostedResponse => {
+                AccessType::ReadResponse
+                | AccessType::WriteNonPostedResponse
+                | AccessType::BarrierRequest
+                | AccessType::BarrierResponse => {
                     return sim_error!("{}: unsupported {access_type} received", self.entity);
                 }
                 AccessType::Control => {

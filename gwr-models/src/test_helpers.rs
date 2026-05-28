@@ -321,21 +321,18 @@ pub struct MemoryTxn {
 
 impl MemoryTxn {
     #[must_use]
-    pub fn new(access_type: AccessType, dst_addr: u64) -> Self {
-        Self {
-            access_type,
-            dst_addr,
-            src_addr: None,
-            bytes: None,
-            total_bytes: None,
-            dst_device: None,
-            src_device: None,
-        }
+    pub fn control(dst_addr: u64) -> Self {
+        Self::new(AccessType::Control, dst_addr)
     }
 
     #[must_use]
-    pub fn control(dst_addr: u64) -> Self {
-        Self::new(AccessType::Control, dst_addr)
+    pub fn barrier_req(dst_addr: u64) -> Self {
+        Self::new(AccessType::BarrierRequest, dst_addr)
+    }
+
+    #[must_use]
+    pub fn barrier_rsp(dst_addr: u64) -> Self {
+        Self::new(AccessType::BarrierResponse, dst_addr)
     }
 
     #[must_use]
@@ -361,6 +358,19 @@ impl MemoryTxn {
     #[must_use]
     pub fn write_np_rsp(dst_addr: u64) -> Self {
         Self::new(AccessType::WriteNonPostedResponse, dst_addr)
+    }
+
+    #[must_use]
+    pub fn new(access_type: AccessType, dst_addr: u64) -> Self {
+        Self {
+            access_type,
+            dst_addr,
+            src_addr: None,
+            bytes: None,
+            total_bytes: None,
+            dst_device: None,
+            src_device: None,
+        }
     }
 
     #[must_use]
