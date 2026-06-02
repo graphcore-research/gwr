@@ -1,0 +1,58 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+description:
+  Run all workspace tests with code coverage and complexity analysis enabled and
+  generate a CRAP (Change Risk Anti-Patterns) metric report.
+arguments:
+  - name: CRAP_DIR
+    default: target/crap
+    comment: Directory to write the generated coverage and crap report into.
+  - name: COV_FILE
+    default: lcov.info
+    comment: Filename for the generated lcov coverage report.
+  - name: REPORT_FILE
+    default: report.md
+    comment: Filename for the generated CRAP report.
+  - name: EXTRA_COV_ARGS
+    default: ""
+    comment: Additional arguments to append to `cargo llvm-cov`.
+  - name: EXTRA_CRAP_ARGS
+    default: ""
+    comment: Additional arguments to append to `cargo crap`.
+ingredients:
+  - comment: Check that the `cargo llvm-cov` subcommand is available.
+    command: |-
+      if ! cargo llvm-cov --version >/dev/null 2>&1; then
+        echo "cargo-llvm-cov is not installed."
+        echo "Install it with: cargo binstall --disable-telemetry --no-confirm --locked cargo-llvm-cov"
+        exit 1
+      fi
+  - comment: Check that the `cargo crap` subcommand is available.
+    command: |-
+      if ! cargo crap --version >/dev/null 2>&1; then
+        echo "cargo-crap is not installed."
+        echo "Install it with: cargo binstall --disable-telemetry --no-confirm --locked cargo-crap"
+        exit 1
+      fi
+  - comment: Ensure the output directory exists before generating the report.
+    command: mkdir -p "$CRAP_DIR"
+  - comment:
+      Run the full workspace test suite with all features enabled and generate
+      coverage information.
+    command: |-
+      cargo llvm-cov \
+        --workspace \
+        --all-features \
+        --all-targets \
+        --lcov \
+        --output-path "$CRAP_DIR/$COV_FILE" \
+        $EXTRA_COV_ARGS
+  - comment: Generate the CRAP report using the coverage information.
+    command: |-
+      cargo crap \
+        --workspace \
+        --lcov "$CRAP_DIR/$COV_FILE" \
+        --format markdown \
+        --output "$CRAP_DIR/$REPORT_FILE" \
+        $EXTRA_CRAP_ARGS  2>&1
+  - comment: Print the location of the generated CRAP report.
+    command: echo "CRAP report generated in $CRAP_DIR/$COV_FILE"
