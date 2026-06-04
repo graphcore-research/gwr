@@ -13,16 +13,16 @@ use gwr_engine::time::clock::Clock;
 use gwr_engine::time::compute_adjusted_value_and_rate;
 use gwr_engine::types::SimError;
 use gwr_engine::{run_simulation, sim_error};
-use gwr_models::data_frame::DataFrame;
 use gwr_models::fabric::functional::FunctionalFabric;
 use gwr_models::fabric::node::FabricRoutingAlgorithm;
 use gwr_models::fabric::routed::RoutedFabric;
 use gwr_models::fabric::{Fabric, FabricConfig};
+use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_track::builder::{TrackerArgs, setup_trackers};
 use gwr_track::entity::Entity;
 use gwr_track::{Track, error, info};
 use indicatif::ProgressBar;
-use sim_fabric::frame_gen::TrafficPattern;
+use sim_fabric::access_gen::TrafficPattern;
 use sim_fabric::source_sink_builder::{Sinks, build_source_sinks};
 
 /// Command-line arguments.
@@ -193,7 +193,7 @@ fn main() -> Result<(), SimError> {
     let (config, num_send_frames) = create_config(&engine, &args);
     let num_ports = config.num_ports();
     let top = engine.top().clone();
-    let fabric: Rc<dyn Fabric<DataFrame>> = if args.routed {
+    let fabric: Rc<dyn Fabric<MemoryAccess>> = if args.routed {
         RoutedFabric::new_and_register(
             &engine,
             &clock,

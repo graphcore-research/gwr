@@ -6,7 +6,6 @@
 //! [components](gwr_components) connected together with additional
 //! functionality.
 
-pub mod data_frame;
 pub mod ethernet_frame;
 pub mod ethernet_link;
 pub mod fabric;

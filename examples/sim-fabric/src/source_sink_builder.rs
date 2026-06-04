@@ -8,17 +8,17 @@ use gwr_components::sink::Sink;
 use gwr_components::source::Source;
 use gwr_engine::engine::Engine;
 use gwr_engine::time::clock::Clock;
-use gwr_models::data_frame::DataFrame;
 use gwr_models::fabric::FabricConfig;
+use gwr_models::memory::memory_access::MemoryAccess;
 use rand::SeedableRng;
 use rand::seq::SliceRandom;
 use rand_xoshiro::Xoshiro256PlusPlus;
 
-use crate::frame_gen::{FrameGen, TrafficPattern};
+use crate::access_gen::{AccessGen, TrafficPattern};
 
 // Define some types to aid readability
-pub type Sources = Vec<Rc<Source<DataFrame>>>;
-pub type Sinks = Vec<Rc<Sink<DataFrame>>>;
+pub type Sources = Vec<Rc<Source<MemoryAccess>>>;
+pub type Sinks = Vec<Rc<Sink<MemoryAccess>>>;
 
 #[expect(clippy::too_many_arguments)]
 #[must_use]
@@ -84,9 +84,9 @@ pub fn build_source_sinks(
 
         total_expected_frames += num_frames_from_source;
 
-        let data_generator: std::option::Option<Box<dyn Iterator<Item = DataFrame>>> =
+        let data_generator: Option<Box<dyn Iterator<Item = MemoryAccess>>> =
             if active_port_indices.contains(&source_index) {
-                Some(Box::new(FrameGen::new(
+                Some(Box::new(AccessGen::new(
                     top,
                     config,
                     source_index,

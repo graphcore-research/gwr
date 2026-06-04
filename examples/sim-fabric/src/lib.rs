@@ -39,5 +39,5 @@
 //! cargo run --bin sim-fabric --release -- --port-bits-per-tick 128 --frame-overhead-bytes 20 --frame-payload-bytes 1484 --kib-to-send 1024 --traffic-pattern all-to-all-fixed --seed 3 --stdout
 //! ```
 
-pub mod frame_gen;
+pub mod access_gen;
 pub mod source_sink_builder;

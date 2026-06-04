@@ -1321,7 +1321,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-models"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "async-trait",
  "cfg-if",
@@ -3151,7 +3151,7 @@ dependencies = [
 
 [[package]]
 name = "sim-fabric"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "byte-unit",
  "clap",
