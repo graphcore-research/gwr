@@ -1238,6 +1238,7 @@ dependencies = [
  "criterion",
  "futures",
  "gungraun",
+ "gwr-build",
  "gwr-engine",
  "gwr-model-builder",
  "gwr-resources",
@@ -1321,7 +1322,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-models"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "async-trait",
  "cfg-if",
@@ -1329,6 +1330,7 @@ dependencies = [
  "criterion",
  "futures",
  "gungraun",
+ "gwr-build",
  "gwr-components",
  "gwr-engine",
  "gwr-model-builder",

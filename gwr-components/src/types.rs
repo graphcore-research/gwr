@@ -19,7 +19,7 @@ pub type DataGenerator<T> = Box<dyn Iterator<Item = T> + 'static>;
 /// It can either return a value or a [SimError].
 pub type GetResult<T> = Result<T, SimError>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Credit(pub usize);
 
 impl TotalBytes for Credit {

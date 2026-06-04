@@ -1,5 +1,7 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
+use std::collections::HashMap;
+use std::fmt::Debug;
 use std::rc::Rc;
 
 use gwr_components::connect_port;
@@ -9,11 +11,16 @@ use gwr_engine::engine::Engine;
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::TotalBytes;
+use gwr_engine::types::AccessType;
+use gwr_models::build_model_harness;
 use gwr_models::ethernet_frame::{EthernetFrame, SRC_MAC_BYTES, u64_to_mac};
 use gwr_models::fabric::functional::FunctionalFabric;
 use gwr_models::fabric::node::FabricRoutingAlgorithm;
 use gwr_models::fabric::routed::RoutedFabric;
 use gwr_models::fabric::{Fabric, FabricConfig};
+use gwr_models::memory::memory_access::MemoryAccess;
+use gwr_models::memory::memory_map::DeviceId;
+use gwr_models::test_helpers::MemoryTxn;
 use gwr_track::entity::GetEntity;
 
 trait ToDest {
@@ -214,6 +221,112 @@ fn latency() {
     let ticks_through_fabric = num_hops * config.cycles_per_hop() + config.cycles_overhead();
     let ticks = ticks_through_limiter + ticks_through_fabric;
     assert_eq!(clock.tick_now().tick(), ticks as u64);
+}
+
+mod routed_fabric_harness {
+    use super::*;
+
+    build_model_harness! {
+        harness RoutedFabricHarness<T> {
+            component: fabric: Rc<RoutedFabric<T>>,
+            rx port arrays: {
+                Ingress<T> => ingress {
+                    count: num_ingress_ports
+                }
+            },
+            tx port arrays: {
+                Egress<T> => egress {
+                    count: num_egress_ports
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn routed_fabric_routes_between_corners_with_harness() {
+        let mut engine = start_test(file!());
+        let clock = engine.clock_ghz(1.0);
+        let top = engine.top();
+        let config = Rc::new(FabricConfig::new(2, 2, 1, None, 2, 1, 2, 2, 128));
+        let fabric = RoutedFabric::new_and_register(
+            &engine,
+            &clock,
+            top,
+            "fabric",
+            config.clone(),
+            FabricRoutingAlgorithm::ColumnFirst,
+        )
+        .unwrap();
+
+        let ingress_a_idx = fabric.col_row_port_to_fabric_port_index(0, 0, 0);
+        let egress_a_idx = fabric.col_row_port_to_fabric_port_index(1, 1, 0);
+        let ingress_b_idx = egress_a_idx;
+        let egress_b_idx = ingress_a_idx;
+        let access_size_bytes = 128;
+        let overhead_size_bytes = 16;
+        let addr_a = 0x1000;
+        let addr_b = 0x2000;
+
+        let access_a = MemoryAccess::new(
+            top,
+            AccessType::ReadRequest,
+            access_size_bytes,
+            addr_a,
+            ingress_a_idx as u64,
+            DeviceId(egress_a_idx as u64),
+            DeviceId(ingress_a_idx as u64),
+            overhead_size_bytes,
+        );
+        let access_b = MemoryAccess::new(
+            top,
+            AccessType::ReadRequest,
+            access_size_bytes,
+            addr_b,
+            ingress_b_idx as u64,
+            DeviceId(egress_b_idx as u64),
+            DeviceId(ingress_b_idx as u64),
+            overhead_size_bytes,
+        );
+
+        let mut harness = RoutedFabricHarness::new(
+            engine,
+            fabric,
+            config.max_num_ports(),
+            config.max_num_ports(),
+        );
+        harness.run_steps(&[step_parallel(HashMap::from([
+            (
+                Port::Ingress(ingress_a_idx),
+                vec![action_send_ingress(access_a.clone())],
+            ),
+            (
+                Port::Ingress(ingress_b_idx),
+                vec![action_send_ingress(access_b.clone())],
+            ),
+            (
+                Port::Egress(egress_a_idx),
+                vec![action_expect_egress(
+                    MemoryTxn::read_req(addr_a)
+                        .with_src_addr(ingress_a_idx as u64)
+                        .with_bytes(access_size_bytes)
+                        .with_destination(egress_a_idx as u64)
+                        .with_dst_device(DeviceId(egress_a_idx as u64))
+                        .with_src_device(DeviceId(ingress_a_idx as u64)),
+                )],
+            ),
+            (
+                Port::Egress(egress_b_idx),
+                vec![action_expect_egress(
+                    MemoryTxn::read_req(addr_b)
+                        .with_src_addr(ingress_b_idx as u64)
+                        .with_bytes(access_size_bytes)
+                        .with_destination(egress_b_idx as u64)
+                        .with_dst_device(DeviceId(egress_b_idx as u64))
+                        .with_src_device(DeviceId(ingress_b_idx as u64)),
+                )],
+            ),
+        ]))]);
+    }
 }
 
 #[test]

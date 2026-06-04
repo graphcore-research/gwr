@@ -1,10 +1,6 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
-//! Components that model higher-level functionality.
-//!
-//! Models will generally comprise one or more base
-//! [components](gwr_components) connected together with additional
-//! functionality.
+#![doc = include_str!(gwr_build::generated_crate_docs_path!())]
 
 pub mod ethernet_frame;
 pub mod ethernet_link;

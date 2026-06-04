@@ -68,6 +68,14 @@ impl AccessMemory for MemoryAccess {
         self.src_addr
     }
 
+    fn dst_device(&self) -> DeviceId {
+        self.dst_device
+    }
+
+    fn src_device(&self) -> DeviceId {
+        self.src_device
+    }
+
     fn cache_hint(&self) -> CacheHintType {
         CacheHintType::Allocate
     }

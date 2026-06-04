@@ -107,7 +107,7 @@ pub fn connect_port_out_i(&self, i: usize, port_state: PortStateResult<T>) -> Si
 # fn main() {}
 ```
 
-# Connecting Ports
+## Connecting Ports
 
 Connections are always made in the direction of flow of data (`tx` -> `rx`). For
 example:

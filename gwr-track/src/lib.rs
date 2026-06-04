@@ -24,6 +24,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::str::FromStr;
 
+#[doc(hidden)]
 pub use log;
 
 pub mod builder;

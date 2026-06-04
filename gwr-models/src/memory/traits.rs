@@ -4,6 +4,7 @@ use gwr_engine::traits::{Routable, TotalBytes};
 use gwr_engine::types::SimError;
 
 use crate::memory::CacheHintType;
+use crate::memory::memory_map::DeviceId;
 
 pub trait ReadMemory {
     fn read(&self) -> Vec<u8>;
@@ -19,6 +20,12 @@ where
 
     /// Return the source address of this access
     fn src_addr(&self) -> u64;
+
+    /// Return the destination device of this access
+    fn dst_device(&self) -> DeviceId;
+
+    /// Return the source device of this access
+    fn src_device(&self) -> DeviceId;
 
     /// Return the size of the access in bytes
     fn access_size_bytes(&self) -> usize;
