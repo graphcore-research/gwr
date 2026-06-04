@@ -9,6 +9,7 @@ pub mod state;
 
 pub mod test_helpers;
 
+#[doc(hidden)]
 pub use paste::paste;
 
 /// Register access permissions

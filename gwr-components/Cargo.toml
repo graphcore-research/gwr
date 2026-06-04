@@ -29,6 +29,7 @@ harness = false
 [dependencies]
 async-trait.workspace = true
 futures.workspace = true
+gwr-build = { path = "../gwr-build", version = "0.1.0" }
 gwr-engine = { path = "../gwr-engine", version = "0.11.0" }
 gwr-model-builder = { path = "../gwr-model-builder", version = "0.2.0" }
 gwr-resources = { path = "../gwr-resources", version = "0.1.0" }
@@ -43,3 +44,6 @@ criterion.workspace = true
 gungraun.workspace = true
 rand.workspace = true
 trybuild.workspace = true
+
+[build-dependencies]
+gwr-build = { path = "../gwr-build", version = "0.1.0" }

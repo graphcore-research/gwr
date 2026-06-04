@@ -26,12 +26,14 @@
   - [Ports](components/ports.md)
   - [Create Subcomponents](components/add_subcomponents.md)
   - [Implement Custom Functionality](components/custom_functionality.md)
+  - [Testing Components](components/testing.md)
   - [The gwr_components Library](components/gwr_components.md)
   - [Example: Writing a Component](components/writing_a_component.md)
 
 - [Protocols](protocols/chapter.md)
 
 - [Models](models/chapter.md)
+  - [Testing Models](models/testing.md)
 
 - [GWR Platform](gwr_platform/chapter.md)
 

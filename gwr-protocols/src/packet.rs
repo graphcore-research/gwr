@@ -4,6 +4,7 @@
 //!
 //! Currently just the [build_packet_type](crate::build_packet_type) macro.
 
+#[doc(hidden)]
 pub use paste::paste;
 
 /// Macro helper for building packet types.

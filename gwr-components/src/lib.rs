@@ -1,6 +1,6 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
-//! Simulation components.
+#![doc = include_str!(gwr_build::generated_crate_docs_path!())]
 
 pub mod arbiter;
 pub mod connect;

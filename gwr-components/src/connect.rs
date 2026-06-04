@@ -2,6 +2,7 @@
 
 //! Helper connection macros
 
+#[doc(hidden)]
 pub use paste::paste;
 
 /// Connect an [OutPort](gwr_engine::port::OutPort) port to an

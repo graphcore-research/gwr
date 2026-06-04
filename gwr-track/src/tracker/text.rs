@@ -3,6 +3,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+#[doc(hidden)]
 pub use log;
 
 use crate::entity::Capacity;
