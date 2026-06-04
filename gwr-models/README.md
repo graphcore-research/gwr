@@ -15,10 +15,10 @@ exhaustive list of the models provided.
 
 Many systems are based on frames (packets) of different forms.
 
-### Data Frame
+### Memory Access
 
-In order to model different protocols an abstract `DataFrame` is provided. It
-has a configurable payload and overhead sizes.
+Memory traffic is represented with `MemoryAccess`, which carries routing, access
+type, payload size, and protocol overhead.
 
 ### Ethernet Frame
 

@@ -4,9 +4,11 @@ use std::fmt;
 use std::rc::Rc;
 
 use clap::ValueEnum;
+use gwr_engine::types::AccessType;
 use gwr_model_builder::EntityGet;
-use gwr_models::data_frame::DataFrame;
 use gwr_models::fabric::FabricConfig;
+use gwr_models::memory::memory_access::MemoryAccess;
+use gwr_models::memory::memory_map::DeviceId;
 use gwr_track::entity::Entity;
 use rand::SeedableRng;
 use rand::seq::{IteratorRandom, SliceRandom};
@@ -40,13 +42,13 @@ impl fmt::Display for TrafficPattern {
     }
 }
 
-/// A frame Generator that can be used by the `Source` to produce frames on
-/// the fly.
+/// A memory access generator that can be used by the `Source` to produce
+/// accesses on the fly.
 ///
-/// This allows each frame being created to be unique which aids debug of the
+/// This allows each access being created to be unique which aids debug of the
 /// system.
 #[derive(EntityGet)]
-pub struct FrameGen {
+pub struct AccessGen {
     entity: Rc<Entity>,
     config: Rc<FabricConfig>,
     source_index: usize,
@@ -60,7 +62,7 @@ pub struct FrameGen {
     next_dests: Vec<usize>,
 }
 
-impl FrameGen {
+impl AccessGen {
     #[expect(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
@@ -124,15 +126,15 @@ impl FrameGen {
     }
 }
 
-impl Iterator for FrameGen {
-    type Item = DataFrame;
+impl Iterator for AccessGen {
+    type Item = MemoryAccess;
     fn next(&mut self) -> Option<Self::Item> {
-        // If this can only send to self then there is nothing to do
-        let no_valid_packets = (self.dest_index == self.source_index)
+        // If this can only send to self then there is nothing to do.
+        let no_valid_accesses = (self.dest_index == self.source_index)
             && (self.traffic_pattern == TrafficPattern::AllToOne
                 || self.traffic_pattern == TrafficPattern::AllToAllFixed);
 
-        if no_valid_packets {
+        if no_valid_accesses {
             return None;
         }
 
@@ -144,21 +146,22 @@ impl Iterator for FrameGen {
             let label = (self.num_sent_frames | (self.source_index << 32)) as u64;
             self.num_sent_frames += 1;
 
-            // Send to the correct `dest`, but set `src` to a unique value to aid debug
-            // (frame count).
+            // Route to the correct device, but keep the access label in the
+            // destination address to aid debug.
             let dest = self.config.port_indices()[self.dest_index];
-            let frame = Some(
-                DataFrame::new(
-                    &self.entity,
-                    self.overhead_size_bytes,
-                    self.payload_size_bytes,
-                )
-                .set_dest(dest as u64)
-                .set_label(label),
-            );
+            let access = Some(MemoryAccess::new(
+                &self.entity,
+                AccessType::WriteRequest,
+                self.payload_size_bytes,
+                label,
+                self.source_index as u64,
+                DeviceId(dest as u64),
+                DeviceId(self.source_index as u64),
+                self.overhead_size_bytes,
+            ));
 
             self.dest_index = self.next_dest();
-            frame
+            access
         } else {
             None
         }

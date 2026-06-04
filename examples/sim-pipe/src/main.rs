@@ -16,8 +16,8 @@ use gwr_engine::executor::Spawner;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::types::SimError;
 use gwr_engine::{run_simulation, sim_error};
-use gwr_models::data_frame::DataFrame;
 use gwr_models::fc_pipeline::{FcPipeline, FcPipelineConfig};
+use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_track::builder::{TrackerArgs, setup_trackers};
 use gwr_track::entity::{Entity, GetEntity};
 use gwr_track::{Track, error, info};
@@ -96,7 +96,7 @@ fn start_frame_dump(
     clock: Clock,
     progress_ticks: usize,
     total_expected_frames: usize,
-    sink: Rc<Sink<DataFrame>>,
+    sink: Rc<Sink<MemoryAccess>>,
     progress_bar: ProgressBar,
 ) {
     spawner.spawn(async move {
