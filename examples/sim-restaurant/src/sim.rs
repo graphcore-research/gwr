@@ -4,7 +4,7 @@ use std::cell::{Cell, RefCell};
 use std::ops::RangeInclusive;
 use std::rc::Rc;
 
-use gwr_components::queue::Queue;
+use gwr_components::queue::QueueCore;
 use gwr_engine::engine::Engine;
 use gwr_engine::events::once::Once;
 use gwr_engine::events::repeated::Repeated;
@@ -150,8 +150,8 @@ fn build_entities(engine: &Engine, staffing: Staffing) -> ScenarioEntities {
 
 pub(crate) struct Restaurant {
     clock: Clock,
-    pub(crate) till_queue: Queue<usize>,
-    pub(crate) kitchen_queue: Queue<usize>,
+    pub(crate) till_queue: QueueCore<usize>,
+    pub(crate) kitchen_queue: QueueCore<usize>,
     pub(crate) closed: Once<()>,
     pub(crate) arrivals_complete: Cell<bool>,
     pub(crate) closed_seen: Cell<bool>,
@@ -176,8 +176,8 @@ impl Restaurant {
     ) -> Self {
         let entity = entities.restaurant;
         let till_queue =
-            Queue::new(&entity, "till_queue", None).expect("queue config should be valid");
-        let kitchen_queue = Queue::new(&entity, "kitchen_queue", Some(kitchen_queue_capacity))
+            QueueCore::new(&entity, "till_queue", None).expect("queue config should be valid");
+        let kitchen_queue = QueueCore::new(&entity, "kitchen_queue", Some(kitchen_queue_capacity))
             .expect("queue config should be valid");
 
         Self {
