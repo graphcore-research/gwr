@@ -4,7 +4,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::process::{ExitStatus, Stdio};
+use std::process::{Command as ProcessCommand, ExitStatus, Output, Stdio};
 
 use color_eyre::eyre::Context;
 use log::{debug, error};
@@ -219,12 +219,11 @@ impl Recipe {
             }
         }
 
-        // Ensure the path is absolute so that there are no issues sourceing it
+        // Ensure the path is absolute so that there are no issues executing it
         let script_path = fs::canonicalize(&script_path)
             .wrap_err_with(|| format!("Failed to canonicalize {}", script_path.display()))?;
-        let command = format!("source {}", script_path.display());
-        run_command_as_interactive(&command, logger, true)
-            .wrap_err_with(|| format!("Running '{command}' failed"))?;
+        run_script_as_interactive(&script_path, logger, true)
+            .wrap_err_with(|| format!("Running '{}' failed", script_path.display()))?;
 
         if !keep_tmp {
             fs::remove_file(&script_path)
@@ -365,62 +364,57 @@ where
     })
 }
 
-/// Run a command as if it were run in interactive mode by the user.
+/// Run a script as if it were run in interactive mode by the user.
 ///
-/// zsh:
-/// In order to run a command under zsh that would be able to execute any
-/// equivalent interactive user commands it needs to be run as:
-///    zsh -i --nozle <<< "COMMAND ; setopt zle ; exit"
-/// so we need to run and drive stdin.
-///
-/// bash:
-/// Very similar to zsh, but can be simply:
-///    bash -i <<< "COMMAND"
-///
-/// Note that multiple commands can be run by writing a script and passing
-/// "source SCRIPT" as the command.
-pub fn run_command_as_interactive(
-    to_run: &str,
+/// This keeps interactive shell startup behaviour, but avoids sourcing scripts
+/// into the long-lived shell command stream. Sourced scripts can leak options
+/// such as `set -e` into interactive zsh hooks and abort after a successful
+/// recipe command.
+fn run_script_as_interactive(
+    script_path: &Path,
     logger: &mut impl Logger,
     show_output_on_pass: bool,
 ) -> io::Result<()> {
-    debug!("Running '{to_run}'");
+    debug!("Running script '{}'", script_path.display());
 
-    let mut child = if cfg!(target_os = "macos") {
-        std::process::Command::new("zsh")
+    let mut command = interactive_shell_command();
+    let child = command
+        .arg(script_path)
+        .spawn()
+        .expect("Should be able to spawn child process");
+
+    log_child_output(
+        &script_path.display().to_string(),
+        &child.wait_with_output()?,
+        logger,
+        show_output_on_pass,
+    )
+}
+
+fn interactive_shell_command() -> ProcessCommand {
+    let mut command = if cfg!(target_os = "macos") {
+        let mut command = ProcessCommand::new("zsh");
+        command
             .env("SHELL_SESSIONS_DISABLE", "1") // Disable saving/restoring zsh sessions
             .arg("-i")
-            .arg("--nozle")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("Should be able to spawn child process")
+            .arg("--nozle");
+        command
     } else {
-        std::process::Command::new("bash")
-            .arg("-i")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("Should be able to spawn child process")
+        let mut command = ProcessCommand::new("bash");
+        command.arg("-i");
+        command
     };
 
-    let mut stdin = child.stdin.take().expect("Should be able to open stdin");
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    command
+}
 
-    let cmd = if cfg!(target_os = "macos") {
-        format!("{to_run} ; setopt zle >/dev/null 2>&1 || true ; exit")
-    } else {
-        to_run.to_string()
-    };
-
-    std::thread::spawn(move || {
-        stdin
-            .write_all(cmd.as_bytes())
-            .expect("Should be able to write to stdin");
-    });
-
-    let output = child.wait_with_output()?;
+fn log_child_output(
+    command: &str,
+    output: &Output,
+    logger: &mut impl Logger,
+    show_output_on_pass: bool,
+) -> io::Result<()> {
     if !output.status.success() {
         let info_str = str::from_utf8(&output.stdout).unwrap();
         logger.info(&format!("STDOUT:\n{TAG}{info_str}{TAG}"));
@@ -428,7 +422,7 @@ pub fn run_command_as_interactive(
         let error_str = str::from_utf8(&output.stderr).unwrap();
         logger.error(&format!("STDERR:\n{TAG}{error_str}{TAG}"));
 
-        return Err(non_zero_exit_error(to_run, output.status));
+        return Err(non_zero_exit_error(command, output.status));
     }
 
     if show_output_on_pass {
