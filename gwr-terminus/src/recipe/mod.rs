@@ -391,18 +391,42 @@ fn run_script_as_interactive(
     )
 }
 
+// #[derive(Clone, Copy)]
+enum InteractiveShell {
+    Bash,
+    Zsh,
+}
+
+fn detect_interactive_shell() -> InteractiveShell {
+    let shell_name = std::env::var_os("SHELL").and_then(|shell| {
+        PathBuf::from(shell)
+            .file_name()
+            .and_then(|file_name| file_name.to_str().map(str::to_owned))
+    });
+
+    match shell_name.as_deref() {
+        Some("bash") => InteractiveShell::Bash,
+        Some("zsh") => InteractiveShell::Zsh,
+        _ if cfg!(target_os = "macos") => InteractiveShell::Zsh,
+        _ => InteractiveShell::Bash,
+    }
+}
+
 fn interactive_shell_command() -> ProcessCommand {
-    let mut command = if cfg!(target_os = "macos") {
-        let mut command = ProcessCommand::new("zsh");
-        command
-            .env("SHELL_SESSIONS_DISABLE", "1") // Disable saving/restoring zsh sessions
-            .arg("-i")
-            .arg("--nozle");
-        command
-    } else {
-        let mut command = ProcessCommand::new("bash");
-        command.arg("-i");
-        command
+    let mut command = match detect_interactive_shell() {
+        InteractiveShell::Zsh => {
+            let mut command = ProcessCommand::new("zsh");
+            command
+                .env("SHELL_SESSIONS_DISABLE", "1") // Disable saving/restoring zsh sessions
+                .arg("-i")
+                .arg("--nozle");
+            command
+        }
+        InteractiveShell::Bash => {
+            let mut command = ProcessCommand::new("bash");
+            command.arg("-i");
+            command
+        }
     };
 
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
