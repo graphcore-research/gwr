@@ -14,7 +14,8 @@ use clap::{Parser, Subcommand};
 use color_eyre::Result;
 use crossterm::event::{self, Event};
 use gwr_terminus::CliLogger;
-use gwr_terminus::recipe::{Recipe, run_command_as_interactive};
+use gwr_terminus::command::Command;
+use gwr_terminus::recipe::Recipe;
 use gwr_terminus::tui::Tui;
 use log::{LevelFilter, info};
 use ratatui::Terminal;
@@ -116,14 +117,28 @@ fn setup_logger(debug: bool) {
         .init();
 }
 
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 /// Build the history
-fn capture_history_to_tmp(tmp_root: &Path, n: u32) -> PathBuf {
+fn capture_history_to_tmp(tmp_root: &Path, n: u32, keep_tmp: bool) -> PathBuf {
     let tmp_str = tmp_root.to_string_lossy().to_string() + ".hist";
     let tmp_path = PathBuf::from(tmp_str);
-    let command = format!("fc -l -{n} > {}", tmp_path.display());
+    let command = format!(
+        "fc -l -{n} > {}",
+        shell_quote(tmp_path.to_string_lossy().as_ref())
+    );
+
+    let mut command = Command::new(&command);
+    command.select();
+    let mut recipe = Recipe::new("Capture shell history", &[command]);
+
     let mut cli_logger = CliLogger {};
-    run_command_as_interactive(&command, &mut cli_logger, false)
+    recipe
+        .execute(tmp_root, keep_tmp, true, &mut cli_logger)
         .expect("Should be able to create history");
+
     tmp_path
 }
 
@@ -146,7 +161,7 @@ fn main() -> Result<()> {
         } => {
             let history_path = match history {
                 Some(history) => history,
-                None => &capture_history_to_tmp(tmp_root, 100),
+                None => &capture_history_to_tmp(tmp_root, 100, keep_tmp),
             };
             let result = if let Some(recipe) = recipe {
                 write_recipe(history_path, recipe, select.as_ref(), description.as_ref())
