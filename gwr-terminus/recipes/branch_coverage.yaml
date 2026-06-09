@@ -1,0 +1,44 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+description:
+  Run all workspace tests with code coverage enabled and generate a text
+  coverage report, including branch coverage.
+arguments:
+  - name: REPORT_DIR
+    default: target/llvm-cov
+    comment: Directory to write the generated text coverage report into.
+  - name: EXTRA_ARGS
+    default: ""
+    comment: Additional arguments to append to `cargo +nightly llvm-cov`.
+ingredients:
+  - comment:
+      Check that the nightly toolchain and `cargo llvm-cov` subcommand are
+      available.
+    command: |-
+      if ! cargo +nightly --version >/dev/null 2>&1; then
+        echo "The nightly Rust toolchain is not installed."
+        echo "Install it with: rustup toolchain install nightly"
+        exit 1
+      fi
+      if ! cargo +nightly llvm-cov --version >/dev/null 2>&1; then
+        echo "cargo-llvm-cov is not installed."
+        echo "Install it with: cargo binstall --disable-telemetry --no-confirm --locked cargo-llvm-cov"
+        exit 1
+      fi
+  - comment: Ensure the output directory exists before generating the report.
+    command: mkdir -p "$REPORT_DIR"
+  - comment: Clear any existing coverage artefacts from previous runs.
+    command: cargo +nightly llvm-cov clean --workspace
+  - comment:
+      Run the full workspace test suite with all features enabled and generate a
+      text coverage report with branch coverage.
+    command: |-
+      cargo +nightly llvm-cov \
+        --workspace \
+        --all-features \
+        --branch \
+        --verbose \
+        --text \
+        --output-path "$REPORT_DIR/coverage.txt" \
+        $EXTRA_ARGS
+  - comment: Print the location of the generated coverage report.
+    command: echo "Coverage report generated in $REPORT_DIR/coverage.txt"

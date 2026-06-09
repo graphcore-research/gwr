@@ -23,5 +23,8 @@ exclude = [
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ["cfg(coverage)"] }
+
 [dev-dependencies]
 strip-ansi-escapes = "0.2.1"
