@@ -36,7 +36,6 @@ repos:
             .*\.png|
             .*\.json
           )
-        stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: lychee-check-links
         name: check links
         description: check validity of links in Markdown and HTML
@@ -44,21 +43,18 @@ repos:
         types_or: [markdown, html]
         entry: lychee .
         pass_filenames: false
-        stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: prettier-markdown
         name: prettier markdown
         description: check formatting of Markdown files
         language: system
         types: [markdown]
         entry: npx prettier --write
-        stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: prettier-yaml
         name: prettier yaml
         description: check formatting of YAML files
         language: system
         types: [yaml]
         entry: npx prettier --write
-        stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: cargo-deny
         name: cargo deny
         description: check Rust dependencies licenses and for vulnerabilities
@@ -66,7 +62,6 @@ repos:
         types_or: [rust, toml]
         entry: cargo deny check
         pass_filenames: false
-        stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: cargo-about
         name: cargo about
         description: Document licenses of Rust dependencies
@@ -76,14 +71,12 @@ repos:
           cargo about generate --locked --workspace --all-features --fail
           --config about.toml --output-file licenses.html about.hbs
         pass_filenames: false
-        stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: cargo-nightly-fmt
         name: cargo +nightly fmt
         description: format files with "cargo fmt" from the nightly toolchain
         language: system
         types: [rust]
         entry: cargo +nightly fmt --
-        stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: cargo-check
         name: cargo check
         description: check for package errors with cargo check
@@ -91,7 +84,6 @@ repos:
         types_or: [rust, toml]
         entry: cargo check --all-targets
         pass_filenames: false
-        stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: cargo-clippy-strict
         name: cargo clippy-strict
         description: lint Rust source code
@@ -99,7 +91,6 @@ repos:
         types: [rust]
         entry: env RUSTFLAGS="-D warnings" cargo clippy-strict
         pass_filenames: false
-        stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: cargo-doc-gwr-dev
         name: cargo doc-gwr-dev
         description: check Rust source code documentation
@@ -107,7 +98,6 @@ repos:
         types: [rust]
         entry: env RUSTDOCFLAGS="-D warnings" cargo doc-gwr-dev
         pass_filenames: false
-        stages: [pre-commit, pre-merge-commit, pre-push, manual]
       - id: cargo-semver-checks
         name: cargo semver-checks
         description: lint crate API changes for semver violations
@@ -122,4 +112,5 @@ repos:
         language: system
         entry: cog verify --file
         stages: [commit-msg]
+default_stages: [pre-commit, pre-merge-commit, pre-push]
 default_install_hook_types: [pre-commit, pre-merge-commit, commit-msg, pre-push]
