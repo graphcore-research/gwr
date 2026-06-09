@@ -112,5 +112,5 @@ repos:
         language: system
         entry: cog verify --file
         stages: [commit-msg]
-default_stages: [pre-commit, pre-merge-commit, pre-push]
-default_install_hook_types: [pre-commit, pre-merge-commit, commit-msg, pre-push]
+default_stages: [pre-commit, pre-merge-commit]
+default_install_hook_types: [pre-commit, pre-merge-commit, commit-msg]
