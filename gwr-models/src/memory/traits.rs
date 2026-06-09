@@ -15,7 +15,7 @@ pub trait AccessMemory
 where
     Self: Routable + TotalBytes,
 {
-    /// Return the source address of this access
+    /// Return the destination address of this access
     fn dst_addr(&self) -> u64;
 
     /// Return the source address of this access
