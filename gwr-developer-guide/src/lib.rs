@@ -26,6 +26,10 @@ mod tests {
     use strip_ansi_escapes::strip_str;
 
     #[test]
+    #[cfg_attr(
+        coverage,
+        ignore = "mdbook-linkcheck is environment-sensitive and is not useful for Rust coverage"
+    )]
     fn mdbook_build() {
         let mdbook_output = Command::new("mdbook")
             .arg("build")

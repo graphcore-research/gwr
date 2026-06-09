@@ -9,11 +9,3 @@ struct Config {
     #[arg(long)]
     a: Option<String>,
 }
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            a: Default::default(),
-        }
-    }
-}
