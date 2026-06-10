@@ -16,20 +16,43 @@ default_install_hook_types = [
 [[repos]]
 repo = "builtin"
 hooks = [
-  { id = "check-added-large-files" },
-  { id = "check-case-conflict" },
-  { id = "check-executables-have-shebangs" },
-  { id = "check-merge-conflict" },
-  { id = "check-toml" },
-  { id = "check-yaml" },
-  { id = "end-of-file-fixer" },
+  {
+    id = "check-added-large-files",
+    priority = 4
+  },
+  {
+    id = "check-case-conflict",
+    priority = 4
+  },
+  {
+    id = "check-executables-have-shebangs",
+    priority = 4
+  },
+  {
+    id = "check-merge-conflict",
+    priority = 4
+  },
+  {
+    id = "check-toml",
+    priority = 4
+  },
+  {
+    id = "check-yaml",
+    priority = 4
+  },
+  {
+    id = "end-of-file-fixer",
+    priority = 3
+  },
   {
     id = "mixed-line-ending",
-    exclude = "licenses.html"
+    exclude = "licenses.html",
+    priority = 2
   },
   {
     id = "trailing-whitespace",
-    exclude = "licenses.html"
+    exclude = "licenses.html",
+    priority = 1
   }
 ]
 
@@ -53,7 +76,8 @@ hooks = [
   .*\.png|
   .*\.json
 )
-'''
+''',
+    priority = 4
   },
   {
     id = "lychee-check-links",
@@ -65,7 +89,8 @@ hooks = [
       "html"
     ],
     entry = "lychee .",
-    pass_filenames = false
+    pass_filenames = false,
+    priority = 4
   },
   {
     id = "prettier-markdown",
@@ -73,7 +98,8 @@ hooks = [
     description = "check formatting of Markdown files",
     language = "system",
     types = ["markdown"],
-    entry = "npx prettier --write"
+    entry = "npx prettier --write",
+    priority = 0
   },
   {
     id = "prettier-yaml",
@@ -81,7 +107,8 @@ hooks = [
     description = "check formatting of YAML files",
     language = "system",
     types = ["yaml"],
-    entry = "npx prettier --write"
+    entry = "npx prettier --write",
+    priority = 0
   },
   {
     id = "cargo-deny",
@@ -93,7 +120,8 @@ hooks = [
       "toml"
     ],
     entry = "cargo deny check",
-    pass_filenames = false
+    pass_filenames = false,
+    priority = 4
   },
   {
     id = "cargo-about",
@@ -105,7 +133,8 @@ hooks = [
       "toml"
     ],
     entry = "cargo about generate --locked --workspace --all-features --fail --config about.toml --output-file licenses.html about.hbs",
-    pass_filenames = false
+    pass_filenames = false,
+    priority = 0
   },
   {
     id = "cargo-nightly-fmt",
@@ -113,7 +142,8 @@ hooks = [
     description = 'format files with "cargo fmt" from the nightly toolchain',
     language = "system",
     types = ["rust"],
-    entry = "cargo +nightly fmt --"
+    entry = "cargo +nightly fmt --",
+    priority = 0
   },
   {
     id = "cargo-check",
@@ -125,7 +155,8 @@ hooks = [
       "toml"
     ],
     entry = "cargo check --all-targets",
-    pass_filenames = false
+    pass_filenames = false,
+    priority = 4
   },
   {
     id = "cargo-clippy-strict",
@@ -134,7 +165,8 @@ hooks = [
     language = "system",
     types = ["rust"],
     entry = 'env RUSTFLAGS="-D warnings" cargo clippy-strict',
-    pass_filenames = false
+    pass_filenames = false,
+    priority = 4
   },
   {
     id = "cargo-doc-gwr-dev",
@@ -143,7 +175,8 @@ hooks = [
     language = "system",
     types = ["rust"],
     entry = 'env RUSTDOCFLAGS="-D warnings" cargo doc-gwr-dev',
-    pass_filenames = false
+    pass_filenames = false,
+    priority = 4
   },
   {
     id = "cargo-semver-checks",
@@ -156,6 +189,7 @@ hooks = [
     ],
     entry = "semver-checks.sh",
     pass_filenames = false,
+    priority = 4,
     stages = ["manual"]
   },
   {
@@ -164,6 +198,7 @@ hooks = [
     description = "check commit message is in Conventional Commit form",
     language = "system",
     entry = "cog verify --file",
+    priority = 0,
     stages = ["commit-msg"]
   }
 ]
