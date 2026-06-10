@@ -19,14 +19,14 @@ command = "mdbook-keeper"
 manifest_dir = "../"
 is_workspace = true
 externs = [
-    "async_trait",
-    "gwr_components",
-    "gwr_engine",
-    "gwr_model_builder",
-    "gwr_models",
-    "gwr_platform",
-    "gwr_resources",
-    "gwr_track",
+  "async_trait",
+  "gwr_components",
+  "gwr_engine",
+  "gwr_model_builder",
+  "gwr_models",
+  "gwr_platform",
+  "gwr_resources",
+  "gwr_track",
 ]
 
 [output.html]

@@ -5,25 +5,25 @@ include_fragments = true
 
 # Do not check the validity of links in these files
 exclude_path = [
-    # Links within the developer guide are validated by mdbook-linkcheck
-    # which is run after mdbook "links" pre-processes has expanded all
-    # {{ #include }} handlebars
-    "^\\./gwr-developer-guide\\/.*",
-    # The licenses file is automatically generarte by cargo-about
-    "^\\.\\/licenses\\.html$",
-    # External sources included as submodules
-    "^\\./gwr-onnx-sys/onnx_src/.*",
-    "^\\./gwr-perfetto-sys/perfetto_src/.*",
+  # Links within the developer guide are validated by mdbook-linkcheck
+  # which is run after mdbook "links" pre-processes has expanded all
+  # {{ #include }} handlebars
+  "^\\./gwr-developer-guide\\/.*",
+  # The licenses file is automatically generarte by cargo-about
+  "^\\.\\/licenses\\.html$",
+  # External sources included as submodules
+  "^\\./gwr-onnx-sys/onnx_src/.*",
+  "^\\./gwr-perfetto-sys/perfetto_src/.*",
 ]
 
 # Do not check links to private IP addresses, local host or loopback
 exclude_all_private = true
 # Do not check the following URLs
 exclude = [
-    # The npm website uses Cloudflare Bot Management, requiring clients to
-    # handle a challenge, see
-    # https://github.com/orgs/community/discussions/174098
-    "^https://www\\.npmjs\\.com/",
+  # The npm website uses Cloudflare Bot Management, requiring clients to
+  # handle a challenge, see
+  # https://github.com/orgs/community/discussions/174098
+  "^https://www\\.npmjs\\.com/",
 ]
 
 # Cache the status returned when checking external links

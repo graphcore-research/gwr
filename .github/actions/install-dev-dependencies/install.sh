@@ -28,5 +28,6 @@ cargo binstall --disable-telemetry --no-confirm --locked   \
   cargo-semver-checks@0.47.0                               \
   lychee@0.22.0                                            \
   prek@0.4.4                                               \
-  release-plz@0.3.153
+  release-plz@0.3.153                                      \
+  taplo-cli@0.10.0
 cargo binstall --disable-telemetry --no-confirm --locked --bin=cog cocogitto@6.5.0

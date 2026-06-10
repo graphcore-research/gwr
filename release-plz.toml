@@ -9,17 +9,17 @@ header = """
 All notable changes for each release of this package will be documented in this file.
 """
 commit_parsers = [
-    { message = "^feat", group = "Features" },
-    { message = "^fix", group = "Bug Fixes" },
-    { message = "^docs", group = "Documentation" },
-    { message = "^perf", group = "Performance" },
-    { message = "^refactor", group = "Refactor" },
-    { message = "^style", group = "Styling" },
-    { message = "^test", group = "Testing" },
-    { message = "^infra", group = "Infrastructure" },
-    { message = "^misc", group = "Miscellaneous Tasks" },
-    { body = ".*security", group = "Security" },
-    { message = "^chore", skip = true },
+  { body = ".*security", group = "Security" },
+  { message = "^chore", skip = true },
+  { message = "^docs", group = "Documentation" },
+  { message = "^feat", group = "Features" },
+  { message = "^fix", group = "Bug Fixes" },
+  { message = "^infra", group = "Infrastructure" },
+  { message = "^misc", group = "Miscellaneous Tasks" },
+  { message = "^perf", group = "Performance" },
+  { message = "^refactor", group = "Refactor" },
+  { message = "^style", group = "Styling" },
+  { message = "^test", group = "Testing" },
 ]
 
 [workspace]

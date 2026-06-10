@@ -1,0 +1,41 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+exclude = ["target/**"]
+
+[formatting]
+inline_table_expand = false
+reorder_arrays = true
+
+# Schema validation rules - used by `taplo check` to validate TOML files.
+
+[[rule]]
+include = ["**/Cargo.toml"]
+# Excluded as schemastore schema does not support `check-cfg` in `[lints.rust.unexpected_cfgs]`.
+exclude = ["gwr-developer-guide/Cargo.toml"]
+[rule.schema]
+path = "https://www.schemastore.org/cargo.json"
+
+[[rule]]
+include = ["rustfmt.toml"]
+[rule.schema]
+path = "https://www.schemastore.org/rustfmt.json"
+
+[[rule]]
+include = ["rust-toolchain.toml"]
+[rule.schema]
+path = "https://www.schemastore.org/rust-toolchain.json"
+
+[[rule]]
+include = ["release-plz.toml"]
+[rule.schema]
+path = "https://raw.githubusercontent.com/MarcoIeni/release-plz/main/.schema/latest.json"
+
+[[rule]]
+include = ["taplo.toml"]
+[rule.schema]
+path = "https://www.schemastore.org/taplo.json"
+
+[[rule]]
+include = ["prek.toml"]
+[rule.schema]
+path = "https://www.schemastore.org/prek.json"
