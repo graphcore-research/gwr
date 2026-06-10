@@ -123,3 +123,34 @@ async fn all_of<T: Default>(events: Vec<Box<dyn Event<T>>>) {
         // Keep waiting till all are done
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clone_dyn_clones_event() {
+        let event = AllOf::<()>::new(Vec::new());
+
+        let cloned = event.clone_dyn();
+
+        drop(cloned);
+    }
+
+    #[test]
+    fn future_reports_termination_state() {
+        let pending = AllOfFuture {
+            state: Rc::new(AllOfState::new(Vec::<Eventable<()>>::new())),
+            future: None,
+            done: false,
+        };
+        assert!(!pending.is_terminated());
+
+        let done = AllOfFuture {
+            state: Rc::new(AllOfState::new(Vec::<Eventable<()>>::new())),
+            future: None,
+            done: true,
+        };
+        assert!(done.is_terminated());
+    }
+}

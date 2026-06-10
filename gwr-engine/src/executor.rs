@@ -227,3 +227,74 @@ pub fn new_executor_and_spawner(top: &Rc<Entity>) -> (Executor, Spawner) {
         Spawner { state },
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::rc::Rc;
+    use std::task::{Context, Poll};
+
+    use futures::task::noop_waker;
+    use gwr_track::entity::toplevel;
+    use gwr_track::tracker::dev_null_tracker;
+
+    use super::*;
+    use crate::time::clock::TaskWaker;
+
+    struct PanicIfPolled;
+
+    impl Future for PanicIfPolled {
+        type Output = SimResult;
+
+        fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+            panic!("finished executor step polled a task");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "finished executor step polled a task")]
+    fn panic_if_polled_panics_when_polled() {
+        let mut future = Box::pin(PanicIfPolled);
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        let _ = future.as_mut().poll(&mut cx);
+    }
+
+    #[test]
+    fn run_exits_when_time_cannot_advance() {
+        let tracker = dev_null_tracker();
+        let top = toplevel(&tracker, "top");
+        let (executor, _spawner) = new_executor_and_spawner(&top);
+        let clock = executor.get_clock(1000.0);
+
+        clock
+            .shared_state
+            .waiting
+            .borrow_mut()
+            .push(vec![TaskWaker {
+                id: 0,
+                waker: noop_waker(),
+                can_exit: false,
+            }]);
+
+        let finished = Rc::new(RefCell::new(false));
+
+        executor.run(&finished).unwrap();
+    }
+
+    #[test]
+    fn step_stops_polling_when_finished_is_set() {
+        let tracker = dev_null_tracker();
+        let top = toplevel(&tracker, "top");
+        let (executor, spawner) = new_executor_and_spawner(&top);
+
+        spawner.spawn(PanicIfPolled);
+
+        let finished = Rc::new(RefCell::new(true));
+
+        executor.step(&finished).unwrap();
+    }
+}

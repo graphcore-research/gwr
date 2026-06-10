@@ -170,3 +170,44 @@ pub trait Runnable {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Tests added simply for code coverage
+    #[test]
+    fn integer_sim_object_defaults_are_available() {
+        assert_eq!(0_i32.total_bytes(), size_of::<i32>());
+        assert_eq!(7_i32.destination(), 7);
+        assert_eq!(0_i32.access_type(), AccessType::ReadRequest);
+        assert_eq!(1_i32.access_type(), AccessType::WriteRequest);
+        assert_eq!(2_i32.access_type(), AccessType::WriteNonPostedRequest);
+        assert_eq!(3_i32.access_type(), AccessType::ReadResponse);
+        assert_eq!(4_i32.access_type(), AccessType::WriteNonPostedResponse);
+        assert_eq!(5_i32.access_type(), AccessType::Control);
+
+        assert_eq!(0_usize.total_bytes(), size_of::<usize>());
+        assert_eq!(7_usize.destination(), 7);
+        assert_eq!(0_usize.access_type(), AccessType::ReadRequest);
+        assert_eq!(1_usize.access_type(), AccessType::WriteRequest);
+        assert_eq!(2_usize.access_type(), AccessType::WriteNonPostedRequest);
+        assert_eq!(3_usize.access_type(), AccessType::ReadResponse);
+        assert_eq!(4_usize.access_type(), AccessType::WriteNonPostedResponse);
+        assert_eq!(5_usize.access_type(), AccessType::Control);
+    }
+
+    struct PassiveRunnable;
+
+    #[test]
+    fn runnable_default_run_completes_successfully() {
+        let runnable = PassiveRunnable;
+
+        futures::executor::LocalPool::new()
+            .run_until(runnable.run())
+            .unwrap();
+    }
+
+    #[async_trait(?Send)]
+    impl Runnable for PassiveRunnable {}
+}

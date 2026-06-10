@@ -78,3 +78,25 @@ impl fmt::Display for AccessType {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Test added for code coverage
+    #[test]
+    fn access_type_display_names_match_variants() {
+        assert_eq!(AccessType::ReadRequest.to_string(), "ReadRequest");
+        assert_eq!(AccessType::WriteRequest.to_string(), "WriteRequest");
+        assert_eq!(
+            AccessType::WriteNonPostedRequest.to_string(),
+            "WriteNonPostedRequest"
+        );
+        assert_eq!(AccessType::ReadResponse.to_string(), "ReadResponse");
+        assert_eq!(
+            AccessType::WriteNonPostedResponse.to_string(),
+            "WriteNonPostedResponse"
+        );
+        assert_eq!(AccessType::Control.to_string(), "Control");
+    }
+}

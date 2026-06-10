@@ -54,3 +54,37 @@ impl Default for Waiting {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use futures::task::noop_waker;
+
+    use super::*;
+
+    #[test]
+    fn default_creates_empty_waiting_list() {
+        let waiting = Waiting::default();
+
+        assert!(waiting.listeners.borrow().is_empty());
+        assert_eq!(waiting.next_listener_id.get(), 0);
+    }
+
+    #[test]
+    fn removing_unknown_listener_is_a_noop() {
+        let waiting = Waiting::new();
+
+        waiting.remove_listener(7);
+
+        assert!(waiting.listeners.borrow().is_empty());
+        assert_eq!(waiting.next_listener_id.get(), 0);
+
+        let listener_id = waiting.register_listener(noop_waker());
+        assert_eq!(waiting.listeners.borrow().len(), 1);
+        assert_eq!(waiting.next_listener_id.get(), 1);
+
+        waiting.remove_listener(listener_id);
+
+        assert!(waiting.listeners.borrow().is_empty());
+        assert_eq!(waiting.next_listener_id.get(), 1);
+    }
+}

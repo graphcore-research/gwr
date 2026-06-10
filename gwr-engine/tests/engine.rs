@@ -8,9 +8,11 @@ use std::task::{Context, Poll};
 
 use gwr_components::sink::Sink;
 use gwr_components::source::Source;
+use gwr_engine::engine::Engine;
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::types::SimResult;
+use gwr_track::tracker::dev_null_tracker;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
@@ -44,6 +46,78 @@ fn all_spawned() {
 
     source.connect_port_tx(sink.port_rx()).unwrap();
     run_simulation!(engine);
+}
+
+#[test]
+fn default_engine_runs() {
+    let mut engine = Engine::default();
+    let clock = engine.default_clock();
+
+    engine.spawn(async move {
+        clock.wait_ticks(1).await;
+        Ok(())
+    });
+
+    run_simulation!(engine);
+
+    assert_eq!(engine.time_now_ns(), 1.0);
+}
+
+#[test]
+fn clock_khz_sets_clock_frequency() {
+    let mut engine = start_test(file!());
+    let clock = engine.clock_khz(1.0);
+
+    engine.spawn(async move {
+        clock.wait_ticks(1).await;
+        Ok(())
+    });
+
+    run_simulation!(engine);
+
+    assert_eq!(engine.time_now_ns(), 1_000_000.0);
+}
+
+#[test]
+fn clock_ghz_sets_clock_frequency() {
+    let mut engine = start_test(file!());
+    let clock = engine.clock_ghz(2.0);
+
+    engine.spawn(async move {
+        clock.wait_ticks(1).await;
+        Ok(())
+    });
+
+    run_simulation!(engine);
+
+    assert_eq!(engine.time_now_ns(), 0.5);
+}
+
+#[test]
+fn spawner_can_spawn_tasks() {
+    let mut engine = start_test(file!());
+    let spawner = engine.spawner();
+    let ran = Rc::new(Cell::new(false));
+
+    {
+        let ran = ran.clone();
+        spawner.spawn(async move {
+            ran.set(true);
+            Ok(())
+        });
+    }
+
+    run_simulation!(engine);
+
+    assert!(ran.get());
+}
+
+#[test]
+fn tracker_returns_shared_tracker() {
+    let tracker = dev_null_tracker();
+    let engine = Engine::new(&tracker);
+
+    assert!(Rc::ptr_eq(&tracker, &engine.tracker()));
 }
 
 #[test]

@@ -157,3 +157,42 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn state_default_uses_unit_result() {
+        let state = OnceState::default();
+
+        assert_eq!(state.result, ());
+        assert!(!*state.triggered.borrow());
+    }
+
+    #[test]
+    fn clone_dyn_clones_event() {
+        let event = Once::default();
+
+        let cloned = event.clone_dyn();
+
+        drop(cloned);
+    }
+
+    #[test]
+    fn future_reports_termination_state() {
+        let pending = OnceFuture {
+            state: Rc::new(OnceState::new(())),
+            done: false,
+            listener_id: None,
+        };
+        assert!(!pending.is_terminated());
+
+        let done = OnceFuture {
+            state: Rc::new(OnceState::new(())),
+            done: true,
+            listener_id: None,
+        };
+        assert!(done.is_terminated());
+    }
+}
