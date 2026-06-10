@@ -6,9 +6,10 @@
         "jquery",
         "mdbook",
         "ONNX",
-        "Perfetto",
         "Perfetto's",
-        "prek"
+        "Perfetto",
+        "prek",
+        "taplo"
     ],
     "rust-analyzer.rustfmt.extraArgs": [
         "+nightly"

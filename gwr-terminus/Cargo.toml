@@ -12,8 +12,12 @@ readme = "README.md"
 homepage.workspace = true
 repository.workspace = true
 license.workspace = true
-keywords = ["gwr", "commands", "utility", "assistant"]
-categories = ["command-line-utilities", "command-line-interface", "development-tools"]
+keywords = ["assistant", "commands", "gwr", "utility"]
+categories = [
+  "command-line-interface",
+  "command-line-utilities",
+  "development-tools",
+]
 publish.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
