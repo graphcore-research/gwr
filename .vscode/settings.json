@@ -2,10 +2,13 @@
 {
     "cSpell.words": [
         "clippy",
+        "Cocogitto",
+        "jquery",
         "mdbook",
         "ONNX",
         "Perfetto",
-        "Perfetto's"
+        "Perfetto's",
+        "prek"
     ],
     "rust-analyzer.rustfmt.extraArgs": [
         "+nightly"

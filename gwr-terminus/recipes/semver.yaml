@@ -3,4 +3,4 @@ description: Run cargo semver checks
 arguments: []
 ingredients:
   - comment: ""
-    command: pre-commit run --hook-stage manual --all-files cargo-semver-checks
+    command: prek run --stage manual --all-files cargo-semver-checks
