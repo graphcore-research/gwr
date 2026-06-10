@@ -18,17 +18,6 @@ if [[ $GITHUB_ACTIONS != "true" ]]; then
   fi
 fi
 
-if [[ $OSTYPE == "linux"* ]]; then
-  sudo apt-get update
-  sudo apt install pre-commit
-elif [[ $OSTYPE == "darwin"* ]]; then
-  brew update
-  brew install pre-commit
-else
-  echo "Installing dev dependencies on $OSTYPE is unsupported"
-  exit 1
-fi
-
 npm install --no-save prettier@3.8.1
 
 rustup toolchain install --profile minimal --component rustfmt nightly
@@ -38,5 +27,6 @@ cargo binstall --disable-telemetry --no-confirm --locked   \
   cargo-deny@0.19.0                                        \
   cargo-semver-checks@0.47.0                               \
   lychee@0.22.0                                            \
+  prek@0.4.4                                               \
   release-plz@0.3.153
 cargo binstall --disable-telemetry --no-confirm --locked --bin=cog cocogitto@6.5.0

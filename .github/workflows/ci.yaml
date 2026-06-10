@@ -50,8 +50,8 @@ jobs:
       - uses: ./.github/actions/install-build-dependencies
       - uses: ./.github/actions/install-dev-dependencies
 
-      - name: Lint with pre-commit
-        run: pre-commit run --all-files --show-diff-on-failure
+      - name: Lint with prek
+        run: prek run --all-files --show-diff-on-failure
 
   check-semantic-versioning:
     runs-on: ubuntu-latest
@@ -64,7 +64,7 @@ jobs:
           submodules: true
       - uses: ./.github/actions/install-build-dependencies
       - uses: ./.github/actions/install-dev-dependencies
-      - run: pre-commit run --hook-stage manual --all-files cargo-semver-checks
+      - run: prek run --stage manual --all-files cargo-semver-checks
 
   build:
     strategy:

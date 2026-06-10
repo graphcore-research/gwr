@@ -207,8 +207,8 @@ required build dependencies can be installed by running:
 
 For developers of the GWR packages both `stable` and `nightly` Rust toolchains
 are required, as well external tools such as [cargo-deny], [cargo-about]
-[cargo-semver-checks], [Cocogitto], [pre-commit], [Prettier], and [Release-plz].
-All of the required development dependencies can be installed by running:
+[cargo-semver-checks], [Cocogitto], [prek], [Prettier], and [Release-plz]. All
+of the required development dependencies can be installed by running:
 
 ```bash
 ./.github/actions/install-dev-dependencies/install.sh
@@ -231,11 +231,11 @@ All of the required development dependencies can be installed by running:
 
 <!-- prettier-ignore-end -->
 
-Finally the pre-commit hooks need to be installed within the cloned copy of the
-GWR repo:
+Finally the Git hooks need to be installed within the cloned copy of the GWR
+repo:
 
 ```bash
-pre-commit install
+prek install
 ```
 
 ### Branching the Repo
@@ -287,8 +287,7 @@ When writing a commmit message in this form:
     infra: set default pre-commit hooks to install
     ```
 
-During the commit process a number of different hooks will be invoked by
-[pre-commit]:
+During the commit process a number of different hooks will be invoked by [prek]:
 
 - The [Cocogitto] tool is used to lint the text of the commit message, ensuring
   that it adheres to the [Conventional Commits] specification.
@@ -298,14 +297,14 @@ During the commit process a number of different hooks will be invoked by
     only performed by the [CI system].
   - The checks can be run locally with:
     ```bash
-    pre-commit run --hook-stage manual --all-files cargo-semver-checks
+    prek run --stage manual --all-files cargo-semver-checks
     ```
 - All dependencies will be checked for vulnerabilities and compatible licensing
   using [cargo-deny].
 - The licenses of all dependencies will collated and included in the
   [licenses.html] file using [cargo-about].
-- Source files will be formatted using `rustfmt`, [Prettier], and built in tools
-  from the [pre-commit-hooks] library.
+- Source files will be formatted using `rustfmt`, [Prettier], and [builtin
+  hooks] included with [prek].
 - Links in Markdown source will be validated using [lychee].
 - Rust source will be linted using [clippy] (via the `cargo clippy-strict`
   alias).
@@ -347,8 +346,8 @@ updated package, and automatically publishes the updated packages using
 [Cocogitto]: https://docs.cocogitto.io
 [Conventional Commits]: https://www.conventionalcommits.org/en/v1.0.0
 [lychee]: https://lychee.cli.rs
-[pre-commit]: https://pre-commit.com
-[pre-commit-hooks]: https://github.com/pre-commit/pre-commit-hooks
+[prek]: https://prek.j178.dev/
+[builtin hooks]: https://prek.j178.dev/builtin/#supported-hooks_1
 [Prettier]: https://prettier.io
 [Release-plz]: https://release-plz.dev
 
