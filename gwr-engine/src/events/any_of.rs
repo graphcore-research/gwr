@@ -175,3 +175,34 @@ async fn any_of<T>(events: Vec<Box<dyn Event<T>>>) -> T {
 
     futures.next().await.unwrap()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clone_dyn_clones_event() {
+        let event = AnyOf::<()>::new(Vec::new());
+
+        let cloned = event.clone_dyn();
+
+        drop(cloned);
+    }
+
+    #[test]
+    fn future_reports_termination_state() {
+        let pending = AnyOfFuture {
+            state: Rc::new(AnyOfState::new(Vec::<Eventable<()>>::new())),
+            future: None,
+            done: false,
+        };
+        assert!(!pending.is_terminated());
+
+        let done = AnyOfFuture {
+            state: Rc::new(AnyOfState::new(Vec::<Eventable<()>>::new())),
+            future: None,
+            done: true,
+        };
+        assert!(done.is_terminated());
+    }
+}

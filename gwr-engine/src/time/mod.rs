@@ -23,3 +23,19 @@ pub fn compute_adjusted_value_and_rate(
     let count_per_second = per_second.get_appropriate_unit(UnitType::Binary);
     (count, count_per_second)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adjusted_value_and_rate_handles_zero_and_elapsed_time() {
+        let (count, rate) = compute_adjusted_value_and_rate(0.0, 1024);
+        assert_eq!(count.get_value(), 1.0);
+        assert_eq!(rate.get_value(), 0.0);
+
+        let (count, rate) = compute_adjusted_value_and_rate(1_000_000_000.0, 2048);
+        assert_eq!(count.get_value(), 2.0);
+        assert_eq!(rate.get_value(), 2.0);
+    }
+}

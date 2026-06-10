@@ -330,6 +330,7 @@ where
         let value = self.state.value.borrow_mut().take();
         if let Some(value) = value {
             self.done = true;
+            self.state.waiting_get.borrow_mut().take();
 
             // Track the object through the port monitor if there is one
             if let Some(monitor) = self.state.monitor.as_ref() {
@@ -378,6 +379,7 @@ where
         let value = self.state.value.borrow_mut().take();
         if let Some(value) = value {
             self.done = true;
+            self.state.waiting_get.borrow_mut().take();
 
             // Track the object through the port monitor if there is one
             if let Some(monitor) = self.state.monitor.as_ref() {
@@ -398,5 +400,323 @@ where
 {
     fn is_terminated(&self) -> bool {
         self.done
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Wake, Waker};
+
+    use futures::future::FusedFuture;
+    use futures::task::noop_waker;
+    use gwr_track::Tracker;
+    use gwr_track::entity::Entity;
+    use gwr_track::tracker::dev_null_tracker;
+
+    use super::*;
+    use crate::traits::TotalBytes;
+
+    struct TestContext {
+        // Just kept to ensure it isn't dropped
+        _tracker: Tracker,
+        engine: Engine,
+        clock: Clock,
+    }
+
+    fn test_context() -> TestContext {
+        let tracker = dev_null_tracker();
+        let mut engine = Engine::new(&tracker);
+        let clock = engine.default_clock();
+
+        TestContext {
+            _tracker: tracker,
+            engine,
+            clock,
+        }
+    }
+
+    fn test_state<T: SimObject>() -> Rc<PortState<T>> {
+        let context = test_context();
+        let entity = Rc::new(Entity::new(context.engine.top(), "rx"));
+
+        Rc::new(PortState::new(
+            &context.engine,
+            &context.clock,
+            entity,
+            None,
+        ))
+    }
+
+    fn monitored_test_state<T: SimObject>() -> Rc<PortState<T>> {
+        let context = test_context();
+        let entity = Rc::new(Entity::new(context.engine.top(), "rx"));
+
+        Rc::new(PortState::new(
+            &context.engine,
+            &context.clock,
+            entity,
+            Some(1),
+        ))
+    }
+
+    struct WakeCounter {
+        wakes_count: Arc<AtomicUsize>,
+    }
+
+    impl Wake for WakeCounter {
+        fn wake(self: Arc<Self>) {
+            self.wakes_count.fetch_add(1, Ordering::SeqCst);
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.wakes_count.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    fn counting_waker() -> (Arc<AtomicUsize>, Waker) {
+        let wakes_count = Arc::new(AtomicUsize::new(0));
+        let waker = Waker::from(Arc::new(WakeCounter {
+            wakes_count: wakes_count.clone(),
+        }));
+
+        (wakes_count, waker)
+    }
+
+    #[test]
+    fn wake_counter_counts_wake_and_wake_by_ref() {
+        let (wakes_count, waker) = counting_waker();
+
+        waker.wake_by_ref();
+        assert_eq!(wakes_count.load(Ordering::SeqCst), 1);
+
+        waker.wake();
+        assert_eq!(wakes_count.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn in_port_state_can_only_connect_once() {
+        let context = test_context();
+        let in_port =
+            InPort::<i32>::new(&context.engine, &context.clock, context.engine.top(), "rx");
+
+        assert!(in_port.state().is_ok());
+
+        let err = in_port
+            .state()
+            .err()
+            .expect("second state call should fail");
+        assert!(format!("{err}").contains("already connected"));
+    }
+
+    #[test]
+    fn out_port_connect_can_only_connect_once() {
+        let context = test_context();
+        let mut out_port = OutPort::<i32>::new(context.engine.top(), "tx");
+        let first_in_port =
+            InPort::new(&context.engine, &context.clock, context.engine.top(), "rx1");
+        let second_in_port =
+            InPort::new(&context.engine, &context.clock, context.engine.top(), "rx2");
+
+        out_port.connect(first_in_port.state()).unwrap();
+
+        let err = out_port.connect(second_in_port.state()).unwrap_err();
+        assert!(format!("{err}").contains("already connected"));
+    }
+
+    #[test]
+    fn out_port_entity_returns_port_entity() {
+        let context = test_context();
+        let out_port = OutPort::<i32>::new(context.engine.top(), "tx");
+
+        assert!(Rc::ptr_eq(out_port.entity(), &out_port.entity));
+    }
+
+    #[test]
+    fn start_get_requires_connection_and_finish_get_wakes_putter() {
+        let context = test_context();
+        let in_port =
+            InPort::<i32>::new(&context.engine, &context.clock, context.engine.top(), "rx");
+
+        assert!(in_port.start_get().is_err());
+        assert!(in_port.state().is_ok());
+        assert!(in_port.start_get().is_ok());
+
+        let waker = noop_waker();
+        *in_port.state.waiting_put.borrow_mut() = Some(waker);
+        in_port.finish_get();
+
+        assert!(in_port.state.waiting_put.borrow().is_none());
+    }
+
+    #[test]
+    fn finish_get_without_waiting_putter_is_a_noop() {
+        let context = test_context();
+        let in_port =
+            InPort::<i32>::new(&context.engine, &context.clock, context.engine.top(), "rx");
+
+        in_port.finish_get();
+
+        assert!(in_port.state.waiting_put.borrow().is_none());
+    }
+
+    #[test]
+    fn port_put_reports_termination_after_second_poll() {
+        let state = test_state::<i32>();
+        let put = PortPut {
+            state: state.clone(),
+            value: RefCell::new(Some(123)),
+            done: RefCell::new(false),
+        };
+        let mut put = Box::pin(put);
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert_eq!(put.as_mut().poll(&mut cx), Poll::Pending);
+        assert!(!put.is_terminated());
+        assert_eq!(*state.value.borrow(), Some(123));
+        assert!(state.waiting_put.borrow().is_some());
+
+        assert_eq!(put.as_mut().poll(&mut cx), Poll::Ready(()));
+        assert!(put.is_terminated());
+    }
+
+    #[test]
+    fn port_try_put_waits_for_getter_then_completes() {
+        let state = test_state::<i32>();
+        let try_put = PortTryPut {
+            state: state.clone(),
+            done: false,
+        };
+        let mut try_put = Box::pin(try_put);
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert_eq!(try_put.as_mut().poll(&mut cx), Poll::Pending);
+        assert!(!try_put.is_terminated());
+        assert!(state.waiting_put.borrow().is_some());
+
+        *state.waiting_get.borrow_mut() = Some(noop_waker());
+
+        assert_eq!(try_put.as_mut().poll(&mut cx), Poll::Ready(()));
+        assert!(try_put.is_terminated());
+    }
+
+    #[test]
+    fn connected_out_port_creates_try_put_future() {
+        let context = test_context();
+        let mut out_port = OutPort::<i32>::new(context.engine.top(), "tx");
+        let in_port = InPort::new(&context.engine, &context.clock, context.engine.top(), "rx");
+
+        out_port.connect(in_port.state()).unwrap();
+
+        assert!(out_port.try_put().is_ok());
+    }
+
+    #[test]
+    fn port_get_waits_then_returns_value_and_reports_termination() {
+        let state = test_state::<i32>();
+        let get = PortGet {
+            state: state.clone(),
+            done: false,
+        };
+        let mut get = Box::pin(get);
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert_eq!(get.as_mut().poll(&mut cx), Poll::Pending);
+        assert!(!get.is_terminated());
+        assert!(state.waiting_get.borrow().is_some());
+
+        *state.value.borrow_mut() = Some(456);
+        *state.waiting_put.borrow_mut() = Some(noop_waker());
+
+        assert_eq!(get.as_mut().poll(&mut cx), Poll::Ready(456));
+        assert!(get.is_terminated());
+        assert!(state.waiting_put.borrow().is_none());
+    }
+
+    #[test]
+    fn port_get_pending_wakes_waiting_putter() {
+        let state = test_state::<i32>();
+        let get = PortGet {
+            state: state.clone(),
+            done: false,
+        };
+        let mut get = Box::pin(get);
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        *state.waiting_put.borrow_mut() = Some(noop_waker());
+
+        assert_eq!(get.as_mut().poll(&mut cx), Poll::Pending);
+
+        assert!(state.waiting_put.borrow().is_none());
+        assert!(state.waiting_get.borrow().is_some());
+    }
+
+    #[test]
+    fn port_get_samples_monitored_values() {
+        let state = monitored_test_state::<i32>();
+        let monitor = state
+            .monitor
+            .as_ref()
+            .expect("monitored state should create a monitor");
+        let get = PortGet {
+            state: state.clone(),
+            done: false,
+        };
+        let mut get = Box::pin(get);
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        *state.value.borrow_mut() = Some(456);
+
+        assert_eq!(get.as_mut().poll(&mut cx), Poll::Ready(456));
+        assert_eq!(monitor.bytes_in_window(), 456_i32.total_bytes());
+    }
+
+    #[test]
+    fn port_start_get_waits_then_returns_value_without_finishing_put() {
+        let state = test_state::<i32>();
+        let start_get = PortStartGet {
+            state: state.clone(),
+            done: false,
+        };
+        let mut start_get = Box::pin(start_get);
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert_eq!(start_get.as_mut().poll(&mut cx), Poll::Pending);
+        assert!(!start_get.is_terminated());
+        assert!(state.waiting_get.borrow().is_some());
+
+        let (waiting_put_wakes, waiting_put_waker) = counting_waker();
+        *state.waiting_put.borrow_mut() = Some(waiting_put_waker.clone());
+        *state.value.borrow_mut() = Some(789);
+
+        assert_eq!(start_get.as_mut().poll(&mut cx), Poll::Ready(789));
+        assert!(start_get.is_terminated());
+        assert!(state.waiting_get.borrow().is_none());
+        assert_eq!(waiting_put_wakes.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn port_start_get_samples_monitored_values() {
+        let state = monitored_test_state::<i32>();
+        let monitor = state
+            .monitor
+            .as_ref()
+            .expect("monitored state should create a monitor");
+        let start_get = PortStartGet {
+            state: state.clone(),
+            done: false,
+        };
+        let mut start_get = Box::pin(start_get);
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        *state.value.borrow_mut() = Some(789);
+
+        assert_eq!(start_get.as_mut().poll(&mut cx), Poll::Ready(789));
+        assert_eq!(monitor.bytes_in_window(), 789_i32.total_bytes());
     }
 }

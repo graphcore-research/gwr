@@ -122,3 +122,44 @@ macro_rules! spawn_subcomponent {
         $($spawner).+.spawn(async move { sub_block.run().await } );
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+
+    use async_trait::async_trait;
+    use gwr_track::tracker::dev_null_tracker;
+
+    use crate::engine::Engine;
+    use crate::traits::Runnable;
+    use crate::types::SimResult;
+
+    struct TestComponent {
+        ran: Rc<Cell<bool>>,
+    }
+
+    #[async_trait(?Send)]
+    impl Runnable for TestComponent {
+        async fn run(&self) -> SimResult {
+            self.ran.set(true);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn spawn_subcomponent_spawns_and_runs_component() {
+        let tracker = dev_null_tracker();
+        let mut engine = Engine::new(&tracker);
+        let spawner = engine.spawner();
+        let ran = Rc::new(Cell::new(false));
+        let component = RefCell::new(Some(TestComponent { ran: ran.clone() }));
+
+        spawn_subcomponent!(spawner; component);
+
+        engine.run().unwrap();
+
+        assert!(ran.get());
+        assert!(component.borrow().is_none());
+    }
+}

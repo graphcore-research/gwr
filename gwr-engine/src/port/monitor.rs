@@ -59,6 +59,21 @@ impl Monitor {
         let object_bytes = object.total_bytes();
         *self.bytes_in_window.borrow_mut() += object_bytes;
     }
+
+    #[cfg(test)]
+    pub(crate) fn bytes_in_window(&self) -> usize {
+        *self.bytes_in_window.borrow()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn bytes_total(&self) -> usize {
+        *self.bytes_total.borrow()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn last_time_ns(&self) -> f64 {
+        *self.last_time_ns.borrow()
+    }
 }
 
 #[async_trait(?Send)]
@@ -82,5 +97,49 @@ impl Runnable for Monitor {
 
             *self.last_time_ns.borrow_mut() = time_now_ns;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::mem::size_of;
+    use std::rc::Rc;
+
+    use gwr_track::entity::Entity;
+    use gwr_track::tracker::dev_null_tracker;
+
+    use super::*;
+
+    #[test]
+    fn new_and_register_initializes_monitor_and_sample_counts_bytes() {
+        let tracker = dev_null_tracker();
+        let mut engine = Engine::new(&tracker);
+        let clock = engine.default_clock();
+        let parent = engine.top().clone();
+        let entity = Rc::new(Entity::new(&parent, "port"));
+
+        let monitor = Monitor::new_and_register(&engine, &entity, &clock, 4);
+
+        assert_eq!(monitor.window_size_ticks, 4);
+        assert_eq!(monitor.bytes_in_window(), 0);
+        assert_eq!(monitor.bytes_total(), 0);
+        assert_eq!(monitor.last_time_ns(), 0.0);
+
+        monitor.sample(&123_i32);
+
+        assert_eq!(monitor.bytes_in_window(), size_of::<i32>());
+
+        {
+            let clock = clock.clone();
+            engine.spawn(async move {
+                clock.wait_ticks(4).await;
+                Ok(())
+            });
+        }
+
+        engine.run().unwrap();
+
+        assert_eq!(monitor.bytes_in_window(), 0);
+        assert_eq!(monitor.bytes_total(), size_of::<i32>());
     }
 }

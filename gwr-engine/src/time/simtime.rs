@@ -92,6 +92,11 @@ impl SimTime {
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    use futures::task::noop_waker;
     use gwr_track::entity::toplevel;
     use gwr_track::test_helpers::create_tracker;
 
@@ -121,5 +126,51 @@ mod tests {
 
         let _clk2 = time.get_clock(1800.0);
         assert_eq!(time.clocks.len(), 2);
+    }
+
+    #[test]
+    fn advance_time_returns_none_without_waiters() {
+        let tracker = create_tracker(file!());
+        let top = toplevel(&tracker, "top");
+
+        let mut time = SimTime::new(&top);
+        assert!(time.advance_time().is_none());
+
+        let _clock = time.get_clock(1000.0);
+        assert!(time.advance_time().is_none());
+    }
+
+    #[test]
+    fn advance_time_handles_equal_times_on_different_clocks() {
+        let tracker = create_tracker(file!());
+        let top = toplevel(&tracker, "top");
+
+        let mut time = SimTime::new(&top);
+        let clock_1ghz = time.get_clock(1000.0);
+        let clock_2ghz = time.get_clock(2000.0);
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        let mut delays = [
+            clock_1ghz.wait_ticks(1),
+            clock_1ghz.wait_ticks(2),
+            clock_2ghz.wait_ticks(2),
+            clock_2ghz.wait_ticks(4),
+        ];
+
+        for delay in &mut delays {
+            assert_eq!(Pin::new(delay).poll(&mut cx), Poll::Pending);
+        }
+
+        for expected_ns in [1.0, 1.0, 2.0, 2.0] {
+            let wakers = time.advance_time().unwrap();
+
+            assert_eq!(wakers.len(), 1);
+            assert_eq!(time.time_now_ns(), expected_ns);
+        }
+
+        assert_eq!(clock_1ghz.tick_now().tick(), 2);
+        assert_eq!(clock_2ghz.tick_now().tick(), 4);
+        assert!(time.advance_time().is_none());
     }
 }

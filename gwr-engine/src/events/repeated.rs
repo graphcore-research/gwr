@@ -164,3 +164,52 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn state_default_uses_unit_result() {
+        let state = RepeatedState::default();
+
+        assert_eq!(*state.result.borrow(), ());
+        assert_eq!(state.generation.get(), 0);
+    }
+
+    #[test]
+    fn with_value_sets_initial_result() {
+        let event = Repeated::with_value(123);
+
+        assert_eq!(*event.state.result.borrow(), 123);
+    }
+
+    #[test]
+    fn clone_dyn_clones_event() {
+        let event = Repeated::default();
+
+        let cloned = event.clone_dyn();
+
+        drop(cloned);
+    }
+
+    #[test]
+    fn future_reports_termination_state() {
+        let state = Rc::new(RepeatedState::new(()));
+        let pending = RepeatedFuture {
+            state: state.clone(),
+            done: false,
+            listener_id: None,
+            observed_generation: 0,
+        };
+        assert!(!pending.is_terminated());
+
+        let done = RepeatedFuture {
+            state,
+            done: true,
+            listener_id: None,
+            observed_generation: 0,
+        };
+        assert!(done.is_terminated());
+    }
+}

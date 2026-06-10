@@ -264,7 +264,7 @@ impl Clock {
     /// Returns the time in `ns` of the next event registered with this clock.
     #[must_use]
     pub fn time_of_next(&self) -> f64 {
-        match self.shared_state.waiting_times.borrow().first() {
+        match self.shared_state.waiting_times.borrow().last() {
             Some(clock_time) => self.to_ns(clock_time),
             None => f64::MAX,
         }
@@ -421,6 +421,11 @@ impl Drop for ClockDelay {
 
 #[cfg(test)]
 mod tests {
+    use std::mem::drop;
+    use std::task::Context;
+
+    use futures::task::noop_waker;
+
     use super::*;
 
     #[test]
@@ -430,5 +435,107 @@ mod tests {
 
         let slow_clk = Clock::new(0.5);
         assert_eq!(2000.0, slow_clk.to_ns(&ClockTick::new().set_tick(1)));
+    }
+
+    #[test]
+    fn clock_tick_accessors_default_display_and_ordering() {
+        let default_tick = ClockTick::default();
+        assert_eq!(default_tick.tick(), 0);
+        #[cfg(not(feature = "phase"))]
+        assert_eq!(default_tick.to_string(), "0");
+        #[cfg(feature = "phase")]
+        assert_eq!(default_tick.to_string(), "0.0");
+
+        let earlier = ClockTick::new().set_tick(1);
+        let later = ClockTick::new().set_tick(2);
+        assert!(earlier < later);
+        assert_eq!(earlier.partial_cmp(&later), Some(Ordering::Less));
+    }
+
+    #[cfg(feature = "phase")]
+    #[test]
+    fn clock_tick_phase_accessors_display_and_ordering() {
+        let tick = ClockTick::new().set_tick(1).set_phase(2);
+        assert_eq!(tick.phase(), 2);
+        assert_eq!(tick.to_string(), "1.2");
+
+        let earlier_phase = ClockTick::new().set_tick(1).set_phase(1);
+        assert!(earlier_phase < tick);
+
+        let later_tick = ClockTick::new().set_tick(2).set_phase(0);
+        assert!(later_tick > tick);
+    }
+
+    #[test]
+    fn clock_default_advance_and_ordering() {
+        let clock = Clock::default();
+        assert_eq!(clock.freq_mhz(), 1000.0);
+
+        clock.advance_to(2.1);
+        assert_eq!(clock.tick_now().tick(), 3);
+        assert_eq!(clock.time_now_ns(), 3.0);
+
+        let earlier = Clock::new(1000.0);
+        let later = Clock::new(1000.0);
+        drop(earlier.wait_ticks(1));
+        drop(later.wait_ticks(2));
+
+        assert!(earlier == later);
+        assert_eq!(earlier.partial_cmp(&later), Some(Ordering::Greater));
+    }
+
+    #[test]
+    fn unschedule_unknown_waiter_is_a_noop() {
+        let clock = Clock::new(1000.0);
+        let scheduled_time = ClockTick::new().set_tick(1);
+
+        clock
+            .shared_state
+            .waiting_times
+            .borrow_mut()
+            .push(scheduled_time);
+        clock.shared_state.waiting.borrow_mut().push(Vec::new());
+
+        clock.shared_state.unschedule(scheduled_time, 7);
+
+        assert_eq!(clock.shared_state.waiting_times.borrow().len(), 1);
+        assert_eq!(clock.shared_state.waiting.borrow().len(), 1);
+    }
+
+    #[test]
+    fn unschedule_waiter_keeps_time_when_other_waiters_remain() {
+        let clock = Clock::new(1000.0);
+        let scheduled_time = ClockTick::new().set_tick(1);
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        let first_waiter_id = clock.shared_state.schedule(scheduled_time, &mut cx, false);
+        let second_waiter_id = clock.shared_state.schedule(scheduled_time, &mut cx, false);
+
+        clock
+            .shared_state
+            .unschedule(scheduled_time, first_waiter_id);
+
+        let waiting_times = clock.shared_state.waiting_times.borrow();
+        let waiting = clock.shared_state.waiting.borrow();
+
+        assert_eq!(waiting_times.as_slice(), &[scheduled_time]);
+        assert_eq!(waiting.len(), 1);
+        assert_eq!(waiting[0].len(), 1);
+        assert_eq!(waiting[0][0].id, second_waiter_id);
+    }
+
+    #[cfg(feature = "phase")]
+    #[test]
+    fn phase_wait_helpers_schedule_phase_delays() {
+        let clock = Clock::new(1000.0);
+
+        let next_tick = clock.next_tick_and_phase(3);
+        assert_eq!(next_tick.until.tick(), 1);
+        assert_eq!(next_tick.until.phase(), 3);
+
+        let same_tick = clock.wait_phase(1);
+        assert_eq!(same_tick.until.tick(), 0);
+        assert_eq!(same_tick.until.phase(), 1);
     }
 }
