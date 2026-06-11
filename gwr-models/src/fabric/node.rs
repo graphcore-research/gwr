@@ -228,7 +228,7 @@ impl fmt::Display for Port {
     }
 }
 
-type RouterArbiterResult<T> = Result<(Rc<Arbiter<T>>, Rc<Router<T>>), SimError>;
+type RouterArbiterResult<T> = (Rc<Arbiter<T>>, Rc<Router<T>>);
 
 #[expect(clippy::too_many_arguments)]
 fn router_arbiter<T>(
@@ -254,7 +254,7 @@ where
         fabric_algorithm,
         config,
     });
-    Ok((
+    (
         Arbiter::new_and_register(
             engine,
             clock,
@@ -262,7 +262,7 @@ where
             &format!("arb_{name}"),
             num_arbiter_router_ports,
             policy,
-        )?,
+        ),
         Router::new_and_register(
             engine,
             clock,
@@ -270,13 +270,13 @@ where
             &format!("router_{name}"),
             num_arbiter_router_ports,
             algorithm,
-        )?,
-    ))
+        ),
+    )
 }
 
 type Arbiters<T> = Vec<Rc<Arbiter<T>>>;
 type Routers<T> = Vec<Rc<Router<T>>>;
-type RoutersArbitersResult<T> = Result<(Arbiters<T>, Routers<T>), SimError>;
+type RoutersArbitersResult<T> = (Arbiters<T>, Routers<T>);
 
 #[expect(clippy::too_many_arguments)]
 fn create_arbiters_routers<T>(
@@ -316,7 +316,7 @@ where
             node_col,
             node_row,
             name.as_str(),
-        )?;
+        );
         arbiters.push(arbiter);
         routers.push(router);
     }
@@ -331,7 +331,7 @@ where
             &format!("arb_{ingress_egress_index}"),
             num_arbiter_router_ports,
             policy,
-        )?);
+        ));
         let algorithm = Box::new(NodeRouter {
             index: ingress_egress_index,
             node_col,
@@ -346,10 +346,10 @@ where
             &format!("router_{ingress_egress_index}"),
             num_arbiter_router_ports,
             algorithm,
-        )?);
+        ));
     }
 
-    Ok((arbiters, routers))
+    (arbiters, routers)
 }
 
 type IngressEgressBuffersResult<T> = Result<(Vec<Rc<Limiter<T>>>, Vec<Rc<Store<T>>>), SimError>;
@@ -383,7 +383,7 @@ where
             &format!("limit_ingress_{i}"),
             Some(&ingress_buffer_limiter_aka),
             port_limiter.clone(),
-        )?;
+        );
         let ingress_buffer = Store::new_and_register(
             engine,
             clock,
@@ -391,8 +391,10 @@ where
             &format!("ingress_buf_{i}"),
             config.rx_buffer_entries,
         )?;
-        connect_port!(ingress_buffer_limiter, tx => ingress_buffer, rx)?;
-        connect_port!(ingress_buffer, tx => routers[ingress_egress_index], rx)?;
+        connect_port!(ingress_buffer_limiter, tx => ingress_buffer, rx)
+            .expect("Internal ports should connect without error");
+        connect_port!(ingress_buffer, tx => routers[ingress_egress_index], rx)
+            .expect("Internal ports should connect without error");
         ingress_buffer_limiters.push(ingress_buffer_limiter);
 
         // Build a buffer per output
@@ -402,7 +404,7 @@ where
             node,
             &format!("limit_egress_{i}"),
             port_limiter.clone(),
-        )?;
+        );
         let egress_buffer_aka = build_aka!(aka, node, &[(&format!("egress_{i}"), "tx")]);
         let egress_buffer = Store::new_and_register_with_renames(
             engine,
@@ -412,8 +414,10 @@ where
             Some(&egress_buffer_aka),
             config.tx_buffer_entries,
         )?;
-        connect_port!(egress_buffer_limiter, tx => egress_buffer, rx)?;
-        connect_port!(arbiters[ingress_egress_index], tx => egress_buffer_limiter, rx)?;
+        connect_port!(egress_buffer_limiter, tx => egress_buffer, rx)
+            .expect("Internal ports should connect without error");
+        connect_port!(arbiters[ingress_egress_index], tx => egress_buffer_limiter, rx)
+            .expect("Internal ports should connect without error");
         egress_buffers.push(egress_buffer);
     }
 
@@ -463,7 +467,7 @@ where
             num_ingress_egress_ports,
             node_col,
             node_row,
-        )?;
+        );
 
         let (ingress_buffer_limiters, egress_buffers) = create_ingress_egress_buffers(
             engine,
@@ -485,7 +489,8 @@ where
 
                 let to_index = if to > from { to - 1 } else { to };
                 let from_index = if from > to { from - 1 } else { from };
-                connect_port!(router, tx, to_index => arbiter, rx, from_index)?;
+                connect_port!(router, tx, to_index => arbiter, rx, from_index)
+                    .expect("Internal ports should connect without error");
             }
         }
 

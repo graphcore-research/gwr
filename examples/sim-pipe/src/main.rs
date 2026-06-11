@@ -146,10 +146,9 @@ fn main() -> Result<(), SimError> {
         args.frame_payload_bytes,
         num_send_frames,
     );
-    let source = Source::new_and_register(&engine, &top, "source", Some(Box::new(frame_gen)))?;
+    let source = Source::new_and_register(&engine, &top, "source", Some(Box::new(frame_gen)));
     let rx_limiter = rc_limiter!(&clock, args.pipe_rx_bits_per_tick);
-    let source_limiter =
-        Limiter::new_and_register(&engine, &clock, &top, "rx_limiter", rx_limiter)?;
+    let source_limiter = Limiter::new_and_register(&engine, &clock, &top, "rx_limiter", rx_limiter);
 
     let pipe_config = FcPipelineConfig::new(
         args.pipe_buffer_entries,
@@ -158,9 +157,8 @@ fn main() -> Result<(), SimError> {
     );
     let pipe = FcPipeline::new_and_register(&engine, &clock, &top, "pipe", &pipe_config)?;
     let tx_limiter = rc_limiter!(&clock, args.pipe_tx_bits_per_tick);
-    let sink_limiter = Limiter::new_and_register(&engine, &clock, &top, "tx_limiter", tx_limiter)?;
-    let sink = Sink::new_and_register(&engine, &clock, &top, "sink")
-        .expect("should be able to create sink");
+    let sink_limiter = Limiter::new_and_register(&engine, &clock, &top, "tx_limiter", tx_limiter);
+    let sink = Sink::new_and_register(&engine, &clock, &top, "sink");
 
     connect_port!(source, tx => source_limiter, rx)?;
     connect_port!(source_limiter, tx => pipe, rx)?;

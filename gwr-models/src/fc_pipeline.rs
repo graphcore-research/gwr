@@ -88,18 +88,20 @@ where
             "credit_limiter",
             Some(&credit_limiter_aka),
             config.buffer_size,
-        )?;
+        );
 
         let data_delay =
-            Delay::new_and_register(engine, clock, &entity, "pipe", config.data_delay_ticks)?;
+            Delay::new_and_register(engine, clock, &entity, "pipe", config.data_delay_ticks);
         // The whole point of the flow-controlled pipeline is that the delays should
         // never have to stall at their outputs
         data_delay.set_error_on_output_stall();
 
         let buffer = Store::new_and_register(engine, clock, &entity, "buf", config.buffer_size)?;
 
-        connect_port!(credit_limiter, tx => data_delay, rx)?;
-        connect_port!(data_delay, tx => buffer, rx)?;
+        connect_port!(credit_limiter, tx => data_delay, rx)
+            .expect("Internal ports should connect without error");
+        connect_port!(data_delay, tx => buffer, rx)
+            .expect("Internal ports should connect without error");
 
         let credit_issuer_aka = build_aka!(aka, &entity, &[("tx", "tx")]);
         let credit_issuer = CreditIssuer::new_and_register_with_renames(
@@ -108,21 +110,24 @@ where
             &entity,
             "credit_issuer",
             Some(&credit_issuer_aka),
-        )?;
+        );
         let credit_delay = Delay::new_and_register(
             engine,
             clock,
             &entity,
             "credit_pipe",
             config.credit_delay_ticks,
-        )?;
+        );
         // The whole point of the flow-controlled pipeline is that the delays should
         // never have to stall at their outputs
         credit_delay.set_error_on_output_stall();
 
-        connect_port!(buffer, tx => credit_issuer, rx)?;
-        connect_port!(credit_issuer, credit_tx => credit_delay, rx)?;
-        connect_port!(credit_delay, tx => credit_limiter, credit_rx)?;
+        connect_port!(buffer, tx => credit_issuer, rx)
+            .expect("Internal ports should connect without error");
+        connect_port!(credit_issuer, credit_tx => credit_delay, rx)
+            .expect("Internal ports should connect without error");
+        connect_port!(credit_delay, tx => credit_limiter, credit_rx)
+            .expect("Internal ports should connect without error");
 
         let rc_self = Rc::new(Self {
             entity,

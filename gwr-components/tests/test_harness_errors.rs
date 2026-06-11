@@ -29,7 +29,7 @@ mod delay_errors {
     fn harness_flags_send_action_on_tx_port() {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
-        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1).unwrap();
+        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
         let mut harness = DelayHarness::new(engine, delay);
 
         harness.run_steps(&[Step::Action {
@@ -43,7 +43,7 @@ mod delay_errors {
     fn harness_flags_expect_action_on_rx_port() {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
-        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1).unwrap();
+        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
         let mut harness = DelayHarness::new(engine, delay);
 
         harness.run_steps(&[Step::Action {
@@ -57,7 +57,7 @@ mod delay_errors {
     fn harness_flags_delay_with_ports() {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
-        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1).unwrap();
+        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
         let mut harness = DelayHarness::<i32>::new(engine, delay);
 
         harness.run_steps(&[Step::Action {
@@ -71,7 +71,7 @@ mod delay_errors {
     fn harness_flags_parallel_action_on_wrong_port() {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
-        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1).unwrap();
+        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
         let mut harness = DelayHarness::new(engine, delay);
 
         harness.run_steps(&[step_parallel(HashMap::from([(
@@ -85,7 +85,7 @@ mod delay_errors {
     fn harness_flags_parallel_no_traffic_on_rx_port() {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
-        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1).unwrap();
+        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
         let mut harness = DelayHarness::<i32>::new(engine, delay);
 
         harness.run_steps(&[step_parallel(HashMap::from([(
@@ -99,7 +99,7 @@ mod delay_errors {
     fn harness_flags_missing_expected_traffic() {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
-        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1).unwrap();
+        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
         let mut harness = DelayHarness::new(engine, delay);
 
         harness.run_steps(&[step_expect_tx(1)]);
@@ -135,8 +135,7 @@ mod arbiter_errors {
             "arb",
             1,
             Box::new(RoundRobin::new()),
-        )
-        .unwrap();
+        );
         let mut harness = ArbiterHarness::new(engine, arbiter, 1);
 
         harness.run_steps(&[step_send_rx(1, 99)]);

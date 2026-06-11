@@ -34,10 +34,9 @@ pub fn spawn_source_store_sink() -> Engine {
     let num_puts = 200;
 
     let top = engine.top();
-    let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; num_puts)).unwrap();
+    let source = Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; num_puts));
     let store = Store::new_and_register(&engine, &clock, top, "store", capacity).unwrap();
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 
     source.connect_port_tx(store.port_rx()).unwrap();
     connect_port!(store, tx => sink, rx).unwrap();
@@ -55,10 +54,9 @@ pub fn spawn_source_delay_sink() -> Engine {
 
     let top = engine.top();
     let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(500; num_puts))
-            .unwrap();
-    let delay = Delay::new_and_register(&engine, &clock, top, "delay", delay).unwrap();
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(500; num_puts));
+    let delay = Delay::new_and_register(&engine, &clock, top, "delay", delay);
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 
     connect_port!(source, tx => delay, rx).unwrap();
     connect_port!(delay, tx => sink, rx).unwrap();
@@ -119,21 +117,16 @@ pub fn spawn_larger_simulation() -> Engine {
         "arb",
         num_sources,
         Box::new(RoundRobin::new()),
-    )
-    .unwrap();
-    let sink_limiter =
-        Limiter::new_and_register(&engine, &clock, top, "limit_sink", rate_limiter).unwrap();
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
+    );
+    let sink_limiter = Limiter::new_and_register(&engine, &clock, top, "limit_sink", rate_limiter);
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
     for i in 0..num_sources {
-        sources.push(
-            Source::new_and_register(
-                &engine,
-                top,
-                &format!("source_{i}"),
-                option_box_repeat!(i ; num_puts),
-            )
-            .unwrap(),
-        );
+        sources.push(Source::new_and_register(
+            &engine,
+            top,
+            &format!("source_{i}"),
+            option_box_repeat!(i ; num_puts),
+        ));
         connect_port!(sources[i], tx => arbiter, rx, i).unwrap();
     }
 

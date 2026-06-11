@@ -59,7 +59,7 @@ fn main() -> SimResult {
 
     let top = engine.top();
     let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(0x123 ; num_puts))?;
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(0x123 ; num_puts));
 
     if !(0.0..=1.0).contains(&args.drop) {
         println!("ERROR: --drop ratio outside valid range [0, 1]");
@@ -67,7 +67,7 @@ fn main() -> SimResult {
     }
     let config = Config::new(args.drop, args.seed, args.delay);
     let flaky = Flaky::new_and_register(&engine, &clock, top, "flaky", &config)?;
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink")?;
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 
     connect_port!(source, tx => flaky, rx)?;
     connect_port!(flaky, tx => sink, rx)?;

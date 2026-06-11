@@ -100,21 +100,18 @@ pub fn build_source_sinks(
             } else {
                 None
             };
-        sources.push(
-            Source::new_and_register(
-                engine,
-                top,
-                &format!("source{source_index}"),
-                data_generator,
-            )
-            .unwrap(),
-        );
+        sources.push(Source::new_and_register(
+            engine,
+            top,
+            &format!("source{source_index}"),
+            data_generator,
+        ));
     }
 
     let sinks: Sinks = config
         .port_indices()
         .iter()
-        .map(|i| Sink::new_and_register(engine, clock, top, &format!("sink_{i}")).unwrap())
+        .map(|i| Sink::new_and_register(engine, clock, top, &format!("sink_{i}")))
         .collect();
 
     (sources, sinks, total_expected_frames)

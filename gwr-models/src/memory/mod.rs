@@ -102,11 +102,13 @@ where
             "delay",
             Some(&response_delay_aka),
             config.delay_ticks,
-        )?;
+        );
 
         // Create a local port to drive into the response delay
         let mut response_tx = OutPort::new(&entity, "response");
-        response_tx.connect(response_delay.port_rx())?;
+        response_tx
+            .connect(response_delay.port_rx())
+            .expect("Internal ports should connect without error");
 
         let rc_self = Rc::new(Self {
             entity,

@@ -83,24 +83,21 @@ pub fn build_source_sinks(engine: &mut Engine, clock: &Clock, config: &Config) -
     for i in 0..config.ring_size {
         let neighbour_left = if i > 0 { i - 1 } else { config.ring_size - 1 };
 
-        sources.push(
-            Source::new_and_register(
-                engine,
+        sources.push(Source::new_and_register(
+            engine,
+            top,
+            &format!("source_{i}"),
+            Some(Box::new(FrameGen::new(
                 top,
-                &format!("source_{i}"),
-                Some(Box::new(FrameGen::new(
-                    top,
-                    u64_to_mac(neighbour_left as u64),
-                    config.frame_payload_bytes,
-                    config.num_send_frames,
-                ))),
-            )
-            .unwrap(),
-        );
+                u64_to_mac(neighbour_left as u64),
+                config.frame_payload_bytes,
+                config.num_send_frames,
+            ))),
+        ));
     }
 
     let sinks: Sinks = (0..config.ring_size)
-        .map(|i| Sink::new_and_register(engine, clock, top, &format!("sink_{i}")).unwrap())
+        .map(|i| Sink::new_and_register(engine, clock, top, &format!("sink_{i}")))
         .collect();
 
     (sources, sinks)
@@ -155,7 +152,6 @@ pub fn build_limiters(
                 &format!("src_limit_{i}"),
                 limiter_gbps.clone(),
             )
-            .unwrap()
         })
         .collect();
 
@@ -168,7 +164,6 @@ pub fn build_limiters(
                 &format!("ring_limit_{i}"),
                 limiter_gbps.clone(),
             )
-            .unwrap()
         })
         .collect();
 
@@ -181,7 +176,6 @@ pub fn build_limiters(
                 &format!("sink_limit_{i}"),
                 limiter_gbps.clone(),
             )
-            .unwrap()
         })
         .collect();
     (source_limiters, ring_limiters, sink_limiters)

@@ -25,7 +25,7 @@ fn put_get() {
 
     let top = engine.top();
     // Create a pair of tasks that use a delay
-    let delay = Delay::new_and_register(&engine, &clock, top, "delay", 20).unwrap();
+    let delay = Delay::new_and_register(&engine, &clock, top, "delay", 20);
     let buffer = Store::new_and_register(&engine, &clock, top, "buffer", 1).unwrap();
 
     connect_port!(delay, tx => buffer, rx).unwrap();
@@ -76,10 +76,9 @@ fn source_sink() {
 
     let top = engine.top();
     let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(500 ; NUM_PUTS))
-            .unwrap();
-    let delay = Delay::new_and_register(&engine, &clock, top, "delay", DELAY).unwrap();
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(500 ; NUM_PUTS));
+    let delay = Delay::new_and_register(&engine, &clock, top, "delay", DELAY);
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 
     connect_port!(source, tx => delay, rx).unwrap();
     connect_port!(delay, tx => sink, rx).unwrap();
@@ -102,9 +101,8 @@ fn error_on_output_stall() {
 
     let top = engine.top();
     let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(500 ; NUM_PUTS))
-            .unwrap();
-    let delay = Delay::new_and_register(&engine, &clock, top, "delay", DELAY).unwrap();
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(500 ; NUM_PUTS));
+    let delay = Delay::new_and_register(&engine, &clock, top, "delay", DELAY);
     delay.set_error_on_output_stall();
     let store = Store::new_and_register(&engine, &clock, top, "store", 1).unwrap();
 
@@ -143,9 +141,8 @@ fn disconnected_delay() {
 
     let top = engine.top();
     let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(500 ; NUM_PUTS))
-            .unwrap();
-    let delay = Delay::new_and_register(&engine, &clock, top, "delay", DELAY).unwrap();
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(500 ; NUM_PUTS));
+    let delay = Delay::new_and_register(&engine, &clock, top, "delay", DELAY);
 
     connect_port!(source, tx => delay, rx).unwrap();
 

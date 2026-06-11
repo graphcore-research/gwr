@@ -157,7 +157,7 @@ where
         // Because it is shared it needs to be wrapped in an Arc
         let entity = Rc::new(entity);
 
-        let delay = Delay::new_and_register(engine, clock, &entity, "delay", config.delay_ticks)?;
+        let delay = Delay::new_and_register(engine, clock, &entity, "delay", config.delay_ticks);
 
         // Build up a renaming that shows that this component's `tx` port is the same
         // as the buffer's `tx` port and the user will be able to use either name.
@@ -171,11 +171,14 @@ where
             1,
         )?;
 
-        delay.connect_port_tx(buffer.port_rx())?;
+        delay
+            .connect_port_tx(buffer.port_rx())
+            .expect("Internal ports should connect without error");
 
         // Create an internal `tx` port and connect into the `delay` subcomponent
         let mut tx = OutPort::new(&entity, "delay_tx");
-        tx.connect(delay.port_rx())?;
+        tx.connect(delay.port_rx())
+            .expect("Internal ports should connect without error");
 
         let rx = InPort::new(engine, clock, &entity, "rx");
 
