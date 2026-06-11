@@ -295,7 +295,7 @@ where
 
         let policy = Box::new(RoundRobin::new());
         let response_arbiter =
-            Arbiter::new_and_register(engine, clock, &entity, "rsp_arb", 2, policy)?;
+            Arbiter::new_and_register(engine, clock, &entity, "rsp_arb", 2, policy);
 
         let response_delay_aka = build_aka!(aka, &entity, &[("dev_tx", "tx")]);
         let response_delay = Delay::new_and_register_with_renames(
@@ -305,7 +305,7 @@ where
             "rsp_delay",
             Some(&response_delay_aka),
             config.delay_ticks,
-        )?;
+        );
 
         let request_delay_aka = build_aka!(aka, &entity, &[("mem_tx", "tx")]);
         let request_delay = Delay::new_and_register_with_renames(
@@ -315,19 +315,26 @@ where
             "req_delay",
             Some(&request_delay_aka),
             config.delay_ticks,
-        )?;
+        );
 
-        response_arbiter.connect_port_tx(response_delay.port_rx())?;
+        response_arbiter
+            .connect_port_tx(response_delay.port_rx())
+            .expect("Internal ports should connect without error");
 
         // Create internal ports that are driven by the cache logic
         let mut req = OutPort::new(&entity, "req_arb_0");
-        req.connect(request_delay.port_rx())?;
+        req.connect(request_delay.port_rx())
+            .expect("Internal ports should connect without error");
 
         let mut rsp_arb_0 = OutPort::new(&entity, "rsp_arb_0");
-        rsp_arb_0.connect(response_arbiter.port_rx_i(0))?;
+        rsp_arb_0
+            .connect(response_arbiter.port_rx_i(0))
+            .expect("Internal ports should connect without error");
 
         let mut rsp_arb_1 = OutPort::new(&entity, "rsp_arb_1");
-        rsp_arb_1.connect(response_arbiter.port_rx_i(1))?;
+        rsp_arb_1
+            .connect(response_arbiter.port_rx_i(1))
+            .expect("Internal ports should connect without error");
 
         let dev_rx = InPort::new_with_renames(engine, clock, &entity, "dev_rx", aka);
         let mem_rx = InPort::new_with_renames(engine, clock, &entity, "mem_rx", aka);

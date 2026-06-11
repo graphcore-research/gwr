@@ -60,7 +60,7 @@ pub fn setup_frame_simulation() -> (Engine, Rc<Sink<EthernetFrame>>) {
         });
     }
 
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 
     connect_port!(store, tx => sink, rx).unwrap();
 
@@ -98,7 +98,7 @@ pub fn setup_box_frame_simulation() -> (Engine, Rc<Sink<Box<EthernetFrame>>>) {
         });
     }
 
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 
     connect_port!(store, tx => sink, rx).unwrap();
 

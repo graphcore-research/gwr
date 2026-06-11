@@ -79,8 +79,8 @@ fn run_test(
         });
     }
 
-    let io_sink = Sink::new_and_register(&engine, &clock, top, "io_sink").unwrap();
-    let ring_sink = Sink::new_and_register(&engine, &clock, top, "ring_sink").unwrap();
+    let io_sink = Sink::new_and_register(&engine, &clock, top, "io_sink");
+    let ring_sink = Sink::new_and_register(&engine, &clock, top, "ring_sink");
 
     connect_port!(ring_node, io_tx => io_sink, rx).unwrap();
     connect_port!(ring_node, ring_tx => ring_sink, rx).unwrap();

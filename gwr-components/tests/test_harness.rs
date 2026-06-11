@@ -37,8 +37,7 @@ mod source_harness {
             engine.top(),
             "source",
             Some(Box::new([1, 2].into_iter())),
-        )
-        .unwrap();
+        );
         let mut harness = SourceHarness::new(engine, source);
 
         harness.run_steps(&[step_expect_tx(1), step_delay(3), step_expect_tx(2)]);
@@ -63,7 +62,7 @@ mod sink_harness {
     fn harness_supports_rx_only_sink() {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
-        let sink = Sink::new_and_register(&engine, &clock, engine.top(), "sink").unwrap();
+        let sink = Sink::new_and_register(&engine, &clock, engine.top(), "sink");
         let mut harness = SinkHarness::new(engine, sink.clone());
 
         harness.run_steps(&[step_delay(4), step_send_rx(1), step_send_rx(2)]);
@@ -92,7 +91,7 @@ mod delay_harness {
     fn harness_supports_paired_delay_ports() {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
-        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 3).unwrap();
+        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 3);
         let mut harness = DelayHarness::new(engine, delay);
 
         harness.run_steps(&[
@@ -206,8 +205,7 @@ mod limiter_harness {
             engine.top(),
             "limiter",
             Rc::new(RateLimiter::new(&clock, 32)),
-        )
-        .unwrap();
+        );
         let mut harness = LimiterHarness::new(engine, limiter);
 
         harness.run_steps(&[step_parallel(HashMap::from([
@@ -245,8 +243,7 @@ mod arbiter_harness {
             "arb",
             2,
             Box::new(RoundRobin::new()),
-        )
-        .unwrap();
+        );
         let mut harness = ArbiterHarness::new(engine, arbiter, 2);
 
         harness.run_steps(&[step_parallel(HashMap::from([
@@ -292,8 +289,7 @@ mod credit_limiter_harness {
             "credit_limiter",
             None,
             1,
-        )
-        .unwrap();
+        );
         let mut harness = CreditLimiterHarness::new(engine, limiter);
 
         harness.run_steps(&[
@@ -327,8 +323,7 @@ mod credit_issuer_harness {
     fn harness_supports_credit_issuer_ports() {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
-        let issuer =
-            CreditIssuer::new_and_register(&engine, &clock, engine.top(), "credit_issuer").unwrap();
+        let issuer = CreditIssuer::new_and_register(&engine, &clock, engine.top(), "credit_issuer");
         let mut harness = CreditIssuerHarness::new(engine, issuer);
 
         harness.run_steps(&[

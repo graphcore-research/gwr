@@ -17,7 +17,7 @@ fn router() {
 
     let iter = Box::new((0..2).cycle().take(NUM_PUTS));
     let top = engine.top();
-    let source = Source::new_and_register(&engine, top, "source", Some(iter)).unwrap();
+    let source = Source::new_and_register(&engine, top, "source", Some(iter));
     let router = Router::new_and_register(
         &engine,
         &clock,
@@ -25,10 +25,9 @@ fn router() {
         "router",
         2,
         Box::new(DefaultAlgorithm {}),
-    )
-    .unwrap();
-    let sink_a = Sink::new_and_register(&engine, &clock, top, "sink_a").unwrap();
-    let sink_b = Sink::new_and_register(&engine, &clock, top, "sink_b").unwrap();
+    );
+    let sink_a = Sink::new_and_register(&engine, &clock, top, "sink_a");
+    let sink_b = Sink::new_and_register(&engine, &clock, top, "sink_b");
 
     connect_port!(source, tx => router, rx).unwrap();
     connect_port!(router, tx, 0 => sink_a, rx).unwrap();

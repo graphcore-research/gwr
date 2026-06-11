@@ -113,7 +113,7 @@ where
         aka: Option<&Aka>,
         num_egress: usize,
         algorithm: Box<dyn Route<T>>,
-    ) -> Result<Rc<Self>, SimError> {
+    ) -> Rc<Self> {
         let entity = Rc::new(Entity::new(parent, name));
         let rx = InPort::new_with_renames(engine, clock, &entity, "rx", aka);
         let mut tx = Vec::with_capacity(num_egress);
@@ -127,7 +127,7 @@ where
             algorithm,
         });
         engine.register(rc_self.clone());
-        Ok(rc_self)
+        rc_self
     }
 
     pub fn new_and_register(
@@ -137,7 +137,7 @@ where
         name: &str,
         num_egress: usize,
         algorithm: Box<dyn Route<T>>,
-    ) -> Result<Rc<Self>, SimError> {
+    ) -> Rc<Self> {
         Self::new_and_register_with_renames(
             engine, clock, parent, name, None, num_egress, algorithm,
         )

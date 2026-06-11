@@ -18,7 +18,7 @@ use gwr_engine::engine::Engine;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Runnable, SimObject};
-use gwr_engine::types::{SimError, SimResult};
+use gwr_engine::types::SimResult;
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::entity::Entity;
 use gwr_track::trace;
@@ -48,7 +48,7 @@ where
         parent: &Rc<Entity>,
         name: &str,
         aka: Option<&Aka>,
-    ) -> Result<Rc<Self>, SimError> {
+    ) -> Rc<Self> {
         let entity = Rc::new(Entity::new(parent, name));
         let tx = OutPort::new_with_renames(&entity, "tx", aka);
         let credit_tx = OutPort::new_with_renames(&entity, "credit_tx", aka);
@@ -60,7 +60,7 @@ where
             rx: RefCell::new(Some(rx)),
         });
         engine.register(rc_self.clone());
-        Ok(rc_self)
+        rc_self
     }
 
     pub fn new_and_register(
@@ -68,7 +68,7 @@ where
         clock: &Clock,
         parent: &Rc<Entity>,
         name: &str,
-    ) -> Result<Rc<Self>, SimError> {
+    ) -> Rc<Self> {
         Self::new_and_register_with_renames(engine, clock, parent, name, None)
     }
 

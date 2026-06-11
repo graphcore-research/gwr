@@ -17,12 +17,11 @@ fn test_fc_pipeline(buffer_size: usize, data_delay: usize, credit_delay: usize) 
 
     // Create a pair of tasks that use a pipeline
     let top = engine.top();
-    let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; num_puts)).unwrap();
+    let source = Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; num_puts));
     let pipe_config = FcPipelineConfig::new(buffer_size, data_delay, credit_delay);
     let pipeline =
         FcPipeline::new_and_register(&engine, &clock, top, "pipe", &pipe_config).unwrap();
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 
     connect_port!(source, tx => pipeline, rx).unwrap();
     connect_port!(pipeline, tx => sink, rx).unwrap();
@@ -76,17 +75,17 @@ fn test_fc_pipeline_throughput(
     // Set the rate limit such that each packet sent will take one cycle
     let bits_per_tick = 128;
     let rate_limiter = rc_limiter!(&clock, bits_per_tick);
-    let limiter = Limiter::new_and_register(&engine, &clock, top, "limiter", rate_limiter).unwrap();
+    let limiter = Limiter::new_and_register(&engine, &clock, top, "limiter", rate_limiter);
 
     // Create a pair of tasks that use a pipeline
-    let source = Source::new_and_register(&engine, top, "source", None).unwrap();
+    let source = Source::new_and_register(&engine, top, "source", None);
     let word = 101;
     source.set_generator(option_box_repeat!(word ; num_puts));
 
     let pipe_config = FcPipelineConfig::new(buffer_size, data_delay, credit_delay);
     let pipeline =
         FcPipeline::new_and_register(&engine, &clock, top, "pipe", &pipe_config).unwrap();
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 
     connect_port!(source, tx => limiter, rx).unwrap();
     connect_port!(limiter, tx => pipeline, rx).unwrap();

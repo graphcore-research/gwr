@@ -29,18 +29,14 @@ fn source_sink() {
 
     let top = engine.top();
     let arbiter =
-        Arbiter::new_and_register(&engine, &clock, top, "arb", 3, Box::new(RoundRobin::new()))
-            .unwrap();
+        Arbiter::new_and_register(&engine, &clock, top, "arb", 3, Box::new(RoundRobin::new()));
     let source_a =
-        Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; NUM_PUTS))
-            .unwrap();
+        Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; NUM_PUTS));
     let source_b =
-        Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; NUM_PUTS))
-            .unwrap();
+        Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; NUM_PUTS));
     let source_c =
-        Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; NUM_PUTS))
-            .unwrap();
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
+        Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; NUM_PUTS));
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 
     connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
     connect_port!(source_b, tx => arbiter, rx, 1).unwrap();
@@ -64,15 +60,11 @@ fn two_active_inputs() {
 
     let top = engine.top();
     let arbiter =
-        Arbiter::new_and_register(&engine, &clock, top, "arb", 3, Box::new(RoundRobin::new()))
-            .unwrap();
-    let source_a =
-        Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na)).unwrap();
-    let source_b =
-        Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; nb)).unwrap();
-    let source_c =
-        Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc)).unwrap();
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
+        Arbiter::new_and_register(&engine, &clock, top, "arb", 3, Box::new(RoundRobin::new()));
+    let source_a = Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na));
+    let source_b = Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; nb));
+    let source_c = Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc));
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 
     connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
     connect_port!(source_b, tx => arbiter, rx, 1).unwrap();
@@ -113,34 +105,29 @@ fn input_order() {
     let clock = engine.default_clock();
     let top = engine.top();
     let arbiter =
-        Arbiter::new_and_register(&engine, &clock, top, "arb", 3, Box::new(RoundRobin::new()))
-            .unwrap();
+        Arbiter::new_and_register(&engine, &clock, top, "arb", 3, Box::new(RoundRobin::new()));
     let source_a = Source::new_and_register(
         &engine,
         top,
         "source_a",
         option_box_repeat!(inputs[0].val; inputs[0].count),
-    )
-    .unwrap();
+    );
     let source_b = Source::new_and_register(
         &engine,
         top,
         "source_b",
         option_box_repeat!(inputs[1].val; inputs[1].count),
-    )
-    .unwrap();
+    );
     let source_c = Source::new_and_register(
         &engine,
         top,
         "source_c",
         option_box_repeat!(inputs[2].val; inputs[2].count),
-    )
-    .unwrap();
+    );
     let total_count = inputs.iter().map(|i| i.count).sum();
 
     let write_limiter = rc_limiter!(&clock, 1);
-    let store_limiter =
-        Limiter::new_and_register(&engine, &clock, top, "limit_wr", write_limiter).unwrap();
+    let store_limiter = Limiter::new_and_register(&engine, &clock, top, "limit_wr", write_limiter);
     let store = Store::new_and_register(&engine, &clock, top, "store", total_count).unwrap();
 
     connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
@@ -181,14 +168,10 @@ fn more_inputs() {
 
     let top = engine.top();
     let arbiter =
-        Arbiter::new_and_register(&engine, &clock, top, "arb", 2, Box::new(RoundRobin::new()))
-            .unwrap();
-    let source_a =
-        Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na)).unwrap();
-    let source_b =
-        Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; nb)).unwrap();
-    let source_c =
-        Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc)).unwrap();
+        Arbiter::new_and_register(&engine, &clock, top, "arb", 2, Box::new(RoundRobin::new()));
+    let source_a = Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na));
+    let source_b = Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; nb));
+    let source_c = Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc));
     let store = Store::new_and_register(&engine, &clock, top, "store", na + nb + nc).unwrap();
 
     connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
@@ -213,14 +196,10 @@ fn no_output() {
 
     let top = engine.top();
     let arbiter =
-        Arbiter::new_and_register(&engine, &clock, top, "arb", 3, Box::new(RoundRobin::new()))
-            .unwrap();
-    let source_a =
-        Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na)).unwrap();
-    let source_b =
-        Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; nb)).unwrap();
-    let source_c =
-        Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc)).unwrap();
+        Arbiter::new_and_register(&engine, &clock, top, "arb", 3, Box::new(RoundRobin::new()));
+    let source_a = Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na));
+    let source_b = Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; nb));
+    let source_c = Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc));
     let _store: Rc<Store<i32>> =
         Store::new_and_register(&engine, &clock, top, "store", na + nb + nc).unwrap();
 
@@ -263,25 +242,21 @@ fn weighted_policy() {
         file!(),
         num_inputs,
         Box::new(WeightedRoundRobin::new(weights.clone(), num_inputs).unwrap()),
-    )
-    .unwrap();
+    );
     let source_a = Source::new_and_register(
         &engine,
         top,
         "source_a",
         option_box_repeat!(inputs[0].val; inputs[0].count),
-    )
-    .unwrap();
+    );
     let source_b = Source::new_and_register(
         &engine,
         top,
         "source_b",
         option_box_repeat!(inputs[1].val; inputs[1].count),
-    )
-    .unwrap();
+    );
     let write_limiter = rc_limiter!(&clock, 1);
-    let store_limiter =
-        Limiter::new_and_register(&engine, &clock, top, "limit_wr", write_limiter).unwrap();
+    let store_limiter = Limiter::new_and_register(&engine, &clock, top, "limit_wr", write_limiter);
     let store = Store::new_and_register(&engine, &clock, top, "store", total_count).unwrap();
 
     connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
@@ -421,6 +396,5 @@ fn panic_priority_policy() {
         "arb",
         num_inputs,
         Box::new(PriorityRoundRobin::from_priorities(priorities.clone(), num_inputs + 1).unwrap()),
-    )
-    .unwrap();
+    );
 }

@@ -12,11 +12,10 @@ fn connect_outport_twice() {
     let clock = engine.default_clock();
 
     let top = engine.top();
-    let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; 1)).unwrap();
+    let source = Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; 1));
 
-    let sink1 = Sink::new_and_register(&engine, &clock, top, "sink1").unwrap();
-    let sink2 = Sink::new_and_register(&engine, &clock, top, "sink2").unwrap();
+    let sink1 = Sink::new_and_register(&engine, &clock, top, "sink1");
+    let sink2 = Sink::new_and_register(&engine, &clock, top, "sink2");
 
     connect_port!(source, tx => sink1, rx).unwrap();
     connect_port!(source, tx => sink2, rx).unwrap();
@@ -29,12 +28,10 @@ fn connect_inport_twice() {
     let clock = engine.default_clock();
 
     let top = engine.top();
-    let source1 =
-        Source::new_and_register(&engine, top, "source1", option_box_repeat!(1 ; 1)).unwrap();
-    let source2 =
-        Source::new_and_register(&engine, top, "source2", option_box_repeat!(1 ; 1)).unwrap();
+    let source1 = Source::new_and_register(&engine, top, "source1", option_box_repeat!(1 ; 1));
+    let source2 = Source::new_and_register(&engine, top, "source2", option_box_repeat!(1 ; 1));
 
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 
     connect_port!(source1, tx => sink, rx).unwrap();
     connect_port!(source2, tx => sink, rx).unwrap();

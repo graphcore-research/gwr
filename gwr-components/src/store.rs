@@ -99,14 +99,12 @@
 //!
 //! // Create the basic componets:
 //! // The simplest use of the source is to inject the same value repeatedly.
-//! let source = Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; 10))
-//!     .expect("should be able to create and register `Source`");
+//! let source = Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; 10));
 //! // Create the store - its type will be derived from the connections to its ports.
 //! let store = Store::new_and_register(&engine, &clock, top, "store", 5)
 //!     .expect("should be able to create and register `Store`");
 //! // Create the sink which will pull all of the data items out of the store
-//! let sink = Sink::new_and_register(&engine, &clock, top, "sink")
-//!     .expect("should be able to create and register `Sink`");
+//! let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 //!
 //! // Connect the ports together:
 //! // The source will drive data into the store:

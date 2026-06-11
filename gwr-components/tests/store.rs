@@ -25,12 +25,11 @@ fn store_basic_flow() {
     let top = engine.top();
 
     // Simple source that repeatedly produces the same value.
-    let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; NUM_PUTS)).unwrap();
+    let source = Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; NUM_PUTS));
 
     let store = Store::new_and_register(&engine, &clock, top, "store", CAPACITY).unwrap();
 
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 
     // Wire up the simple pipeline: source → store → sink
     connect_port!(source, tx => store, rx).unwrap();
@@ -88,8 +87,7 @@ fn store_overflow_panics_when_error_on_overflow_set() {
 
     let top = engine.top();
 
-    let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; NUM_PUTS)).unwrap();
+    let source = Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; NUM_PUTS));
 
     let store = Store::new_and_register(&engine, &clock, top, "store_overflow", CAPACITY).unwrap();
 

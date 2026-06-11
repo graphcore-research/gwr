@@ -41,8 +41,8 @@ fn all_spawned() {
     let clock = engine.default_clock();
 
     let top = engine.top();
-    let source: Rc<Source<i32>> = Source::new_and_register(&engine, top, "source", None).unwrap();
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
+    let source: Rc<Source<i32>> = Source::new_and_register(&engine, top, "source", None);
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 
     source.connect_port_tx(sink.port_rx()).unwrap();
     run_simulation!(engine);

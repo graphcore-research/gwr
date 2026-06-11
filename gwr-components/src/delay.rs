@@ -172,9 +172,9 @@
 //! #     let top = engine.top();
 //! #     let to_send: Option<Box<dyn Iterator<Item = _>>> = option_box_repeat!(500 ; num_puts);
 //!     // Create the components
-//!     let source = Source::new_and_register(&engine, top, "source", to_send)?;
-//!     let delay = Delay::new_and_register(&engine, &clock, top, "delay", delay_ticks)?;
-//!     let sink = Sink::new_and_register(&engine, &clock, top, "sink")?;
+//!     let source = Source::new_and_register(&engine, top, "source", to_send);
+//!     let delay = Delay::new_and_register(&engine, &clock, top, "delay", delay_ticks);
+//!     let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 //!
 //!     // Connect the ports
 //!     connect_port!(source, tx => delay, rx)?;
@@ -200,7 +200,7 @@ use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::sim_error;
 use gwr_engine::time::clock::{Clock, ClockTick};
 use gwr_engine::traits::{Event, Runnable, SimObject};
-use gwr_engine::types::{SimError, SimResult};
+use gwr_engine::types::SimResult;
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
@@ -237,7 +237,7 @@ where
         name: &str,
         aka: Option<&Aka>,
         delay_ticks: usize,
-    ) -> Result<Rc<Self>, SimError> {
+    ) -> Rc<Self> {
         let spawner = engine.spawner();
         let entity = Rc::new(Entity::new(parent, name));
         let tx = OutPort::new_with_renames(&entity, "tx", aka);
@@ -255,7 +255,7 @@ where
             error_on_output_stall: RefCell::new(false),
         });
         engine.register(rc_self.clone());
-        Ok(rc_self)
+        rc_self
     }
 
     pub fn new_and_register(
@@ -264,7 +264,7 @@ where
         parent: &Rc<Entity>,
         name: &str,
         delay_ticks: usize,
-    ) -> Result<Rc<Self>, SimError> {
+    ) -> Rc<Self> {
         Self::new_and_register_with_renames(engine, clock, parent, name, None, delay_ticks)
     }
 
@@ -280,6 +280,8 @@ where
         port_rx!(self.rx, state)
     }
 
+    /// Change the delay value. Can only be done before the simulation has
+    /// started.
     pub fn set_delay(&self, delay_ticks: usize) -> SimResult {
         if self.rx.borrow().is_none() {
             return sim_error!(

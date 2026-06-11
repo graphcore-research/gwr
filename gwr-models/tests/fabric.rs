@@ -86,14 +86,14 @@ fn run_test(
     let mut sinks = Vec::with_capacity(num_ports);
 
     for i in 0..num_ports {
-        let source = Source::new_and_register(&engine, top, &format!("source_{i}"), None).unwrap();
+        let source = Source::new_and_register(&engine, top, &format!("source_{i}"), None);
         source.set_generator(Some(Box::new(
             build_frames(&engine, i, to_dest, num_frames, payload_bytes).into_iter(),
         )));
         connect_port!(source, tx => fabric, ingress, i).unwrap();
         sources.push(source);
 
-        let sink = Sink::new_and_register(&engine, &clock, top, &format!("sink_{i}")).unwrap();
+        let sink = Sink::new_and_register(&engine, &clock, top, &format!("sink_{i}"));
         connect_port!(fabric, egress, i => sink, rx).unwrap();
         sinks.push(sink);
     }
@@ -180,11 +180,11 @@ fn latency() {
 
     // Connect up sources that will do nothing to all ports
     for i in 0..num_ports {
-        let source = Source::new_and_register(&engine, top, &format!("source_{i}"), None).unwrap();
+        let source = Source::new_and_register(&engine, top, &format!("source_{i}"), None);
         connect_port!(source, tx => fabric, ingress, i).unwrap();
         sources.push(source);
 
-        let sink = Sink::new_and_register(&engine, &clock, top, &format!("sink_{i}")).unwrap();
+        let sink = Sink::new_and_register(&engine, &clock, top, &format!("sink_{i}"));
         connect_port!(fabric, egress, i => sink, rx).unwrap();
         sinks.push(sink);
     }
@@ -193,8 +193,8 @@ fn latency() {
     let num_rows = config.num_rows();
 
     // Send a single frame from one corner to the other
-    let source_index = config.col_row_port_to_fabric_port_index(0, 0, 0);
-    let dest_index = config.col_row_port_to_fabric_port_index(
+    let source_index = fabric.col_row_port_to_fabric_port_index(0, 0, 0);
+    let dest_index = fabric.col_row_port_to_fabric_port_index(
         num_columns - 1,
         num_rows - 1,
         config.num_ports_per_node() - 1,
@@ -339,6 +339,44 @@ fn invalid_functional_fabric() {
 
     let _: Rc<FunctionalFabric<usize>> =
         FunctionalFabric::new_and_register(&engine, &clock, top, "fabric", config).unwrap();
+}
+
+#[test]
+fn invalid_functional_fabric_rx_buffer_entries() {
+    let config = Rc::new(FabricConfig::new(1, 1, 2, None, 1, 1, 0, 1, 1));
+    let mut engine = start_test(file!());
+    let clock = engine.clock_ghz(1.0);
+    let top = engine.top();
+
+    let result =
+        FunctionalFabric::<usize>::new_and_register(&engine, &clock, top, "fabric", config);
+
+    let Err(err) = result else {
+        panic!("Expected zero-capacity RX buffer creation to return an error");
+    };
+    assert!(
+        format!("{err}").contains("Unsupported Store with 0 capacity"),
+        "Unexpected error: {err}"
+    );
+}
+
+#[test]
+fn invalid_functional_fabric_tx_buffer_entries() {
+    let config = Rc::new(FabricConfig::new(1, 1, 2, None, 1, 1, 1, 0, 1));
+    let mut engine = start_test(file!());
+    let clock = engine.clock_ghz(1.0);
+    let top = engine.top();
+
+    let result =
+        FunctionalFabric::<usize>::new_and_register(&engine, &clock, top, "fabric", config);
+
+    let Err(err) = result else {
+        panic!("Expected zero-capacity TX buffer creation to return an error");
+    };
+    assert!(
+        format!("{err}").contains("Unsupported Store with 0 capacity"),
+        "Unexpected error: {err}"
+    );
 }
 
 #[test]

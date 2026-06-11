@@ -11,8 +11,7 @@ fn main() {
     let clock = engine.default_clock();
     let top = engine.top();
     let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(0x123 ; num_puts))
-            .unwrap();
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(0x123 ; num_puts));
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
     connect_port!(source, tx => sink, invalid_rx).unwrap();
 }

@@ -116,7 +116,7 @@ where
                 &format!("limit_rx_{i}"),
                 Some(&rx_buffer_limiter_aka),
                 port_limiter.clone(),
-            )?;
+            );
             let rx_buffer = Store::new_and_register(
                 engine,
                 clock,
@@ -124,11 +124,14 @@ where
                 &format!("rx_buf_{i}"),
                 config.rx_buffer_entries,
             )?;
-            connect_port!(rx_buffer_limiter, tx => rx_buffer, rx)?;
+            connect_port!(rx_buffer_limiter, tx => rx_buffer, rx)
+                .expect("Internal ports should connect without error");
 
             // Create and connect a port to receive from the RX
             let internal_rx_port = InPort::new(engine, clock, &entity, &format!("internal_rx_{i}"));
-            rx_buffer.connect_port_tx(internal_rx_port.state()).unwrap();
+            rx_buffer
+                .connect_port_tx(internal_rx_port.state())
+                .expect("Internal ports should connect without error");
 
             rx_buffer_limiters.push(rx_buffer_limiter);
             internal_rx.push(internal_rx_port);
@@ -140,7 +143,7 @@ where
                 &entity,
                 &format!("limit_tx_{i}"),
                 port_limiter.clone(),
-            )?;
+            );
 
             let tx_buffer_aka = build_aka!(aka, &entity, &[(&format!("egress_{i}"), "tx")]);
             let tx_buffer = Store::new_and_register_with_renames(
@@ -151,11 +154,14 @@ where
                 Some(&tx_buffer_aka),
                 config.tx_buffer_entries,
             )?;
-            connect_port!(tx_buffer_limiter, tx => tx_buffer, rx)?;
+            connect_port!(tx_buffer_limiter, tx => tx_buffer, rx)
+                .expect("Internal ports should connect without error");
 
             // Create and connect a port to drive the TX
             let mut internal_tx_port = OutPort::new(&entity, &format!("internal_tx_{i}"));
-            internal_tx_port.connect(tx_buffer_limiter.port_rx())?;
+            internal_tx_port
+                .connect(tx_buffer_limiter.port_rx())
+                .expect("Internal ports should connect without error");
 
             tx_buffers.push(tx_buffer);
             internal_tx.push(internal_tx_port);

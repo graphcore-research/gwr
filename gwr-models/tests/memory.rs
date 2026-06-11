@@ -53,7 +53,7 @@ fn setup_system(
     let memory_map = Rc::new(create_default_memory_map());
     let top = engine.top();
 
-    let source = Source::new_and_register(&engine, top, "source", None).unwrap();
+    let source = Source::new_and_register(&engine, top, "source", None);
     let to_put = create_fn(
         source.entity(),
         &memory_map,
@@ -64,7 +64,7 @@ fn setup_system(
     );
     source.set_generator(option_box_repeat!(to_put ; num_accesses));
 
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 
     connect_port!(source, tx => memory, rx).unwrap();
     connect_port!(memory, tx => sink, rx).unwrap();

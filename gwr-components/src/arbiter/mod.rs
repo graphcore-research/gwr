@@ -18,7 +18,7 @@ use gwr_engine::executor::Spawner;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Event, Runnable, SimObject};
-use gwr_engine::types::{SimError, SimResult};
+use gwr_engine::types::SimResult;
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::entity::Entity;
 use gwr_track::trace;
@@ -81,7 +81,7 @@ where
         aka: Option<&Aka>,
         num_rx: usize,
         policy: Box<dyn Arbitrate<T>>,
-    ) -> Result<Rc<Self>, SimError> {
+    ) -> Rc<Self> {
         let spawner = engine.spawner();
         let entity = Rc::new(Entity::new(parent, name));
         let shared_state = Rc::new(ArbiterSharedState::new(num_rx));
@@ -106,7 +106,7 @@ where
             spawner,
         });
         engine.register(rc_self.clone());
-        Ok(rc_self)
+        rc_self
     }
 
     pub fn new_and_register(
@@ -116,7 +116,7 @@ where
         name: &str,
         num_rx: usize,
         policy: Box<dyn Arbitrate<T>>,
-    ) -> Result<Rc<Self>, SimError> {
+    ) -> Rc<Self> {
         Self::new_and_register_with_renames(engine, clock, parent, name, None, num_rx, policy)
     }
 

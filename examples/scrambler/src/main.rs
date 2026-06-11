@@ -34,15 +34,15 @@ fn main() -> SimResult {
         top,
         &format!("{}_{}", "source", "a"),
         option_box_repeat!(1 ; 1),
-    )?;
+    );
     let source_b = Source::new_and_register(
         &engine,
         top,
         &format!("{}_{}", "source", "b"),
         option_box_repeat!(2 ; 2),
-    )?;
-    let sink_a = Sink::new_and_register(&engine, &clock, top, "sink_a")?;
-    let sink_b = Sink::new_and_register(&engine, &clock, top, "sink_b")?;
+    );
+    let sink_a = Sink::new_and_register(&engine, &clock, top, "sink_a");
+    let sink_b = Sink::new_and_register(&engine, &clock, top, "sink_b");
 
     connect_port!(source_a, tx => scrambler, rx_a)?;
     connect_port!(source_b, tx => scrambler, rx_b)?;
