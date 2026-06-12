@@ -1,0 +1,39 @@
+{
+  "data": [
+    {
+      "files": [
+        {
+          "filename": "src/lib.rs",
+          "summary": {
+            "lines": { "count": 10, "covered": 9, "percent": 90.0 },
+            "functions": { "count": 4, "covered": 4, "percent": 100.0 },
+            "regions": { "count": 10, "covered": 9, "percent": 90.0 }
+          }
+        },
+        {
+          "filename": "src/new.rs",
+          "summary": {
+            "lines": { "count": 2, "covered": 2, "percent": 100.0 },
+            "functions": { "count": 1, "covered": 1, "percent": 100.0 },
+            "regions": { "count": 2, "covered": 2, "percent": 100.0 }
+          }
+        },
+        {
+          "filename": "src/unchanged.rs",
+          "summary": {
+            "lines": { "count": 3, "covered": 3, "percent": 100.0 },
+            "functions": { "count": 1, "covered": 1, "percent": 100.0 },
+            "regions": { "count": 3, "covered": 3, "percent": 100.0 }
+          }
+        }
+      ],
+      "totals": {
+        "lines": { "count": 12, "covered": 11, "percent": 91.6666666667 },
+        "functions": { "count": 4, "covered": 4, "percent": 100.0 },
+        "regions": { "count": 12, "covered": 10, "percent": 83.3333333333 }
+      }
+    }
+  ],
+  "type": "llvm.coverage.json.export",
+  "version": "2.0.1"
+}

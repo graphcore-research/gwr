@@ -66,6 +66,11 @@ changelog_update = false
 publish = false
 
 [[package]]
+name = "gwr-code-coverage"
+changelog_update = false
+publish = false
+
+[[package]]
 name = "gwr-developer-guide"
 changelog_update = false
 publish = false

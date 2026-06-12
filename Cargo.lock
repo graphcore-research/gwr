@@ -1229,6 +1229,16 @@ name = "gwr-build"
 version = "0.1.0"
 
 [[package]]
+name = "gwr-code-coverage"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "gwr-components"
 version = "0.9.0"
 dependencies = [
@@ -1454,6 +1464,7 @@ dependencies = [
  "rand 0.9.2",
  "serde",
  "serde_yaml",
+ "tempfile",
 ]
 
 [[package]]
