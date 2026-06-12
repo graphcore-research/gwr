@@ -1,0 +1,26 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+[package]
+name = "gwr-tools"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Developer tools for GWR"
+documentation.workspace = true
+readme = "README.md"
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords = ["gwr", "tools"]
+categories = ["command-line-utilities", "development-tools"]
+publish.workspace = true
+
+[dependencies]
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[[bin]]
+name = "diff-coverage"
+path = "src/bin/diff-coverage.rs"
