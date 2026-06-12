@@ -21,10 +21,9 @@ fn drop_precent() {
     let seed = 1;
     let top = engine.top();
     let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(0x123 ; num_puts))
-            .unwrap();
-    let flaky = Flaky::new_and_register(&engine, &clock, top, "flaky", drop, seed).unwrap();
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(0x123 ; num_puts));
+    let flaky = Flaky::new_and_register(&engine, &clock, top, "flaky", drop, seed);
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 
     connect_port!(source, tx => flaky, rx).unwrap();
     connect_port!(flaky, tx => sink, rx).unwrap();

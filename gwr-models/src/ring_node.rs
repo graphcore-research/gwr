@@ -111,10 +111,11 @@ where
             "limit_rx",
             Some(&rx_buffer_limiter_aka),
             config.write_limiter.clone(),
-        )?;
+        );
         let rx_buffer =
             Store::new_and_register(engine, clock, &entity, "rx_buf", config.rx_buffer_entries)?;
-        connect_port!(rx_buffer_limiter, tx => rx_buffer, rx)?;
+        connect_port!(rx_buffer_limiter, tx => rx_buffer, rx)
+            .expect("Internal ports should connect without error");
 
         let tx_buffer_limiter = Limiter::new_and_register(
             engine,
@@ -122,7 +123,7 @@ where
             &entity,
             "limit_tx",
             config.write_limiter.clone(),
-        )?;
+        );
         let tx_buffer_aka = build_aka!(aka, &entity, &[("ring_tx", "tx")]);
         let tx_buffer = Store::new_and_register_with_renames(
             engine,
@@ -132,7 +133,8 @@ where
             Some(&tx_buffer_aka),
             config.tx_buffer_entries,
         )?;
-        connect_port!(tx_buffer_limiter, tx => tx_buffer, rx)?;
+        connect_port!(tx_buffer_limiter, tx => tx_buffer, rx)
+            .expect("Internal ports should connect without error");
 
         let router_aka = build_aka!(aka, &entity, &[("io_tx", &format!("tx_{IO_INDEX}"))]);
         let router = Router::new_and_register_with_renames(
@@ -143,8 +145,9 @@ where
             Some(&router_aka),
             2,
             routing_algorithm,
-        )?;
-        connect_port!(rx_buffer, tx => router, rx)?;
+        );
+        connect_port!(rx_buffer, tx => router, rx)
+            .expect("Internal ports should connect without error");
 
         let arbiter_aka = build_aka!(aka, &entity, &[("io_rx", &format!("rx_{IO_INDEX}"))]);
         let arbiter = Arbiter::new_and_register_with_renames(
@@ -155,9 +158,11 @@ where
             Some(&arbiter_aka),
             2,
             policy,
-        )?;
-        connect_port!(router, tx, RING_INDEX => arbiter, rx, RING_INDEX)?;
-        connect_port!(arbiter, tx => tx_buffer_limiter, rx)?;
+        );
+        connect_port!(router, tx, RING_INDEX => arbiter, rx, RING_INDEX)
+            .expect("Internal ports should connect without error");
+        connect_port!(arbiter, tx => tx_buffer_limiter, rx)
+            .expect("Internal ports should connect without error");
 
         let rc_self = Rc::new(Self {
             entity,

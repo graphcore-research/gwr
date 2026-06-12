@@ -26,7 +26,7 @@ use gwr_engine::engine::Engine;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Runnable, SimObject};
-use gwr_engine::types::{SimError, SimResult};
+use gwr_engine::types::SimResult;
 use gwr_model_builder::{EntityDisplay, EntityGet};
 /// The gwr_track library provides tracing/logging features.
 use gwr_track::entity::Entity;
@@ -103,7 +103,7 @@ where
         name: &str,
         drop_ratio: f64,
         seed: u64,
-    ) -> Result<Rc<Self>, SimError> {
+    ) -> Rc<Self> {
         // The entity needs to be created first because it is shared between the state
         // and the component itself.
         let entity = Entity::new(parent, name);
@@ -122,7 +122,7 @@ where
             tx: RefCell::new(Some(tx)),
         });
         engine.register(rc_self.clone());
-        Ok(rc_self)
+        rc_self
     }
 
     /// This provides the `InPort` to which you can connect

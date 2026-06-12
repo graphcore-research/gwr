@@ -63,7 +63,7 @@ where
             "limit_a",
             Some(&limiter_a_aka),
             limiter.clone(),
-        )?;
+        );
         let delay_a_aka = build_aka!(aka, &entity, &[("tx_a", "tx")]);
         let delay_a = Delay::new_and_register_with_renames(
             engine,
@@ -72,8 +72,9 @@ where
             "a",
             Some(&delay_a_aka),
             DELAY_TICKS,
-        )?;
-        connect_port!(limiter_a, tx => delay_a, rx)?;
+        );
+        connect_port!(limiter_a, tx => delay_a, rx)
+            .expect("Internal ports should connect without error");
 
         let limiter_b_aka = build_aka!(aka, &entity, &[("rx_b", "rx")]);
         let limiter_b: Rc<Limiter<_>> = Limiter::new_and_register_with_renames(
@@ -83,7 +84,7 @@ where
             "limit_b",
             Some(&limiter_b_aka),
             limiter.clone(),
-        )?;
+        );
         let delay_b_aka = build_aka!(aka, &entity, &[("tx_b", "tx")]);
         let delay_b = Delay::new_and_register_with_renames(
             engine,
@@ -92,8 +93,9 @@ where
             "b",
             Some(&delay_b_aka),
             DELAY_TICKS,
-        )?;
-        connect_port!(limiter_b, tx => delay_b, rx)?;
+        );
+        connect_port!(limiter_b, tx => delay_b, rx)
+            .expect("Internal ports should connect without error");
 
         let rc_self = Rc::new(Self {
             entity: entity.clone(),
@@ -115,6 +117,8 @@ where
         Self::new_and_register_with_renames(engine, clock, parent, name, None)
     }
 
+    /// Change the delay value. Can only be done before the simulation has
+    /// started.
     pub fn set_delay(&self, delay: usize) -> SimResult {
         self.delay_a.set_delay(delay)?;
         self.delay_b.set_delay(delay)

@@ -52,7 +52,7 @@ mod delay_harness {
     fn model_harness_can_match_read_request() {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
-        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1).unwrap();
+        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
         let memory_map = Rc::new(create_default_memory_map());
         let access = test_read(engine.top(), &memory_map);
 
@@ -67,7 +67,7 @@ mod delay_harness {
     fn model_harness_can_match_partial_access() {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
-        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1).unwrap();
+        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
         let memory_map = Rc::new(create_default_memory_map());
         let creator = Rc::new(Entity::new(engine.top(), "creator"));
         let access = create_write(
@@ -90,7 +90,7 @@ mod delay_harness {
     fn model_harness_can_delay_and_expect_no_traffic() {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
-        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 3).unwrap();
+        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 3);
         let memory_map = Rc::new(create_default_memory_map());
         let access = test_read(engine.top(), &memory_map);
 
@@ -107,7 +107,7 @@ mod delay_harness {
     fn model_harness_can_drive_ports_in_parallel() {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
-        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1).unwrap();
+        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
         let memory_map = Rc::new(create_default_memory_map());
         let access = test_read(engine.top(), &memory_map);
 
@@ -150,8 +150,7 @@ mod arbiter_harness {
             "arbiter",
             2,
             Box::new(RoundRobin::new()),
-        )
-        .unwrap();
+        );
         let memory_map = Rc::new(create_default_memory_map());
         let top = engine.top().clone();
 

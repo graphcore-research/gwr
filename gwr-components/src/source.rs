@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use gwr_engine::engine::Engine;
 use gwr_engine::port::{OutPort, PortStateResult};
 use gwr_engine::traits::{Runnable, SimObject};
-use gwr_engine::types::{SimError, SimResult};
+use gwr_engine::types::SimResult;
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
@@ -58,7 +58,7 @@ where
         name: &str,
         aka: Option<&Aka>,
         data_generator: Option<DataGenerator<T>>,
-    ) -> Result<Rc<Self>, SimError> {
+    ) -> Rc<Self> {
         let entity = Rc::new(Entity::new(parent, name));
         let tx = OutPort::new_with_renames(&entity, "tx", aka);
         let rc_self = Rc::new(Self {
@@ -67,7 +67,7 @@ where
             tx: RefCell::new(Some(tx)),
         });
         engine.register(rc_self.clone());
-        Ok(rc_self)
+        rc_self
     }
 
     pub fn new_and_register(
@@ -75,7 +75,7 @@ where
         parent: &Rc<Entity>,
         name: &str,
         data_generator: Option<DataGenerator<T>>,
-    ) -> Result<Rc<Self>, SimError> {
+    ) -> Rc<Self> {
         Self::new_and_register_with_renames(engine, parent, name, None, data_generator)
     }
 

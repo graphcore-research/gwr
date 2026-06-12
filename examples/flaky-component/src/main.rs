@@ -53,9 +53,9 @@ fn main() -> SimResult {
 
     let top = engine.top();
     let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(0x123 ; num_puts))?;
-    let flaky = Flaky::new_and_register(&engine, &clock, top, "flaky", args.drop, args.seed)?;
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink")?;
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(0x123 ; num_puts));
+    let flaky = Flaky::new_and_register(&engine, &clock, top, "flaky", args.drop, args.seed);
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 
     connect_port!(source, tx => flaky, rx)?;
     connect_port!(flaky, tx => sink, rx)?;

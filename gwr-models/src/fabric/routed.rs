@@ -118,8 +118,7 @@ fn connect_columns<T>(
     config: &Rc<FabricConfig>,
     nodes: &[Vec<Rc<FabricNode<T>>>],
     delay_ticks: usize,
-) -> Result<(), SimError>
-where
+) where
     T: SimObject + Routable,
 {
     for c in 1..config.num_columns {
@@ -137,9 +136,11 @@ where
                 entity,
                 &format!("{c_m1}_{r}_to_{c}_{r}"),
                 delay_ticks,
-            )?;
-            connect_port!(nodes[c_m1][r], col_plus => delay, rx)?;
-            connect_port!(delay, tx => nodes[c][r], col_minus)?;
+            );
+            connect_port!(nodes[c_m1][r], col_plus => delay, rx)
+                .expect("Internal ports should connect without error");
+            connect_port!(delay, tx => nodes[c][r], col_minus)
+                .expect("Internal ports should connect without error");
 
             let delay = Delay::new_and_register(
                 engine,
@@ -147,12 +148,13 @@ where
                 entity,
                 &format!("{c}_{r}_to_{c_m1}_{r}"),
                 delay_ticks,
-            )?;
-            connect_port!(nodes[c][r], col_minus => delay, rx)?;
-            connect_port!(delay, tx => nodes[c_m1][r], col_plus)?;
+            );
+            connect_port!(nodes[c][r], col_minus => delay, rx)
+                .expect("Internal ports should connect without error");
+            connect_port!(delay, tx => nodes[c_m1][r], col_plus)
+                .expect("Internal ports should connect without error");
         }
     }
-    Ok(())
 }
 
 /// Create connections between rows
@@ -163,8 +165,7 @@ fn connect_rows<T>(
     config: &Rc<FabricConfig>,
     nodes: &[Vec<Rc<FabricNode<T>>>],
     delay_ticks: usize,
-) -> Result<(), SimError>
-where
+) where
     T: SimObject + Routable,
 {
     for (c, col) in nodes.iter().enumerate() {
@@ -176,9 +177,11 @@ where
                 entity,
                 &format!("{c}_{r_m1}_to_{c}_{r}"),
                 delay_ticks,
-            )?;
-            connect_port!(col[r_m1], row_plus => delay, rx)?;
-            connect_port!(delay, tx => col[r], row_minus)?;
+            );
+            connect_port!(col[r_m1], row_plus => delay, rx)
+                .expect("Internal ports should connect without error");
+            connect_port!(delay, tx => col[r], row_minus)
+                .expect("Internal ports should connect without error");
 
             let delay = Delay::new_and_register(
                 engine,
@@ -186,12 +189,13 @@ where
                 entity,
                 &format!("{c}_{r}_to_{c}_{r_m1}"),
                 delay_ticks,
-            )?;
-            connect_port!(col[r], row_minus => delay, rx)?;
-            connect_port!(delay, tx => col[r_m1], row_plus)?;
+            );
+            connect_port!(col[r], row_minus => delay, rx)
+                .expect("Internal ports should connect without error");
+            connect_port!(delay, tx => col[r_m1], row_plus)
+                .expect("Internal ports should connect without error");
         }
     }
-    Ok(())
 }
 
 /// Connect up the edge ports that will otherwise be left dangling
@@ -201,8 +205,7 @@ fn create_dummy_ports<T>(
     entity: &Rc<Entity>,
     config: &Rc<FabricConfig>,
     nodes: &[Vec<Rc<FabricNode<T>>>],
-) -> Result<(), SimError>
-where
+) where
     T: SimObject + Routable,
 {
     // Connect dummy ports left/right
@@ -212,21 +215,28 @@ where
     // a larger refactor is likely required here.
     #[expect(clippy::needless_range_loop)]
     for r in 0..config.num_rows {
-        connect_dummy_tx!(entity => nodes[0][r], col_minus)?;
-        connect_dummy_rx!(nodes[0][r], col_minus => engine, clock, entity)?;
-        connect_dummy_tx!(entity => nodes[right][r], col_plus)?;
-        connect_dummy_rx!(nodes[right][r], col_plus => engine, clock, entity)?;
+        connect_dummy_tx!(entity => nodes[0][r], col_minus)
+            .expect("Internal ports should connect without error");
+        connect_dummy_rx!(nodes[0][r], col_minus => engine, clock, entity)
+            .expect("Internal ports should connect without error");
+        connect_dummy_tx!(entity => nodes[right][r], col_plus)
+            .expect("Internal ports should connect without error");
+        connect_dummy_rx!(nodes[right][r], col_plus => engine, clock, entity)
+            .expect("Internal ports should connect without error");
     }
 
     // Connect dummy ports top/bottom
     let bottom = config.num_rows - 1;
     for col in nodes {
-        connect_dummy_tx!(entity => col[0], row_minus)?;
-        connect_dummy_rx!(col[0], row_minus => engine, clock, entity)?;
-        connect_dummy_tx!(entity => col[bottom], row_plus)?;
-        connect_dummy_rx!(col[bottom], row_plus => engine, clock, entity)?;
+        connect_dummy_tx!(entity => col[0], row_minus)
+            .expect("Internal ports should connect without error");
+        connect_dummy_rx!(col[0], row_minus => engine, clock, entity)
+            .expect("Internal ports should connect without error");
+        connect_dummy_tx!(entity => col[bottom], row_plus)
+            .expect("Internal ports should connect without error");
+        connect_dummy_rx!(col[bottom], row_plus => engine, clock, entity)
+            .expect("Internal ports should connect without error");
     }
-    Ok(())
 }
 
 impl<T> RoutedFabric<T>
@@ -256,7 +266,7 @@ where
             &config,
             &nodes,
             config.cycles_per_hop,
-        )?;
+        );
         connect_rows(
             engine,
             clock,
@@ -264,8 +274,8 @@ where
             &config,
             &nodes,
             config.cycles_per_hop,
-        )?;
-        create_dummy_ports(engine, clock, &entity, &config, &nodes)?;
+        );
+        create_dummy_ports(engine, clock, &entity, &config, &nodes);
 
         let rc_self = Rc::new(Self {
             entity,

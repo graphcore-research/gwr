@@ -100,24 +100,20 @@ pub fn priority_policy_test_core(engine: &mut Engine, inputs: &[ArbiterInputData
         "arb",
         num_inputs,
         Box::new(policy),
-    )
-    .unwrap();
+    );
     let mut sources = Vec::new();
     for (i, input) in inputs.iter().enumerate() {
-        sources.push(
-            Source::new_and_register(
-                engine,
-                engine.top(),
-                &("source_".to_owned() + &i.to_string()),
-                option_box_repeat!(input.val; input.count),
-            )
-            .unwrap(),
-        );
+        sources.push(Source::new_and_register(
+            engine,
+            engine.top(),
+            &("source_".to_owned() + &i.to_string()),
+            option_box_repeat!(input.val; input.count),
+        ));
     }
 
     let write_limiter = rc_limiter!(&clock, 1);
     let store_limiter =
-        Limiter::new_and_register(engine, &clock, engine.top(), "limit_wr", write_limiter).unwrap();
+        Limiter::new_and_register(engine, &clock, engine.top(), "limit_wr", write_limiter);
     let store =
         Store::new_and_register(engine, &clock, engine.top(), "store", total_count).unwrap();
     connect_port!(store_limiter, tx => store, rx).unwrap();

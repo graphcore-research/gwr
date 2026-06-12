@@ -18,7 +18,7 @@ use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::spawn_subcomponent;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Runnable, SimObject};
-use gwr_engine::types::{SimError, SimResult};
+use gwr_engine::types::SimResult;
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_resources::Resource;
 use gwr_track::entity::Entity;
@@ -96,7 +96,7 @@ where
         name: &str,
         aka: Option<&Aka>,
         num_credits: usize,
-    ) -> Result<Rc<Self>, SimError> {
+    ) -> Rc<Self> {
         let spawner = engine.spawner();
         let entity = Rc::new(Entity::new(parent, name));
         let credit = Resource::new(num_credits);
@@ -122,7 +122,7 @@ where
             spawner,
         });
         engine.register(rc_self.clone());
-        Ok(rc_self)
+        rc_self
     }
 
     pub fn connect_port_tx(&self, port_state: PortStateResult<T>) -> SimResult {

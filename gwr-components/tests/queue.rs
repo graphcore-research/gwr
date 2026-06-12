@@ -187,10 +187,9 @@ fn queue_component_connects_rx_to_tx_ports() {
     let top = engine.top();
 
     let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(5 ; NUM_VALUES))
-            .unwrap();
+        Source::new_and_register(&engine, top, "source", option_box_repeat!(5 ; NUM_VALUES));
     let queue = Queue::new_and_register(&engine, &clock, top, "queue", Some(2)).unwrap();
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink").unwrap();
+    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 
     connect_port!(source, tx => queue, rx).unwrap();
     connect_port!(queue, tx => sink, rx).unwrap();

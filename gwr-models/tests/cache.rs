@@ -89,7 +89,7 @@ fn cache_dev_read_goes_to_mem() {
 
     let cache = create_cache(&mut engine);
     let top = engine.top();
-    let source = Source::new_and_register(&engine, top, "source", None).unwrap();
+    let source = Source::new_and_register(&engine, top, "source", None);
     let to_put = create_read(
         source.entity(),
         &memory_map,
@@ -100,8 +100,8 @@ fn cache_dev_read_goes_to_mem() {
     );
     source.set_generator(option_box_repeat!(to_put ; num_accesses));
 
-    let dev_req_sink = Sink::new_and_register(&engine, &clock, top, "dev_req_sink").unwrap();
-    let mem_req_sink = Sink::new_and_register(&engine, &clock, top, "mem_req_sink").unwrap();
+    let dev_req_sink = Sink::new_and_register(&engine, &clock, top, "dev_req_sink");
+    let mem_req_sink = Sink::new_and_register(&engine, &clock, top, "mem_req_sink");
 
     connect_port!(source, tx => cache, dev_rx).unwrap();
     connect_port!(cache, dev_tx => dev_req_sink, rx).unwrap();

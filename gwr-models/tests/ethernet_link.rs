@@ -22,18 +22,18 @@ fn run_test(
     let clock = engine.clock_ghz(1.0);
     let top = engine.top();
 
-    let source_a = Source::new_and_register(&engine, top, "src_a", None).unwrap();
+    let source_a = Source::new_and_register(&engine, top, "src_a", None);
     let frame_a = EthernetFrame::new(source_a.entity(), payload_bytes);
     source_a.set_generator(option_box_repeat!(frame_a; num_put_a));
 
-    let source_b = Source::new_and_register(&engine, top, "src_b", None).unwrap();
+    let source_b = Source::new_and_register(&engine, top, "src_b", None);
     let frame_b = EthernetFrame::new(source_b.entity(), payload_bytes);
     source_b.set_generator(option_box_repeat!(frame_b; num_put_b));
 
     let link = EthernetLink::new_and_register(&engine, &clock, top, "link").unwrap();
 
-    let sink_a = Sink::new_and_register(&engine, &clock, top, "sink_a").unwrap();
-    let sink_b = Sink::new_and_register(&engine, &clock, top, "sink_b").unwrap();
+    let sink_a = Sink::new_and_register(&engine, &clock, top, "sink_a");
+    let sink_b = Sink::new_and_register(&engine, &clock, top, "sink_b");
 
     connect_port!(source_a, tx => link, rx_a).unwrap();
     connect_port!(source_b, tx => link, rx_b).unwrap();
@@ -105,17 +105,17 @@ fn change_delay() {
     let clock = engine.clock_ghz(1.0);
     let top = engine.top();
 
-    let source_a = Source::new_and_register(&engine, top, "src_a", None).unwrap();
+    let source_a = Source::new_and_register(&engine, top, "src_a", None);
     let etwr = EthernetFrame::new(source_a.entity(), 128);
     source_a.set_generator(option_box_repeat!(etwr; 1));
 
-    let source_b = Source::new_and_register(&engine, top, "src_b", None).unwrap();
+    let source_b = Source::new_and_register(&engine, top, "src_b", None);
 
     let link = EthernetLink::new_and_register(&engine, &clock, top, "link").unwrap();
     link.set_delay(DELAY_TICKS).unwrap();
 
-    let sink_a = Sink::new_and_register(&engine, &clock, top, "sink_a").unwrap();
-    let sink_b = Sink::new_and_register(&engine, &clock, top, "sink_b").unwrap();
+    let sink_a = Sink::new_and_register(&engine, &clock, top, "sink_a");
+    let sink_b = Sink::new_and_register(&engine, &clock, top, "sink_b");
 
     connect_port!(source_a, tx => link, rx_a).unwrap();
     connect_port!(source_b, tx => link, rx_b).unwrap();
@@ -129,4 +129,40 @@ fn change_delay() {
 
     let expected_time = DELAY_TICKS as f64;
     assert_eq!(clock.time_now_ns(), expected_time);
+}
+
+#[test]
+fn change_delay_after_simulation_started_errors() {
+    const DELAY_TICKS: usize = 100;
+
+    let mut engine = start_test(file!());
+
+    let clock = engine.clock_ghz(1.0);
+    let top = engine.top();
+
+    let source_a = Source::new_and_register(&engine, top, "src_a", None);
+    let frame_a = EthernetFrame::new(source_a.entity(), 128);
+    source_a.set_generator(option_box_repeat!(frame_a; 1));
+
+    let source_b = Source::new_and_register(&engine, top, "src_b", None);
+
+    let link = EthernetLink::new_and_register(&engine, &clock, top, "link").unwrap();
+
+    let sink_a = Sink::new_and_register(&engine, &clock, top, "sink_a");
+    let sink_b = Sink::new_and_register(&engine, &clock, top, "sink_b");
+
+    connect_port!(source_a, tx => link, rx_a).unwrap();
+    connect_port!(source_b, tx => link, rx_b).unwrap();
+    connect_port!(link, tx_a => sink_a, rx).unwrap();
+    connect_port!(link, tx_b => sink_b, rx).unwrap();
+
+    engine.spawn(async move {
+        clock.wait_ticks(1).await;
+        link.set_delay(DELAY_TICKS)
+    });
+
+    run_simulation!(
+        engine,
+        "top::link::a: can't change the delay after the simulation has started"
+    );
 }
