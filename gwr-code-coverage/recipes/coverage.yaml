@@ -1,13 +1,14 @@
 # Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 description:
   Run all workspace tests with code coverage enabled and generate an HTML
-  coverage report plus a machine-readable summary.json.
+  coverage report, a source snapshot, and machine-readable summary.json and
+  details.json files.
 arguments:
   - name: REPORT_DIR
     default: target/llvm-cov/latest
     comment:
-      Directory to write the generated HTML coverage report and summary.json
-      into.
+      Directory to write the generated HTML coverage report, source snapshot,
+      and JSON outputs into.
   - name: EXTRA_ARGS
     default: ""
     comment: Additional arguments to append to `cargo llvm-cov`.
@@ -34,8 +35,8 @@ ingredients:
         --no-report \
         $EXTRA_ARGS
   - comment:
-      Generate the HTML coverage report and summary.json from the collected
-      data.
+      Generate the HTML coverage report, summary.json, and details.json from the
+      collected data.
     command: |-
       cargo llvm-cov report \
         --html \
@@ -44,7 +45,20 @@ ingredients:
         --json \
         --summary-only \
         --output-path "$REPORT_DIR/summary.json"
+      cargo llvm-cov report \
+        --json \
+        --output-path "$REPORT_DIR/details.json"
+  - comment:
+      Snapshot the source files referenced by details.json so later diffs can
+      compare against the source as it existed when coverage was collected.
+    command: |-
+      rm -rf "$REPORT_DIR/source-snapshot"
+      cargo run --bin gather-files -- \
+        "$REPORT_DIR/details.json" \
+        "$REPORT_DIR/source-snapshot"
   - comment: Print the location of the generated coverage artefacts.
     command: |-
       echo "Coverage report generated in $REPORT_DIR/index.html"
       echo "Coverage summary generated in $REPORT_DIR/summary.json"
+      echo "Coverage details generated in $REPORT_DIR/details.json"
+      echo "Coverage source snapshot generated in $REPORT_DIR/source-snapshot"

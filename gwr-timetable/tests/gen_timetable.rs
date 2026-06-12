@@ -1,10 +1,8 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
 use std::fs;
-use std::path::PathBuf;
 use std::process::Command;
 use std::rc::Rc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use gwr_engine::test_helpers::start_test;
 use gwr_models::processing_element::operators::dtype::DataType;
@@ -31,18 +29,6 @@ memories:
     capacity_bytes: 0x1000_0000
 ";
 
-fn temp_path(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    std::env::temp_dir().join(format!(
-        "gwr_gen_timetable_{name}_{}_{}",
-        std::process::id(),
-        nanos
-    ))
-}
-
 fn tensor_config<'a>(timetable_file: &'a TimetableFile, id: &str) -> &'a TensorConfigSection {
     timetable_file
         .nodes
@@ -59,8 +45,9 @@ fn tensor_config<'a>(timetable_file: &'a TimetableFile, id: &str) -> &'a TensorC
 
 #[test]
 fn generator_emits_multi_output_maxpool() {
-    let platform_path = temp_path("platform.yaml");
-    let timetable_path = temp_path("timetable.yaml");
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let platform_path = temp_dir.path().join("platform.yaml");
+    let timetable_path = temp_dir.path().join("timetable.yaml");
     fs::write(&platform_path, PLATFORM_YAML).unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_gen-timetable"))
@@ -154,7 +141,4 @@ fn generator_emits_multi_output_maxpool() {
     let clock = engine.default_clock();
     let platform = Rc::new(Platform::from_string(&engine, &clock, PLATFORM_YAML).unwrap());
     Timetable::new(&engine.top().clone(), timetable_file, &platform).unwrap();
-
-    let _ = fs::remove_file(platform_path);
-    let _ = fs::remove_file(timetable_path);
 }

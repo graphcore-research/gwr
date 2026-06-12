@@ -260,6 +260,8 @@ impl Operator for OperatorAdd {
 
 #[cfg(test)]
 mod tests {
+    use rand::RngCore;
+
     use super::*;
     use crate::processing_element::operators::dtype::DataType;
     use crate::processing_element::operators::partition_tensors;
@@ -271,6 +273,43 @@ mod tests {
     fn tensor_view(dims: &[usize]) -> Option<TensorView> {
         let tensor = Tensor::new(dims, &DataType::Bf16, 0);
         Some(TensorView::new_full(tensor))
+    }
+
+    struct FixedBoolRng {
+        values: Vec<bool>,
+    }
+
+    impl FixedBoolRng {
+        fn with_bool_values(values: impl IntoIterator<Item = bool>) -> Self {
+            Self {
+                values: values.into_iter().collect(),
+            }
+        }
+
+        fn next_bool(&mut self) -> bool {
+            if self.values.is_empty() {
+                true
+            } else {
+                self.values.remove(0)
+            }
+        }
+    }
+
+    impl RngCore for FixedBoolRng {
+        fn next_u32(&mut self) -> u32 {
+            if self.next_bool() { 0 } else { u32::MAX }
+        }
+
+        fn next_u64(&mut self) -> u64 {
+            if self.next_bool() { 0 } else { u64::MAX }
+        }
+
+        fn fill_bytes(&mut self, dst: &mut [u8]) {
+            for chunk in dst.chunks_mut(size_of::<u64>()) {
+                let bytes = self.next_u64().to_le_bytes();
+                chunk.copy_from_slice(&bytes[..chunk.len()]);
+            }
+        }
     }
 
     #[test]
@@ -332,45 +371,55 @@ mod tests {
     fn create_inputs_with_expand_ratio_one_preserves_output_shape() {
         let op = OperatorAdd {};
         let outputs = vec![tensor(&[2, 3, 4])];
-        let mut rng = rand::rng();
 
-        let inputs = op.create_inputs(&outputs, 1.0, &mut rng).unwrap();
+        for shrink_input_a in [false, true] {
+            let mut rng = FixedBoolRng::with_bool_values([shrink_input_a]);
 
-        assert_eq!(inputs.len(), 2);
-        assert_eq!(inputs[0].as_ref().unwrap().shape, Shape(vec![2, 3, 4]));
-        assert_eq!(inputs[1].as_ref().unwrap().shape, Shape(vec![2, 3, 4]));
-        op.validate_tensors(&inputs, &outputs).unwrap();
+            let inputs = op.create_inputs(&outputs, 1.0, &mut rng).unwrap();
+
+            assert_eq!(inputs.len(), 2);
+            assert_eq!(inputs[0].as_ref().unwrap().shape, Shape(vec![2, 3, 4]));
+            assert_eq!(inputs[1].as_ref().unwrap().shape, Shape(vec![2, 3, 4]));
+            op.validate_tensors(&inputs, &outputs).unwrap();
+        }
     }
 
     #[test]
     fn create_inputs_with_expand_ratio_zero_creates_broadcastable_inputs() {
         let op = OperatorAdd {};
         let outputs = vec![tensor(&[2, 3, 4])];
-        let mut rng = rand::rng();
 
-        let inputs = op.create_inputs(&outputs, 0.0, &mut rng).unwrap();
+        for shrink_input_a in [false, true] {
+            let mut rng = FixedBoolRng::with_bool_values([shrink_input_a]);
 
-        assert_eq!(inputs.len(), 2);
-        op.validate_tensors(&inputs, &outputs).unwrap();
+            let inputs = op.create_inputs(&outputs, 0.0, &mut rng).unwrap();
 
-        let inputs: Vec<Tensor> = inputs.into_iter().map(|input| input.unwrap()).collect();
-        let outputs: Vec<Tensor> = outputs.into_iter().map(|output| output.unwrap()).collect();
-        assert!(inputs[0].num_dims() <= outputs[0].num_dims());
-        assert!(inputs[1].num_dims() <= outputs[0].num_dims());
-        assert!(
-            inputs[0]
-                .shape
-                .0
+            assert_eq!(inputs.len(), 2);
+            op.validate_tensors(&inputs, &outputs).unwrap();
+
+            let inputs: Vec<Tensor> = inputs.into_iter().map(|input| input.unwrap()).collect();
+            let outputs: Vec<Tensor> = outputs
                 .iter()
-                .all(|dim| *dim == 1 || outputs[0].shape.0.contains(dim))
-        );
-        assert!(
-            inputs[1]
-                .shape
-                .0
-                .iter()
-                .all(|dim| *dim == 1 || outputs[0].shape.0.contains(dim))
-        );
+                .map(|output| output.clone().unwrap())
+                .collect();
+            assert_eq!(inputs[usize::from(shrink_input_a)].shape, outputs[0].shape);
+            assert!(inputs[0].num_dims() <= outputs[0].num_dims());
+            assert!(inputs[1].num_dims() <= outputs[0].num_dims());
+            assert!(
+                inputs[0]
+                    .shape
+                    .0
+                    .iter()
+                    .all(|dim| *dim == 1 || outputs[0].shape.0.contains(dim))
+            );
+            assert!(
+                inputs[1]
+                    .shape
+                    .0
+                    .iter()
+                    .all(|dim| *dim == 1 || outputs[0].shape.0.contains(dim))
+            );
+        }
     }
 
     #[test]
