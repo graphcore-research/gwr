@@ -175,7 +175,6 @@ types_or = ["rust", "toml"]
 entry = "semver-checks.sh"
 pass_filenames = false
 priority = 4
-stages = ["manual"]
 
 [[repos.hooks]]
 id = "cog-verify"
