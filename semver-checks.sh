@@ -8,6 +8,14 @@ set -eu
 # regardless of the caller's cwd.
 cd -- "$(dirname -- "$0")"
 
+# Git exports GIT_DIR et al. into the environment of hooks which it launches.
+# Those vars would be inherited by child processes and take precedence over
+# `-C <dir>`, which would result in the git operations within this script
+# operating on the outer repo (i.e. the one running the hook) instead of the
+# baseline checkout.
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX GIT_COMMON_DIR \
+    GIT_OBJECT_DIRECTORY GIT_NAMESPACE
+
 REMOTE_URL=https://github.com/graphcore-research/gwr.git
 REMOTE_NAME=origin
 BRANCH=main
