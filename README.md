@@ -297,7 +297,7 @@ During the commit process a number of different hooks will be invoked by [prek]:
     only performed by the [CI system].
   - The checks can be run locally with:
     ```bash
-    prek run --stage manual --all-files cargo-semver-checks
+    prek run --all-files cargo-semver-checks
     ```
 - All dependencies will be checked for vulnerabilities and compatible licensing
   using [cargo-deny].
