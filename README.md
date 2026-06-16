@@ -53,10 +53,8 @@ use gwr_engine::run_simulation;
 fn main() {
   let mut engine = Engine::default();
   let clock = engine.default_clock();
-  let mut source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10))
-      .expect("should be able to create and register `Source`");
-  let sink = Sink::new_and_register(&engine, &clock, engine.top(), "sink")
-      .expect("should be able to create and register `Sink`");
+  let mut source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10));
+  let sink = Sink::new_and_register(&engine, &clock, engine.top(), "sink");
   connect_port!(source, tx => sink, rx)
       .expect("should be able to connect `Source` to `Sink`");
   run_simulation!(engine);
