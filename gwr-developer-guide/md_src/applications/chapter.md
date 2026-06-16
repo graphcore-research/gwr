@@ -34,10 +34,8 @@ In this case the [`Source`] is configured to emit the value `0x123` ten times:
 # fn main() {
 # let mut engine = Engine::default();
 # let clock = engine.default_clock();
-let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10))
-    .expect("should be able to create and register `Source`");
-# let sink = Sink::new_and_register(&engine, &clock, engine.top(), "sink")
-#     .expect("should be able to create and register `Sink`");
+let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10));
+# let sink = Sink::new_and_register(&engine, &clock, engine.top(), "sink");
 # connect_port!(source, tx => sink, rx)
 #     .expect("should be able to connect `Source` to `Sink`");
 # }
@@ -51,10 +49,8 @@ let source = Source::new_and_register(&engine, engine.top(), "source", option_bo
 # fn main() {
 # let mut engine = Engine::default();
 # let clock = engine.default_clock();
-# let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10))
-#     .expect("should be able to create and register `Source`");
-let sink = Sink::new_and_register(&engine, &clock, engine.top(), "sink")
-    .expect("should be able to create and register `Sink`");
+# let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10));
+let sink = Sink::new_and_register(&engine, &clock, engine.top(), "sink");
 # connect_port!(source, tx => sink, rx)
 #     .expect("should be able to connect `Source` to `Sink`");
 # }
@@ -73,10 +69,8 @@ connections are always done in the direction of data flow `tx -> rx`.
 # fn main() {
 # let mut engine = Engine::default();
 # let clock = engine.default_clock();
-# let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10))
-#     .expect("should be able to create and register `Source`");
-# let sink = Sink::new_and_register(&engine, &clock, engine.top(), "sink")
-#     .expect("should be able to create and register `Sink`");
+# let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10));
+# let sink = Sink::new_and_register(&engine, &clock, engine.top(), "sink");
 connect_port!(source, tx => sink, rx)
     .expect("should be able to connect `Source` to `Sink`");
 # }
@@ -96,10 +90,8 @@ using the `run_simulation!` macro:
 # fn main() {
 # let mut engine = Engine::default();
 # let clock = engine.default_clock();
-# let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10))
-#     .expect("should be able to create and register `Source`");
-# let sink = Sink::new_and_register(&engine, &clock, engine.top(), "sink")
-#     .expect("should be able to create and register `Sink`");
+# let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10));
+# let sink = Sink::new_and_register(&engine, &clock, engine.top(), "sink");
 # connect_port!(source, tx => sink, rx)
 #     .expect("should be able to connect `Source` to `Sink`");
 run_simulation!(engine);
@@ -123,10 +115,8 @@ has received all the expected data.
 # fn main() {
 # let mut engine = Engine::default();
 # let clock = engine.default_clock();
-# let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10))
-#     .expect("should be able to create and register `Source`");
-# let sink = Sink::new_and_register(&engine, &clock, engine.top(), "sink")
-#     .expect("should be able to create and register `Sink`");
+# let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10));
+# let sink = Sink::new_and_register(&engine, &clock, engine.top(), "sink");
 # connect_port!(source, tx => sink, rx)
 #     .expect("should be able to connect `Source` to `Sink`");
 # run_simulation!(engine);
@@ -149,10 +139,8 @@ use gwr_engine::run_simulation;
 fn main() {
     let mut engine = Engine::default();
     let clock = engine.default_clock();
-    let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10))
-        .expect("should be able to create and register `Source`");
-    let sink = Sink::new_and_register(&engine, &clock, engine.top(), "sink")
-        .expect("should be able to create and register `Sink`");
+    let source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10));
+    let sink = Sink::new_and_register(&engine, &clock, engine.top(), "sink");
     connect_port!(source, tx => sink, rx)
         .expect("should be able to connect `Source` to `Sink`");
     run_simulation!(engine);
