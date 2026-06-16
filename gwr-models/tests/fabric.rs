@@ -1,6 +1,5 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::rc::Rc;
 
@@ -294,38 +293,28 @@ mod routed_fabric_harness {
             config.max_num_ports(),
             config.max_num_ports(),
         );
-        harness.run_steps(&[step_parallel(HashMap::from([
-            (
-                Port::Ingress(ingress_a_idx),
-                vec![action_send_ingress(access_a.clone())],
+        harness.run_steps([step_par([
+            step_send_ingress(ingress_a_idx, access_a.clone()),
+            step_send_ingress(ingress_b_idx, access_b.clone()),
+            step_expect_egress(
+                egress_a_idx,
+                MemoryTxn::read_req(addr_a)
+                    .with_src_addr(ingress_a_idx as u64)
+                    .with_bytes(access_size_bytes)
+                    .with_destination(egress_a_idx as u64)
+                    .with_dst_device(DeviceId(egress_a_idx as u64))
+                    .with_src_device(DeviceId(ingress_a_idx as u64)),
             ),
-            (
-                Port::Ingress(ingress_b_idx),
-                vec![action_send_ingress(access_b.clone())],
+            step_expect_egress(
+                egress_b_idx,
+                MemoryTxn::read_req(addr_b)
+                    .with_src_addr(ingress_b_idx as u64)
+                    .with_bytes(access_size_bytes)
+                    .with_destination(egress_b_idx as u64)
+                    .with_dst_device(DeviceId(egress_b_idx as u64))
+                    .with_src_device(DeviceId(ingress_b_idx as u64)),
             ),
-            (
-                Port::Egress(egress_a_idx),
-                vec![action_expect_egress(
-                    MemoryTxn::read_req(addr_a)
-                        .with_src_addr(ingress_a_idx as u64)
-                        .with_bytes(access_size_bytes)
-                        .with_destination(egress_a_idx as u64)
-                        .with_dst_device(DeviceId(egress_a_idx as u64))
-                        .with_src_device(DeviceId(ingress_a_idx as u64)),
-                )],
-            ),
-            (
-                Port::Egress(egress_b_idx),
-                vec![action_expect_egress(
-                    MemoryTxn::read_req(addr_b)
-                        .with_src_addr(ingress_b_idx as u64)
-                        .with_bytes(access_size_bytes)
-                        .with_destination(egress_b_idx as u64)
-                        .with_dst_device(DeviceId(egress_b_idx as u64))
-                        .with_src_device(DeviceId(ingress_b_idx as u64)),
-                )],
-            ),
-        ]))]);
+        ])]);
     }
 }
 

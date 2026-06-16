@@ -1,6 +1,5 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use gwr_components::arbiter::Arbiter;
@@ -57,7 +56,7 @@ mod delay_harness {
         let access = test_read(engine.top(), &memory_map);
 
         let mut harness = DelayHarness::new(engine, delay);
-        harness.run_steps(&[
+        harness.run_steps([
             step_send_rx(access.clone()),
             step_expect_tx(MemoryTxn::read_req(DST_ADDR)),
         ]);
@@ -80,7 +79,7 @@ mod delay_harness {
         );
 
         let mut harness = DelayHarness::new(engine, delay);
-        harness.run_steps(&[
+        harness.run_steps([
             step_send_rx(access),
             step_expect_tx(MemoryTxn::write_req(DST_ADDR).with_bytes(ACCESS_SIZE_BYTES)),
         ]);
@@ -95,7 +94,7 @@ mod delay_harness {
         let access = test_read(engine.top(), &memory_map);
 
         let mut harness = DelayHarness::new(engine, delay);
-        harness.run_steps(&[
+        harness.run_steps([
             step_send_rx(access),
             step_expect_no_traffic(&[Port::Tx], 2),
             step_delay(1),
@@ -112,13 +111,10 @@ mod delay_harness {
         let access = test_read(engine.top(), &memory_map);
 
         let mut harness = DelayHarness::new(engine, delay);
-        harness.run_steps(&[step_parallel(HashMap::from([
-            (Port::Rx, vec![action_send_rx(access)]),
-            (
-                Port::Tx,
-                vec![action_expect_tx(MemoryTxn::read_req(DST_ADDR))],
-            ),
-        ]))]);
+        harness.run_steps([step_par([
+            step_send_rx(access),
+            step_expect_tx(MemoryTxn::read_req(DST_ADDR)),
+        ])]);
     }
 }
 
@@ -160,30 +156,21 @@ mod arbiter_harness {
         let addr3 = DST_ADDR + 0x3000;
 
         let mut harness = ArbiterHarness::new(engine, arbiter, 2);
-        harness.run_steps(&[step_parallel(HashMap::from([
-            (
-                Port::Rx(0),
-                vec![
-                    action_send_rx(test_read_at(&top, &memory_map, addr0)),
-                    action_send_rx(test_read_at(&top, &memory_map, addr2)),
-                ],
-            ),
-            (
-                Port::Rx(1),
-                vec![
-                    action_send_rx(test_read_at(&top, &memory_map, addr1)),
-                    action_send_rx(test_read_at(&top, &memory_map, addr3)),
-                ],
-            ),
-            (
-                Port::Tx,
-                vec![
-                    action_expect_tx(MemoryTxn::read_req(addr0)),
-                    action_expect_tx(MemoryTxn::read_req(addr1)),
-                    action_expect_tx(MemoryTxn::read_req(addr2)),
-                    action_expect_tx(MemoryTxn::read_req(addr3)),
-                ],
-            ),
-        ]))]);
+        harness.run_steps([step_par([
+            step_seq([
+                step_send_rx(0, test_read_at(&top, &memory_map, addr0)),
+                step_send_rx(0, test_read_at(&top, &memory_map, addr2)),
+            ]),
+            step_seq([
+                step_send_rx(1, test_read_at(&top, &memory_map, addr1)),
+                step_send_rx(1, test_read_at(&top, &memory_map, addr3)),
+            ]),
+            step_seq([
+                step_expect_tx(MemoryTxn::read_req(addr0)),
+                step_expect_tx(MemoryTxn::read_req(addr1)),
+                step_expect_tx(MemoryTxn::read_req(addr2)),
+                step_expect_tx(MemoryTxn::read_req(addr3)),
+            ]),
+        ])]);
     }
 }

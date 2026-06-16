@@ -220,9 +220,9 @@ where
 
 /// Build a simulation test harness around a component.
 ///
-/// This macro generates the harness struct, local `Port`/`Action`/`Step` enums,
-/// helper functions, fixed step execution, stateful step generators, and
-/// parallel port driving for a component testbench.
+/// This macro generates the harness struct, local `Port`/`Step` enums, helper
+/// functions, fixed step execution, stateful step generators, and recursive
+/// sequence/parallel step driving for a component testbench.
 ///
 /// See the crate-level Testing documentation for the intended usage pattern,
 /// generated API, and examples.
@@ -239,6 +239,7 @@ macro_rules! build_component_harness {
             @normalize
             [$(#[$meta])*]
             [$vis]
+            [$harness]
             [$vis struct $harness<$item> where $item: gwr_engine::traits::SimObject]
             [impl<$item> $harness<$item> where $item: gwr_engine::traits::SimObject]
             [<$item, Expected>]
@@ -259,12 +260,13 @@ macro_rules! build_component_harness {
         @normalize
         [$($meta:tt)*]
         [$vis:vis]
+        [$harness:ident]
         [$($struct_head:tt)+]
         [$($impl_head:tt)+]
-        [$($action_generics_decl:tt)*]
+        [$($step_generics_decl:tt)*]
         [$expected_ident:ident]
         [$expected_ty:ty]
-        [$($action_where:tt)*]
+        [$($step_where:tt)*]
         [$item_ty:ty]
         [$component_field:ident : $component_ty:ty]
         [$($rx_ports:tt)*]
@@ -277,12 +279,13 @@ macro_rules! build_component_harness {
             @normalize
             [$($meta)*]
             [$vis]
+            [$harness]
             [$($struct_head)*]
             [$($impl_head)*]
-            [$($action_generics_decl)*]
+            [$($step_generics_decl)*]
             [$expected_ident]
             [$expected_ty]
-            [$($action_where)*]
+            [$($step_where)*]
             [$item_ty]
             [$component_field: $component_ty]
             [$($rx_section)*]
@@ -297,12 +300,13 @@ macro_rules! build_component_harness {
         @normalize
         [$($meta:tt)*]
         [$vis:vis]
+        [$harness:ident]
         [$($struct_head:tt)+]
         [$($impl_head:tt)+]
-        [$($action_generics_decl:tt)*]
+        [$($step_generics_decl:tt)*]
         [$expected_ident:ident]
         [$expected_ty:ty]
-        [$($action_where:tt)*]
+        [$($step_where:tt)*]
         [$item_ty:ty]
         [$component_field:ident : $component_ty:ty]
         [$($rx_ports:tt)*]
@@ -315,12 +319,13 @@ macro_rules! build_component_harness {
             @normalize
             [$($meta)*]
             [$vis]
+            [$harness]
             [$($struct_head)*]
             [$($impl_head)*]
-            [$($action_generics_decl)*]
+            [$($step_generics_decl)*]
             [$expected_ident]
             [$expected_ty]
-            [$($action_where)*]
+            [$($step_where)*]
             [$item_ty]
             [$component_field: $component_ty]
             [$($rx_section)*]
@@ -334,12 +339,13 @@ macro_rules! build_component_harness {
         @normalize
         [$($meta:tt)*]
         [$vis:vis]
+        [$harness:ident]
         [$($struct_head:tt)+]
         [$($impl_head:tt)+]
-        [$($action_generics_decl:tt)*]
+        [$($step_generics_decl:tt)*]
         [$expected_ident:ident]
         [$expected_ty:ty]
-        [$($action_where:tt)*]
+        [$($step_where:tt)*]
         [$item_ty:ty]
         [$component_field:ident : $component_ty:ty]
         [$($rx_ports:tt)*]
@@ -352,12 +358,13 @@ macro_rules! build_component_harness {
             @normalize
             [$($meta)*]
             [$vis]
+            [$harness]
             [$($struct_head)*]
             [$($impl_head)*]
-            [$($action_generics_decl)*]
+            [$($step_generics_decl)*]
             [$expected_ident]
             [$expected_ty]
-            [$($action_where)*]
+            [$($step_where)*]
             [$item_ty]
             [$component_field: $component_ty]
             [$($rx_ports)*]
@@ -372,12 +379,13 @@ macro_rules! build_component_harness {
         @normalize
         [$($meta:tt)*]
         [$vis:vis]
+        [$harness:ident]
         [$($struct_head:tt)+]
         [$($impl_head:tt)+]
-        [$($action_generics_decl:tt)*]
+        [$($step_generics_decl:tt)*]
         [$expected_ident:ident]
         [$expected_ty:ty]
-        [$($action_where:tt)*]
+        [$($step_where:tt)*]
         [$item_ty:ty]
         [$component_field:ident : $component_ty:ty]
         [$($rx_ports:tt)*]
@@ -390,12 +398,13 @@ macro_rules! build_component_harness {
             @normalize
             [$($meta)*]
             [$vis]
+            [$harness]
             [$($struct_head)*]
             [$($impl_head)*]
-            [$($action_generics_decl)*]
+            [$($step_generics_decl)*]
             [$expected_ident]
             [$expected_ty]
-            [$($action_where)*]
+            [$($step_where)*]
             [$item_ty]
             [$component_field: $component_ty]
             [$($rx_ports)*]
@@ -409,12 +418,13 @@ macro_rules! build_component_harness {
         @normalize
         [$($meta:tt)*]
         [$vis:vis]
+        [$harness:ident]
         [$($struct_head:tt)+]
         [$($impl_head:tt)+]
-        [$($action_generics_decl:tt)*]
+        [$($step_generics_decl:tt)*]
         [$expected_ident:ident]
         [$expected_ty:ty]
-        [$($action_where:tt)*]
+        [$($step_where:tt)*]
         [$item_ty:ty]
         [$component_field:ident : $component_ty:ty]
         [$($rx_ports:tt)*]
@@ -427,12 +437,13 @@ macro_rules! build_component_harness {
             @normalize
             [$($meta)*]
             [$vis]
+            [$harness]
             [$($struct_head)*]
             [$($impl_head)*]
-            [$($action_generics_decl)*]
+            [$($step_generics_decl)*]
             [$expected_ident]
             [$expected_ty]
-            [$($action_where)*]
+            [$($step_where)*]
             [$item_ty]
             [$component_field: $component_ty]
             [$($rx_ports)*]
@@ -447,12 +458,13 @@ macro_rules! build_component_harness {
         @normalize
         [$($meta:tt)*]
         [$vis:vis]
+        [$harness:ident]
         [$($struct_head:tt)+]
         [$($impl_head:tt)+]
-        [$($action_generics_decl:tt)*]
+        [$($step_generics_decl:tt)*]
         [$expected_ident:ident]
         [$expected_ty:ty]
-        [$($action_where:tt)*]
+        [$($step_where:tt)*]
         [$item_ty:ty]
         [$component_field:ident : $component_ty:ty]
         [$($rx_ports:tt)*]
@@ -465,12 +477,13 @@ macro_rules! build_component_harness {
             @normalize
             [$($meta)*]
             [$vis]
+            [$harness]
             [$($struct_head)*]
             [$($impl_head)*]
-            [$($action_generics_decl)*]
+            [$($step_generics_decl)*]
             [$expected_ident]
             [$expected_ty]
-            [$($action_where)*]
+            [$($step_where)*]
             [$item_ty]
             [$component_field: $component_ty]
             [$($rx_ports)*]
@@ -484,12 +497,13 @@ macro_rules! build_component_harness {
         @normalize
         [$($meta:tt)*]
         [$vis:vis]
+        [$harness:ident]
         [$($struct_head:tt)+]
         [$($impl_head:tt)+]
-        [$($action_generics_decl:tt)*]
+        [$($step_generics_decl:tt)*]
         [$expected_ident:ident]
         [$expected_ty:ty]
-        [$($action_where:tt)*]
+        [$($step_where:tt)*]
         [$item_ty:ty]
         [$component_field:ident : $component_ty:ty]
         [$($rx_ports:tt)*]
@@ -502,12 +516,13 @@ macro_rules! build_component_harness {
             @normalize
             [$($meta)*]
             [$vis]
+            [$harness]
             [$($struct_head)*]
             [$($impl_head)*]
-            [$($action_generics_decl)*]
+            [$($step_generics_decl)*]
             [$expected_ident]
             [$expected_ty]
-            [$($action_where)*]
+            [$($step_where)*]
             [$item_ty]
             [$component_field: $component_ty]
             [$($rx_ports)*]
@@ -522,12 +537,13 @@ macro_rules! build_component_harness {
         @normalize
         [$($meta:tt)*]
         [$vis:vis]
+        [$harness:ident]
         [$($struct_head:tt)+]
         [$($impl_head:tt)+]
-        [$($action_generics_decl:tt)*]
+        [$($step_generics_decl:tt)*]
         [$expected_ident:ident]
         [$expected_ty:ty]
-        [$($action_where:tt)*]
+        [$($step_where:tt)*]
         [$item_ty:ty]
         [$component_field:ident : $component_ty:ty]
         [$($rx_ports:tt)*]
@@ -540,12 +556,13 @@ macro_rules! build_component_harness {
             @normalize
             [$($meta)*]
             [$vis]
+            [$harness]
             [$($struct_head)*]
             [$($impl_head)*]
-            [$($action_generics_decl)*]
+            [$($step_generics_decl)*]
             [$expected_ident]
             [$expected_ty]
-            [$($action_where)*]
+            [$($step_where)*]
             [$item_ty]
             [$component_field: $component_ty]
             [$($rx_ports)*]
@@ -559,12 +576,13 @@ macro_rules! build_component_harness {
         @normalize
         [$($meta:tt)*]
         [$vis:vis]
+        [$harness:ident]
         [$($struct_head:tt)+]
         [$($impl_head:tt)+]
-        [$($action_generics_decl:tt)*]
+        [$($step_generics_decl:tt)*]
         [$expected_ident:ident]
         [$expected_ty:ty]
-        [$($action_where:tt)*]
+        [$($step_where:tt)*]
         [$item_ty:ty]
         [$component_field:ident : $component_ty:ty]
         [$($rx_ports:tt)*]
@@ -576,12 +594,13 @@ macro_rules! build_component_harness {
             @impl_inferred
             [$($meta)*]
             [$vis]
+            [$harness]
             [$($struct_head)*]
             [$($impl_head)*]
-            [$($action_generics_decl)*]
+            [$($step_generics_decl)*]
             [$expected_ident]
             [$expected_ty]
-            [$($action_where)*]
+            [$($step_where)*]
             [$item_ty]
             [$component_field: $component_ty]
             rx ports: { $($rx_ports)* },
@@ -595,12 +614,13 @@ macro_rules! build_component_harness {
         @impl_inferred
         [$($meta:tt)*]
         [$vis:vis]
+        [$harness:ident]
         [$($struct_head:tt)+]
         [$($impl_head:tt)+]
-        [$($action_generics_decl:tt)*]
+        [$($step_generics_decl:tt)*]
         [$expected_ident:ident]
         [$expected_ty:ty]
-        [$($action_where:tt)*]
+        [$($step_where:tt)*]
         [$item_ty:ty]
         [$component_field:ident : $component_ty:ty]
         rx ports: {
@@ -632,12 +652,13 @@ macro_rules! build_component_harness {
             @impl
             [$($meta)*]
             [$vis]
+            [$harness]
             [$($struct_head)*]
             [$($impl_head)*]
-            [$($action_generics_decl)*]
+            [$($step_generics_decl)*]
             [$expected_ident]
             [$expected_ty]
-            [$($action_where)*]
+            [$($step_where)*]
             [$item_ty]
             [$component_field: $component_ty]
             rx ports: {
@@ -699,6 +720,7 @@ macro_rules! build_component_harness {
             @impl
             [$(#[$meta])*]
             [$vis]
+            [$harness]
             [
                 $vis struct $harness<$item>
                 where
@@ -776,16 +798,10 @@ macro_rules! build_component_harness {
             pub fn [<step_send_ $rx_field>]<$item_ident>(
                 value: $rx_ty,
             ) -> Step<$item_ty, $expected_ty> {
-                Step::<$item_ty, $expected_ty>::Action {
-                    ports: vec![Port::$rx_variant],
-                    action: Action::<$item_ty, $expected_ty>::[<Send $rx_variant>] { value },
+                Step::<$item_ty, $expected_ty>::[<Send $rx_variant>] {
+                    port: Port::$rx_variant,
+                    value,
                 }
-            }
-
-            pub fn [<action_send_ $rx_field>]<$item_ident>(
-                value: $rx_ty,
-            ) -> Action<$item_ty, $expected_ty> {
-                Action::<$item_ty, $expected_ty>::[<Send $rx_variant>] { value }
             }
         }
     };
@@ -804,16 +820,10 @@ macro_rules! build_component_harness {
             pub fn [<step_expect_ $tx_field>]<$item_ident>(
                 value: $tx_expected_ty,
             ) -> Step<$item_ty, $expected_ty> {
-                Step::<$item_ty, $expected_ty>::Action {
-                    ports: vec![Port::$tx_variant],
-                    action: Action::<$item_ty, $expected_ty>::[<Expect $tx_variant>] { value },
+                Step::<$item_ty, $expected_ty>::[<Expect $tx_variant>] {
+                    port: Port::$tx_variant,
+                    value,
                 }
-            }
-
-            pub fn [<action_expect_ $tx_field>]<$item_ident>(
-                value: $tx_expected_ty,
-            ) -> Action<$item_ty, $expected_ty> {
-                Action::<$item_ty, $expected_ty>::[<Expect $tx_variant>] { value }
             }
         }
     };
@@ -833,16 +843,10 @@ macro_rules! build_component_harness {
                 idx: usize,
                 value: $rx_array_ty,
             ) -> Step<$item_ty, $expected_ty> {
-                Step::<$item_ty, $expected_ty>::Action {
-                    ports: vec![Port::$rx_array_variant(idx)],
-                    action: Action::<$item_ty, $expected_ty>::[<Send $rx_array_variant>] { value },
+                Step::<$item_ty, $expected_ty>::[<Send $rx_array_variant>] {
+                    port: Port::$rx_array_variant(idx),
+                    value,
                 }
-            }
-
-            pub fn [<action_send_ $rx_array_field>]<$item_ident>(
-                value: $rx_array_ty,
-            ) -> Action<$item_ty, $expected_ty> {
-                Action::<$item_ty, $expected_ty>::[<Send $rx_array_variant>] { value }
             }
         }
     };
@@ -862,16 +866,10 @@ macro_rules! build_component_harness {
                 idx: usize,
                 value: $tx_array_expected_ty,
             ) -> Step<$item_ty, $expected_ty> {
-                Step::<$item_ty, $expected_ty>::Action {
-                    ports: vec![Port::$tx_array_variant(idx)],
-                    action: Action::<$item_ty, $expected_ty>::[<Expect $tx_array_variant>] { value },
+                Step::<$item_ty, $expected_ty>::[<Expect $tx_array_variant>] {
+                    port: Port::$tx_array_variant(idx),
+                    value,
                 }
-            }
-
-            pub fn [<action_expect_ $tx_array_field>]<$item_ident>(
-                value: $tx_array_expected_ty,
-            ) -> Action<$item_ty, $expected_ty> {
-                Action::<$item_ty, $expected_ty>::[<Expect $tx_array_variant>] { value }
             }
         }
     };
@@ -880,12 +878,13 @@ macro_rules! build_component_harness {
         @impl
         [$(#[$meta:meta])*]
         [$vis:vis]
+        [$harness:ident]
         [$($struct_head:tt)+]
         [$($impl_head:tt)+]
-        [$($action_generics_decl:tt)*]
+        [$($step_generics_decl:tt)*]
         [$expected_ident:ident]
         [$expected_ty:ty]
-        [$($action_where:tt)*]
+        [$($step_where:tt)*]
         [$item_ty:ty]
         [$component_field:ident : $component_ty:ty]
         rx ports: {
@@ -929,38 +928,358 @@ macro_rules! build_component_harness {
             }
 
             #[derive(Clone, Debug)]
-            $vis enum Action<$item_ty, $expected_ident = ()> {
-                $([<Send $rx_variant>] { value: $rx_ty },)*
-                $([<Expect $tx_variant>] { value: $tx_expected_ty },)*
-                $([<Send $rx_array_variant>] { value: $rx_array_ty },)*
-                $([<Expect $tx_array_variant>] { value: $tx_array_expected_ty },)*
-                ExpectNoTraffic { ticks: u64 },
-                Delay { ticks: u64 },
-                #[doc(hidden)]
-                __Expected(std::marker::PhantomData<fn() -> $expected_ident>),
-            }
-
-            #[derive(Clone, Debug)]
             $vis enum Step<$item_ty, $expected_ident = ()> {
-                Action {
-                    ports: Vec<Port>,
-                    action: Action<$item_ty, $expected_ty>,
-                },
-                Parallel {
-                    sections: std::collections::HashMap<
-                        Port,
-                        Vec<Action<$item_ty, $expected_ty>>,
-                    >,
-                },
+                Seq(Vec<Step<$item_ty, $expected_ty>>),
+                Par(Vec<Step<$item_ty, $expected_ty>>),
+                $([<Send $rx_variant>] { port: Port, value: $rx_ty },)*
+                $([<Expect $tx_variant>] { port: Port, value: $tx_expected_ty },)*
+                $([<Send $rx_array_variant>] { port: Port, value: $rx_array_ty },)*
+                $([<Expect $tx_array_variant>] { port: Port, value: $tx_array_expected_ty },)*
+                ExpectNoTraffic { ports: Vec<Port>, ticks: u64 },
+                Delay { ports: Vec<Port>, ticks: u64 },
                 #[doc(hidden)]
                 __Expected(std::marker::PhantomData<fn() -> $expected_ident>),
             }
 
-            enum ParallelPort<$item_ty> $($action_where)* {
-                $($rx_variant(gwr_engine::port::OutPort<$rx_ty>),)*
-                $($tx_variant(gwr_engine::port::InPort<$tx_ty>),)*
-                $($rx_array_variant(usize, gwr_engine::port::OutPort<$rx_array_ty>),)*
-                $($tx_array_variant(usize, gwr_engine::port::InPort<$tx_array_ty>),)*
+            struct [<$harness Ports>]<$item_ty> $($step_where)* {
+                $(
+                    [<$rx_field _driver>]: Option<gwr_engine::port::OutPort<$rx_ty>>,
+                )*
+                $(
+                    [<$tx_field _receiver>]: Option<gwr_engine::port::InPort<$tx_ty>>,
+                )*
+                $(
+                    [<$rx_array_field _drivers>]: Vec<Option<gwr_engine::port::OutPort<$rx_array_ty>>>,
+                )*
+                $(
+                    [<$tx_array_field _receivers>]: Vec<Option<gwr_engine::port::InPort<$tx_array_ty>>>,
+                )*
+                _item: std::marker::PhantomData<fn() -> $item_ty>,
+            }
+
+            impl<$item_ty> [<$harness Ports>]<$item_ty> $($step_where)* {
+                fn new_empty(&self) -> Self {
+                    Self {
+                        $(
+                            [<$rx_field _driver>]: None,
+                        )*
+                        $(
+                            [<$tx_field _receiver>]: None,
+                        )*
+                        $(
+                            [<$rx_array_field _drivers>]: std::iter::repeat_with(|| None)
+                                .take(self.[<$rx_array_field _drivers>].len())
+                                .collect(),
+                        )*
+                        $(
+                            [<$tx_array_field _receivers>]: std::iter::repeat_with(|| None)
+                                .take(self.[<$tx_array_field _receivers>].len())
+                                .collect(),
+                        )*
+                        _item: std::marker::PhantomData,
+                    }
+                }
+
+                fn take_selected(
+                    &mut self,
+                    selected: &std::collections::HashSet<Port>,
+                    context: &str,
+                ) -> Self {
+                    let mut port_collection = self.new_empty();
+                    for port in selected {
+                        match *port {
+                            $(
+                            Port::$rx_variant => {
+                                port_collection.[<$rx_field _driver>] = Some(
+                                    self.[<$rx_field _driver>]
+                                        .take()
+                                        .unwrap_or_else(|| panic!("{context}: {} driver already taken", stringify!($rx_field))),
+                                );
+                            }
+                            )*
+                            $(
+                            Port::$tx_variant => {
+                                port_collection.[<$tx_field _receiver>] = Some(
+                                    self.[<$tx_field _receiver>]
+                                        .take()
+                                        .unwrap_or_else(|| panic!("{context}: {} receiver already taken", stringify!($tx_field))),
+                                );
+                            }
+                            )*
+                            $(
+                            Port::$rx_array_variant(idx) => {
+                                port_collection.[<$rx_array_field _drivers>][idx] = Some(
+                                    self.[<$rx_array_field _drivers>]
+                                        .get_mut(idx)
+                                        .and_then(|driver| driver.take())
+                                        .unwrap_or_else(|| panic!("{context}: {} driver index {idx} out of range or already taken", stringify!($rx_array_field))),
+                                );
+                            }
+                            )*
+                            $(
+                            Port::$tx_array_variant(idx) => {
+                                port_collection.[<$tx_array_field _receivers>][idx] = Some(
+                                    self.[<$tx_array_field _receivers>]
+                                        .get_mut(idx)
+                                        .and_then(|receiver| receiver.take())
+                                        .unwrap_or_else(|| panic!("{context}: {} receiver index {idx} out of range or already taken", stringify!($tx_array_field))),
+                                );
+                            }
+                            )*
+                        }
+                    }
+                    port_collection
+                }
+
+                fn return_ports(&mut self, mut port_collection: Self, context: &str) {
+                    $(
+                    if let Some(driver) = port_collection.[<$rx_field _driver>].take() {
+                        if self.[<$rx_field _driver>].replace(driver).is_some() {
+                            panic!("{context}: {} driver returned twice", stringify!($rx_field));
+                        }
+                    }
+                    )*
+                    $(
+                    if let Some(receiver) = port_collection.[<$tx_field _receiver>].take() {
+                        if self.[<$tx_field _receiver>].replace(receiver).is_some() {
+                            panic!("{context}: {} receiver returned twice", stringify!($tx_field));
+                        }
+                    }
+                    )*
+                    $(
+                    for (idx, driver) in port_collection.[<$rx_array_field _drivers>].into_iter().enumerate() {
+                        if let Some(driver) = driver {
+                            if self.[<$rx_array_field _drivers>][idx].replace(driver).is_some() {
+                                panic!("{context}: {} driver index {idx} returned twice", stringify!($rx_array_field));
+                            }
+                        }
+                    }
+                    )*
+                    $(
+                    for (idx, receiver) in port_collection.[<$tx_array_field _receivers>].into_iter().enumerate() {
+                        if let Some(receiver) = receiver {
+                            if self.[<$tx_array_field _receivers>][idx].replace(receiver).is_some() {
+                                panic!("{context}: {} receiver index {idx} returned twice", stringify!($tx_array_field));
+                            }
+                        }
+                    }
+                    )*
+                }
+
+                fn collect_step_ports(
+                    step: &Step<$item_ty, $expected_ty>,
+                    ports: &mut std::collections::HashSet<Port>,
+                ) {
+                    match step {
+                        Step::<$item_ty, $expected_ty>::Seq(steps)
+                        | Step::<$item_ty, $expected_ty>::Par(steps) => {
+                            for step in steps {
+                                Self::collect_step_ports(step, ports);
+                            }
+                        }
+                        $(
+                        Step::<$item_ty, $expected_ty>::[<Send $rx_variant>] { port, .. } => {
+                            ports.insert(*port);
+                        }
+                        )*
+                        $(
+                        Step::<$item_ty, $expected_ty>::[<Expect $tx_variant>] { port, .. } => {
+                            ports.insert(*port);
+                        }
+                        )*
+                        $(
+                        Step::<$item_ty, $expected_ty>::[<Send $rx_array_variant>] { port, .. } => {
+                            ports.insert(*port);
+                        }
+                        )*
+                        $(
+                        Step::<$item_ty, $expected_ty>::[<Expect $tx_array_variant>] { port, .. } => {
+                            ports.insert(*port);
+                        }
+                        )*
+                        Step::<$item_ty, $expected_ty>::ExpectNoTraffic { ports: step_ports, .. } => {
+                            ports.extend(step_ports.iter().copied());
+                        }
+                        Step::<$item_ty, $expected_ty>::Delay { ports: step_ports, .. } => {
+                            ports.extend(step_ports.iter().copied());
+                        }
+                        Step::<$item_ty, $expected_ty>::__Expected(_) => {
+                            unreachable!("marker variant is not a harness step");
+                        }
+                    }
+                }
+
+                fn run_steps(
+                    mut self,
+                    steps: Vec<Step<$item_ty, $expected_ty>>,
+                    clock: gwr_engine::time::clock::Clock,
+                    spawner: gwr_engine::executor::Spawner,
+                    context: String,
+                ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self, gwr_engine::types::SimError>> + 'static>>
+                where
+                    $($rx_ty: Clone + 'static,)*
+                    $($tx_expected_ty: Clone + $crate::test_helpers::ValueCheck<$tx_ty> + 'static,)*
+                    $($rx_array_ty: Clone + 'static,)*
+                    $($tx_array_expected_ty: Clone + $crate::test_helpers::ValueCheck<$tx_array_ty> + 'static,)*
+                    $item_ty: 'static,
+                    $expected_ty: 'static,
+                {
+                    Box::pin(async move {
+                        for (step_idx, step) in steps.into_iter().enumerate() {
+                            let step_context = if context.is_empty() {
+                                format!("step {step_idx}")
+                            } else {
+                                format!("{context} step {step_idx}")
+                            };
+                            match step {
+                                Step::<$item_ty, $expected_ty>::Seq(steps) => {
+                                    self = self.run_steps(steps, clock.clone(), spawner.clone(), step_context).await?;
+                                }
+                                Step::<$item_ty, $expected_ty>::Par(steps) => {
+                                    let mut completions = Vec::with_capacity(steps.len());
+
+                                    for (par_step_idx, step) in steps.into_iter().enumerate() {
+                                        let branch_context = format!("{step_context}: parallel step {par_step_idx}");
+                                        let mut branch_ports = std::collections::HashSet::new();
+                                        Self::collect_step_ports(&step, &mut branch_ports);
+                                        let branch_runner_ports = self.take_selected(&branch_ports, &branch_context);
+                                        let branch_clock = clock.clone();
+                                        let branch_spawner = spawner.clone();
+                                        let (complete_tx, complete_rx) = $crate::test_helpers::one_shot_channel();
+
+                                        spawner.spawn(async move {
+                                            let branch_steps = match step {
+                                                Step::<$item_ty, $expected_ty>::Seq(steps) => steps,
+                                                step => vec![step],
+                                            };
+                                            let result = branch_runner_ports
+                                                .run_steps(branch_steps, branch_clock, branch_spawner, branch_context.clone())
+                                                .await;
+                                            complete_tx
+                                                .send((branch_context, result))
+                                                .unwrap_or_else(|_| panic!("parallel step receiver dropped"));
+                                            Ok::<(), gwr_engine::types::SimError>(())
+                                        });
+                                        completions.push(complete_rx);
+                                    }
+
+                                    for completion in completions {
+                                        let (branch_context, result) = completion
+                                            .await
+                                            .unwrap_or_else(|_| panic!("{step_context}: parallel section dropped"));
+                                        let returned = result?;
+                                        self.return_ports(returned, &branch_context);
+                                    }
+                                }
+                                $(
+                                Step::<$item_ty, $expected_ty>::[<Send $rx_variant>] { port, value } => {
+                                    let Port::$rx_variant = port else {
+                                        panic!("{step_context} {port:?}: step is for {}", stringify!($rx_variant));
+                                    };
+                                    self.[<$rx_field _driver>]
+                                        .as_ref()
+                                        .expect(concat!(stringify!($rx_field), " driver already taken"))
+                                        .put(value.clone())?
+                                        .await;
+                                }
+                                )*
+                                $(
+                                Step::<$item_ty, $expected_ty>::[<Expect $tx_variant>] { port, value } => {
+                                    let Port::$tx_variant = port else {
+                                        panic!("{step_context} {port:?}: step is for {}", stringify!($tx_variant));
+                                    };
+                                    let actual = self.[<$tx_field _receiver>]
+                                        .as_ref()
+                                        .expect(concat!(stringify!($tx_field), " receiver already taken"))
+                                        .get()?
+                                        .await;
+                                    $crate::test_helpers::ValueCheck::assert_matches(
+                                        &value,
+                                        &format!("{step_context} {port:?}"),
+                                        &actual,
+                                    );
+                                }
+                                )*
+                                $(
+                                Step::<$item_ty, $expected_ty>::[<Send $rx_array_variant>] { port, value } => {
+                                    let Port::$rx_array_variant(idx) = port else {
+                                        panic!("{step_context} {port:?}: step is for {}", stringify!($rx_array_variant));
+                                    };
+                                    self.[<$rx_array_field _drivers>]
+                                        .get(idx)
+                                        .and_then(|driver| driver.as_ref())
+                                        .unwrap_or_else(|| panic!("{} driver index {idx} out of range or already taken", stringify!($rx_array_field)))
+                                        .put(value.clone())?
+                                        .await;
+                                }
+                                )*
+                                $(
+                                Step::<$item_ty, $expected_ty>::[<Expect $tx_array_variant>] { port, value } => {
+                                    let Port::$tx_array_variant(idx) = port else {
+                                        panic!("{step_context} {port:?}: step is for {}", stringify!($tx_array_variant));
+                                    };
+                                    let actual = self.[<$tx_array_field _receivers>]
+                                        .get(idx)
+                                        .and_then(|receiver| receiver.as_ref())
+                                        .unwrap_or_else(|| panic!("{} receiver index {idx} out of range or already taken", stringify!($tx_array_field)))
+                                        .get()?
+                                        .await;
+                                    $crate::test_helpers::ValueCheck::assert_matches(
+                                        &value,
+                                        &format!("{step_context} {port:?}"),
+                                        &actual,
+                                    );
+                                }
+                                )*
+                                Step::<$item_ty, $expected_ty>::ExpectNoTraffic { ports, ticks } => {
+                                    let mut receivers = Vec::new();
+                                    for port in &ports {
+                                        match port {
+                                            $(
+                                            Port::$tx_variant => {
+                                                let receiver = self.[<$tx_field _receiver>]
+                                                    .as_ref()
+                                                    .expect(concat!(stringify!($tx_field), " receiver already taken"));
+                                                receivers.push((stringify!($tx_field), receiver as &dyn $crate::test_helpers::NoTrafficPort));
+                                            }
+                                            )*
+                                            $(
+                                            Port::$tx_array_variant(idx) => {
+                                                let receiver = self.[<$tx_array_field _receivers>]
+                                                    .get(*idx)
+                                                    .and_then(|receiver| receiver.as_ref())
+                                                    .unwrap_or_else(|| panic!("{} receiver index {idx} out of range or already taken", stringify!($tx_array_field)));
+                                                receivers.push((stringify!($tx_array_field), receiver as &dyn $crate::test_helpers::NoTrafficPort));
+                                            }
+                                            )*
+                                            _ => {
+                                                panic!("{step_context} {port:?}: expect no traffic requires tx ports");
+                                            }
+                                        }
+                                    }
+
+                                    $crate::test_helpers::expect_no_traffic(
+                                        &step_context,
+                                        &clock,
+                                        ticks,
+                                        receivers,
+                                    )
+                                    .await?;
+                                }
+                                Step::<$item_ty, $expected_ty>::Delay { ports, ticks } => {
+                                    if !ports.is_empty() {
+                                        panic!("{step_context}: delay does not take ports");
+                                    }
+                                    clock.wait_ticks(ticks).await;
+                                }
+                                Step::<$item_ty, $expected_ty>::__Expected(_) => {
+                                    unreachable!("marker variant is not a harness step");
+                                }
+                            }
+                        }
+                        Ok(self)
+                    })
+                }
             }
 
             $(#[$meta])*
@@ -1123,17 +1442,21 @@ macro_rules! build_component_harness {
                 )*
 
                 #[allow(unreachable_code)]
-                pub fn run_steps(
+                pub fn run_steps<Steps>(
                     &mut self,
-                    steps: &[Step<$item_ty, $expected_ty>],
+                    steps: Steps,
                 )
                 where
-                    $($rx_ty: Clone,)*
-                    $($tx_expected_ty: Clone + $crate::test_helpers::ValueCheck<$tx_ty>,)*
-                    $($rx_array_ty: Clone,)*
-                    $($tx_array_expected_ty: Clone + $crate::test_helpers::ValueCheck<$tx_array_ty>,)*
+                    Steps: IntoIterator<Item = Step<$item_ty, $expected_ty>>,
+                    Steps::IntoIter: 'static,
+                    $($rx_ty: Clone + 'static,)*
+                    $($tx_expected_ty: Clone + $crate::test_helpers::ValueCheck<$tx_ty> + 'static,)*
+                    $($rx_array_ty: Clone + 'static,)*
+                    $($tx_array_expected_ty: Clone + $crate::test_helpers::ValueCheck<$tx_array_ty> + 'static,)*
+                    $item_ty: 'static,
+                    $expected_ty: 'static,
                 {
-                    self.run_step_generator(steps.to_vec().into_iter());
+                    self.run_step_generator(steps.into_iter());
                 }
 
                 #[allow(unreachable_code)]
@@ -1143,10 +1466,12 @@ macro_rules! build_component_harness {
                 )
                 where
                     I: Iterator<Item = Step<$item_ty, $expected_ty>> + 'static,
-                    $($rx_ty: Clone,)*
-                    $($tx_expected_ty: Clone + $crate::test_helpers::ValueCheck<$tx_ty>,)*
-                    $($rx_array_ty: Clone,)*
-                    $($tx_array_expected_ty: Clone + $crate::test_helpers::ValueCheck<$tx_array_ty>,)*
+                    $($rx_ty: Clone + 'static,)*
+                    $($tx_expected_ty: Clone + $crate::test_helpers::ValueCheck<$tx_ty> + 'static,)*
+                    $($rx_array_ty: Clone + 'static,)*
+                    $($tx_array_expected_ty: Clone + $crate::test_helpers::ValueCheck<$tx_array_ty> + 'static,)*
+                    $item_ty: 'static,
+                    $expected_ty: 'static,
                 {
                     let harness_complete = gwr_engine::events::once::Once::default();
                     let notify_harness_complete = harness_complete.clone();
@@ -1154,298 +1479,36 @@ macro_rules! build_component_harness {
                     let mark_harness_completed = harness_completed.clone();
                     let clock = self.clock.clone();
                     let spawner = self.engine.spawner();
-                    $(let mut [<$rx_field _driver>] = Some(self.[<take_ $rx_field _driver>]());)*
-                    $(let mut [<$tx_field _receiver>] = Some(self.[<take_ $tx_field _receiver>]());)*
-                    $(
-                        let mut [<$rx_array_field _drivers>]: Vec<_> = self
-                            .[<take_ $rx_array_field _drivers>]()
-                            .into_iter()
-                            .map(Some)
-                            .collect();
-                    )*
-                    $(
-                        let mut [<$tx_array_field _receivers>]: Vec<_> = self
-                            .[<take_ $tx_array_field _receivers>]()
-                            .into_iter()
-                            .map(Some)
-                            .collect();
-                    )*
+                    let runner_ports = [<$harness Ports>]::<$item_ty> {
+                        $(
+                            [<$rx_field _driver>]: Some(self.[<take_ $rx_field _driver>]()),
+                        )*
+                        $(
+                            [<$tx_field _receiver>]: Some(self.[<take_ $tx_field _receiver>]()),
+                        )*
+                        $(
+                            [<$rx_array_field _drivers>]: self
+                                .[<take_ $rx_array_field _drivers>]()
+                                .into_iter()
+                                .map(Some)
+                                .collect(),
+                        )*
+                        $(
+                            [<$tx_array_field _receivers>]: self
+                                .[<take_ $tx_array_field _receivers>]()
+                                .into_iter()
+                                .map(Some)
+                                .collect(),
+                        )*
+                        _item: std::marker::PhantomData,
+                    };
 
                     self.engine.spawn(async move {
-                        for (step_idx, step) in steps.enumerate() {
-                            match &step {
-                                Step::<$item_ty, $expected_ty>::Action { ports, action } => {
-                                    match action {
-                                        $(
-                                        Action::<$item_ty, $expected_ty>::[<Send $rx_variant>] { value } => {
-                                            let [port] = ports.as_slice() else {
-                                                panic!("step {step_idx}: send requires exactly one port");
-                                            };
-                                            let Port::$rx_variant = port else {
-                                                panic!("step {step_idx} {port:?}: action is for {}", stringify!($rx_variant));
-                                            };
-                                            [<$rx_field _driver>]
-                                                .as_ref()
-                                                .expect(concat!(stringify!($rx_field), " driver already taken"))
-                                                .put(value.clone())?
-                                                .await;
-                                        }
-                                        )*
-                                        $(
-                                        Action::<$item_ty, $expected_ty>::[<Expect $tx_variant>] { value } => {
-                                            let [port] = ports.as_slice() else {
-                                                panic!("step {step_idx}: expect requires exactly one port");
-                                            };
-                                            let Port::$tx_variant = port else {
-                                                panic!("step {step_idx} {port:?}: action is for {}", stringify!($tx_variant));
-                                            };
-                                            let actual = [<$tx_field _receiver>]
-                                                .as_ref()
-                                                .expect(concat!(stringify!($tx_field), " receiver already taken"))
-                                                .get()?
-                                                .await;
-                                            $crate::test_helpers::ValueCheck::assert_matches(
-                                                value,
-                                                &format!("step {step_idx} {port:?}"),
-                                                &actual,
-                                            );
-                                        }
-                                        )*
-                                        $(
-                                        Action::<$item_ty, $expected_ty>::[<Send $rx_array_variant>] { value } => {
-                                            let [port] = ports.as_slice() else {
-                                                panic!("step {step_idx}: send requires exactly one port");
-                                            };
-                                            let Port::$rx_array_variant(idx) = port else {
-                                                panic!("step {step_idx} {port:?}: action is for {}", stringify!($rx_array_variant));
-                                            };
-                                            [<$rx_array_field _drivers>]
-                                                .get(*idx)
-                                                .and_then(|driver| driver.as_ref())
-                                                .unwrap_or_else(|| panic!("{} driver index {idx} out of range or already taken", stringify!($rx_array_field)))
-                                                .put(value.clone())?
-                                                .await;
-                                        }
-                                        )*
-                                        $(
-                                        Action::<$item_ty, $expected_ty>::[<Expect $tx_array_variant>] { value } => {
-                                            let [port] = ports.as_slice() else {
-                                                panic!("step {step_idx}: expect requires exactly one port");
-                                            };
-                                            let Port::$tx_array_variant(idx) = port else {
-                                                panic!("step {step_idx} {port:?}: action is for {}", stringify!($tx_array_variant));
-                                            };
-                                            let actual = [<$tx_array_field _receivers>]
-                                                .get(*idx)
-                                                .and_then(|receiver| receiver.as_ref())
-                                                .unwrap_or_else(|| panic!("{} receiver index {idx} out of range or already taken", stringify!($tx_array_field)))
-                                                .get()?
-                                                .await;
-                                            $crate::test_helpers::ValueCheck::assert_matches(
-                                                value,
-                                                &format!("step {step_idx} {port:?}"),
-                                                &actual,
-                                            );
-                                        }
-                                        )*
-                                        Action::<$item_ty, $expected_ty>::ExpectNoTraffic { ticks } => {
-                                            let mut receivers = Vec::new();
-                                            for port in ports {
-                                                match port {
-                                                    $(
-                                                    Port::$tx_variant => {
-                                                        let receiver = [<$tx_field _receiver>]
-                                                            .as_ref()
-                                                            .expect(concat!(stringify!($tx_field), " receiver already taken"));
-                                                        receivers.push((stringify!($tx_field), receiver as &dyn $crate::test_helpers::NoTrafficPort));
-                                                    }
-                                                    )*
-                                                    $(
-                                                    Port::$tx_array_variant(idx) => {
-                                                        let receiver = [<$tx_array_field _receivers>]
-                                                            .get(*idx)
-                                                            .and_then(|receiver| receiver.as_ref())
-                                                            .unwrap_or_else(|| panic!("{} receiver index {idx} out of range or already taken", stringify!($tx_array_field)));
-                                                        receivers.push((stringify!($tx_array_field), receiver as &dyn $crate::test_helpers::NoTrafficPort));
-                                                    }
-                                                    )*
-                                                    _ => {
-                                                        panic!("step {step_idx} {port:?}: expect no traffic requires tx ports");
-                                                    }
-                                                }
-                                            }
-
-                                            $crate::test_helpers::expect_no_traffic(
-                                                &format!("step {step_idx}"),
-                                                &clock,
-                                                *ticks,
-                                                receivers,
-                                            )
-                                            .await?;
-                                        }
-                                        Action::<$item_ty, $expected_ty>::Delay { ticks } => {
-                                            if !ports.is_empty() {
-                                                panic!("step {step_idx}: delay does not take ports");
-                                            }
-                                            clock.wait_ticks(*ticks).await;
-                                        }
-                                        Action::<$item_ty, $expected_ty>::__Expected(_) => {
-                                            unreachable!("marker variant is not a harness action");
-                                        }
-                                    }
-                                }
-                                Step::<$item_ty, $expected_ty>::Parallel { sections } => {
-                                    let mut completions = Vec::with_capacity(sections.len());
-
-                                    for (parallel_port, parallel_steps) in sections {
-                                        let resource = match parallel_port {
-                                            $(
-                                            Port::$rx_variant => ParallelPort::<$item_ty>::$rx_variant(
-                                                [<$rx_field _driver>]
-                                                    .take()
-                                                    .expect(concat!(stringify!($rx_field), " driver already taken")),
-                                            ),
-                                            )*
-                                            $(
-                                            Port::$tx_variant => ParallelPort::<$item_ty>::$tx_variant(
-                                                [<$tx_field _receiver>]
-                                                    .take()
-                                                    .expect(concat!(stringify!($tx_field), " receiver already taken")),
-                                            ),
-                                            )*
-                                            $(
-                                            Port::$rx_array_variant(idx) => ParallelPort::<$item_ty>::$rx_array_variant(
-                                                *idx,
-                                                [<$rx_array_field _drivers>]
-                                                    .get_mut(*idx)
-                                                    .and_then(|driver| driver.take())
-                                                    .unwrap_or_else(|| panic!("{} driver index {idx} out of range or already taken", stringify!($rx_array_field))),
-                                            ),
-                                            )*
-                                            $(
-                                            Port::$tx_array_variant(idx) => ParallelPort::<$item_ty>::$tx_array_variant(
-                                                *idx,
-                                                [<$tx_array_field _receivers>]
-                                                    .get_mut(*idx)
-                                                    .and_then(|receiver| receiver.take())
-                                                    .unwrap_or_else(|| panic!("{} receiver index {idx} out of range or already taken", stringify!($tx_array_field))),
-                                            ),
-                                            )*
-                                        };
-                                        let parallel_port = *parallel_port;
-                                        let parallel_steps = parallel_steps.clone();
-                                        let parallel_clock = clock.clone();
-                                        let (complete_tx, complete_rx) = $crate::test_helpers::one_shot_channel();
-
-                                        spawner.spawn(async move {
-                                            for (par_step_idx, action) in parallel_steps.iter().enumerate() {
-                                                match (&resource, action) {
-                                                    $(
-                                                    (ParallelPort::<$item_ty>::$rx_variant(driver), Action::<$item_ty, $expected_ty>::[<Send $rx_variant>] { value }) => {
-                                                        driver.put(value.clone())?.await;
-                                                    }
-                                                    )*
-                                                    $(
-                                                    (ParallelPort::<$item_ty>::$tx_variant(receiver), Action::<$item_ty, $expected_ty>::[<Expect $tx_variant>] { value }) => {
-                                                        let actual = receiver.get()?.await;
-                                                        $crate::test_helpers::ValueCheck::assert_matches(
-                                                            value,
-                                                            &format!("step {step_idx}: parallel step {par_step_idx} {parallel_port:?}"),
-                                                            &actual,
-                                                        );
-                                                    }
-                                                    )*
-                                                    $(
-                                                    (ParallelPort::<$item_ty>::$rx_array_variant(_, driver), Action::<$item_ty, $expected_ty>::[<Send $rx_array_variant>] { value }) => {
-                                                        driver.put(value.clone())?.await;
-                                                    }
-                                                    )*
-                                                    $(
-                                                    (ParallelPort::<$item_ty>::$tx_array_variant(_, receiver), Action::<$item_ty, $expected_ty>::[<Expect $tx_array_variant>] { value }) => {
-                                                        let actual = receiver.get()?.await;
-                                                        $crate::test_helpers::ValueCheck::assert_matches(
-                                                            value,
-                                                            &format!("step {step_idx}: parallel step {par_step_idx} {parallel_port:?}"),
-                                                            &actual,
-                                                        );
-                                                    }
-                                                    )*
-                                                    (_, Action::<$item_ty, $expected_ty>::ExpectNoTraffic { ticks }) => {
-                                                        match &resource {
-                                                            $(
-                                                            ParallelPort::<$item_ty>::$tx_variant(receiver) => {
-                                                                $crate::test_helpers::expect_no_traffic(
-                                                                    &format!("step {step_idx}: parallel step {par_step_idx}"),
-                                                                    &parallel_clock,
-                                                                    *ticks,
-                                                                    vec![(
-                                                                        stringify!($tx_field),
-                                                                        receiver as &dyn $crate::test_helpers::NoTrafficPort,
-                                                                    )],
-                                                                )
-                                                                .await?;
-                                                            }
-                                                            )*
-                                                            $(
-                                                            ParallelPort::<$item_ty>::$tx_array_variant(_, receiver) => {
-                                                                $crate::test_helpers::expect_no_traffic(
-                                                                    &format!("step {step_idx}: parallel step {par_step_idx}"),
-                                                                    &parallel_clock,
-                                                                    *ticks,
-                                                                    vec![(
-                                                                        stringify!($tx_array_field),
-                                                                        receiver as &dyn $crate::test_helpers::NoTrafficPort,
-                                                                    )],
-                                                                )
-                                                                .await?;
-                                                            }
-                                                            )*
-                                                            _ => {
-                                                                panic!("step {step_idx}: parallel step {par_step_idx} {parallel_port:?}: cannot expect traffic on rx port");
-                                                            }
-                                                        }
-                                                    }
-                                                    (_, Action::<$item_ty, $expected_ty>::Delay { ticks }) => {
-                                                        parallel_clock.wait_ticks(*ticks).await;
-                                                    }
-                                                    _ => {
-                                                        panic!("step {step_idx}: parallel step {par_step_idx} {parallel_port:?}: action is for a different port");
-                                                    }
-                                                }
-                                            }
-
-                                            complete_tx
-                                                .send((parallel_port, resource))
-                                                .unwrap_or_else(|_| panic!("parallel step receiver dropped"));
-                                            Ok::<(), gwr_engine::types::SimError>(())
-                                        });
-                                        completions.push(complete_rx);
-                                    }
-
-                                    for completion in completions {
-                                        let (parallel_port, resource) = completion
-                                            .await
-                                            .unwrap_or_else(|_| panic!("step {step_idx}: parallel section dropped"));
-                                        match resource {
-                                            $(ParallelPort::<$item_ty>::$rx_variant(driver) => {
-                                                [<$rx_field _driver>] = Some(driver);
-                                            })*
-                                            $(ParallelPort::<$item_ty>::$tx_variant(receiver) => {
-                                                [<$tx_field _receiver>] = Some(receiver);
-                                            })*
-                                            $(ParallelPort::<$item_ty>::$rx_array_variant(idx, driver) => {
-                                                [<$rx_array_field _drivers>][idx] = Some(driver);
-                                            })*
-                                            $(ParallelPort::<$item_ty>::$tx_array_variant(idx, receiver) => {
-                                                [<$tx_array_field _receivers>][idx] = Some(receiver);
-                                            })*
-                                        }
-                                    }
-                                }
-                                Step::<$item_ty, $expected_ty>::__Expected(_) => {
-                                    unreachable!("marker variant is not a harness step");
-                                }
-                            }
+                        let mut runner_ports = runner_ports;
+                        for step in steps {
+                            runner_ports = runner_ports
+                                .run_steps(vec![step], clock.clone(), spawner.clone(), String::new())
+                                .await?;
                         }
                         *mark_harness_completed.borrow_mut() = true;
                         notify_harness_complete.notify()?;
@@ -1516,9 +1579,9 @@ macro_rules! build_component_harness {
             pub fn step_delay<$item_ty>(
                 ticks: u64,
             ) -> Step<$item_ty, $expected_ty> {
-                Step::<$item_ty, $expected_ty>::Action {
+                Step::<$item_ty, $expected_ty>::Delay {
                     ports: Vec::new(),
-                    action: Action::<$item_ty, $expected_ty>::Delay { ticks },
+                    ticks,
                 }
             }
 
@@ -1526,32 +1589,30 @@ macro_rules! build_component_harness {
                 ports: &[Port],
                 ticks: u64,
             ) -> Step<$item_ty, $expected_ty> {
-                Step::<$item_ty, $expected_ty>::Action {
+                Step::<$item_ty, $expected_ty>::ExpectNoTraffic {
                     ports: ports.to_vec(),
-                    action: Action::<$item_ty, $expected_ty>::ExpectNoTraffic { ticks },
+                    ticks,
                 }
             }
 
-            pub fn action_expect_no_traffic<$item_ty>(
-                ticks: u64,
-            ) -> Action<$item_ty, $expected_ty> {
-                Action::<$item_ty, $expected_ty>::ExpectNoTraffic { ticks }
+            pub fn step_seq<$item_ty, Steps>(
+                steps: Steps,
+            ) -> Step<$item_ty, $expected_ty>
+            where
+                Steps: IntoIterator<Item = Step<$item_ty, $expected_ty>>,
+            {
+                Step::<$item_ty, $expected_ty>::Seq(steps.into_iter().collect())
             }
 
-            pub fn action_delay<$item_ty>(
-                ticks: u64,
-            ) -> Action<$item_ty, $expected_ty> {
-                Action::<$item_ty, $expected_ty>::Delay { ticks }
+            pub fn step_par<$item_ty, Steps>(
+                steps: Steps,
+            ) -> Step<$item_ty, $expected_ty>
+            where
+                Steps: IntoIterator<Item = Step<$item_ty, $expected_ty>>,
+            {
+                Step::<$item_ty, $expected_ty>::Par(steps.into_iter().collect())
             }
 
-            pub fn step_parallel<$item_ty>(
-                sections: std::collections::HashMap<
-                    Port,
-                    Vec<Action<$item_ty, $expected_ty>>,
-                >,
-            ) -> Step<$item_ty, $expected_ty> {
-                Step::<$item_ty, $expected_ty>::Parallel { sections }
-            }
         }
     };
 }

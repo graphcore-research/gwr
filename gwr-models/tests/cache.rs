@@ -1,5 +1,4 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use gwr_components::sink::Sink;
@@ -158,7 +157,7 @@ mod full_cache_harness {
         );
         let response = read.to_response(&TestMemory {}).unwrap();
 
-        harness.run_steps(&[
+        harness.run_steps([
             step_send_dev_rx(read.clone()),
             step_expect_mem_tx(
                 MemoryTxn::read_req(dst_addr)
@@ -174,21 +173,15 @@ mod full_cache_harness {
             ),
             // Make a second device request to the same address - expecting response without
             // need to go to memory
-            step_parallel(HashMap::from([
-                (Port::DevRx, vec![action_send_dev_rx(read)]),
-                (
-                    Port::DevTx,
-                    vec![action_expect_dev_tx(
-                        MemoryTxn::read_rsp(dst_addr)
-                            .with_src_addr(SRC_ADDR)
-                            .with_bytes(ACCESS_SIZE_BYTES),
-                    )],
+            step_par([
+                step_send_dev_rx(read),
+                step_expect_dev_tx(
+                    MemoryTxn::read_rsp(dst_addr)
+                        .with_src_addr(SRC_ADDR)
+                        .with_bytes(ACCESS_SIZE_BYTES),
                 ),
-                (
-                    Port::MemTx,
-                    vec![action_expect_no_traffic((DELAY_TICKS * 2) as u64)],
-                ),
-            ])),
+                step_expect_no_traffic(&[Port::MemTx], (DELAY_TICKS * 2) as u64),
+            ]),
         ]);
 
         assert_eq!(cache.payload_bytes_read(), 2 * ACCESS_SIZE_BYTES);
@@ -242,7 +235,7 @@ mod dev_cache_harness {
             ));
         }
 
-        harness.run_steps(&steps);
+        harness.run_steps(steps);
 
         assert_eq!(
             cache.payload_bytes_read(),
@@ -287,7 +280,7 @@ mod dev_cache_harness {
             }
         }
 
-        harness.run_steps(&steps);
+        harness.run_steps(steps);
 
         let num_accesses = num_iterations * NUM_WAYS;
         assert_eq!(cache.payload_bytes_read(), num_accesses * ACCESS_SIZE_BYTES);
@@ -330,7 +323,7 @@ mod dev_cache_harness {
             }
         }
 
-        harness.run_steps(&steps);
+        harness.run_steps(steps);
 
         let num_accesses = num_iterations * (NUM_WAYS + 1);
         assert_eq!(cache.payload_bytes_read(), num_accesses * ACCESS_SIZE_BYTES);
@@ -388,7 +381,7 @@ mod dev_cache_harness {
             ));
         }
 
-        harness.run_steps(&steps);
+        harness.run_steps(steps);
 
         assert_eq!(
             cache.payload_bytes_read(),
