@@ -136,7 +136,7 @@ mod delay_harness {
         let access = create_read(engine.top(), &memory_map, 64, DST_ADDR, SRC_ADDR, 8);
         let mut harness = DelayHarness::new(engine, delay);
 
-        harness.run_steps(&[
+        harness.run_steps([
             step_send_rx(access),
             step_expect_tx(MemoryTxn::read_req(DST_ADDR)),
         ]);

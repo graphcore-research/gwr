@@ -1,6 +1,5 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use gwr_components::arbiter::Arbiter;
@@ -40,7 +39,7 @@ mod source_harness {
         );
         let mut harness = SourceHarness::new(engine, source);
 
-        harness.run_steps(&[step_expect_tx(1), step_delay(3), step_expect_tx(2)]);
+        harness.run_steps([step_expect_tx(1), step_delay(3), step_expect_tx(2)]);
 
         assert_eq!(harness.clock.tick_now().tick(), 3);
     }
@@ -65,7 +64,7 @@ mod sink_harness {
         let sink = Sink::new_and_register(&engine, &clock, engine.top(), "sink");
         let mut harness = SinkHarness::new(engine, sink.clone());
 
-        harness.run_steps(&[step_delay(4), step_send_rx(1), step_send_rx(2)]);
+        harness.run_steps([step_delay(4), step_send_rx(1), step_send_rx(2)]);
 
         assert_eq!(sink.num_sunk(), 2);
         assert_eq!(harness.clock.tick_now().tick(), 4);
@@ -94,7 +93,7 @@ mod delay_harness {
         let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 3);
         let mut harness = DelayHarness::new(engine, delay);
 
-        harness.run_steps(&[
+        harness.run_steps([
             step_send_rx(7),
             step_expect_no_traffic(&[Port::Tx], 2),
             step_expect_tx(7),
@@ -124,7 +123,7 @@ mod store_harness {
         let store = Store::new_and_register(&engine, &clock, engine.top(), "store", 2).unwrap();
         let mut harness = StoreHarness::new(engine, store);
 
-        harness.run_steps(&[
+        harness.run_steps([
             step_send_rx(10),
             step_send_rx(20),
             step_expect_tx(10),
@@ -208,10 +207,26 @@ mod limiter_harness {
         );
         let mut harness = LimiterHarness::new(engine, limiter);
 
-        harness.run_steps(&[step_parallel(HashMap::from([
-            (Port::Rx, vec![action_send_rx(4)]),
-            (Port::Tx, vec![action_expect_tx(4)]),
-        ]))]);
+        harness.run_steps([step_par([step_send_rx(4), step_expect_tx(4)])]);
+    }
+
+    #[test]
+    fn harness_supports_nested_seq_par_steps() {
+        let mut engine = start_test(file!());
+        let clock = engine.default_clock();
+        let limiter = Limiter::new_and_register(
+            &engine,
+            &clock,
+            engine.top(),
+            "limiter",
+            Rc::new(RateLimiter::new(&clock, 32)),
+        );
+        let mut harness = LimiterHarness::new(engine, limiter);
+
+        harness.run_steps([step_par([
+            step_seq([step_send_rx(4), step_send_rx(5)]),
+            step_seq([step_expect_tx(4), step_expect_tx(5)]),
+        ])]);
     }
 }
 
@@ -246,19 +261,16 @@ mod arbiter_harness {
         );
         let mut harness = ArbiterHarness::new(engine, arbiter, 2);
 
-        harness.run_steps(&[step_parallel(HashMap::from([
-            (Port::Rx(0), vec![action_send_rx(1), action_send_rx(3)]),
-            (Port::Rx(1), vec![action_send_rx(2), action_send_rx(4)]),
-            (
-                Port::Tx,
-                vec![
-                    action_expect_tx(1),
-                    action_expect_tx(2),
-                    action_expect_tx(3),
-                    action_expect_tx(4),
-                ],
-            ),
-        ]))]);
+        harness.run_steps([step_par([
+            step_seq([step_send_rx(0, 1), step_send_rx(0, 3)]),
+            step_seq([step_send_rx(1, 2), step_send_rx(1, 4)]),
+            step_seq([
+                step_expect_tx(1),
+                step_expect_tx(2),
+                step_expect_tx(3),
+                step_expect_tx(4),
+            ]),
+        ])]);
     }
 }
 
@@ -292,7 +304,7 @@ mod credit_limiter_harness {
         );
         let mut harness = CreditLimiterHarness::new(engine, limiter);
 
-        harness.run_steps(&[
+        harness.run_steps([
             step_send_rx(42),
             step_expect_tx(42),
             step_send_rx(43),
@@ -326,7 +338,7 @@ mod credit_issuer_harness {
         let issuer = CreditIssuer::new_and_register(&engine, &clock, engine.top(), "credit_issuer");
         let mut harness = CreditIssuerHarness::new(engine, issuer);
 
-        harness.run_steps(&[
+        harness.run_steps([
             step_send_rx(5),
             step_expect_credit_tx(Credit(1)),
             step_expect_tx(5),

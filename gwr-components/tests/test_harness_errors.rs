@@ -1,6 +1,5 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use gwr_components::arbiter::Arbiter;
@@ -25,30 +24,30 @@ mod delay_errors {
     }
 
     #[test]
-    #[should_panic(expected = "step 0 Tx: action is for Rx")]
-    fn harness_flags_send_action_on_tx_port() {
+    #[should_panic(expected = "step 0 Tx: step is for Rx")]
+    fn harness_flags_send_step_on_tx_port() {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
         let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
         let mut harness = DelayHarness::new(engine, delay);
 
-        harness.run_steps(&[Step::Action {
-            ports: vec![Port::Tx],
-            action: Action::SendRx { value: 1 },
+        harness.run_steps([Step::SendRx {
+            port: Port::Tx,
+            value: 1,
         }]);
     }
 
     #[test]
-    #[should_panic(expected = "step 0 Rx: action is for Tx")]
-    fn harness_flags_expect_action_on_rx_port() {
+    #[should_panic(expected = "step 0 Rx: step is for Tx")]
+    fn harness_flags_expect_step_on_rx_port() {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
         let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
         let mut harness = DelayHarness::new(engine, delay);
 
-        harness.run_steps(&[Step::Action {
-            ports: vec![Port::Rx],
-            action: Action::ExpectTx { value: 1 },
+        harness.run_steps([Step::ExpectTx {
+            port: Port::Rx,
+            value: 1,
         }]);
     }
 
@@ -60,38 +59,37 @@ mod delay_errors {
         let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
         let mut harness = DelayHarness::<i32>::new(engine, delay);
 
-        harness.run_steps(&[Step::Action {
+        harness.run_steps([Step::Delay {
             ports: vec![Port::Tx],
-            action: Action::Delay { ticks: 1 },
+            ticks: 1,
         }]);
     }
 
     #[test]
-    #[should_panic(expected = "step 0: parallel step 0 Tx: action is for a different port")]
-    fn harness_flags_parallel_action_on_wrong_port() {
+    #[should_panic(expected = "step 0: parallel step 0 step 0 Tx: step is for Rx")]
+    fn harness_flags_parallel_step_on_wrong_port() {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
         let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
         let mut harness = DelayHarness::new(engine, delay);
 
-        harness.run_steps(&[step_parallel(HashMap::from([(
-            Port::Tx,
-            vec![action_send_rx(1)],
-        )]))]);
+        harness.run_steps([step_par([Step::SendRx {
+            port: Port::Tx,
+            value: 1,
+        }])]);
     }
 
     #[test]
-    #[should_panic(expected = "step 0: parallel step 0 Rx: cannot expect traffic on rx port")]
+    #[should_panic(
+        expected = "step 0: parallel step 0 step 0 Rx: expect no traffic requires tx ports"
+    )]
     fn harness_flags_parallel_no_traffic_on_rx_port() {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
         let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
         let mut harness = DelayHarness::<i32>::new(engine, delay);
 
-        harness.run_steps(&[step_parallel(HashMap::from([(
-            Port::Rx,
-            vec![action_expect_no_traffic(1)],
-        )]))]);
+        harness.run_steps([step_par([step_expect_no_traffic(&[Port::Rx], 1)])]);
     }
 
     #[test]
@@ -102,7 +100,7 @@ mod delay_errors {
         let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
         let mut harness = DelayHarness::new(engine, delay);
 
-        harness.run_steps(&[step_expect_tx(1)]);
+        harness.run_steps([step_expect_tx(1)]);
     }
 }
 
@@ -138,6 +136,6 @@ mod arbiter_errors {
         );
         let mut harness = ArbiterHarness::new(engine, arbiter, 1);
 
-        harness.run_steps(&[step_send_rx(1, 99)]);
+        harness.run_steps([step_send_rx(1, 99)]);
     }
 }
