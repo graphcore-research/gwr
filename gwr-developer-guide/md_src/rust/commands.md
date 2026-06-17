@@ -115,7 +115,7 @@ commandline for running it against the `flakey-component` binary with a few
 arguments.
 
 ```bash
-CARGO_PROFILE_RELEASE_DEBUG=true sudo cargo flamegraph --bin flaky-component -- --num-packets 500000
+CARGO_PROFILE_RELEASE_DEBUG=true sudo RUSTC_WRAPPER="" cargo flamegraph --bin flaky-component -- --num-packets 500000
 ```
 
 **Note:** This must be run with as root when running on macOS.
