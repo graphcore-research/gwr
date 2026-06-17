@@ -6,9 +6,10 @@
         "jquery",
         "mdbook",
         "ONNX",
-        "Perfetto's",
         "Perfetto",
+        "Perfetto's",
         "prek",
+        "sccache",
         "taplo"
     ],
     "rust-analyzer.rustfmt.extraArgs": [

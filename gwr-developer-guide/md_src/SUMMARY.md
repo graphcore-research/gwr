@@ -42,6 +42,7 @@
 
 - [Contributing to GWR](contributing/chapter.md)
   - [Setup](contributing/setup.md)
+  - [Advanced Setup](contributing/advanced_setup.md)
   - [Workspace](contributing/workspace.md)
 
 - [Rust](rust/chapter.md)
