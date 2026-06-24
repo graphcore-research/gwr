@@ -29,11 +29,11 @@ their ports directly. For simple cases this can be done by hand with
 1. Run a sequence of sends, expects, delays, and no-traffic checks.
 
 The `build_component_harness!` macro will generate the repeated testbench code.
-It generates the harness `struct`, `Port`/`Step` enums, helper functions, etc.
+It generates the harness `struct`, `Port`/`Step` enums, helper macros, etc.
 
 Harnesses are usually declared inside a small test module. This keeps generated
-names such as `Port`, `Step`, `step_send_rx`, and `step_expect_tx` local to the
-harness and avoids clashes with other harnesses in the same test file.
+names such as `Port`, `Step`, and the helper macros local to the harness and
+avoids clashes with other harnesses in the same test file.
 
 For example, the harness around a `Delay` component is created and used below:
 
@@ -65,9 +65,9 @@ mod delay_harness {
         let mut harness = DelayHarness::new(engine, delay);
 
         harness.run_steps([
-            step_send_rx(10),
-            step_expect_no_traffic(&[Port::Tx], 4),
-            step_expect_tx(10),
+            send_rx!(10),
+            expect_no_traffic!(&[Port::Tx], 4),
+            expect_tx!(10),
         ]);
     }
 }
@@ -79,9 +79,10 @@ sink-only component can define only `rx ports`.
 
 `Step` can be a send, expect, delay, no-traffic check, `Seq(Vec<Step<...>>)`
 that runs child steps in order, or `Par(Vec<Step<...>>)` that runs child steps
-concurrently and waits for all of them before moving on. The `step_seq` and
-`step_par` helpers build those recursive control structures, so tests can
-express parallel sequences on different ports.
+concurrently and waits for all of them before moving on. The generated `seq!`
+and `par!` helper macros build those recursive control structures and record
+their source location, so tests can express parallel sequences on different
+ports while keeping error messages tied to the call site.
 
 The harness checks that each step is used on a compatible port; for example,
 using an expect step on an RX port or a send step on a TX port will fail the

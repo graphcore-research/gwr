@@ -100,7 +100,7 @@ out of the model.
 
 `MemoryTxn` lets tests match only the memory access fields that matter for a
 scenario. For example, this test harness only checks the destination address
-when the `step_expect_tx()` is called:
+when the `expect_tx()` is called:
 
 ```rust,no_run
 mod delay_harness {
@@ -137,8 +137,8 @@ mod delay_harness {
         let mut harness = DelayHarness::new(engine, delay);
 
         harness.run_steps([
-            step_send_rx(access),
-            step_expect_tx(MemoryTxn::read_req(DST_ADDR)),
+            send_rx!(access),
+            expect_tx!(MemoryTxn::read_req(DST_ADDR)),
         ]);
     }
 }
