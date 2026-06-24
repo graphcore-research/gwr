@@ -293,10 +293,10 @@ mod routed_fabric_harness {
             config.max_num_ports(),
             config.max_num_ports(),
         );
-        harness.run_steps([step_par([
-            step_send_ingress(ingress_a_idx, access_a.clone()),
-            step_send_ingress(ingress_b_idx, access_b.clone()),
-            step_expect_egress(
+        harness.run_steps([par!([
+            send_ingress!(ingress_a_idx, access_a.clone()),
+            send_ingress!(ingress_b_idx, access_b.clone()),
+            expect_egress!(
                 egress_a_idx,
                 MemoryTxn::read_req(addr_a)
                     .with_src_addr(ingress_a_idx as u64)
@@ -305,7 +305,7 @@ mod routed_fabric_harness {
                     .with_dst_device(DeviceId(egress_a_idx as u64))
                     .with_src_device(DeviceId(ingress_a_idx as u64)),
             ),
-            step_expect_egress(
+            expect_egress!(
                 egress_b_idx,
                 MemoryTxn::read_req(addr_b)
                     .with_src_addr(ingress_b_idx as u64)

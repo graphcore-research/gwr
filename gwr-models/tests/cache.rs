@@ -158,29 +158,29 @@ mod full_cache_harness {
         let response = read.to_response(&TestMemory {}).unwrap();
 
         harness.run_steps([
-            step_send_dev_rx(read.clone()),
-            step_expect_mem_tx(
+            send_dev_rx!(read.clone()),
+            expect_mem_tx!(
                 MemoryTxn::read_req(dst_addr)
                     .with_src_addr(SRC_ADDR)
                     .with_bytes(ACCESS_SIZE_BYTES),
             ),
-            step_delay(memory_delay_ticks),
-            step_send_mem_rx(response.clone()),
-            step_expect_dev_tx(
+            delay!(memory_delay_ticks),
+            send_mem_rx!(response.clone()),
+            expect_dev_tx!(
                 MemoryTxn::read_rsp(dst_addr)
                     .with_src_addr(SRC_ADDR)
                     .with_bytes(ACCESS_SIZE_BYTES),
             ),
             // Make a second device request to the same address - expecting response without
             // need to go to memory
-            step_par([
-                step_send_dev_rx(read),
-                step_expect_dev_tx(
+            par!([
+                send_dev_rx!(read),
+                expect_dev_tx!(
                     MemoryTxn::read_rsp(dst_addr)
                         .with_src_addr(SRC_ADDR)
                         .with_bytes(ACCESS_SIZE_BYTES),
                 ),
-                step_expect_no_traffic(&[Port::MemTx], (DELAY_TICKS * 2) as u64),
+                expect_no_traffic!(&[Port::MemTx], (DELAY_TICKS * 2) as u64),
             ]),
         ]);
 
@@ -227,8 +227,8 @@ mod dev_cache_harness {
         );
         let mut steps = Vec::new();
         for _ in 0..=num_rereads {
-            steps.push(step_send_dev_rx(read.clone()));
-            steps.push(step_expect_dev_tx(
+            steps.push(send_dev_rx!(read.clone()));
+            steps.push(expect_dev_tx!(
                 MemoryTxn::read_rsp(dst_addr)
                     .with_src_addr(SRC_ADDR)
                     .with_bytes(ACCESS_SIZE_BYTES),
@@ -271,8 +271,8 @@ mod dev_cache_harness {
                     SRC_ADDR,
                     OVERHEAD_SIZE_BYTES,
                 );
-                steps.push(step_send_dev_rx(read));
-                steps.push(step_expect_dev_tx(
+                steps.push(send_dev_rx!(read));
+                steps.push(expect_dev_tx!(
                     MemoryTxn::read_rsp(dst_addr)
                         .with_src_addr(SRC_ADDR)
                         .with_bytes(ACCESS_SIZE_BYTES),
@@ -314,8 +314,8 @@ mod dev_cache_harness {
                     SRC_ADDR,
                     OVERHEAD_SIZE_BYTES,
                 );
-                steps.push(step_send_dev_rx(read));
-                steps.push(step_expect_dev_tx(
+                steps.push(send_dev_rx!(read));
+                steps.push(expect_dev_tx!(
                     MemoryTxn::read_rsp(dst_addr)
                         .with_src_addr(SRC_ADDR)
                         .with_bytes(ACCESS_SIZE_BYTES),
@@ -362,19 +362,19 @@ mod dev_cache_harness {
         );
         let mut steps = Vec::new();
         for _ in 0..num_rereads {
-            steps.push(step_send_dev_rx(read.clone()));
-            steps.push(step_expect_dev_tx(
+            steps.push(send_dev_rx!(read.clone()));
+            steps.push(expect_dev_tx!(
                 MemoryTxn::read_rsp(dst_addr)
                     .with_src_addr(SRC_ADDR)
                     .with_bytes(ACCESS_SIZE_BYTES),
             ));
         }
 
-        steps.push(step_send_dev_rx(write));
+        steps.push(send_dev_rx!(write));
 
         for _ in 0..num_rereads {
-            steps.push(step_send_dev_rx(read.clone()));
-            steps.push(step_expect_dev_tx(
+            steps.push(send_dev_rx!(read.clone()));
+            steps.push(expect_dev_tx!(
                 MemoryTxn::read_rsp(dst_addr)
                     .with_src_addr(SRC_ADDR)
                     .with_bytes(ACCESS_SIZE_BYTES),

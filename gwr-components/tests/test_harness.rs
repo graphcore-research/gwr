@@ -39,7 +39,7 @@ mod source_harness {
         );
         let mut harness = SourceHarness::new(engine, source);
 
-        harness.run_steps([step_expect_tx(1), step_delay(3), step_expect_tx(2)]);
+        harness.run_steps([expect_tx!(1), delay!(3), expect_tx!(2)]);
 
         assert_eq!(harness.clock.tick_now().tick(), 3);
     }
@@ -64,7 +64,7 @@ mod sink_harness {
         let sink = Sink::new_and_register(&engine, &clock, engine.top(), "sink");
         let mut harness = SinkHarness::new(engine, sink.clone());
 
-        harness.run_steps([step_delay(4), step_send_rx(1), step_send_rx(2)]);
+        harness.run_steps([delay!(4), send_rx!(1), send_rx!(2)]);
 
         assert_eq!(sink.num_sunk(), 2);
         assert_eq!(harness.clock.tick_now().tick(), 4);
@@ -94,9 +94,9 @@ mod delay_harness {
         let mut harness = DelayHarness::new(engine, delay);
 
         harness.run_steps([
-            step_send_rx(7),
-            step_expect_no_traffic(&[Port::Tx], 2),
-            step_expect_tx(7),
+            send_rx!(7),
+            expect_no_traffic!(&[Port::Tx], 2),
+            expect_tx!(7),
         ]);
     }
 }
@@ -123,12 +123,7 @@ mod store_harness {
         let store = Store::new_and_register(&engine, &clock, engine.top(), "store", 2).unwrap();
         let mut harness = StoreHarness::new(engine, store);
 
-        harness.run_steps([
-            step_send_rx(10),
-            step_send_rx(20),
-            step_expect_tx(10),
-            step_expect_tx(20),
-        ]);
+        harness.run_steps([send_rx!(10), send_rx!(20), expect_tx!(10), expect_tx!(20)]);
     }
 
     struct StoreFillGenerator {
@@ -150,12 +145,12 @@ mod store_harness {
             if self.store.fill_level() < self.capacity && self.next_value < self.num_to_receive {
                 let value = self.next_value;
                 self.next_value += 1;
-                return Some(step_send_rx(value));
+                return Some(send_rx!(value));
             }
 
             let value = self.next_expected;
             self.next_expected += 1;
-            Some(step_expect_tx(value))
+            Some(expect_tx!(value))
         }
     }
 
@@ -207,7 +202,7 @@ mod limiter_harness {
         );
         let mut harness = LimiterHarness::new(engine, limiter);
 
-        harness.run_steps([step_par([step_send_rx(4), step_expect_tx(4)])]);
+        harness.run_steps([par!([send_rx!(4), expect_tx!(4)])]);
     }
 
     #[test]
@@ -223,9 +218,9 @@ mod limiter_harness {
         );
         let mut harness = LimiterHarness::new(engine, limiter);
 
-        harness.run_steps([step_par([
-            step_seq([step_send_rx(4), step_send_rx(5)]),
-            step_seq([step_expect_tx(4), step_expect_tx(5)]),
+        harness.run_steps([par!([
+            seq!([send_rx!(4), send_rx!(5)]),
+            seq!([expect_tx!(4), expect_tx!(5)]),
         ])]);
     }
 }
@@ -261,15 +256,10 @@ mod arbiter_harness {
         );
         let mut harness = ArbiterHarness::new(engine, arbiter, 2);
 
-        harness.run_steps([step_par([
-            step_seq([step_send_rx(0, 1), step_send_rx(0, 3)]),
-            step_seq([step_send_rx(1, 2), step_send_rx(1, 4)]),
-            step_seq([
-                step_expect_tx(1),
-                step_expect_tx(2),
-                step_expect_tx(3),
-                step_expect_tx(4),
-            ]),
+        harness.run_steps([par!([
+            seq!([send_rx!(0, 1), send_rx!(0, 3)]),
+            seq!([send_rx!(1, 2), send_rx!(1, 4)]),
+            seq!([expect_tx!(1), expect_tx!(2), expect_tx!(3), expect_tx!(4)]),
         ])]);
     }
 }
@@ -305,12 +295,12 @@ mod credit_limiter_harness {
         let mut harness = CreditLimiterHarness::new(engine, limiter);
 
         harness.run_steps([
-            step_send_rx(42),
-            step_expect_tx(42),
-            step_send_rx(43),
-            step_expect_no_traffic(&[Port::Tx], 5),
-            step_send_credit_rx(Credit(1)),
-            step_expect_tx(43),
+            send_rx!(42),
+            expect_tx!(42),
+            send_rx!(43),
+            expect_no_traffic!(&[Port::Tx], 5),
+            send_credit_rx!(Credit(1)),
+            expect_tx!(43),
         ]);
     }
 }
@@ -338,10 +328,6 @@ mod credit_issuer_harness {
         let issuer = CreditIssuer::new_and_register(&engine, &clock, engine.top(), "credit_issuer");
         let mut harness = CreditIssuerHarness::new(engine, issuer);
 
-        harness.run_steps([
-            step_send_rx(5),
-            step_expect_credit_tx(Credit(1)),
-            step_expect_tx(5),
-        ]);
+        harness.run_steps([send_rx!(5), expect_credit_tx!(Credit(1)), expect_tx!(5)]);
     }
 }
