@@ -9,9 +9,9 @@
 //! refined with a second dynamic-programming pass that pairs lines whose
 //! character-level LCS similarity is high enough, allowing small edits on the
 //! same logical line to appear side by side instead of as a delete plus insert.
-//! When source text is missing, or when the source pair is large enough that
-//! the full table would be too expensive, the aligner falls back to matching
-//! line numbers directly.
+//! When source text is missing the aligner falls back to matching line numbers
+//! directly. When the source pair is too large to align and the source differs,
+//! no source diff is rendered because line-number matching would be misleading.
 
 use std::collections::BTreeMap;
 
@@ -22,6 +22,7 @@ use crate::lcs::longest_common_subsequence_lengths;
 #[derive(Debug, Default)]
 pub(crate) struct LineChanges {
     pub(crate) rows: Vec<LineDiffRow>,
+    pub(crate) unavailable_reason: Option<String>,
 }
 
 #[derive(Debug)]
@@ -297,6 +298,12 @@ impl<'a> Aligner<'a> {
     }
 }
 
+#[derive(Debug)]
+enum SourceAlignment {
+    Aligned(Vec<AlignedLine>),
+    Unavailable(String),
+}
+
 pub(crate) fn line_changes(
     before: Option<&CoverageFile>,
     after: Option<&CoverageFile>,
@@ -312,13 +319,21 @@ pub(crate) fn line_changes(
         after_source_lines,
     );
     let aligned_lines = match (before, after) {
-        (None, Some(_)) => align_added_lines(max_line_number),
-        (Some(_), None) => align_removed_lines(max_line_number),
+        (None, Some(_)) => SourceAlignment::Aligned(align_added_lines(max_line_number)),
+        (Some(_), None) => SourceAlignment::Aligned(align_removed_lines(max_line_number)),
         _ => try_to_align_lines(before_source_lines, after_source_lines, max_line_number),
     };
     let has_source_alignment = before_source_lines.is_some() || after_source_lines.is_some();
 
     let mut changes = LineChanges::default();
+    let aligned_lines = match aligned_lines {
+        SourceAlignment::Aligned(aligned_lines) => aligned_lines,
+        SourceAlignment::Unavailable(reason) => {
+            changes.unavailable_reason = Some(reason);
+            return changes;
+        }
+    };
+
     for aligned_line in aligned_lines {
         let before_count = aligned_line
             .before_line_number
@@ -386,6 +401,10 @@ impl LineChanges {
         self.rows.iter().any(LineDiffRow::changed)
     }
 
+    pub(crate) fn unavailable_reason(&self) -> Option<&str> {
+        self.unavailable_reason.as_deref()
+    }
+
     pub(crate) fn changed_rows(&self) -> Vec<usize> {
         self.rows
             .iter()
@@ -420,25 +439,39 @@ fn try_to_align_lines(
     before_source_lines: Option<&[String]>,
     after_source_lines: Option<&[String]>,
     max_covered_line: u64,
-) -> Vec<AlignedLine> {
+) -> SourceAlignment {
     match (before_source_lines, after_source_lines) {
         (Some(before_source_lines), Some(after_source_lines))
             if !too_many_lines_to_align(before_source_lines, after_source_lines) =>
         {
-            Aligner::new(before_source_lines, after_source_lines).align_source_lines()
+            SourceAlignment::Aligned(
+                Aligner::new(before_source_lines, after_source_lines).align_source_lines(),
+            )
         }
-        _ => (1..=max_covered_line)
-            .map(|line_number| AlignedLine {
-                before_line_number: Some(line_number),
-                after_line_number: Some(line_number),
-            })
-            .collect(),
+        (Some(before_source_lines), Some(after_source_lines))
+            if before_source_lines != after_source_lines =>
+        {
+            SourceAlignment::Unavailable(format!(
+                "source files differ, but they are too large to align safely ({} x {} lines exceeds the {} line-pair limit)",
+                before_source_lines.len(),
+                after_source_lines.len(),
+                MAX_LINE_PERMUTATIONS,
+            ))
+        }
+        _ => SourceAlignment::Aligned(
+            (1..=max_covered_line)
+                .map(|line_number| AlignedLine {
+                    before_line_number: Some(line_number),
+                    after_line_number: Some(line_number),
+                })
+                .collect(),
+        ),
     }
 }
 
-fn too_many_lines_to_align(before_source_lines: &[String], after_source_lines: &[String]) -> bool {
-    const MAX_LINE_PERMUTATIONS: usize = 4_000_000;
+const MAX_LINE_PERMUTATIONS: usize = 8_000_000;
 
+fn too_many_lines_to_align(before_source_lines: &[String], after_source_lines: &[String]) -> bool {
     before_source_lines
         .len()
         .saturating_mul(after_source_lines.len())
@@ -475,7 +508,10 @@ fn line_similarity(before: &str, after: &str) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{AlignedLine, line_similarity, try_to_align_lines};
+    use super::{
+        AlignedLine, MAX_LINE_PERMUTATIONS, SourceAlignment, line_changes, line_similarity,
+        try_to_align_lines,
+    };
 
     fn source(lines: &[&str]) -> Vec<String> {
         lines.iter().map(|line| (*line).to_string()).collect()
@@ -488,13 +524,26 @@ mod tests {
         }
     }
 
+    fn aligned_source_lines(
+        before_source_lines: Option<&[String]>,
+        after_source_lines: Option<&[String]>,
+        max_covered_line: u64,
+    ) -> Vec<AlignedLine> {
+        match try_to_align_lines(before_source_lines, after_source_lines, max_covered_line) {
+            SourceAlignment::Aligned(lines) => lines,
+            SourceAlignment::Unavailable(reason) => {
+                panic!("expected aligned source lines, got unavailable: {reason}")
+            }
+        }
+    }
+
     #[test]
     fn aligns_inserted_source_lines_between_exact_matches() {
         let before = source(&["fn first() {}", "fn target() {}"]);
         let after = source(&["fn first() {}", "fn inserted() {}", "fn target() {}"]);
 
         assert_eq!(
-            try_to_align_lines(Some(&before), Some(&after), 3),
+            aligned_source_lines(Some(&before), Some(&after), 3),
             vec![
                 aligned(Some(1), Some(1)),
                 aligned(None, Some(2)),
@@ -514,7 +563,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            try_to_align_lines(Some(&before), Some(&after), 4),
+            aligned_source_lines(Some(&before), Some(&after), 4),
             vec![
                 aligned(Some(1), Some(1)),
                 aligned(None, Some(2)),
@@ -529,7 +578,7 @@ mod tests {
         let before = source(&["before one", "before two"]);
 
         assert_eq!(
-            try_to_align_lines(Some(&before), None, 3),
+            aligned_source_lines(Some(&before), None, 3),
             vec![
                 aligned(Some(1), Some(1)),
                 aligned(Some(2), Some(2)),
@@ -544,7 +593,7 @@ mod tests {
         let after = source(&["fn first() {}", "fn target() {}"]);
 
         assert_eq!(
-            try_to_align_lines(Some(&before), Some(&after), 3),
+            aligned_source_lines(Some(&before), Some(&after), 3),
             vec![
                 aligned(Some(1), Some(1)),
                 aligned(Some(2), None),
@@ -559,7 +608,7 @@ mod tests {
         let after = source(&["fn first() {}", "z9 z9 z9", "fn last() {}"]);
 
         assert_eq!(
-            try_to_align_lines(Some(&before), Some(&after), 3),
+            aligned_source_lines(Some(&before), Some(&after), 3),
             vec![
                 aligned(Some(1), Some(1)),
                 aligned(Some(2), None),
@@ -580,7 +629,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            try_to_align_lines(Some(&before), Some(&after), 4),
+            aligned_source_lines(Some(&before), Some(&after), 4),
             vec![
                 aligned(Some(1), Some(1)),
                 aligned(Some(2), Some(2)),
@@ -601,7 +650,7 @@ mod tests {
         let after = source(&["fn first() {}", "fn target_new_value() {}", "fn last() {}"]);
 
         assert_eq!(
-            try_to_align_lines(Some(&before), Some(&after), 4),
+            aligned_source_lines(Some(&before), Some(&after), 4),
             vec![
                 aligned(Some(1), Some(1)),
                 aligned(Some(2), Some(2)),
@@ -612,18 +661,38 @@ mod tests {
     }
 
     #[test]
-    fn falls_back_to_matching_line_numbers_when_sources_are_too_large() {
-        let before = vec!["before".to_string(); 2_001];
-        let after = vec!["after".to_string(); 2_000];
+    fn falls_back_to_matching_line_numbers_when_identical_sources_are_too_large() {
+        let before = vec!["same".to_string(); 2_829];
+        let after = before.clone();
 
         assert_eq!(
-            try_to_align_lines(Some(&before), Some(&after), 3),
+            aligned_source_lines(Some(&before), Some(&after), 3),
             vec![
                 aligned(Some(1), Some(1)),
                 aligned(Some(2), Some(2)),
                 aligned(Some(3), Some(3)),
             ]
         );
+    }
+
+    #[test]
+    fn reports_unavailable_diff_when_changed_sources_are_too_large_to_align() {
+        let before = vec!["before".to_string(); 2_829];
+        let after = vec!["after".to_string(); 2_829];
+
+        let SourceAlignment::Unavailable(reason) =
+            try_to_align_lines(Some(&before), Some(&after), 3)
+        else {
+            panic!("expected source alignment to be unavailable");
+        };
+        assert!(reason.contains("source files differ"));
+        assert!(
+            reason
+                .contains(format!("exceeds the {MAX_LINE_PERMUTATIONS} line-pair limit").as_str())
+        );
+
+        let changes = line_changes(None, None, Some(&before), Some(&after));
+        assert_eq!(changes.unavailable_reason(), Some(reason.as_str()));
     }
 
     #[test]
