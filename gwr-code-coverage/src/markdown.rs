@@ -308,6 +308,20 @@ fn render_line_changes_section(
             after_source_lines.as_deref(),
         );
 
+        if let Some(reason) = changes.unavailable_reason() {
+            rendered_files += 1;
+            let _ = writeln!(
+                section,
+                "\n### `{}` changes\n",
+                escape_markdown_code(&filename)
+            );
+            let _ = writeln!(
+                section,
+                "Source-line diff cannot be shown because {reason}."
+            );
+            continue;
+        }
+
         if !changes.has_changes() {
             if let Some(delta) = line_coverage_summary_delta(before_file, after_file) {
                 summary_only_line_changes.push((filename, delta));
