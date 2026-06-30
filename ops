@@ -1,0 +1,1 @@
+{"author":{"id":"15a88cc68503e42ab24006333304090e606ec65782bc59288f3c1c3e49bb4654"},"ops":[{"type":1,"timestamp":1762791620,"nonce":"ld3QCGX9oX+e3BqxEdM9+OfkFKE=","metadata":{"github-id":"I_kwDOOEv6_s7XGUna","github-url":"https://github.com/graphcore-research/gwr/issues/92","origin":"github"},"title":"Migrate `pub self.entity` to a trait","message":"","files":null}]}
