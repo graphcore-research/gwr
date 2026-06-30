@@ -39,12 +39,13 @@ pub trait Routable {
 ///    Debug. We could require Display, but that requires explicit
 ///    implementation.
 ///  - Routable:    Allows routing.
-///  - TotalBytes:  Allows rate limiting.
 ///  - Unique:      Allows for unique identification of `Entities`.
+///  - TotalBytes:  Allows rate limiting.
+///  - Unpin:       Required in order to be able to Unpin in port futures.
 ///  - 'static:     Due to the way that futures are implemented, the lifetimes
 ///    need to be `static. This means that objects may have to be placed in
 ///    `Box` to make the static.
-pub trait SimObject: Clone + Debug + Display + Unique + TotalBytes + 'static {}
+pub trait SimObject: Clone + Debug + Display + Unique + TotalBytes + Unpin + 'static {}
 
 // Implementations for basic types that can be sent around the simulation for
 // testing

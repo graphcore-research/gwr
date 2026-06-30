@@ -216,8 +216,8 @@ where
         };
         Ok(PortPut {
             state,
-            value: RefCell::new(Some(value)),
-            done: RefCell::new(false),
+            value: Some(value),
+            done: false,
         })
     }
 
@@ -236,8 +236,8 @@ where
     T: SimObject,
 {
     state: Rc<PortState<T>>,
-    value: RefCell<Option<T>>,
-    done: RefCell<bool>,
+    value: Option<T>,
+    done: bool,
 }
 
 impl<T> Future for PortPut<T>
@@ -246,7 +246,7 @@ where
 {
     type Output = ();
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.value.take() {
             Some(value) => {
                 // The state is designed to be shared between one put/get pair so it should
@@ -262,7 +262,7 @@ where
             }
             None => {
                 // Value already sent, woken because it has been consumed
-                *self.done.borrow_mut() = true;
+                self.done = true;
                 Poll::Ready(())
             }
         }
@@ -274,7 +274,7 @@ where
     T: SimObject,
 {
     fn is_terminated(&self) -> bool {
-        *self.done.borrow()
+        self.done
     }
 }
 
@@ -566,8 +566,8 @@ mod tests {
         let state = test_state::<i32>();
         let put = PortPut {
             state: state.clone(),
-            value: RefCell::new(Some(123)),
-            done: RefCell::new(false),
+            value: Some(123),
+            done: false,
         };
         let mut put = Box::pin(put);
         let waker = noop_waker();
