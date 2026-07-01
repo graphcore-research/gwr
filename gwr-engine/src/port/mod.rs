@@ -34,6 +34,7 @@ where
     T: SimObject,
 {
     value: RefCell<Option<T>>,
+    put_released: RefCell<bool>,
     waiting_get: RefCell<Option<Waker>>,
     waiting_put: RefCell<Option<Waker>>,
     pub in_port_entity: Rc<Entity>,
@@ -55,6 +56,7 @@ where
         });
         Self {
             value: RefCell::new(None),
+            put_released: RefCell::new(true),
             waiting_get: RefCell::new(None),
             waiting_put: RefCell::new(None),
             in_port_entity,
@@ -143,6 +145,7 @@ where
 
     /// Must be matched with a `start_get ` to consume the value.
     pub fn finish_get(&self) {
+        *self.state.put_released.borrow_mut() = true;
         if let Some(waker) = self.state.waiting_put.borrow_mut().take() {
             waker.wake();
         }
@@ -254,6 +257,7 @@ where
                 assert!(self.state.value.borrow().is_none());
 
                 *self.state.value.borrow_mut() = Some(value);
+                *self.state.put_released.borrow_mut() = false;
                 if let Some(waker) = self.state.waiting_get.borrow_mut().take() {
                     waker.wake();
                 }
@@ -261,9 +265,16 @@ where
                 Poll::Pending
             }
             None => {
-                // Value already sent, woken because it has been consumed
-                self.done = true;
-                Poll::Ready(())
+                if *self.state.put_released.borrow() {
+                    // Getter has consumed the value and released the putter.
+                    self.done = true;
+                    Poll::Ready(())
+                } else {
+                    // Stay pending as the task was woken before the getter has removed
+                    // the value and released the putter.
+                    *self.state.waiting_put.borrow_mut() = Some(cx.waker().clone());
+                    Poll::Pending
+                }
             }
         }
     }
@@ -331,6 +342,7 @@ where
         if let Some(value) = value {
             self.done = true;
             self.state.waiting_get.borrow_mut().take();
+            *self.state.put_released.borrow_mut() = true;
 
             // Track the object through the port monitor if there is one
             if let Some(monitor) = self.state.monitor.as_ref() {
@@ -562,7 +574,7 @@ mod tests {
     }
 
     #[test]
-    fn port_put_reports_termination_after_second_poll() {
+    fn port_put_waits_until_value_is_consumed_before_terminating() {
         let state = test_state::<i32>();
         let put = PortPut {
             state: state.clone(),
@@ -577,6 +589,42 @@ mod tests {
         assert!(!put.is_terminated());
         assert_eq!(*state.value.borrow(), Some(123));
         assert!(state.waiting_put.borrow().is_some());
+
+        assert_eq!(put.as_mut().poll(&mut cx), Poll::Pending);
+        assert!(!put.is_terminated());
+
+        assert_eq!(state.value.borrow_mut().take(), Some(123));
+        *state.put_released.borrow_mut() = true;
+
+        assert_eq!(put.as_mut().poll(&mut cx), Poll::Ready(()));
+        assert!(put.is_terminated());
+    }
+
+    #[test]
+    fn port_put_waits_for_start_get_to_finish_before_terminating() {
+        let state = test_state::<i32>();
+        let put = PortPut {
+            state: state.clone(),
+            value: Some(123),
+            done: false,
+        };
+        let mut put = Box::pin(put);
+        let start_get = PortStartGet {
+            state: state.clone(),
+            done: false,
+        };
+        let mut start_get = Box::pin(start_get);
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert_eq!(put.as_mut().poll(&mut cx), Poll::Pending);
+        assert_eq!(start_get.as_mut().poll(&mut cx), Poll::Ready(123));
+        assert!(state.value.borrow().is_none());
+
+        assert_eq!(put.as_mut().poll(&mut cx), Poll::Pending);
+        assert!(!put.is_terminated());
+
+        *state.put_released.borrow_mut() = true;
 
         assert_eq!(put.as_mut().poll(&mut cx), Poll::Ready(()));
         assert!(put.is_terminated());
