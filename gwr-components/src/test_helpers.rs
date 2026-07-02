@@ -13,7 +13,7 @@ use gwr_engine::port::InPort;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::SimObject;
 use gwr_engine::types::SimResult;
-use gwr_track::entity::{Entity, GetEntity};
+use gwr_track::entity::Entity;
 #[doc(hidden)]
 pub use paste::paste;
 

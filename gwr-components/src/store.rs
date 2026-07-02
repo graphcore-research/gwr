@@ -28,7 +28,7 @@
 //! use gwr_engine::engine::Engine;
 //! use gwr_engine::executor::Spawner;
 //! use gwr_engine::time::clock::Clock;
-//! use gwr_track::entity::{Entity, GetEntity};
+//! use gwr_track::entity::Entity;
 //!
 //! fn build_store(engine: &Engine, clock: &Clock, parent: &Rc<Entity>) -> Rc<Store<i32>> {
 //!     // Create a store. It is passed:
@@ -54,7 +54,7 @@
 //! use gwr_engine::engine::Engine;
 //! use gwr_engine::executor::Spawner;
 //! use gwr_engine::time::clock::Clock;
-//! use gwr_track::entity::{Entity, GetEntity};
+//! use gwr_track::entity::Entity;
 //!
 //! fn build_store_with_panic(
 //!     engine: &Engine,
@@ -86,7 +86,6 @@
 //! use gwr_engine::engine::Engine;
 //! use gwr_engine::time::clock::Clock;
 //! use gwr_engine::run_simulation;
-//! use gwr_track::entity::GetEntity;
 //!
 //! // Every simulation is based around an `Engine`
 //! let mut engine = Engine::default();
