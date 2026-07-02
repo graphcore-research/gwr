@@ -11,6 +11,7 @@ pub use paste::paste;
 macro_rules! connect_port {
     ($from:expr, $from_port_name:ident => $to:expr, $to_port_name:ident) => {
         {
+            use gwr_track::entity::GetEntity;
             gwr_track::debug!($from.entity() ; "Connect {}.{} => {}.{}", $from, stringify!($from_port_name), $to, stringify!($to_port_name));
             $crate::connect::paste! {
                 $from.[< connect_port_ $from_port_name >]($to.[< port_ $to_port_name >]())
@@ -19,6 +20,7 @@ macro_rules! connect_port {
     };
     ($from:expr, $from_port_name:ident, $from_index:expr => $to:expr, $to_port_name:ident) => {
         {
+            use gwr_track::entity::GetEntity;
             let from_index: usize = $from_index;
             gwr_track::debug!($from.entity() ; "Connect {}.{}[{}] => {}.{}", $from, stringify!($from_port_name), from_index, $to, stringify!($to_port_name));
             $crate::connect::paste! {
@@ -28,6 +30,7 @@ macro_rules! connect_port {
     };
     ($from:expr, $from_port_name:ident => $to:expr, $to_port_name:ident, $to_index:expr) => {
         {
+            use gwr_track::entity::GetEntity;
             let to_index: usize = $to_index;
             gwr_track::debug!($from.entity() ; "Connect {}.{} => {}.{}[{}]", $from, stringify!($from_port_name), $to, stringify!($to_port_name), to_index);
             $crate::connect::paste! {
@@ -37,6 +40,7 @@ macro_rules! connect_port {
     };
     ($from:expr, $from_port_name:ident, $from_index:expr => $to:expr, $to_port_name:ident, $to_index:expr) => {
         {
+            use gwr_track::entity::GetEntity;
             let from_index: usize = $from_index;
             let to_index: usize = $to_index;
             gwr_track::debug!($from.entity() ; "Connect {}.{}[{}] => {}.{}[{}]", $from, stringify!($from_port_name), from_index, $to, stringify!($to_port_name), to_index);

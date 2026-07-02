@@ -79,11 +79,6 @@ where
         Self::new_and_register_with_renames(engine, parent, name, None, data_generator)
     }
 
-    #[must_use]
-    pub fn entity(&self) -> &Rc<Entity> {
-        &self.entity
-    }
-
     pub fn set_generator(&self, data_generator: Option<DataGenerator<T>>) {
         *self.data_generator.borrow_mut() = data_generator;
     }

@@ -20,7 +20,6 @@ use gwr_models::fabric::{Fabric, FabricConfig};
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::memory_map::DeviceId;
 use gwr_models::test_helpers::MemoryTxn;
-use gwr_track::entity::GetEntity;
 
 trait ToDest {
     fn to_dest(&self, source_index: usize, frame_index: usize) -> [u8; SRC_MAC_BYTES];

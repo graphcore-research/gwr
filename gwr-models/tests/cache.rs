@@ -122,6 +122,8 @@ fn cache_dev_read_goes_to_mem() {
 
 /// Test the basics of the cache by driving/handling all of the ports manually
 mod full_cache_harness {
+    use gwr_track::entity::GetEntity;
+
     use super::*;
 
     build_model_harness! {

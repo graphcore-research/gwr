@@ -11,7 +11,6 @@ use gwr_components::{connect_port, option_box_repeat};
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::Event;
-use gwr_track::entity::GetEntity;
 
 #[test]
 fn queue_rejects_zero_capacity() {

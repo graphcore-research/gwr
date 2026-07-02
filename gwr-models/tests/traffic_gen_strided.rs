@@ -13,7 +13,6 @@ use gwr_models::memory::memory_access_gen::MemoryAccessGen;
 use gwr_models::memory::memory_access_gen::strided::Strided;
 use gwr_models::memory::{Memory, MemoryConfig};
 use gwr_models::test_helpers::create_default_memory_map;
-use gwr_track::entity::GetEntity;
 
 const BASE_ADDRESS: u64 = 0x80000;
 const SRC_ADDR: u64 = BASE_ADDRESS - LINE_SIZE_BYTES as u64;
