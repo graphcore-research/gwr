@@ -37,7 +37,7 @@ use gwr_engine::traits::{Event, Routable, Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::build_aka;
-use gwr_track::entity::{Entity, GetEntity};
+use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
 
 use crate::fabric::{Fabric, FabricConfig};

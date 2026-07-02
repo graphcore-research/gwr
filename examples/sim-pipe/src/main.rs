@@ -19,7 +19,7 @@ use gwr_engine::{run_simulation, sim_error};
 use gwr_models::fc_pipeline::{FcPipeline, FcPipelineConfig};
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_track::builder::{TrackerArgs, setup_trackers};
-use gwr_track::entity::{Entity, GetEntity};
+use gwr_track::entity::Entity;
 use gwr_track::{Track, error, info};
 use indicatif::ProgressBar;
 use sim_pipe::frame_gen::FrameGen;

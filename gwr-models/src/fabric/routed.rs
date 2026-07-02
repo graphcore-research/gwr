@@ -31,7 +31,7 @@ use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Routable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet, Runnable};
-use gwr_track::entity::{Entity, GetEntity};
+use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::{Aka, populate_aka_from_string};
 
 use crate::fabric::node::{FabricNode, FabricRoutingAlgorithm};

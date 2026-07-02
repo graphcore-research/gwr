@@ -160,7 +160,6 @@
 //! # use gwr_engine::time::clock::Clock;
 //! # use gwr_engine::traits::SimObject;
 //! # use gwr_engine::types::SimResult;
-//! # use gwr_track::entity::GetEntity;
 //! #
 //! # fn source_sink() -> SimResult {
 //! #     let mut engine = start_test(file!());

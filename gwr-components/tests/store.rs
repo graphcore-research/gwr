@@ -7,7 +7,6 @@ use gwr_components::{connect_port, option_box_repeat};
 use gwr_engine::port::InPort;
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
-use gwr_track::entity::GetEntity;
 
 /// Basic end-to-end test: Source → Store → Sink.
 ///
