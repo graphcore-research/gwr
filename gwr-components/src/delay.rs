@@ -29,9 +29,9 @@
 //! #
 //! # async fn run_tx<T>(
 //! #     entity: Rc<Entity>,
-//! #     tx: OutPort<T>,
+//! #     mut tx: OutPort<T>,
 //! #     clock: &Clock,
-//! #     rx: InPort<T>,
+//! #     mut rx: InPort<T>,
 //! #     delay_ticks: u64,
 //! # ) -> SimResult
 //! # where
@@ -68,7 +68,7 @@
 //! #
 //! # async fn run_rx<T>(
 //! #     entity: Rc<Entity>,
-//! #     rx: InPort<T>,
+//! #     mut rx: InPort<T>,
 //! #     clock: &Clock,
 //! #     pending: Rc<RefCell<VecDeque<(T, ClockTick)>>>,
 //! #     pending_changed: Repeated<usize>,
@@ -114,7 +114,7 @@
 //! #
 //! # async fn run_tx<T>(
 //! #     entity: Rc<Entity>,
-//! #     tx: OutPort<T>,
+//! #     mut tx: OutPort<T>,
 //! #     clock: &Clock,
 //! #     pending: Rc<RefCell<VecDeque<(T, ClockTick)>>>,
 //! #     pending_changed: Repeated<usize>,
@@ -321,7 +321,7 @@ where
             .await
         });
 
-        let rx = take_option!(self.rx);
+        let mut rx = take_option!(self.rx);
         let delay_ticks = *self.delay_ticks.borrow();
         loop {
             let value = rx.get()?.await;
@@ -345,7 +345,7 @@ where
 
 async fn run_tx<T>(
     entity: Rc<Entity>,
-    tx: OutPort<T>,
+    mut tx: OutPort<T>,
     clock: &Clock,
     pending: Rc<RefCell<VecDeque<(T, ClockTick)>>>,
     pending_changed: Repeated<()>,

@@ -118,8 +118,13 @@ where
         Ok(self.state.clone())
     }
 
+    #[must_use]
+    pub fn has_value(&self) -> bool {
+        self.state.value.borrow().is_some()
+    }
+
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
-    pub fn get(&self) -> PortGetResult<T> {
+    pub fn get(&mut self) -> PortGetResult<T> {
         if !*self.connected.borrow() {
             return sim_error!("{self} not connected");
         }
@@ -132,7 +137,7 @@ where
 
     /// Must be matched with a `finish_get` to allow the OutPort to continue.
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
-    pub fn start_get(&self) -> PortStartGetResult<T> {
+    pub fn start_get(&mut self) -> PortStartGetResult<T> {
         if !*self.connected.borrow() {
             return sim_error!("{self} not connected");
         }
@@ -144,7 +149,7 @@ where
     }
 
     /// Must be matched with a `start_get ` to consume the value.
-    pub fn finish_get(&self) {
+    pub fn finish_get(&mut self) {
         *self.state.put_released.borrow_mut() = true;
         if let Some(waker) = self.state.waiting_put.borrow_mut().take() {
             waker.wake();
@@ -212,7 +217,7 @@ where
     }
 
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
-    pub fn put(&self, value: T) -> PortPutResult<T> {
+    pub fn put(&mut self, value: T) -> PortPutResult<T> {
         let state = match self.state.as_ref() {
             Some(s) => s.clone(),
             None => return sim_error!("{self} not connected"),
@@ -225,7 +230,7 @@ where
     }
 
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
-    pub fn try_put(&self) -> PortTryPutResult<T> {
+    pub fn try_put(&mut self) -> PortTryPutResult<T> {
         let state = match self.state.as_ref() {
             Some(s) => s.clone(),
             None => return sim_error!("{self} not connected"),
@@ -548,7 +553,7 @@ mod tests {
     #[test]
     fn start_get_requires_connection_and_finish_get_wakes_putter() {
         let context = test_context();
-        let in_port =
+        let mut in_port =
             InPort::<i32>::new(&context.engine, &context.clock, context.engine.top(), "rx");
 
         assert!(in_port.start_get().is_err());
@@ -565,7 +570,7 @@ mod tests {
     #[test]
     fn finish_get_without_waiting_putter_is_a_noop() {
         let context = test_context();
-        let in_port =
+        let mut in_port =
             InPort::<i32>::new(&context.engine, &context.clock, context.engine.top(), "rx");
 
         in_port.finish_get();

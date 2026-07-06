@@ -233,10 +233,10 @@ where
     /// functionality of this component.
     async fn run(&self) -> SimResult {
         // Pull out the `rx` port so that it is owned in this function.
-        let rx = take_option!(self.rx);
+        let mut rx = take_option!(self.rx);
 
         // Pull out the internal `tx` port so that it is owned in this function.
-        let tx = take_option!(self.tx);
+        let mut tx = take_option!(self.tx);
 
         loop {
             // Receive a value from the input

@@ -2,7 +2,7 @@
 
 [package]
 name = "gwr-components"
-version = "0.9.0"
+version = "0.10.0"
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -30,7 +30,7 @@ harness = false
 async-trait.workspace = true
 futures.workspace = true
 gwr-build = { path = "../gwr-build", version = "0.1.0" }
-gwr-engine = { path = "../gwr-engine", version = "0.12.0" }
+gwr-engine = { path = "../gwr-engine", version = "0.13.0" }
 gwr-model-builder = { path = "../gwr-model-builder", version = "0.2.0" }
 gwr-resources = { path = "../gwr-resources", version = "0.1.0" }
 gwr-track = { path = "../gwr-track", version = "0.11.0" }

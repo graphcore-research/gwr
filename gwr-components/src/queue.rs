@@ -271,7 +271,7 @@ where
     }
 }
 
-async fn run_rx<T>(rx: InPort<T>, queue: Rc<QueueCore<T>>) -> SimResult
+async fn run_rx<T>(mut rx: InPort<T>, queue: Rc<QueueCore<T>>) -> SimResult
 where
     T: SimObject,
 {
@@ -286,7 +286,7 @@ where
     }
 }
 
-async fn run_tx<T>(tx: OutPort<T>, queue: Rc<QueueCore<T>>) -> SimResult
+async fn run_tx<T>(mut tx: OutPort<T>, queue: Rc<QueueCore<T>>) -> SimResult
 where
     T: SimObject,
 {

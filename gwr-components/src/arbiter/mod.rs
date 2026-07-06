@@ -144,7 +144,7 @@ where
                 .spawn(async move { run_input(entity, rx, i, shared_state).await });
         }
 
-        let tx = take_option!(self.tx);
+        let mut tx = take_option!(self.tx);
         let mut policy = take_option!(self.policy);
 
         // Drive the output
@@ -185,7 +185,7 @@ where
 
 async fn run_input<T: SimObject>(
     entity: Rc<Entity>,
-    rx: InPort<T>,
+    mut rx: InPort<T>,
     input_idx: usize,
     shared_state: Rc<ArbiterSharedState<T>>,
 ) -> SimResult {

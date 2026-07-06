@@ -99,7 +99,7 @@ where
             None => return Ok(()),
         };
 
-        let tx = take_option!(self.tx);
+        let mut tx = take_option!(self.tx);
         loop {
             let value = data_generator.next();
             if let Some(value) = value {

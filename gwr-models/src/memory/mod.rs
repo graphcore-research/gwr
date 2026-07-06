@@ -187,8 +187,8 @@ where
     T: SimObject + AccessMemory,
 {
     async fn run(&self) -> SimResult {
-        let rx = take_option!(self.rx);
-        let response_tx = take_option!(self.response_tx);
+        let mut rx = take_option!(self.rx);
+        let mut response_tx = take_option!(self.response_tx);
 
         loop {
             let access = rx.get()?.await;

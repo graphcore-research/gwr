@@ -58,7 +58,7 @@ impl PortCredit {
     }
 
     pub async fn run(&self) -> SimResult {
-        let rx = take_option!(self.rx);
+        let mut rx = take_option!(self.rx);
         let credit = self.credit.clone();
 
         loop {
@@ -144,8 +144,8 @@ where
     T: SimObject,
 {
     async fn run(&self) -> SimResult {
-        let rx = take_option!(self.rx);
-        let tx = take_option!(self.tx);
+        let mut rx = take_option!(self.rx);
+        let mut tx = take_option!(self.tx);
         let credit = self.credit.clone();
 
         spawn_subcomponent!(self.spawner ; self.credit_rx);

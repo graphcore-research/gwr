@@ -40,7 +40,7 @@ fn put_get() {
         Ok(())
     });
 
-    let rx = InPort::new(&engine, &clock, engine.top(), "test_rx");
+    let mut rx = InPort::new(&engine, &clock, engine.top(), "test_rx");
     buffer.connect_port_tx(rx.state()).unwrap();
     let rx_count = Rc::new(RefCell::new(0));
     {
@@ -116,7 +116,7 @@ fn spawn_slow_reader<T>(engine: &Engine, clock: &Clock, store: &Store<T>)
 where
     T: SimObject,
 {
-    let rx = InPort::new(engine, clock, engine.top(), "rx");
+    let mut rx = InPort::new(engine, clock, engine.top(), "rx");
     store.connect_port_tx(rx.state()).unwrap();
     let clock = clock.clone();
     engine.spawn(async move {

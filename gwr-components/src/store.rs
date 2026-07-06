@@ -298,7 +298,7 @@ where
     }
 }
 
-async fn run_rx<T>(rx: InPort<T>, state: Rc<State<T>>) -> SimResult
+async fn run_rx<T>(mut rx: InPort<T>, state: Rc<State<T>>) -> SimResult
 where
     T: SimObject,
 {
@@ -315,7 +315,7 @@ where
     }
 }
 
-async fn run_tx<T>(tx: OutPort<T>, state: Rc<State<T>>) -> SimResult
+async fn run_tx<T>(mut tx: OutPort<T>, state: Rc<State<T>>) -> SimResult
 where
     T: SimObject,
 {
