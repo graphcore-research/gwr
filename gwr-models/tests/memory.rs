@@ -133,7 +133,7 @@ fn read_becomes_read_response() {
     let mut mem_rx_driver = OutPort::new(top, "mem_rx_driver");
     mem_rx_driver.connect(memory.port_rx()).unwrap();
 
-    let mem_tx_recv = InPort::new(&engine, &clock, top, "mem_tx_recv");
+    let mut mem_tx_recv = InPort::new(&engine, &clock, top, "mem_tx_recv");
     memory.connect_port_tx(mem_tx_recv.state()).unwrap();
 
     engine.spawn(async move {

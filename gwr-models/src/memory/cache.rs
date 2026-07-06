@@ -439,7 +439,7 @@ where
             let req = take_option!(self.req);
             let rsp_arb_1 = take_option!(self.rsp_arb_1);
             self.spawner
-                .spawn(async move { run_dev_rx(&state, req, rsp_arb_1).await });
+                .spawn(async move { run_dev_rx(state, req, rsp_arb_1).await });
         }
 
         // Handle responses from the memory side
@@ -452,14 +452,14 @@ where
             bw_bytes_per_cycle: self.bw_bytes_per_cycle,
         };
         let rsp_arb_0 = take_option!(self.rsp_arb_0);
-        run_mem_rx(&state, rsp_arb_0).await
+        run_mem_rx(state, rsp_arb_0).await
     }
 }
 
 async fn run_dev_rx<T>(
-    state: &RxHandlingState<T>,
-    req: OutPort<T>,
-    rsp_arb_1: OutPort<T>,
+    mut state: RxHandlingState<T>,
+    mut req: OutPort<T>,
+    mut rsp_arb_1: OutPort<T>,
 ) -> SimResult
 where
     T: SimObject + AccessMemory,
@@ -468,7 +468,7 @@ where
         let request = state.rx.get()?.await;
         trace!(state.entity ; "Device request {}", request);
         let total_bytes = request.total_bytes();
-        handle_request(state, &req, &rsp_arb_1, request).await?;
+        handle_request(&state, &mut req, &mut rsp_arb_1, request).await?;
         let ticks = total_bytes.div_ceil(state.bw_bytes_per_cycle);
         state.clock.wait_ticks(ticks as u64).await;
     }
@@ -476,8 +476,8 @@ where
 
 async fn handle_request<T>(
     state: &RxHandlingState<T>,
-    req: &OutPort<T>,
-    rsp_arb_1: &OutPort<T>,
+    req: &mut OutPort<T>,
+    rsp_arb_1: &mut OutPort<T>,
     request: T,
 ) -> SimResult
 where
@@ -531,7 +531,7 @@ where
     Ok(())
 }
 
-async fn run_mem_rx<T>(state: &RxHandlingState<T>, rsp_arb_0: OutPort<T>) -> SimResult
+async fn run_mem_rx<T>(mut state: RxHandlingState<T>, mut rsp_arb_0: OutPort<T>) -> SimResult
 where
     T: SimObject + AccessMemory,
 {
@@ -539,7 +539,7 @@ where
         let response = state.rx.get()?.await;
         trace!(state.entity ; "Memory response {}", response);
         let total_bytes = response.total_bytes();
-        handle_response(state, &rsp_arb_0, response).await?;
+        handle_response(&state, &mut rsp_arb_0, response).await?;
         let ticks = total_bytes.div_ceil(state.bw_bytes_per_cycle);
         state.clock.wait_ticks(ticks as u64).await;
     }
@@ -547,7 +547,7 @@ where
 
 async fn handle_response<T>(
     state: &RxHandlingState<T>,
-    rsp_arb_0: &OutPort<T>,
+    rsp_arb_0: &mut OutPort<T>,
     access: T,
 ) -> SimResult
 where

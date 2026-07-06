@@ -136,7 +136,7 @@ fn input_order() {
     connect_port!(arbiter, tx => store_limiter, rx).unwrap();
     connect_port!(store_limiter, tx => store, rx).unwrap();
 
-    let port = InPort::new(
+    let mut port = InPort::new(
         &engine,
         &clock,
         &Rc::new(Entity::new(engine.top(), "port")),
@@ -264,7 +264,7 @@ fn weighted_policy() {
     connect_port!(arbiter, tx => store_limiter, rx).unwrap();
     connect_port!(store_limiter, tx => store, rx).unwrap();
 
-    let port = InPort::new(
+    let mut port = InPort::new(
         &engine,
         &clock,
         &Rc::new(Entity::new(engine.top(), "port")),

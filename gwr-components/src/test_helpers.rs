@@ -4,10 +4,8 @@ use std::cmp::min;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use futures::FutureExt;
 use futures::channel::oneshot;
 use futures::channel::oneshot::{Receiver, Sender};
-use futures::future::select_all;
 use gwr_engine::engine::Engine;
 use gwr_engine::port::InPort;
 use gwr_engine::time::clock::Clock;
@@ -123,7 +121,7 @@ pub fn priority_policy_test_core(engine: &mut Engine, inputs: &[ArbiterInputData
     }
     connect_port!(arbiter, tx => store_limiter, rx).unwrap();
 
-    let port = InPort::new(
+    let mut port = InPort::new(
         engine,
         &clock,
         &Rc::new(Entity::new(engine.top(), "port")),
@@ -148,29 +146,15 @@ pub fn one_shot_channel<T>() -> (Sender<T>, Receiver<T>) {
 }
 
 pub trait NoTrafficPort {
-    fn wait_for_traffic<'a>(
-        &'a self,
-        step_name: &'a str,
-        port_name: &'static str,
-    ) -> futures::future::LocalBoxFuture<'a, SimResult>;
+    fn has_traffic(&self) -> bool;
 }
 
 impl<T> NoTrafficPort for InPort<T>
 where
     T: SimObject,
 {
-    fn wait_for_traffic<'a>(
-        &'a self,
-        location: &'a str,
-        port_name: &'static str,
-    ) -> futures::future::LocalBoxFuture<'a, SimResult> {
-        async move {
-            let value = self.get()?.await;
-            panic!("{location}: unexpected {port_name} traffic: {value}");
-            #[allow(unreachable_code)]
-            Ok(())
-        }
-        .boxed_local()
+    fn has_traffic(&self) -> bool {
+        self.has_value()
     }
 }
 
@@ -180,26 +164,11 @@ pub async fn expect_no_traffic(
     ticks: u64,
     receivers: Vec<(&'static str, &dyn NoTrafficPort)>,
 ) -> SimResult {
-    if receivers.is_empty() {
-        clock.wait_ticks(ticks).await;
-        return Ok(());
-    }
-
-    let mut traffic = select_all(
-        receivers
-            .into_iter()
-            .map(|(port_name, receiver)| receiver.wait_for_traffic(location, port_name))
-            .collect::<Vec<_>>(),
-    )
-    .fuse();
-    let mut timeout = clock.wait_ticks(ticks).fuse();
-
-    futures::select! {
-        (result, _, _) = traffic => {
-            result?;
-            panic!("{location}: no-traffic check completed unexpectedly");
+    clock.wait_ticks(ticks).await;
+    for (port_name, receiver) in receivers {
+        if receiver.has_traffic() {
+            panic!("{location}: unexpected {port_name} traffic");
         }
-        _ = timeout => {}
     }
 
     Ok(())
@@ -1150,7 +1119,7 @@ macro_rules! build_component_harness {
                                         panic!("{location}: {port:?}: step is for {}", stringify!($rx_variant));
                                     };
                                     self.[<$rx_field _driver>]
-                                        .as_ref()
+                                        .as_mut()
                                         .expect(concat!(stringify!($rx_field), " driver already taken"))
                                         .put(value.clone())?
                                         .await;
@@ -1162,7 +1131,7 @@ macro_rules! build_component_harness {
                                         panic!("{location}: {port:?}: step is for {}", stringify!($tx_variant));
                                     };
                                     let actual = self.[<$tx_field _receiver>]
-                                        .as_ref()
+                                        .as_mut()
                                         .expect(concat!(stringify!($tx_field), " receiver already taken"))
                                         .get()?
                                         .await;
@@ -1179,8 +1148,8 @@ macro_rules! build_component_harness {
                                         panic!("{location}: {port:?}: step is for {}", stringify!($rx_array_variant));
                                     };
                                     self.[<$rx_array_field _drivers>]
-                                        .get(idx)
-                                        .and_then(|driver| driver.as_ref())
+                                        .get_mut(idx)
+                                        .and_then(|driver| driver.as_mut())
                                         .unwrap_or_else(|| panic!("{location}: {} driver index {idx} out of range or already taken", stringify!($rx_array_field)))
                                         .put(value.clone())?
                                         .await;
@@ -1192,8 +1161,8 @@ macro_rules! build_component_harness {
                                         panic!("{location}: {port:?}: step is for {}", stringify!($tx_array_variant));
                                     };
                                     let actual = self.[<$tx_array_field _receivers>]
-                                        .get(idx)
-                                        .and_then(|receiver| receiver.as_ref())
+                                        .get_mut(idx)
+                                        .and_then(|receiver| receiver.as_mut())
                                         .unwrap_or_else(|| panic!("{location}: {} receiver index {idx} out of range or already taken", stringify!($tx_array_field)))
                                         .get()?
                                         .await;
@@ -1376,7 +1345,7 @@ macro_rules! build_component_harness {
                     }
 
                     pub async fn [<expect_no_ $tx_field _traffic>](
-                        &self,
+                        &mut self,
                         ticks: u64,
                     ) -> gwr_engine::types::SimResult {
                         $crate::test_helpers::expect_no_traffic(

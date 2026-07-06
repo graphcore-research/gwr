@@ -9,7 +9,7 @@ use gwr_engine::test_helpers::start_test;
 fn disconnected_outport() {
     let mut engine = start_test(file!());
 
-    let tx_port = OutPort::new(engine.top(), "tx");
+    let mut tx_port = OutPort::new(engine.top(), "tx");
     engine.spawn(async move {
         tx_port.put(1)?.await;
         Ok(())
@@ -22,7 +22,7 @@ fn disconnected_outport() {
 fn disconnected_outport_try_put() {
     let mut engine = start_test(file!());
 
-    let tx_port = OutPort::new(engine.top(), "tx");
+    let mut tx_port = OutPort::new(engine.top(), "tx");
     engine.spawn(async move {
         tx_port.try_put()?.await;
         tx_port.put(1)?.await;
@@ -37,7 +37,7 @@ fn disconnected_input() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
 
-    let rx_port = InPort::new(&engine, &clock, engine.top(), "rx");
+    let mut rx_port = InPort::new(&engine, &clock, engine.top(), "rx");
     engine.spawn(async move {
         let _: i32 = rx_port.get()?.await;
         Ok(())
@@ -51,7 +51,7 @@ fn disconnected_input_start() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
 
-    let rx_port = InPort::new(&engine, &clock, engine.top(), "rx");
+    let mut rx_port = InPort::new(&engine, &clock, engine.top(), "rx");
     engine.spawn(async move {
         let _: i32 = rx_port.start_get()?.await;
         rx_port.finish_get();

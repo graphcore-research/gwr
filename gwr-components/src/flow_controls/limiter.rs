@@ -90,8 +90,8 @@ where
     T: SimObject,
 {
     async fn run(&self) -> SimResult {
-        let rx = take_option!(self.rx);
-        let tx = take_option!(self.tx);
+        let mut rx = take_option!(self.rx);
+        let mut tx = take_option!(self.tx);
         let limiter = &self.limiter;
         loop {
             // Get the value but without letting the OutPort complete

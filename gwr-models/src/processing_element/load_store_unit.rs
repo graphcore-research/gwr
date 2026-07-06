@@ -189,7 +189,7 @@ impl LsuState {
     // port
     async fn try_handle_next_active_request(
         &self,
-        tx: &OutPort<MemoryAccess>,
+        tx: &mut OutPort<MemoryAccess>,
     ) -> Result<bool, SimError> {
         let next_slot_idx = self.pending_request_indices.borrow_mut().pop_front();
 
@@ -382,16 +382,16 @@ impl Runnable for LoadStoreUnit {
     }
 }
 
-async fn run_rx(state: Rc<LsuState>, rx: InPort<MemoryAccess>) -> SimResult {
+async fn run_rx(state: Rc<LsuState>, mut rx: InPort<MemoryAccess>) -> SimResult {
     loop {
         let response = rx.get()?.await;
         state.put_response_in_active_request_slot(response)?;
     }
 }
 
-async fn run_tx(state: Rc<LsuState>, tx: OutPort<MemoryAccess>) -> SimResult {
+async fn run_tx(state: Rc<LsuState>, mut tx: OutPort<MemoryAccess>) -> SimResult {
     loop {
-        if !state.try_handle_next_active_request(&tx).await? {
+        if !state.try_handle_next_active_request(&mut tx).await? {
             // Nothing was handled. Wait until the queue is changed.
             state.new_request.listen().await;
         }

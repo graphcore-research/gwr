@@ -156,8 +156,8 @@ where
     T: SimObject,
 {
     async fn run(&self) -> SimResult {
-        let rx = take_option!(self.rx);
-        let tx = take_option!(self.tx);
+        let mut rx = take_option!(self.rx);
+        let mut tx = take_option!(self.tx);
 
         loop {
             // Receive a value from the input

@@ -28,8 +28,8 @@
 //! # use gwr_track::entity::Entity;
 //! #
 //! # async fn run<T>(
-//! #     tx: Vec<OutPort<T>>,
-//! #     rx: InPort<T>,
+//! #     mut tx: Vec<OutPort<T>>,
+//! #     mut rx: InPort<T>,
 //! #     routing_algorithm: Box<dyn Route<T>>
 //! # ) -> SimResult
 //! # where
@@ -39,11 +39,11 @@
 //!     let value = rx.get()?.await;
 //!     let tx_index = routing_algorithm.route(&value)?;
 //!
-//!     match tx.get(tx_index) {
+//!     match tx.get_mut(tx_index) {
 //!         None => {
 //!             // Report error
 //!         }
-//!         Some(tx) => {
+//!         Some(mut tx) => {
 //!             tx.put(value)?.await;
 //!         }
 //!     }
@@ -163,8 +163,8 @@ where
     T: SimObject + Routable,
 {
     async fn run(&self) -> SimResult {
-        let tx: Vec<OutPort<T>> = self.tx.borrow_mut().drain(..).collect();
-        let rx = take_option!(self.rx);
+        let mut tx: Vec<OutPort<T>> = self.tx.borrow_mut().drain(..).collect();
+        let mut rx = take_option!(self.rx);
         let algorithm = &self.algorithm;
 
         loop {
@@ -174,7 +174,7 @@ where
             let tx_index = algorithm.route(&value)?;
             trace!(self.entity ; "Route {} to {}", value.id(), tx_index);
 
-            match tx.get(tx_index) {
+            match tx.get_mut(tx_index) {
                 None => {
                     return sim_error!(
                         "{self}: {value:?} selected invalid egress index {tx_index}"

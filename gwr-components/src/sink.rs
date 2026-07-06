@@ -82,7 +82,7 @@ where
     T: SimObject,
 {
     async fn run(&self) -> SimResult {
-        let rx = take_option!(self.rx);
+        let mut rx = take_option!(self.rx);
         loop {
             let value = rx.get()?.await;
             self.entity.track_enter(value.id());

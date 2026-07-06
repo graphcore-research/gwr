@@ -115,7 +115,7 @@ where
         // Use a HashSet so that memory accesses are permitted in any order
         let expected = Rc::new(RefCell::new(HashSet::new()));
         let rx = take_option!(self.rx);
-        let tx = take_option!(self.tx);
+        let mut tx = take_option!(self.tx);
 
         {
             let expected = expected.clone();
@@ -139,7 +139,7 @@ where
 }
 
 async fn run_input<T>(
-    rx: InPort<T>,
+    mut rx: InPort<T>,
     expected: Rc<RefCell<HashSet<Id>>>,
     payload_bytes_received: Rc<RefCell<usize>>,
 ) -> SimResult

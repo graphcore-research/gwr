@@ -91,9 +91,9 @@ where
     T: SimObject,
 {
     async fn run(&self) -> SimResult {
-        let rx = take_option!(self.rx);
-        let credit_tx = take_option!(self.credit_tx);
-        let tx = take_option!(self.tx);
+        let mut rx = take_option!(self.rx);
+        let mut credit_tx = take_option!(self.credit_tx);
+        let mut tx = take_option!(self.tx);
 
         loop {
             let value = rx.get()?.await;

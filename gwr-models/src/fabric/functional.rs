@@ -288,7 +288,7 @@ async fn run_rx<T>(
     entity: Rc<Entity>,
     clock: Clock,
     port_index: usize,
-    internal_rx: InPort<T>,
+    mut internal_rx: InPort<T>,
     port_states: Rc<Vec<PortState<T>>>,
     routing_algorithm: Rc<Box<dyn Route<T>>>,
     config: Rc<FabricConfig>,
@@ -331,7 +331,7 @@ async fn run_tx<T>(
     entity: Rc<Entity>,
     clock: Clock,
     port_index: usize,
-    internal_tx: OutPort<T>,
+    mut internal_tx: OutPort<T>,
     port_states: Rc<Vec<PortState<T>>>,
 ) -> SimResult
 where
