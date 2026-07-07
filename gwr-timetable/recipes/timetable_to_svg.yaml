@@ -1,0 +1,39 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+description: Convert a GWR timetable YAML file to an SVG diagram via Mermaid.
+arguments:
+  - name: PLATFORM
+    default: gwr-platform/examples/platform.yaml
+    comment: Platform YAML file to pass to timetable-to-mermaid.
+  - name: TIMETABLE
+    default: gwr-timetable/examples/small.yaml
+    comment: Timetable YAML file to render.
+  - name: MERMAID
+    default: timetable.mmd
+    comment: Intermediate Mermaid file to write.
+  - name: SVG
+    default: timetable.svg
+    comment: SVG output file to write.
+  - name: MMDC_CONFIG
+    default: mmdc-config.json
+    comment: Mermaid CLI config file to write.
+  - name: MAX_TEXT_SIZE
+    default: 500000
+    comment: Mermaid maxTextSize config value.
+  - name: MAX_EDGES
+    default: 100000
+    comment: Mermaid maxEdges config value.
+  - name: MMDC
+    default: mmdc
+    comment: Mermaid CLI executable.
+ingredients:
+  - comment: Convert timetable YAML to Mermaid.
+    command:
+      cargo run --bin timetable-to-mermaid -- --platform ${PLATFORM} --timetable
+      ${TIMETABLE} --mermaid ${MERMAID}
+  - comment: Write Mermaid CLI config with larger graph limits.
+    command: >
+      printf '{"maxTextSize": %s, "maxEdges": %s}\n' "${MAX_TEXT_SIZE}"
+      "${MAX_EDGES}" > ${MMDC_CONFIG}
+  - comment: Render Mermaid to SVG.
+    command:
+      ${MMDC} --input ${MERMAID} --output ${SVG} --configFile ${MMDC_CONFIG}
