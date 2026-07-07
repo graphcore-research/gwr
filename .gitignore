@@ -8,3 +8,4 @@ flamegraph*
 *.profdata
 node_modules/
 .lycheecache
+mmdc-config.json

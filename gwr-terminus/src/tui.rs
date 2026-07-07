@@ -2,13 +2,12 @@
 
 use std::{io, panic};
 
-use color_eyre::Result;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::Terminal;
 use ratatui::backend::Backend;
 
-use crate::Draw;
+use crate::{Draw, Result};
 
 /// Representation of a terminal user interface.
 ///

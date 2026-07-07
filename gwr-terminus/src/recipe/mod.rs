@@ -6,13 +6,12 @@ use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitStatus, Output, Stdio};
 
-use color_eyre::eyre::Context;
-use log::{debug, error};
+use log::debug;
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::Logger;
 use crate::command::Command;
+use crate::{Logger, Result};
 
 pub mod converter;
 
@@ -93,12 +92,17 @@ fn build_regexs() -> (Regex, Regex) {
 }
 
 impl Recipe {
-    pub fn new_from_file(recipe_path: &Path) -> color_eyre::eyre::Result<Self> {
-        let file_contents = fs::read_to_string(recipe_path)
-            .wrap_err_with(|| format!("Failed to read {}", recipe_path.display()));
+    pub fn new_from_file(recipe_path: &Path) -> Result<Self> {
+        let file_contents = fs::read_to_string(recipe_path).map_err(|e| {
+            io::Error::other(format!("Failed to read {}: {e}", recipe_path.display()))
+        });
         let mut recipe_result = match file_contents {
-            Ok(file_contents) => serde_yaml_ng::from_str::<Recipe>(&file_contents)
-                .wrap_err_with(|| format!("Failed to parse contents of {}", recipe_path.display())),
+            Ok(file_contents) => serde_yaml_ng::from_str::<Recipe>(&file_contents).map_err(|e| {
+                io::Error::other(format!(
+                    "Failed to parse contents of {}: {e}",
+                    recipe_path.display()
+                ))
+            }),
             Err(e) => Err(e),
         };
 
@@ -113,7 +117,7 @@ impl Recipe {
                 }
             }
         }
-        recipe_result
+        Ok(recipe_result?)
     }
 
     #[must_use]
@@ -189,8 +193,8 @@ impl Recipe {
     }
 
     /// Parse arguments from the command-line so that all the current
-    pub fn parse_cli_args(&mut self, args: &[String]) {
-        self.parse_args(args);
+    pub fn parse_cli_args(&mut self, args: &[String]) -> Result<()> {
+        self.parse_args(args)
     }
 
     /// Execute a recipe by writing out a single shell script which is called.
@@ -200,11 +204,13 @@ impl Recipe {
         keep_tmp: bool,
         exit_on_error: bool,
         logger: &mut impl Logger,
-    ) -> color_eyre::eyre::Result<()> {
+    ) -> Result<()> {
         let tmp_str = tmp_root.to_string_lossy().to_string() + ".sh";
         let script_path = PathBuf::from(tmp_str);
         self.write_script(&script_path, exit_on_error)
-            .wrap_err_with(|| format!("Failed to write {}", script_path.display()))?;
+            .map_err(|e| {
+                io::Error::other(format!("Failed to write {}: {e}", script_path.display()))
+            })?;
 
         if log::log_enabled!(log::Level::Debug) {
             match fs::read_to_string(&script_path) {
@@ -220,14 +226,20 @@ impl Recipe {
         }
 
         // Ensure the path is absolute so that there are no issues executing it
-        let script_path = fs::canonicalize(&script_path)
-            .wrap_err_with(|| format!("Failed to canonicalize {}", script_path.display()))?;
-        run_script_as_interactive(&script_path, logger, true)
-            .wrap_err_with(|| format!("Running '{}' failed", script_path.display()))?;
+        let script_path = fs::canonicalize(&script_path).map_err(|e| {
+            io::Error::other(format!(
+                "Failed to canonicalize {}: {e}",
+                script_path.display()
+            ))
+        })?;
+        run_script_as_interactive(&script_path, logger, true).map_err(|e| {
+            io::Error::other(format!("Running '{}' failed: {e}", script_path.display()))
+        })?;
 
         if !keep_tmp {
-            fs::remove_file(&script_path)
-                .wrap_err_with(|| format!("Failed to remove {}", script_path.display()))?;
+            fs::remove_file(&script_path).map_err(|e| {
+                io::Error::other(format!("Failed to remove {}: {e}", script_path.display()))
+            })?;
         }
         Ok(())
     }
@@ -235,28 +247,48 @@ impl Recipe {
     /// Parse the arguments passed by the user and track their values
     ///
     /// Assume using default values if the user hasn't set a value.
-    ///
-    /// Returns true if successfully parsed, false on error.
-    fn parse_args(&mut self, args: &[String]) -> bool {
-        let mut args_to_set = HashMap::new();
+    fn parse_args(&mut self, args: &[String]) -> Result<()> {
+        let mut args_to_set: HashMap<String, String> = HashMap::new();
         let mut arg_name = None;
         for arg in args {
             if let Some(name) = arg_name.take() {
-                args_to_set.insert(name, arg);
+                args_to_set.insert(name, arg.to_string());
             } else if arg.starts_with("--") {
-                let name: String = arg.chars().skip(2).collect();
-                arg_name = Some(name);
+                let arg = arg.trim_start_matches("--");
+                if let Some((name, value)) = arg.split_once('=') {
+                    args_to_set.insert(name.to_string(), value.to_string());
+                } else {
+                    arg_name = Some(arg.to_string());
+                }
             } else {
-                error!("Cannot parse '{arg}'");
                 self.print_help();
-                return false;
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("Cannot parse recipe argument '{arg}'"),
+                )
+                .into());
             }
         }
 
         if arg_name.is_some() {
-            error!("--{} with no value", arg_name.take().unwrap());
+            let name = arg_name.take().unwrap();
             self.print_help();
-            return false;
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("--{name} with no value"),
+            )
+            .into());
+        }
+
+        for name in args_to_set.keys() {
+            if !self.arguments.iter().any(|arg| arg.name == *name) {
+                self.print_help();
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("Unknown recipe argument '--{name}'"),
+                )
+                .into());
+            }
         }
 
         for arg in &mut self.arguments {
@@ -273,7 +305,7 @@ impl Recipe {
                 None => debug!("Not setting {}", arg.name),
             }
         }
-        true
+        Ok(())
     }
 
     fn write_script(&self, script_path: &PathBuf, exit_on_error: bool) -> io::Result<()> {
@@ -353,7 +385,7 @@ enum CommandValue {
     Lines(Vec<String>),
 }
 
-fn deserialize_command<'de, D>(deserializer: D) -> Result<String, D::Error>
+fn deserialize_command<'de, D>(deserializer: D) -> std::result::Result<String, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -536,8 +568,46 @@ ingredients: []
 
         let mut recipe = serde_yaml_ng::from_str::<Recipe>(yaml).unwrap();
         let args = vec!["--EXTRA_ARGS".to_string(), "--routed".to_string()];
-        recipe.parse_cli_args(&args);
+        recipe.parse_cli_args(&args).unwrap();
 
         assert_eq!(recipe.arguments()[0].value(), &Some("--routed".to_string()));
+    }
+
+    #[test]
+    fn parse_cli_args_allows_equals_values() {
+        let yaml = r"
+description: test
+arguments:
+  - name: TIMETABLE
+    default: gwr-timetable/examples/small.yaml
+    comment: timetable
+ingredients: []
+";
+
+        let mut recipe = serde_yaml_ng::from_str::<Recipe>(yaml).unwrap();
+        let args = vec!["--TIMETABLE=timetable.yaml".to_string()];
+        recipe.parse_cli_args(&args).unwrap();
+
+        assert_eq!(
+            recipe.arguments()[0].value(),
+            &Some("timetable.yaml".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_cli_args_rejects_unknown_argument() {
+        let yaml = r"
+description: test
+arguments:
+  - name: TIMETABLE
+    default: gwr-timetable/examples/small.yaml
+    comment: timetable
+ingredients: []
+";
+
+        let mut recipe = serde_yaml_ng::from_str::<Recipe>(yaml).unwrap();
+        let args = vec!["--UNKNOWN=timetable.yaml".to_string()];
+
+        assert!(recipe.parse_cli_args(&args).is_err());
     }
 }

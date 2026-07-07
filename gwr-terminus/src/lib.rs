@@ -3,6 +3,8 @@
 use log::{error, info};
 use ratatui::style::{Color, Style};
 
+pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
 /// Trait defining an error handler function
 pub trait Logger {
     fn error(&mut self, message: &str);

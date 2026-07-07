@@ -11,12 +11,11 @@ use std::path::{Path, PathBuf};
 use std::{fs, io};
 
 use clap::{Parser, Subcommand};
-use color_eyre::Result;
 use crossterm::event::{self, Event};
-use gwr_terminus::CliLogger;
 use gwr_terminus::command::Command;
 use gwr_terminus::recipe::Recipe;
 use gwr_terminus::tui::Tui;
+use gwr_terminus::{CliLogger, Result};
 use log::{LevelFilter, info};
 use ratatui::Terminal;
 use ratatui::prelude::CrosstermBackend;
@@ -216,16 +215,16 @@ fn run_recipe(
     recipe: &String,
     recipe_help: bool,
     args: &[String],
-) -> color_eyre::eyre::Result<()> {
+) -> Result<()> {
     let recipe_path = PathBuf::from(recipe);
     let mut recipe = Recipe::new_from_file(recipe_path.as_path())?;
     if recipe_help {
         recipe.print_help();
     } else {
-        recipe.parse_cli_args(args);
+        recipe.parse_cli_args(args)?;
         recipe.execute(tmp_root, keep_tmp, exit_on_error, &mut CliLogger {})?;
     }
-    color_eyre::eyre::Ok(())
+    Ok(())
 }
 
 fn write_recipe(
@@ -250,11 +249,10 @@ fn write_recipe(
     info!("Writing {recipe}");
     app.write_recipe();
 
-    color_eyre::eyre::Ok(())
+    Ok(())
 }
 
 fn start_write_recipe_tui(history: &PathBuf, recipes_folder: &str) -> Result<()> {
-    color_eyre::install()?;
     let mut app = gwr_terminus::writer::app::App::new(history, recipes_folder, true);
 
     // Initialize the terminal user interface.
@@ -275,7 +273,7 @@ fn start_write_recipe_tui(history: &PathBuf, recipes_folder: &str) -> Result<()>
 
     // Exit the user interface.
     tui.exit()?;
-    color_eyre::eyre::Ok(())
+    Ok(())
 }
 
 fn start_run_recipe_tui(
@@ -284,7 +282,6 @@ fn start_run_recipe_tui(
     keep_tmp: bool,
     exit_on_error: bool,
 ) -> Result<()> {
-    color_eyre::install()?;
     let mut app =
         gwr_terminus::runner::app::App::new(recipes_folder, tmp_root, keep_tmp, exit_on_error);
 
@@ -306,5 +303,5 @@ fn start_run_recipe_tui(
 
     // Exit the user interface.
     tui.exit()?;
-    color_eyre::eyre::Ok(())
+    Ok(())
 }
