@@ -1,6 +1,7 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::entity::Capacity;
@@ -15,6 +16,8 @@ pub struct PerfettoTracker {
     writer: SharedWriter,
     current_time_ns: RefCell<u64>,
     trace_builder: RefCell<PerfettoTraceBuilder>,
+    group_memberships: RefCell<HashMap<Id, Id>>,
+    activity_lanes: RefCell<HashMap<Id, Id>>,
 }
 
 impl PerfettoTracker {
@@ -25,6 +28,8 @@ impl PerfettoTracker {
             writer: Rc::new(RefCell::new(writer)),
             current_time_ns: RefCell::new(0),
             trace_builder: RefCell::new(PerfettoTraceBuilder::new()),
+            group_memberships: RefCell::new(HashMap::new()),
+            activity_lanes: RefCell::new(HashMap::new()),
         }
     }
 }
@@ -86,6 +91,51 @@ impl Track for PerfettoTracker {
         }
     }
 
+    fn begin_activity(&self, activity: Id, lane: Id, name: &str) {
+        if self.is_entity_enabled(lane, log::Level::Trace) {
+            self.activity_lanes.borrow_mut().insert(activity, lane);
+            let guard = self.trace_builder.borrow_mut();
+            let correlation_id = self
+                .group_memberships
+                .borrow()
+                .get(&activity)
+                .map(|group_id| group_id.0);
+            let trace_packet = guard.build_activity_begin_trace_packet(
+                *self.current_time_ns.borrow(),
+                lane,
+                name,
+                correlation_id,
+            );
+            let buf = guard.build_trace_to_bytes(vec![trace_packet]);
+            self.writer.borrow_mut().write_all(&buf).unwrap();
+        }
+    }
+
+    fn add_to_group(&self, activity: Id, group_id: Id) {
+        self.group_memberships
+            .borrow_mut()
+            .insert(activity, group_id);
+    }
+
+    fn remove_from_group(&self, activity: Id, group_id: Id) {
+        let is_member = self.group_memberships.borrow().get(&activity) == Some(&group_id);
+        if is_member {
+            self.group_memberships.borrow_mut().remove(&activity);
+        }
+    }
+
+    fn end_activity(&self, activity: Id) {
+        if let Some(lane) = self.activity_lanes.borrow_mut().remove(&activity)
+            && self.is_entity_enabled(lane, log::Level::Trace)
+        {
+            let guard = self.trace_builder.borrow_mut();
+            let trace_packet =
+                guard.build_activity_end_trace_packet(*self.current_time_ns.borrow(), lane);
+            let buf = guard.build_trace_to_bytes(vec![trace_packet]);
+            self.writer.borrow_mut().write_all(&buf).unwrap();
+        }
+    }
+
     fn create_entity(&self, created_by: Id, id: Id, name: &str) {
         if self.is_entity_enabled(id, log::Level::Trace) {
             let mut guard = self.trace_builder.borrow_mut();
@@ -113,6 +163,22 @@ impl Track for PerfettoTracker {
             self.writer.borrow_mut().write_all(&buf).unwrap();
         }
     }
+
+    fn create_lane(&self, created_by: Id, id: Id, name: &str) {
+        if self.is_entity_enabled(id, log::Level::Trace) {
+            let mut guard = self.trace_builder.borrow_mut();
+            let trace_packet = guard.build_activity_track_descriptor_trace_packet(
+                *self.current_time_ns.borrow(),
+                id,
+                created_by,
+                name,
+            );
+            let buf = guard.build_trace_to_bytes(vec![trace_packet]);
+            self.writer.borrow_mut().write_all(&buf).unwrap();
+        }
+    }
+
+    fn create_group(&self, _created_by: Id, _id: Id, _name: &str) {}
 
     fn create_object(
         &self,

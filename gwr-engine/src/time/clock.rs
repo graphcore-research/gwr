@@ -15,6 +15,11 @@ use futures::future::FusedFuture;
 
 use crate::traits::{Resolve, Resolver};
 
+pub mod phase {
+    pub const BEGIN: u32 = 0;
+    pub const END: u32 = u32::MAX;
+}
+
 /// ClockTick structure for representing a number of Clock ticks and a phase.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ClockTick {
@@ -22,7 +27,6 @@ pub struct ClockTick {
     tick: u64,
 
     /// Clock phase.
-    #[cfg(feature = "phase")]
     phase: u32,
 }
 
@@ -31,9 +35,7 @@ impl ClockTick {
     pub fn new() -> Self {
         Self {
             tick: 0,
-
-            #[cfg(feature = "phase")]
-            phase: 0,
+            phase: phase::BEGIN,
         }
     }
 
@@ -45,7 +47,6 @@ impl ClockTick {
 
     /// Get the current clock phase.
     #[must_use]
-    #[cfg(feature = "phase")]
     pub fn phase(&self) -> u32 {
         self.phase
     }
@@ -57,7 +58,6 @@ impl ClockTick {
     }
 
     /// Change the default constructor value of `phase`.
-    #[cfg(feature = "phase")]
     pub fn set_phase(&mut self, phase: u32) -> ClockTick {
         self.phase = phase;
         *self
@@ -72,18 +72,12 @@ impl Default for ClockTick {
 
 /// Define the comparison operation for SimTime.
 impl Ord for ClockTick {
-    #[cfg(feature = "phase")]
     fn cmp(&self, other: &Self) -> Ordering {
         match self.tick.cmp(&other.tick) {
             Ordering::Greater => Ordering::Greater,
             Ordering::Less => Ordering::Less,
             Ordering::Equal => self.phase.cmp(&other.phase),
         }
-    }
-
-    #[cfg(not(feature = "phase"))]
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.tick.cmp(&other.tick)
     }
 }
 
@@ -94,13 +88,8 @@ impl PartialOrd for ClockTick {
 }
 
 impl std::fmt::Display for ClockTick {
-    #[cfg(feature = "phase")]
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}.{:?}", self.tick, self.phase)
-    }
-    #[cfg(not(feature = "phase"))]
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.tick)
     }
 }
 
@@ -224,8 +213,7 @@ impl Clock {
         let shared_state = Rc::new(ClockState {
             now: RefCell::new(ClockTick {
                 tick: 0,
-                #[cfg(feature = "phase")]
-                phase: 0,
+                phase: phase::BEGIN,
             }),
             next_waiter_id: Cell::new(0),
             waiting: RefCell::new(Vec::new()),
@@ -272,6 +260,15 @@ impl Clock {
         }
     }
 
+    /// Returns the phase of the next event registered with this clock.
+    #[must_use]
+    pub fn phase_of_next(&self) -> u32 {
+        match self.shared_state.waiting_times.borrow().last() {
+            Some(clock_time) => clock_time.phase(),
+            None => u32::MAX,
+        }
+    }
+
     /// Convert the given [ClockTick] to a time in `ns` for this clock.
     #[must_use]
     pub fn to_ns(&self, clock_time: &ClockTick) -> f64 {
@@ -284,6 +281,7 @@ impl Clock {
     pub fn wait_ticks(&self, ticks: u64) -> ClockDelay {
         let mut until = self.tick_now();
         until.tick += ticks;
+        until.phase = phase::BEGIN;
         ClockDelay {
             shared_state: self.shared_state.clone(),
             until,
@@ -302,6 +300,7 @@ impl Clock {
     pub fn wait_ticks_or_exit(&self, ticks: u64) -> ClockDelay {
         let mut until = self.tick_now();
         until.tick += ticks;
+        until.phase = phase::BEGIN;
         ClockDelay {
             shared_state: self.shared_state.clone(),
             until,
@@ -312,7 +311,6 @@ impl Clock {
     }
 
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
-    #[cfg(feature = "phase")]
     pub fn next_tick_and_phase(&self, phase: u32) -> ClockDelay {
         let mut until = self.tick_now();
         until.tick += 1;
@@ -327,10 +325,9 @@ impl Clock {
     }
 
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
-    #[cfg(feature = "phase")]
     pub fn wait_phase(&self, phase: u32) -> ClockDelay {
         let mut until = self.tick_now();
-        assert!(phase > until.phase, "Time going backwards");
+        assert!(phase >= until.phase, "Time going backwards");
         until.phase = phase;
         ClockDelay {
             shared_state: self.shared_state.clone(),
@@ -350,6 +347,7 @@ impl Clock {
 
         let mut until = self.tick_now();
         until.tick += ticks as u64;
+        until.phase = phase::BEGIN;
 
         self.shared_state.advance_time(until);
     }
@@ -365,18 +363,16 @@ impl Default for Clock {
 /// The comparison operators for Clocks - use the next pending Waker time.
 impl PartialEq for Clock {
     fn eq(&self, other: &Self) -> bool {
-        self.time_of_next() == other.time_of_next()
+        self.time_of_next() == other.time_of_next() && self.phase_of_next() == other.phase_of_next()
     }
 }
 impl Eq for Clock {}
 
 impl Ord for Clock {
     fn cmp(&self, other: &Self) -> Ordering {
-        if self.time_of_next() < other.time_of_next() {
-            Ordering::Less
-        } else {
-            Ordering::Greater
-        }
+        self.time_of_next()
+            .total_cmp(&other.time_of_next())
+            .then_with(|| self.phase_of_next().cmp(&other.phase_of_next()))
     }
 }
 
@@ -461,9 +457,7 @@ mod tests {
     fn clock_tick_accessors_default_display_and_ordering() {
         let default_tick = ClockTick::default();
         assert_eq!(default_tick.tick(), 0);
-        #[cfg(not(feature = "phase"))]
-        assert_eq!(default_tick.to_string(), "0");
-        #[cfg(feature = "phase")]
+        assert_eq!(default_tick.phase(), phase::BEGIN);
         assert_eq!(default_tick.to_string(), "0.0");
 
         let earlier = ClockTick::new().set_tick(1);
@@ -472,7 +466,6 @@ mod tests {
         assert_eq!(earlier.partial_cmp(&later), Some(Ordering::Less));
     }
 
-    #[cfg(feature = "phase")]
     #[test]
     fn clock_tick_phase_accessors_display_and_ordering() {
         let tick = ClockTick::new().set_tick(1).set_phase(2);
@@ -493,6 +486,7 @@ mod tests {
 
         clock.advance_to(2.1);
         assert_eq!(clock.tick_now().tick(), 3);
+        assert_eq!(clock.tick_now().phase(), phase::BEGIN);
         assert_eq!(clock.time_now_ns(), 3.0);
 
         let earlier = Clock::new(1000.0);
@@ -501,7 +495,7 @@ mod tests {
         drop(later.wait_ticks(2));
 
         assert!(earlier == later);
-        assert_eq!(earlier.partial_cmp(&later), Some(Ordering::Greater));
+        assert_eq!(earlier.partial_cmp(&later), Some(Ordering::Equal));
     }
 
     #[test]
@@ -563,7 +557,6 @@ mod tests {
         assert!(delay.is_terminated());
     }
 
-    #[cfg(feature = "phase")]
     #[test]
     fn phase_wait_helpers_schedule_phase_delays() {
         let clock = Clock::new(1000.0);
@@ -575,5 +568,20 @@ mod tests {
         let same_tick = clock.wait_phase(1);
         assert_eq!(same_tick.until.tick(), 0);
         assert_eq!(same_tick.until.phase(), 1);
+    }
+
+    #[test]
+    fn tick_waits_resume_in_end_phase() {
+        let clock = Clock::new(1000.0);
+
+        let begin = clock.wait_phase(phase::END);
+        assert_eq!(begin.until.tick(), 0);
+        assert_eq!(begin.until.phase(), phase::END);
+
+        clock.advance_time(ClockTick::new().set_phase(phase::END));
+
+        let delay = clock.wait_ticks(1);
+        assert_eq!(delay.until.tick(), 1);
+        assert_eq!(delay.until.phase(), phase::BEGIN);
     }
 }

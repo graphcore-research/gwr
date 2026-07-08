@@ -190,7 +190,9 @@ impl Renderer {
             | EventLine::Enter { id, .. }
             | EventLine::Exit { id, .. }
             | EventLine::Value { id, .. }
-            | EventLine::Log { id, .. } => *id,
+            | EventLine::Log { id, .. }
+            | EventLine::ActivityBegin { id, .. }
+            | EventLine::ActivityEnd { id, .. } => *id,
             EventLine::Connect { .. } => {
                 return Some(0);
             }
@@ -257,6 +259,27 @@ impl Renderer {
             EventLine::Log { id, msg, time, .. } => {
                 let name = self.name_id(id, &mut tmp0);
                 (format!("{name}: {msg}").to_owned(), time)
+            }
+
+            EventLine::ActivityBegin {
+                id,
+                name,
+                correlation_id,
+                time,
+            } => {
+                let track = self.name_id(id, &mut tmp0);
+                let suffix = correlation_id
+                    .map(|correlation_id| format!(" correlation {correlation_id}"))
+                    .unwrap_or_default();
+                (
+                    format!("{track}: activity begin {name}{suffix}").to_owned(),
+                    time,
+                )
+            }
+
+            EventLine::ActivityEnd { id, time } => {
+                let name = self.name_id(id, &mut tmp0);
+                (format!("{name}: activity end").to_owned(), time)
             }
 
             EventLine::Create { id, time } => {
@@ -447,5 +470,34 @@ impl Iterator for LineIterator<'_> {
             }
             None => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renders_activity_events() {
+        let mut renderer = Renderer::new();
+        renderer.extend_id_to_name(HashMap::from([(7, "pe0::lane::compute::0".to_string())]));
+        renderer.add_chunk(vec![
+            EventLine::ActivityBegin {
+                id: 7,
+                name: "add compute".to_string(),
+                correlation_id: Some(42),
+                time: 10.0,
+            },
+            EventLine::ActivityEnd { id: 7, time: 15.0 },
+        ]);
+
+        assert_eq!(
+            renderer.render_line(0),
+            "7: pe0::lane::compute::0: activity begin add compute correlation 42 @10.0ns"
+        );
+        assert_eq!(
+            renderer.render_line(1),
+            "7: pe0::lane::compute::0: activity end @15.0ns"
+        );
     }
 }

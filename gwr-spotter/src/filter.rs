@@ -95,6 +95,17 @@ impl SearchState {
             EventLine::Exit { id, exited, .. } => self.id_matches(id) || self.id_matches(exited),
             EventLine::Value { id, .. } => self.id_matches(id),
             EventLine::Log { id, msg, .. } => self.id_matches(id) || self.text_matches(msg),
+            EventLine::ActivityBegin {
+                id,
+                name,
+                correlation_id,
+                ..
+            } => {
+                self.id_matches(id)
+                    || self.text_matches(name)
+                    || correlation_id.is_some_and(|id| self.id_text_matches(&id))
+            }
+            EventLine::ActivityEnd { id, .. } => self.id_matches(id),
         }
     }
 }

@@ -25,6 +25,8 @@ struct BinLoader {
     id_to_name: Option<HashMap<u64, String>>,
     id_to_details: Option<HashMap<u64, String>>,
     id_to_req_type: Option<HashMap<u64, u8>>,
+    group_memberships: HashMap<u64, u64>,
+    activity_lanes: HashMap<u64, u64>,
     current_time_ns: f64,
 }
 
@@ -39,6 +41,8 @@ impl BinLoader {
             id_to_name: Some(HashMap::new()),
             id_to_details: Some(HashMap::new()),
             id_to_req_type: Some(HashMap::new()),
+            group_memberships: HashMap::new(),
+            activity_lanes: HashMap::new(),
             current_time_ns: 0.0,
         }
     }
@@ -129,6 +133,24 @@ impl TraceVisitor for BinLoader {
             time: self.current_time_ns,
         });
     }
+
+    fn create_lane(&mut self, _created_by: Id, id: Id, name: &str) {
+        SHARED_STATE
+            .lock()
+            .unwrap()
+            .entity_names
+            .push(format!("{name}={id}"));
+        self.id_to_name
+            .as_mut()
+            .unwrap()
+            .insert(id.0, name.to_owned());
+        self.add_event(EventLine::Create {
+            id: id.0,
+            time: self.current_time_ns,
+        });
+    }
+
+    fn create_group(&mut self, _created_by: Id, _id: Id, _name: &str) {}
 
     fn create_object(
         &mut self,
@@ -237,6 +259,36 @@ impl TraceVisitor for BinLoader {
             value,
             time,
         });
+    }
+
+    fn add_to_group(&mut self, activity: Id, group_id: Id) {
+        self.group_memberships.insert(activity.0, group_id.0);
+    }
+
+    fn remove_from_group(&mut self, activity: Id, group_id: Id) {
+        if self.group_memberships.get(&activity.0) == Some(&group_id.0) {
+            self.group_memberships.remove(&activity.0);
+        }
+    }
+
+    fn begin_activity(&mut self, activity: Id, lane: Id, name: &str) {
+        self.activity_lanes.insert(activity.0, lane.0);
+        let correlation_id = self.group_memberships.get(&activity.0).copied();
+        self.add_event(EventLine::ActivityBegin {
+            id: lane.0,
+            name: name.to_owned(),
+            correlation_id,
+            time: self.current_time_ns,
+        });
+    }
+
+    fn end_activity(&mut self, activity: Id) {
+        if let Some(lane) = self.activity_lanes.remove(&activity.0) {
+            self.add_event(EventLine::ActivityEnd {
+                id: lane,
+                time: self.current_time_ns,
+            });
+        }
     }
 
     fn capacity(&mut self, id: Id, capacity: Capacity) {

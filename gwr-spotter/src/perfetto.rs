@@ -1,5 +1,6 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Write};
 use std::path::Path;
@@ -12,6 +13,8 @@ struct PerfettoGenerator {
     output: File,
     current_time_ns: u64,
     trace_builder: PerfettoTraceBuilder,
+    group_memberships: HashMap<Id, Id>,
+    activity_lanes: HashMap<Id, Id>,
 }
 
 impl PerfettoGenerator {
@@ -21,6 +24,8 @@ impl PerfettoGenerator {
                 .expect("`output` should be a file path that can be written to"),
             current_time_ns: 0,
             trace_builder: PerfettoTraceBuilder::new(),
+            group_memberships: HashMap::new(),
+            activity_lanes: HashMap::new(),
         }
     }
 
@@ -62,6 +67,23 @@ impl TraceVisitor for PerfettoGenerator {
             .write_all(&buf)
             .expect("`output` should be writable file");
     }
+
+    fn create_lane(&mut self, created_by: Id, id: Id, name: &str) {
+        let trace_packet = self
+            .trace_builder
+            .build_activity_track_descriptor_trace_packet(
+                self.current_time_ns,
+                id,
+                created_by,
+                name,
+            );
+        let buf = self.trace_builder.build_trace_to_bytes(vec![trace_packet]);
+        self.output
+            .write_all(&buf)
+            .expect("`output` should be writable file");
+    }
+
+    fn create_group(&mut self, _created_by: Id, _id: Id, _name: &str) {}
 
     fn create_object(
         &mut self,
@@ -128,6 +150,46 @@ impl TraceVisitor for PerfettoGenerator {
         self.output
             .write_all(&buf)
             .expect("`output` should be writable file");
+    }
+
+    fn add_to_group(&mut self, activity: Id, group_id: Id) {
+        self.group_memberships.insert(activity, group_id);
+    }
+
+    fn remove_from_group(&mut self, activity: Id, group_id: Id) {
+        if self.group_memberships.get(&activity) == Some(&group_id) {
+            self.group_memberships.remove(&activity);
+        }
+    }
+
+    fn begin_activity(&mut self, activity: Id, lane: Id, name: &str) {
+        self.activity_lanes.insert(activity, lane);
+        let correlation_id = self
+            .group_memberships
+            .get(&activity)
+            .map(|group_id| group_id.0);
+        let trace_packet = self.trace_builder.build_activity_begin_trace_packet(
+            self.current_time_ns,
+            lane,
+            name,
+            correlation_id,
+        );
+        let buf = self.trace_builder.build_trace_to_bytes(vec![trace_packet]);
+        self.output
+            .write_all(&buf)
+            .expect("`output` should be writable file");
+    }
+
+    fn end_activity(&mut self, activity: Id) {
+        if let Some(lane) = self.activity_lanes.remove(&activity) {
+            let trace_packet = self
+                .trace_builder
+                .build_activity_end_trace_packet(self.current_time_ns, lane);
+            let buf = self.trace_builder.build_trace_to_bytes(vec![trace_packet]);
+            self.output
+                .write_all(&buf)
+                .expect("`output` should be writable file");
+        }
     }
 
     fn time(&mut self, _id: Id, time_ns: f64) {

@@ -63,6 +63,16 @@ pub enum EventLine {
         value: f64,
         time: f64,
     },
+    ActivityBegin {
+        id: u64,
+        name: String,
+        correlation_id: Option<u64>,
+        time: f64,
+    },
+    ActivityEnd {
+        id: u64,
+        time: f64,
+    },
 }
 
 impl ToTime for EventLine {
@@ -74,6 +84,8 @@ impl ToTime for EventLine {
             EventLine::Exit { time, .. } => *time,
             EventLine::Value { time, .. } => *time,
             EventLine::Log { time, .. } => *time,
+            EventLine::ActivityBegin { time, .. } => *time,
+            EventLine::ActivityEnd { time, .. } => *time,
         }
     }
 }
@@ -87,6 +99,8 @@ impl ToFullness for EventLine {
             EventLine::Exit { fullness, .. } => *fullness,
             EventLine::Value { .. } => 0,
             EventLine::Log { .. } => 0,
+            EventLine::ActivityBegin { .. } => 0,
+            EventLine::ActivityEnd { .. } => 0,
         }
     }
 }

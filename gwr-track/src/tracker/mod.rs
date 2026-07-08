@@ -68,6 +68,24 @@ pub trait Track {
     /// Track when a monitor with the given ID is created.
     fn create_monitor(&self, created_by: Id, id: Id, name: &str);
 
+    /// Track when a lane with the given ID is created.
+    fn create_lane(&self, created_by: Id, id: Id, name: &str);
+
+    /// Track when a group with the given ID is created.
+    fn create_group(&self, created_by: Id, id: Id, name: &str);
+
+    /// Track when an activity becomes a member of a group.
+    fn add_to_group(&self, activity: Id, group_id: Id);
+
+    /// Track when an activity is no longer a member of a group.
+    fn remove_from_group(&self, activity: Id, group_id: Id);
+
+    /// Track the beginning of a named activity on a lane.
+    fn begin_activity(&self, activity: Id, lane: Id, name: &str);
+
+    /// Track the end of the current activity on a lane.
+    fn end_activity(&self, activity: Id);
+
     /// Track when an object with the given ID is created.
     fn create_object(
         &self,

@@ -48,6 +48,12 @@ impl TestTracker {
         let mut events = self.events.borrow_mut();
         events.push(event);
     }
+
+    /// Return a snapshot of the events recorded so far.
+    #[must_use]
+    pub fn events(&self) -> Vec<String> {
+        self.events.borrow().clone()
+    }
 }
 
 impl Track for TestTracker {
@@ -82,12 +88,36 @@ impl Track for TestTracker {
         self.add_event(format!("{id}: {value}"));
     }
 
+    fn begin_activity(&self, activity: Id, lane: Id, name: &str) {
+        self.add_event(format!("{activity}: activity begin {name} on lane {lane}"));
+    }
+
+    fn end_activity(&self, activity: Id) {
+        self.add_event(format!("{activity}: activity end"));
+    }
+
+    fn add_to_group(&self, activity: Id, group_id: Id) {
+        self.add_event(format!("{activity}: added to group {group_id}"));
+    }
+
+    fn remove_from_group(&self, activity: Id, group_id: Id) {
+        self.add_event(format!("{activity}: removed from group {group_id}"));
+    }
+
     fn create_entity(&self, created_by: Id, id: Id, name: &str) {
         self.add_event(format!("{created_by}: created entity {id}, {name}"));
     }
 
     fn create_monitor(&self, created_by: Id, id: Id, name: &str) {
         self.add_event(format!("{created_by}: created monitor {id}, {name}"));
+    }
+
+    fn create_lane(&self, created_by: Id, id: Id, name: &str) {
+        self.add_event(format!("{created_by}: created lane {id}, {name}"));
+    }
+
+    fn create_group(&self, created_by: Id, id: Id, name: &str) {
+        self.add_event(format!("{created_by}: created group {id}, {name}"));
     }
 
     fn create_object(
