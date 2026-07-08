@@ -102,6 +102,34 @@ impl Track for CapnProtoTracker {
         }
     }
 
+    fn begin_activity(&self, activity: Id, lane: Id, name: &str) {
+        if self.is_entity_enabled(lane, log::Level::Trace) {
+            self.write_event(activity, |event| {
+                let mut begin_activity = event.init_begin_activity();
+                begin_activity.set_lane(lane.0);
+                begin_activity.set_name(name);
+            });
+        }
+    }
+
+    fn add_to_group(&self, activity: Id, group_id: Id) {
+        self.write_event(activity, |mut event| {
+            event.set_add_to_group(group_id.0);
+        });
+    }
+
+    fn remove_from_group(&self, activity: Id, group_id: Id) {
+        self.write_event(activity, |mut event| {
+            event.set_remove_from_group(group_id.0);
+        });
+    }
+
+    fn end_activity(&self, activity: Id) {
+        self.write_event(activity, |mut event| {
+            event.set_end_activity(());
+        });
+    }
+
     fn create_entity(&self, created_by: Id, id: Id, name: &str) {
         // Don't filter this event as it could be required by a GUI
         self.write_event(created_by, |event| {
@@ -117,6 +145,24 @@ impl Track for CapnProtoTracker {
             let mut create = event.init_create();
             create.set_id(id.0);
             create.init_monitor().set_name(name);
+        });
+    }
+
+    fn create_lane(&self, created_by: Id, id: Id, name: &str) {
+        // Don't filter this event as it could be required by a GUI
+        self.write_event(created_by, |event| {
+            let mut create = event.init_create();
+            create.set_id(id.0);
+            create.init_lane().set_name(name);
+        });
+    }
+
+    fn create_group(&self, created_by: Id, id: Id, name: &str) {
+        // Don't filter this event as it could be required by a GUI
+        self.write_event(created_by, |event| {
+            let mut create = event.init_create();
+            create.set_id(id.0);
+            create.init_group().set_name(name);
         });
     }
 

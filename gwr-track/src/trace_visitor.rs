@@ -57,6 +57,32 @@ pub trait TraceVisitor {
         let _ = name;
     }
 
+    /// The creation of a lane.
+    ///
+    /// # Arguments
+    ///
+    /// * `created_by` - ID of the entity causing the creation.
+    /// * `id` - The originator of this event.
+    /// * `name` - Name of the lane being created.
+    fn create_lane(&mut self, created_by: Id, id: Id, name: &str) {
+        let _ = created_by;
+        let _ = id;
+        let _ = name;
+    }
+
+    /// The creation of a group.
+    ///
+    /// # Arguments
+    ///
+    /// * `created_by` - ID of the entity causing the creation.
+    /// * `id` - The originator of this event.
+    /// * `name` - Name of the group being created.
+    fn create_group(&mut self, created_by: Id, id: Id, name: &str) {
+        let _ = created_by;
+        let _ = id;
+        let _ = name;
+    }
+
     /// The creation of an object.
     ///
     /// # Arguments
@@ -142,6 +168,50 @@ pub trait TraceVisitor {
         // Remove the unused variable warnings
         let _ = id;
         let _ = value;
+    }
+
+    /// The specified ID has been added to a group.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The ID added to the group.
+    /// * `group_id` - The group ID.
+    fn add_to_group(&mut self, id: Id, group_id: Id) {
+        let _ = id;
+        let _ = group_id;
+    }
+
+    /// The specified ID has been removed from a group.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The ID removed from the group.
+    /// * `group_id` - The group ID.
+    fn remove_from_group(&mut self, id: Id, group_id: Id) {
+        let _ = id;
+        let _ = group_id;
+    }
+
+    /// A named activity has begun on the specified lane.
+    ///
+    /// # Arguments
+    ///
+    /// * `activity` - The activity identity.
+    /// * `lane` - The lane on which the activity is starting.
+    /// * `name` - The activity name.
+    fn begin_activity(&mut self, activity: Id, lane: Id, name: &str) {
+        let _ = activity;
+        let _ = lane;
+        let _ = name;
+    }
+
+    /// The specivied activity has ended.
+    ///
+    /// # Arguments
+    ///
+    /// * `activity` - The activity identity.
+    fn end_activity(&mut self, activity: Id) {
+        let _ = activity;
     }
 
     /// A capacity has been set for the specified ID.
@@ -234,6 +304,18 @@ where
             Ok(gwr_track_capnp::event::Which::Enter(entered)) => handle_enter(visitor, id, entered),
             Ok(gwr_track_capnp::event::Which::Exit(exited)) => handle_exit(visitor, id, exited),
             Ok(gwr_track_capnp::event::Which::Value(value)) => handle_value(visitor, id, value),
+            Ok(gwr_track_capnp::event::Which::AddToGroup(group_id)) => {
+                handle_add_to_group(visitor, id, group_id);
+            }
+            Ok(gwr_track_capnp::event::Which::RemoveFromGroup(group_id)) => {
+                handle_remove_from_group(visitor, id, group_id);
+            }
+            Ok(gwr_track_capnp::event::Which::BeginActivity(begin_activity)) => {
+                handle_begin_activity(visitor, id, begin_activity);
+            }
+            Ok(gwr_track_capnp::event::Which::EndActivity(())) => {
+                handle_end_activity(visitor, id);
+            }
             Ok(gwr_track_capnp::event::Which::Capacity(capacity)) => {
                 handle_capacity(visitor, id, capacity);
             }
@@ -298,6 +380,29 @@ fn handle_create(
                     .expect("Create Monitor name should be valid UTF-8 string"),
             );
         }
+        Ok(gwr_track_capnp::create::Which::Lane(lane)) => {
+            let lane = lane.expect("should be able to parse Create Lane");
+            visitor.create_lane(
+                id,
+                created_id,
+                lane.get_name()
+                    .expect("should be able to parse Lane name")
+                    .to_str()
+                    .expect("Create Lane name should be valid UTF-8 string"),
+            );
+        }
+        Ok(gwr_track_capnp::create::Which::Group(group)) => {
+            let group = group.expect("should be able to parse Create Group");
+            visitor.create_group(
+                id,
+                created_id,
+                group
+                    .get_name()
+                    .expect("should be able to parse Group name")
+                    .to_str()
+                    .expect("Create Group name should be valid UTF-8 string"),
+            );
+        }
         Ok(gwr_track_capnp::create::Which::Object(object)) => {
             let object = object.expect("should be able to parse Create Object");
             visitor.create_object(
@@ -339,6 +444,35 @@ fn handle_exit(visitor: &mut dyn TraceVisitor, id: Id, exited: u64) {
 
 fn handle_value(visitor: &mut dyn TraceVisitor, id: Id, value: f64) {
     visitor.value(id, value);
+}
+
+fn handle_add_to_group(visitor: &mut dyn TraceVisitor, id: Id, group_id: u64) {
+    visitor.add_to_group(id, Id(group_id));
+}
+
+fn handle_remove_from_group(visitor: &mut dyn TraceVisitor, id: Id, group_id: u64) {
+    visitor.remove_from_group(id, Id(group_id));
+}
+
+fn handle_begin_activity(
+    visitor: &mut dyn TraceVisitor,
+    id: Id,
+    begin_activity: capnp::Result<gwr_track_capnp::begin_activity::Reader<'_>>,
+) {
+    let begin_activity = begin_activity.expect("should be able to parse BeginActivity event");
+    visitor.begin_activity(
+        id,
+        Id(begin_activity.get_lane()),
+        begin_activity
+            .get_name()
+            .expect("should be able to parse activity name")
+            .to_str()
+            .expect("Activity name should be valid UTF-8 string"),
+    );
+}
+
+fn handle_end_activity(visitor: &mut dyn TraceVisitor, id: Id) {
+    visitor.end_activity(id);
 }
 
 fn handle_capacity(

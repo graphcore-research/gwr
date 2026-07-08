@@ -20,14 +20,18 @@ use crate::rocket::SHARED_STATE;
 struct LogParser {
     log_line_re: Regex,
     connect_re: Regex,
-    create_entity_re: Regex,
-    create_monitor_re: Regex,
-    create_object_re: Regex,
+    create_re: Regex,
+    begin_activity_re: Regex,
+    end_activity_re: Regex,
+    add_to_group_re: Regex,
+    remove_from_group_re: Regex,
     enter_re: Regex,
     exit_re: Regex,
     value_re: Regex,
     time_re: Regex,
     text_re: Regex,
+    group_memberships: HashMap<u64, u64>,
+    activity_lanes: HashMap<u64, u64>,
 
     current_time: f64,
 }
@@ -38,23 +42,22 @@ impl LogParser {
             log_line_re: Regex::new(r"(?<id>\d+):(?<level>[^ :]+): (?<msg>.*)$").unwrap(),
 
             connect_re: Regex::new(r"(\d+): connect to (\d+)$").unwrap(),
-            create_entity_re: Regex::new(
-                r"(?<by>\d+): created entity (?<id>\d+), (?<name>.*)$",
+            create_re: Regex::new(r"(?<by>\d+): created (?<kind>\w+) (?<rest>.*)$").unwrap(),
+            add_to_group_re: Regex::new(r"(?<id>\d+): added to group (?<group_id>\d+)$").unwrap(),
+            remove_from_group_re: Regex::new(r"(?<id>\d+): removed from group (?<group_id>\d+)$")
+                .unwrap(),
+            begin_activity_re: Regex::new(
+                r"(?<id>\d+): activity begin (?<name>.*) on lane (?<lane>\d+)$",
             )
             .unwrap(),
-            create_monitor_re: Regex::new(
-                r"(?<by>\d+): created monitor (?<id>\d+), (?<name>.*)$",
-            )
-            .unwrap(),
-            create_object_re: Regex::new(
-                r"(?<by>\d+): created object (?<id>\d+), (?<type>\d+), (?<size>\d+), (?<units>.*), (?<details>.*)$",
-            )
-            .unwrap(),
+            end_activity_re: Regex::new(r"(?<id>\d+): activity end$").unwrap(),
             enter_re: Regex::new(r"(\d+): enter (\d+)$").unwrap(),
             exit_re: Regex::new(r"(\d+): exit (\d+)$").unwrap(),
             value_re: Regex::new(r"(\d+): value (.*)$").unwrap(),
             time_re: Regex::new(r"\d+: set time to ([^n]+)ns").unwrap(),
             text_re: Regex::new(r"(\d+): (\d+) entered$").unwrap(),
+            group_memberships: HashMap::new(),
+            activity_lanes: HashMap::new(),
 
             current_time: 0.0,
         }
@@ -119,13 +122,19 @@ impl LogParser {
         if let Some(event) = self.parse_text_log(msg) {
             return event;
         }
-        if let Some(event) = self.parse_create_entity(msg, id_to_name) {
+        if let Some(event) = self.parse_create(msg, id_to_name, id_to_details) {
             return event;
         }
-        if let Some(event) = self.parse_create_monitor(msg, id_to_name) {
+        if let Some(event) = self.parse_add_to_group(msg) {
             return event;
         }
-        if let Some(event) = self.parse_create_object(msg, id_to_name, id_to_details) {
+        if let Some(event) = self.parse_remove_from_group(msg) {
+            return event;
+        }
+        if let Some(event) = self.parse_begin_activity(msg) {
+            return event;
+        }
+        if let Some(event) = self.parse_end_activity(msg) {
             return event;
         }
         if let Some(event) = self.parse_connect(msg) {
@@ -236,65 +245,61 @@ impl LogParser {
         })
     }
 
-    fn parse_create_entity(
-        &self,
-        msg: &str,
-        id_to_name: &mut HashMap<u64, String>,
-    ) -> Option<EventLine> {
-        let e = self.create_entity_re.captures(msg)?;
-        let id_str = e.name("id").unwrap().as_str();
-        let id = id_str.parse().unwrap();
-        let name = e.name("name").unwrap().as_str().to_owned();
-
-        SHARED_STATE
-            .lock()
-            .unwrap()
-            .entity_names
-            .push(format!("{name}={id_str}"));
-
-        id_to_name.insert(id, name);
-
-        Some(EventLine::Create {
-            id,
-            time: self.current_time,
-        })
-    }
-
-    fn parse_create_monitor(
-        &self,
-        msg: &str,
-        id_to_name: &mut HashMap<u64, String>,
-    ) -> Option<EventLine> {
-        let e = self.create_monitor_re.captures(msg)?;
-        let id_str = e.name("id").unwrap().as_str();
-        let id = id_str.parse().unwrap();
-        let name = e.name("name").unwrap().as_str().to_owned();
-
-        SHARED_STATE
-            .lock()
-            .unwrap()
-            .entity_names
-            .push(format!("{name}={id_str}"));
-
-        id_to_name.insert(id, name);
-
-        Some(EventLine::Create {
-            id,
-            time: self.current_time,
-        })
-    }
-
-    fn parse_create_object(
+    fn parse_create(
         &self,
         msg: &str,
         id_to_name: &mut HashMap<u64, String>,
         id_to_details: &mut HashMap<u64, String>,
     ) -> Option<EventLine> {
-        let e = self.create_object_re.captures(msg)?;
-        let id_str = e.name("id").unwrap().as_str();
+        let e = self.create_re.captures(msg)?;
+        let kind = e.name("kind").unwrap().as_str();
+        let rest = e.name("rest").unwrap().as_str();
+
+        match kind {
+            "entity" | "monitor" | "lane" | "group" | "activity" => {
+                self.parse_named_create(rest, id_to_name)
+            }
+            "object" => self.parse_object_create(rest, id_to_name, id_to_details),
+            _ => None,
+        }
+    }
+
+    fn parse_named_create(
+        &self,
+        rest: &str,
+        id_to_name: &mut HashMap<u64, String>,
+    ) -> Option<EventLine> {
+        let (id_str, name) = rest.split_once(", ")?;
         let id = id_str.parse().unwrap();
-        let units = e.name("units").unwrap().as_str().to_owned();
-        let details = e.name("details").unwrap().as_str().to_owned();
+        let name = name.to_owned();
+
+        SHARED_STATE
+            .lock()
+            .unwrap()
+            .entity_names
+            .push(format!("{name}={id_str}"));
+
+        id_to_name.insert(id, name);
+
+        Some(EventLine::Create {
+            id,
+            time: self.current_time,
+        })
+    }
+
+    fn parse_object_create(
+        &self,
+        rest: &str,
+        id_to_name: &mut HashMap<u64, String>,
+        id_to_details: &mut HashMap<u64, String>,
+    ) -> Option<EventLine> {
+        let mut fields = rest.splitn(5, ", ");
+        let id_str = fields.next()?;
+        let _req_type = fields.next()?;
+        let _size = fields.next()?;
+        let units = fields.next()?;
+        let details = fields.next()?.to_owned();
+        let id = id_str.parse().unwrap();
 
         SHARED_STATE
             .lock()
@@ -334,6 +339,59 @@ impl LogParser {
         Some(EventLine::Connect {
             from_id,
             to_id,
+            time: self.current_time,
+        })
+    }
+
+    fn parse_add_to_group(&mut self, msg: &str) -> Option<EventLine> {
+        let e = self.add_to_group_re.captures(msg)?;
+        let id = e.name("id").unwrap().as_str().parse().unwrap();
+        let group_id = e.name("group_id").unwrap().as_str().parse().unwrap();
+        self.group_memberships.insert(id, group_id);
+        Some(EventLine::Log {
+            level: log::Level::Trace,
+            id,
+            msg: msg.to_owned(),
+            time: self.current_time,
+        })
+    }
+
+    fn parse_remove_from_group(&mut self, msg: &str) -> Option<EventLine> {
+        let e = self.remove_from_group_re.captures(msg)?;
+        let id = e.name("id").unwrap().as_str().parse().unwrap();
+        let group_id = e.name("group_id").unwrap().as_str().parse().unwrap();
+        if self.group_memberships.get(&id) == Some(&group_id) {
+            self.group_memberships.remove(&id);
+        }
+        Some(EventLine::Log {
+            level: log::Level::Trace,
+            id,
+            msg: msg.to_owned(),
+            time: self.current_time,
+        })
+    }
+
+    fn parse_begin_activity(&mut self, msg: &str) -> Option<EventLine> {
+        let e = self.begin_activity_re.captures(msg)?;
+        let id = e.name("id").unwrap().as_str().parse().unwrap();
+        let lane = e.name("lane").unwrap().as_str().parse().unwrap();
+        let name = e.name("name").unwrap().as_str().to_owned();
+        self.activity_lanes.insert(id, lane);
+        let correlation_id = self.group_memberships.get(&id).copied();
+        Some(EventLine::ActivityBegin {
+            id: lane,
+            name,
+            correlation_id,
+            time: self.current_time,
+        })
+    }
+
+    fn parse_end_activity(&mut self, msg: &str) -> Option<EventLine> {
+        let e = self.end_activity_re.captures(msg)?;
+        let id = e.name("id").unwrap().as_str().parse().unwrap();
+        let id = self.activity_lanes.remove(&id).unwrap_or(id);
+        Some(EventLine::ActivityEnd {
+            id,
             time: self.current_time,
         })
     }
@@ -405,4 +463,43 @@ pub fn start_background_load(
             filter.lock().unwrap().extend_id_to_details(id_to_details);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_created_events_from_shared_prefix() {
+        let parser = LogParser::new();
+        let mut id_to_name = HashMap::new();
+        let mut id_to_details = HashMap::new();
+
+        let event = parser
+            .parse_create(
+                "12: created lane 34, top::pe0::lane::compute::0",
+                &mut id_to_name,
+                &mut id_to_details,
+            )
+            .unwrap();
+        assert!(matches!(event, EventLine::Create { id: 34, .. }));
+        assert_eq!(
+            id_to_name.get(&34).map(String::as_str),
+            Some("top::pe0::lane::compute::0")
+        );
+
+        let event = parser
+            .parse_create(
+                "12: created object 35, 255, 128, bytes, tensor chunk",
+                &mut id_to_name,
+                &mut id_to_details,
+            )
+            .unwrap();
+        assert!(matches!(event, EventLine::Create { id: 35, .. }));
+        assert_eq!(id_to_name.get(&35).map(String::as_str), Some("object"));
+        assert_eq!(
+            id_to_details.get(&35).map(String::as_str),
+            Some("tensor chunk [bytes]")
+        );
+    }
 }

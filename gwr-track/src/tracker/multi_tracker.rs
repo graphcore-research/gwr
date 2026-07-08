@@ -76,6 +76,30 @@ impl Track for MultiTracker {
         }
     }
 
+    fn begin_activity(&self, activity: Id, lane: Id, name: &str) {
+        for tracker in &self.trackers {
+            tracker.begin_activity(activity, lane, name);
+        }
+    }
+
+    fn add_to_group(&self, activity: Id, group_id: Id) {
+        for tracker in &self.trackers {
+            tracker.add_to_group(activity, group_id);
+        }
+    }
+
+    fn remove_from_group(&self, activity: Id, group_id: Id) {
+        for tracker in &self.trackers {
+            tracker.remove_from_group(activity, group_id);
+        }
+    }
+
+    fn end_activity(&self, activity: Id) {
+        for tracker in &self.trackers {
+            tracker.end_activity(activity);
+        }
+    }
+
     fn create_entity(&self, created_by: Id, id: Id, name: &str) {
         for tracker in &self.trackers {
             tracker.create_entity(created_by, id, name);
@@ -85,6 +109,18 @@ impl Track for MultiTracker {
     fn create_monitor(&self, created_by: Id, id: Id, name: &str) {
         for tracker in &self.trackers {
             tracker.create_monitor(created_by, id, name);
+        }
+    }
+
+    fn create_lane(&self, created_by: Id, id: Id, name: &str) {
+        for tracker in &self.trackers {
+            tracker.create_lane(created_by, id, name);
+        }
+    }
+
+    fn create_group(&self, created_by: Id, id: Id, name: &str) {
+        for tracker in &self.trackers {
+            tracker.create_group(created_by, id, name);
         }
     }
 

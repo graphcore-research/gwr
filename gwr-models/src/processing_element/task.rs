@@ -47,6 +47,15 @@ impl Serialize for ComputeOp {
 }
 
 impl ComputeOp {
+    #[must_use]
+    pub fn trace_name(&self) -> &'static str {
+        match self {
+            ComputeOp::Add => "add",
+            ComputeOp::Gemm => "gemm",
+            ComputeOp::MaxPool(_) => "maxpool",
+        }
+    }
+
     pub fn compute_delay_ticks(
         &self,
         compute_capabilities: &Rc<ComputeCapabilities>,

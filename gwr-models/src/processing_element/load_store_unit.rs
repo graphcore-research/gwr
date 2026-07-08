@@ -20,23 +20,25 @@ use std::rc::Rc;
 use async_trait::async_trait;
 use gwr_components::{connect_tx, port_rx};
 use gwr_engine::engine::Engine;
+use gwr_engine::events::once::Once;
 use gwr_engine::events::repeated::Repeated;
 use gwr_engine::executor::Spawner;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::sim_error;
-use gwr_engine::time::clock::Clock;
+use gwr_engine::time::clock::{Clock, phase};
 use gwr_engine::traits::{Event, Runnable};
 use gwr_engine::types::{AccessType, SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_resources::Resource;
+use gwr_resources::base::ResourceGuard;
 use gwr_track::debug;
-use gwr_track::entity::Entity;
+use gwr_track::entity::{Entity, EntityGroup};
 use gwr_track::tracker::aka::Aka;
 
 use crate::memory::memory_access::MemoryAccess;
 use crate::memory::memory_map::{DeviceId, MemoryMap};
 use crate::memory::traits::AccessMemory;
-use crate::processing_element::ProcessingElementConfig;
+use crate::processing_element::{ActivityLanes, ProcessingElementConfig};
 
 /// Each active request slot manages the request from the Processing Element
 /// and ensures the corresponding response is handled.
@@ -231,6 +233,7 @@ impl LsuState {
 pub struct LoadStoreUnit {
     entity: Rc<Entity>,
     spawner: Spawner,
+    clock: Clock,
 
     /// Max bytes the LSU can request at once
     max_access_size_bytes: usize,
@@ -288,6 +291,7 @@ impl LoadStoreUnit {
         let rc_self = Rc::new(Self {
             entity,
             spawner,
+            clock: clock.clone(),
             max_access_size_bytes,
             rx: RefCell::new(Some(rx)),
             tx: RefCell::new(Some(tx)),
@@ -305,15 +309,16 @@ impl LoadStoreUnit {
         port_rx!(self.rx, state)
     }
 
-    /// Perform a memory access
-    ///
-    /// This will break a larger request down into requests of the maximum size
-    /// permitted by the LSU
+    /// Perform a memory access and emit an activity once the LSU has been
+    /// acquired.
     pub async fn do_access(
         &self,
         access_type: AccessType,
         access_size_bytes: usize,
         dst_addr: u64,
+        activity_lanes: &Rc<RefCell<ActivityLanes>>,
+        activity_name: &str,
+        group: &Rc<EntityGroup>,
     ) -> SimResult {
         if access_size_bytes > self.state.sram_bytes {
             return sim_error!(
@@ -325,8 +330,11 @@ impl LoadStoreUnit {
         let mut bytes_remaining = access_size_bytes;
         let mut access_address = dst_addr;
 
-        // Ensure only one load/store Task uses the LSU at a time
-        self.state.serialiser.request().await;
+        let mut completed_requests = Vec::new();
+
+        // Ensure only one load/store Task uses the LSU request issue path at a time.
+        let serialiser_guard = ResourceGuard::new(self.state.serialiser.clone()).await;
+        let mut activity_guard = None;
 
         loop {
             if bytes_remaining == 0 {
@@ -335,6 +343,20 @@ impl LoadStoreUnit {
 
             // Wait until there is a request slot available
             let request_slot_idx = self.state.allocate_request_slot().await;
+            if activity_guard.is_none() {
+                // Lanes cannot support overlapping activity. If a lane will be released
+                // in the current clock cycle then we want to re-use it rather than allocate
+                // a new lane. Hence we wait here for the end of the current clock cycle
+                // to ensure all lanes that will be released in this cycle have been.
+                self.clock.wait_phase(phase::END).await;
+
+                activity_guard = Some(ActivityLanes::begin_in_group(
+                    activity_lanes,
+                    activity_name,
+                    group,
+                ));
+            }
+
             let access_size_bytes = min(self.max_access_size_bytes, bytes_remaining);
             let access = self.state.create_memory_access(
                 access_type,
@@ -346,13 +368,18 @@ impl LoadStoreUnit {
             {
                 // Spawn off a handler for the request
                 let state = self.state.clone();
+                let completed = Once::default();
+                completed_requests.push(completed.clone());
                 self.spawner.spawn(async move {
                     let response_ready_event =
                         state.make_request_to_port_driver(request_slot_idx, access)?;
 
                     // Wait for response to be received to slot
                     response_ready_event.listen().await;
-                    state.handle_response_in_slot(request_slot_idx)
+                    let result = state.handle_response_in_slot(request_slot_idx);
+
+                    completed.notify()?;
+                    result
                 });
             }
 
@@ -360,8 +387,12 @@ impl LoadStoreUnit {
             access_address += access_size_bytes as u64;
         }
 
-        // Allow another load/store Task to start
-        self.state.serialiser.release().await?;
+        // Allow other requests to start
+        drop(serialiser_guard);
+
+        for completed in completed_requests {
+            completed.listen().await;
+        }
 
         Ok(())
     }

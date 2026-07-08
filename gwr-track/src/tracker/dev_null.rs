@@ -26,9 +26,15 @@ impl Track for DevNullTracker {
     fn enter(&self, _id: Id, _obj: Id) {}
     fn exit(&self, _id: Id, _obj: Id) {}
     fn value(&self, _id: Id, _value: f64) {}
+    fn begin_activity(&self, _activity: Id, _lane: Id, _name: &str) {}
+    fn end_activity(&self, _activity: Id) {}
+    fn add_to_group(&self, _activity: Id, _group_id: Id) {}
+    fn remove_from_group(&self, _activity: Id, _group_id: Id) {}
     fn capacity(&self, _id: Id, _capacity: Capacity) {}
     fn create_entity(&self, _created_by: Id, _id: Id, _name: &str) {}
     fn create_monitor(&self, _created_by: Id, _id: Id, _name: &str) {}
+    fn create_lane(&self, _created_by: Id, _id: Id, _name: &str) {}
+    fn create_group(&self, _created_by: Id, _id: Id, _name: &str) {}
     fn create_object(
         &self,
         _created_by: Id,

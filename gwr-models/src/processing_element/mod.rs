@@ -28,11 +28,11 @@ use async_trait::async_trait;
 use gwr_engine::engine::Engine;
 use gwr_engine::executor::Spawner;
 use gwr_engine::port::PortStateResult;
-use gwr_engine::time::clock::Clock;
+use gwr_engine::time::clock::{Clock, phase};
 use gwr_engine::traits::Runnable;
 use gwr_engine::types::{AccessType, SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
-use gwr_track::entity::Entity;
+use gwr_track::entity::{Entity, EntityGroup, EntityLane};
 use gwr_track::tracker::aka::Aka;
 use gwr_track::{debug, info};
 
@@ -116,6 +116,108 @@ struct ProcessingElementStats {
     total_flops: usize,
 }
 
+struct Lane {
+    lane: EntityLane,
+    active: bool,
+}
+
+pub(crate) struct ActivityLanes {
+    entity: Rc<Entity>,
+    track_name: String,
+    lanes: Vec<Lane>,
+}
+
+impl ActivityLanes {
+    fn new(entity: Rc<Entity>, track_name: &str) -> Self {
+        Self {
+            entity,
+            track_name: track_name.to_string(),
+            lanes: Vec::new(),
+        }
+    }
+
+    fn begin_in_group(
+        lanes: &Rc<RefCell<Self>>,
+        name: &str,
+        group: &Rc<EntityGroup>,
+    ) -> ActivityLaneGuard {
+        let mut lanes_ref = lanes.borrow_mut();
+        let lane_idx = match lanes_ref.lanes.iter().position(|lane| !lane.active) {
+            Some(lane_idx) => lane_idx,
+            None => lanes_ref.add_new_lane(),
+        };
+
+        let lane = &mut lanes_ref.lanes[lane_idx];
+        lane.lane.begin_in_group(name, group);
+        lane.active = true;
+
+        ActivityLaneGuard {
+            lanes: lanes.clone(),
+            lane_idx,
+            active: true,
+        }
+    }
+
+    fn add_new_lane(&mut self) -> usize {
+        let lane_idx = self.lanes.len();
+        let lane = EntityLane::new(&self.entity, &format!("{}::{lane_idx}", self.track_name));
+        self.lanes.push(Lane {
+            lane,
+            active: false,
+        });
+        lane_idx
+    }
+
+    fn end(&mut self, lane_idx: usize) {
+        let lane = &mut self.lanes[lane_idx];
+        lane.lane.end();
+        lane.active = false;
+    }
+}
+
+struct ActivityLaneGuard {
+    lanes: Rc<RefCell<ActivityLanes>>,
+    lane_idx: usize,
+    active: bool,
+}
+
+impl Drop for ActivityLaneGuard {
+    fn drop(&mut self) {
+        if self.active {
+            self.lanes.borrow_mut().end(self.lane_idx);
+            self.active = false;
+        }
+    }
+}
+
+struct ProcessingElementActivityLanes {
+    entity: Rc<Entity>,
+    compute: Rc<RefCell<ActivityLanes>>,
+    lsu_read: Rc<RefCell<ActivityLanes>>,
+    lsu_write: Rc<RefCell<ActivityLanes>>,
+}
+
+impl ProcessingElementActivityLanes {
+    fn new(entity: Rc<Entity>) -> Self {
+        Self {
+            entity: entity.clone(),
+            compute: Rc::new(RefCell::new(ActivityLanes::new(
+                entity.clone(),
+                "lane::compute",
+            ))),
+            lsu_read: Rc::new(RefCell::new(ActivityLanes::new(
+                entity.clone(),
+                "lane::lsu_read",
+            ))),
+            lsu_write: Rc::new(RefCell::new(ActivityLanes::new(entity, "lane::lsu_write"))),
+        }
+    }
+
+    fn create_group(&self, name: &str) -> Rc<EntityGroup> {
+        Rc::new(EntityGroup::new(&self.entity, name))
+    }
+}
+
 #[derive(EntityGet, EntityDisplay)]
 pub struct ProcessingElement {
     entity: Rc<Entity>,
@@ -125,6 +227,7 @@ pub struct ProcessingElement {
 
     compute_capabilities: Rc<ComputeCapabilities>,
     stats: Rc<RefCell<ProcessingElementStats>>,
+    activity_lanes: Rc<ProcessingElementActivityLanes>,
     dispatcher: RefCell<Option<Dispatcher>>,
     flop_monitor: Option<Rc<FlopMonitor>>,
 }
@@ -152,7 +255,7 @@ impl ProcessingElement {
         });
 
         let rc_self = Rc::new(Self {
-            entity,
+            entity: entity.clone(),
             lsu,
             clock: clock.clone(),
             spawner: engine.spawner(),
@@ -164,6 +267,7 @@ impl ProcessingElement {
                 sram_bytes: pe_config.sram_bytes,
             }),
             stats: Rc::new(RefCell::new(ProcessingElementStats::default())),
+            activity_lanes: Rc::new(ProcessingElementActivityLanes::new(entity.clone())),
 
             dispatcher: RefCell::new(None),
             flop_monitor,
@@ -255,6 +359,7 @@ impl Runnable for ProcessingElement {
                     let compute_capabilities = self.compute_capabilities.clone();
                     let stats = self.stats.clone();
                     let entity = self.entity.clone();
+                    let activity_lanes = self.activity_lanes.clone();
                     let flop_monitor = self.flop_monitor.clone();
                     self.spawner.spawn(async move {
                         handle_task(
@@ -264,6 +369,7 @@ impl Runnable for ProcessingElement {
                             lsu,
                             compute_capabilities,
                             stats,
+                            activity_lanes,
                             flop_monitor,
                             task_idx,
                         )
@@ -287,6 +393,7 @@ async fn handle_task(
     lsu: Rc<LoadStoreUnit>,
     compute_capabilities: Rc<ComputeCapabilities>,
     stats: Rc<RefCell<ProcessingElementStats>>,
+    activity_lanes: Rc<ProcessingElementActivityLanes>,
     flop_monitor: Option<Rc<FlopMonitor>>,
     task_idx: usize,
 ) -> SimResult {
@@ -299,14 +406,19 @@ async fn handle_task(
             task_idx,
             compute_capabilities,
             stats,
+            activity_lanes,
             flop_monitor,
             &config,
         )
         .await
         .map_err(|err| SimError(format!("{entity} had error on task {}:\n{err}", config.id))),
-        Task::MemoryTask { config } => handle_memory_task(dispatcher, lsu, task_idx, &config)
-            .await
-            .map_err(|err| SimError(format!("{entity} had error on task {}:\n{err}", config.id))),
+        Task::MemoryTask { config } => {
+            handle_memory_task(dispatcher, lsu, activity_lanes, task_idx, &config)
+                .await
+                .map_err(|err| {
+                    SimError(format!("{entity} had error on task {}:\n{err}", config.id))
+                })
+        }
         Task::SyncTask { .. } => {
             todo!();
         }
@@ -333,6 +445,7 @@ async fn handle_compute_task(
     task_idx: usize,
     compute_capabilities: Rc<ComputeCapabilities>,
     stats: Rc<RefCell<ProcessingElementStats>>,
+    activity_lanes: Rc<ProcessingElementActivityLanes>,
     flop_monitor: Option<Rc<FlopMonitor>>,
     config: &ComputeTaskConfig,
 ) -> SimResult {
@@ -352,13 +465,20 @@ async fn handle_compute_task(
         config
             .op
             .create_partitions(&config.inputs, &config.outputs, num_partitions)?;
+    let group = activity_lanes.create_group(&format!("{} operation", config.id));
 
     for partition in partitions {
-        for view in partition.inputs.iter().flatten() {
+        for (idx, view) in partition.inputs.iter().enumerate() {
+            let Some(view) = view else {
+                continue;
+            };
             lsu.do_access(
                 AccessType::ReadRequest,
                 tensor_view_num_bytes(view),
                 tensor_view_base_addr(view)?,
+                &activity_lanes.lsu_read,
+                &format!("{} tensor {idx} read", config.id),
+                &group,
             )
             .await?;
         }
@@ -374,38 +494,75 @@ async fn handle_compute_task(
         if let Some(flop_monitor) = &flop_monitor {
             flop_monitor.record_interval(compute_ticks as u64, compute_flops as f64);
         }
-        clock.wait_ticks(compute_ticks as u64).await;
+        {
+            // Lanes cannot support overlapping activity. If a lane will be released
+            // in the current clock cycle then we want to re-use it rather than allocate
+            // a new lane. Hence we wait here for the end of the current clock cycle
+            // to ensure all lanes that will be released in this cycle have been.
+            clock.wait_phase(phase::END).await;
+
+            let _activity = ActivityLanes::begin_in_group(
+                &activity_lanes.compute,
+                &format!("{} compute", config.id),
+                &group,
+            );
+            clock.wait_ticks(compute_ticks as u64).await;
+        }
         stats.borrow_mut().total_flops += compute_flops;
 
-        for view in partition.outputs.iter().flatten() {
+        for (idx, view) in partition.outputs.iter().enumerate() {
+            let Some(view) = view else {
+                continue;
+            };
             lsu.do_access(
                 AccessType::WriteNonPostedRequest,
                 tensor_view_num_bytes(view),
                 tensor_view_base_addr(view)?,
+                &activity_lanes.lsu_write,
+                &format!("{} tensor {idx} write", config.id),
+                &group,
             )
             .await?;
         }
     }
 
-    dispatcher.set_task_completed(task_idx)
+    dispatcher.set_task_completed(task_idx)?;
+    Ok(())
 }
 
 // Spawn the handling of memory nodes so that thye can run in parallel.
 async fn handle_memory_task(
     dispatcher: Dispatcher,
     lsu: Rc<LoadStoreUnit>,
+    activity_lanes: Rc<ProcessingElementActivityLanes>,
     task_idx: usize,
     config: &MemoryTaskConfig,
 ) -> SimResult {
     let dst_addr = config.addr;
-    let access_type = match config.op {
-        MemoryOp::Load => AccessType::ReadRequest,
-        MemoryOp::Store => AccessType::WriteNonPostedRequest,
+    let (access_type, lanes, activity_name) = match config.op {
+        MemoryOp::Load => (
+            AccessType::ReadRequest,
+            &activity_lanes.lsu_read,
+            format!("{} tensor read", config.id),
+        ),
+        MemoryOp::Store => (
+            AccessType::WriteNonPostedRequest,
+            &activity_lanes.lsu_write,
+            format!("{} tensor write", config.id),
+        ),
     };
 
     let access_size_bytes = config.num_bytes;
-    lsu.do_access(access_type, access_size_bytes, dst_addr)
-        .await?;
+    let group = activity_lanes.create_group(&format!("{} operation", config.id));
+    lsu.do_access(
+        access_type,
+        access_size_bytes,
+        dst_addr,
+        lanes,
+        &activity_name,
+        &group,
+    )
+    .await?;
     dispatcher.set_task_completed(task_idx)?;
     Ok(())
 }

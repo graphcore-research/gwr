@@ -228,6 +228,138 @@ impl EntityMonitor {
     }
 }
 
+/// A child trace lane used to represent named activity intervals.
+pub struct EntityLane {
+    /// Parent entity that owns this lane.
+    pub entity: Rc<Entity>,
+
+    /// Unique simulation identifier used for trace events.
+    pub id: Id,
+
+    /// Name of this lane.
+    pub name: String,
+
+    active: bool,
+    active_activity: Option<Id>,
+    active_group: Option<Id>,
+}
+
+impl EntityLane {
+    /// Create a new lane under `parent`.
+    #[must_use]
+    pub fn new(parent: &Rc<Entity>, name: &str) -> Self {
+        let mut full_name = parent.full_name();
+        full_name.push_str(JOIN);
+        full_name.push_str(name);
+
+        let id = create_id!(parent);
+        let lane = Self {
+            entity: parent.clone(),
+            id,
+            name: String::from(name),
+            active: false,
+            active_activity: None,
+            active_group: None,
+        };
+
+        lane.track_create(parent.id, &full_name);
+
+        lane
+    }
+
+    fn track_create(&self, created_by: Id, full_name: &str) {
+        self.entity
+            .tracker
+            .create_lane(created_by, self.id, full_name);
+    }
+
+    /// Begin the named activity on this lane.
+    pub fn begin(&mut self, name: &str) {
+        let activity_id = create_id!(self.entity);
+        self.entity
+            .tracker
+            .begin_activity(activity_id, self.id, name);
+        self.active_activity = Some(activity_id);
+        self.active = true;
+    }
+
+    /// Begin the named activity as part of a group.
+    pub fn begin_in_group(&mut self, name: &str, group: &EntityGroup) {
+        let activity_id = create_id!(self.entity);
+        self.entity.tracker.add_to_group(activity_id, group.id);
+        self.active_activity = Some(activity_id);
+        self.active_group = Some(group.id);
+        self.entity
+            .tracker
+            .begin_activity(activity_id, self.id, name);
+        self.active = true;
+    }
+
+    /// End the current activity on this lane.
+    pub fn end(&mut self) {
+        if self.active {
+            let activity_id = self
+                .active_activity
+                .take()
+                .expect("active lane should have an activity ID");
+            self.entity.tracker.end_activity(activity_id);
+            if let Some(group_id) = self.active_group.take() {
+                self.entity.tracker.remove_from_group(activity_id, group_id);
+            }
+            self.active = false;
+        }
+    }
+}
+
+impl Drop for EntityLane {
+    fn drop(&mut self) {
+        self.end();
+        self.entity.tracker.destroy(self.entity.id, self.id);
+    }
+}
+
+/// A trace group used to associate related activities.
+pub struct EntityGroup {
+    /// Parent entity that owns this group.
+    pub entity: Rc<Entity>,
+
+    /// Unique simulation identifier used for trace events.
+    pub id: Id,
+
+    /// Name of this group.
+    pub name: String,
+}
+
+impl EntityGroup {
+    /// Create a new group under `parent`.
+    #[must_use]
+    pub fn new(parent: &Rc<Entity>, name: &str) -> Self {
+        let mut full_name = parent.full_name();
+        full_name.push_str(JOIN);
+        full_name.push_str(name);
+
+        let id = create_id!(parent);
+        let group = Self {
+            entity: parent.clone(),
+            id,
+            name: String::from(name),
+        };
+
+        group
+            .entity
+            .tracker
+            .create_group(parent.id, group.id, &full_name);
+
+        group
+    }
+}
+
+impl Drop for EntityGroup {
+    fn drop(&mut self) {
+        self.entity.tracker.destroy(self.entity.id, self.id);
+    }
+}
+
 /// The `GetEntity` trait is used to provide access to an objects [Entity]
 pub trait GetEntity {
     /// Return the [Entity]

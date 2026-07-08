@@ -179,6 +179,22 @@ impl PerfettoTraceBuilder {
         self.build_track_descriptor_trace_packet(current_time_ns, track_descriptor)
     }
 
+    /// Build a TracePacket containing the TrackDescriptor for activity slices
+    /// denoted by [crate::tracker::Track::begin_activity] and
+    /// [crate::tracker::Track::end_activity] events.
+    #[must_use]
+    pub fn build_activity_track_descriptor_trace_packet(
+        &mut self,
+        current_time_ns: u64,
+        id: Id,
+        parent: Id,
+        name: &str,
+    ) -> TracePacket {
+        let track_descriptor = self.build_track_descriptor(id, parent, name);
+
+        self.build_track_descriptor_trace_packet(current_time_ns, track_descriptor)
+    }
+
     fn build_track_descriptor_trace_packet(
         &self,
         current_time_ns: u64,
@@ -234,6 +250,35 @@ impl PerfettoTraceBuilder {
         self.build_track_event_trace_packet(current_time_ns, track_event)
     }
 
+    /// Build a TracePacket containing the TrackEvent for a
+    /// [crate::tracker::Track::begin_activity] SliceBegin event.
+    #[must_use]
+    pub fn build_activity_begin_trace_packet(
+        &self,
+        current_time_ns: u64,
+        id: Id,
+        name: &str,
+        correlation_id: Option<u64>,
+    ) -> TracePacket {
+        let track_event = build_slice_track_event(
+            id,
+            Some(name),
+            track_event::Type::SliceBegin,
+            correlation_id,
+        );
+
+        self.build_track_event_trace_packet(current_time_ns, track_event)
+    }
+
+    /// Build a TracePacket containing the TrackEvent for a
+    /// [crate::tracker::Track::end_activity] SliceEnd event.
+    #[must_use]
+    pub fn build_activity_end_trace_packet(&self, current_time_ns: u64, id: Id) -> TracePacket {
+        let track_event = build_slice_track_event(id, None, track_event::Type::SliceEnd, None);
+
+        self.build_track_event_trace_packet(current_time_ns, track_event)
+    }
+
     fn build_track_event_trace_packet(
         &self,
         current_time_ns: u64,
@@ -268,5 +313,85 @@ impl PerfettoTraceBuilder {
         Trace {
             packet: trace_packets,
         }
+    }
+}
+
+fn build_slice_track_event(
+    id: Id,
+    name: Option<&str>,
+    event_type: track_event::Type,
+    correlation_id: Option<u64>,
+) -> TrackEvent {
+    let mut track_event = match name {
+        Some(name) => build_named_track_event(id, name),
+        None => TrackEvent {
+            track_uuid: Some(id.0),
+            ..Default::default()
+        },
+    };
+    track_event.set_type(event_type);
+    if let Some(correlation_id) = correlation_id {
+        track_event.correlation_id_field = Some(track_event::CorrelationIdField::CorrelationId(
+            correlation_id,
+        ));
+    }
+    track_event
+}
+
+fn build_named_track_event(id: Id, name: &str) -> TrackEvent {
+    TrackEvent {
+        track_uuid: Some(id.0),
+        name_field: Some(track_event::NameField::Name(name.to_string())),
+        ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gwr_perfetto::protos::trace_packet::Data;
+
+    use super::*;
+
+    #[test]
+    fn activity_packets_are_perfetto_slices() {
+        let mut builder = PerfettoTraceBuilder::new();
+        let descriptor =
+            builder.build_activity_track_descriptor_trace_packet(0, Id(11), Id(10), "pe::op");
+        let begin = builder.build_activity_begin_trace_packet(42, Id(11), "add_task (add)", None);
+        let correlated_begin =
+            builder.build_activity_begin_trace_packet(43, Id(11), "add compute", Some(99));
+        let end = builder.build_activity_end_trace_packet(84, Id(11));
+
+        let Some(Data::TrackDescriptor(descriptor)) = descriptor.data else {
+            panic!("expected activity track descriptor");
+        };
+        assert_eq!(descriptor.uuid, Some(11));
+        assert_eq!(descriptor.parent_uuid, Some(10));
+        assert!(descriptor.counter.is_none());
+
+        let Some(Data::TrackEvent(begin)) = begin.data else {
+            panic!("expected activity begin track event");
+        };
+        assert_eq!(begin.track_uuid, Some(11));
+        assert_eq!(begin.r#type, Some(track_event::Type::SliceBegin as i32));
+        assert_eq!(
+            begin.name_field,
+            Some(track_event::NameField::Name("add_task (add)".to_string()))
+        );
+
+        let Some(Data::TrackEvent(correlated_begin)) = correlated_begin.data else {
+            panic!("expected correlated activity begin track event");
+        };
+        assert_eq!(correlated_begin.track_uuid, Some(11));
+        assert_eq!(
+            correlated_begin.correlation_id_field,
+            Some(track_event::CorrelationIdField::CorrelationId(99))
+        );
+
+        let Some(Data::TrackEvent(end)) = end.data else {
+            panic!("expected activity end track event");
+        };
+        assert_eq!(end.track_uuid, Some(11));
+        assert_eq!(end.r#type, Some(track_event::Type::SliceEnd as i32));
     }
 }

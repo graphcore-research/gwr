@@ -5,7 +5,7 @@
 use std::fmt::Display;
 use std::rc::Rc;
 
-use gwr_track::entity::{Entity, toplevel};
+use gwr_track::entity::{Entity, EntityLane, toplevel};
 use gwr_track::id::Unique;
 use gwr_track::{
     Id, create_id, debug, destroy_id, error, info, set_time, test_helpers, test_init, trace, warn,
@@ -112,6 +112,32 @@ fn enter_exit_basics() {
 
     drop(top);
     test_helpers::check_and_clear(&test_tracker, &["40: destroyed"]);
+}
+
+#[test]
+fn activity_basics() {
+    let (test_tracker, tracker) = test_init!(70);
+
+    let top = toplevel(&tracker, "top");
+    test_helpers::check_and_clear(&test_tracker, &["0: created entity 70, top"]);
+
+    {
+        let mut lane = EntityLane::new(&top, "lane::add");
+        test_helpers::check_and_clear(&test_tracker, &["70: created lane 71, top::lane::add"]);
+
+        lane.begin("add_task (add)");
+        test_helpers::check_and_clear(
+            &test_tracker,
+            &["72: activity begin add_task \\(add\\) on lane 71"],
+        );
+
+        lane.end();
+        test_helpers::check_and_clear(&test_tracker, &["72: activity end"]);
+    }
+    test_helpers::check_and_clear(&test_tracker, &["70: destroyed 71"]);
+
+    drop(top);
+    test_helpers::check_and_clear(&test_tracker, &["70: destroyed"]);
 }
 
 #[test]

@@ -75,6 +75,42 @@ impl Track for TextTracker {
         }
     }
 
+    fn add_to_group(&self, activity: Id, group_id: Id) {
+        if self.is_entity_enabled(activity, log::Level::Trace) {
+            self.writer
+                .borrow_mut()
+                .write_all(format!("{activity}: added to group {group_id}\n").as_bytes())
+                .unwrap();
+        }
+    }
+
+    fn remove_from_group(&self, activity: Id, group_id: Id) {
+        if self.is_entity_enabled(activity, log::Level::Trace) {
+            self.writer
+                .borrow_mut()
+                .write_all(format!("{activity}: removed from group {group_id}\n").as_bytes())
+                .unwrap();
+        }
+    }
+
+    fn begin_activity(&self, activity: Id, lane: Id, name: &str) {
+        if self.is_entity_enabled(lane, log::Level::Trace) {
+            self.writer
+                .borrow_mut()
+                .write_all(format!("{activity}: activity begin {name} on lane {lane}\n").as_bytes())
+                .unwrap();
+        }
+    }
+
+    fn end_activity(&self, activity: Id) {
+        if self.is_entity_enabled(activity, log::Level::Trace) {
+            self.writer
+                .borrow_mut()
+                .write_all(format!("{activity}: activity end\n").as_bytes())
+                .unwrap();
+        }
+    }
+
     fn create_entity(&self, created_by: Id, id: Id, name: &str) {
         if self.is_entity_enabled(created_by, log::Level::Trace) {
             self.writer
@@ -89,6 +125,24 @@ impl Track for TextTracker {
             self.writer
                 .borrow_mut()
                 .write_all(format!("{created_by}: created monitor {id}, {name}\n").as_bytes())
+                .unwrap();
+        }
+    }
+
+    fn create_lane(&self, created_by: Id, id: Id, name: &str) {
+        if self.is_entity_enabled(created_by, log::Level::Trace) {
+            self.writer
+                .borrow_mut()
+                .write_all(format!("{created_by}: created lane {id}, {name}\n").as_bytes())
+                .unwrap();
+        }
+    }
+
+    fn create_group(&self, created_by: Id, id: Id, name: &str) {
+        if self.is_entity_enabled(created_by, log::Level::Trace) {
+            self.writer
+                .borrow_mut()
+                .write_all(format!("{created_by}: created group {id}, {name}\n").as_bytes())
                 .unwrap();
         }
     }
