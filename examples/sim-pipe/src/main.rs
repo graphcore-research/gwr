@@ -7,6 +7,7 @@ use std::rc::Rc;
 
 use byte_unit::{AdjustedByte, Byte, UnitType};
 use clap::Parser;
+use gwr_components::cli::parse_bytes_string;
 use gwr_components::flow_controls::limiter::Limiter;
 use gwr_components::sink::Sink;
 use gwr_components::source::Source;
@@ -46,16 +47,16 @@ struct Cli {
     #[arg(long, default_value = "0")]
     finish_tick: usize,
 
-    /// The number of KiB to send from each source.
-    #[arg(long, default_value = "100")]
-    kib_to_send: usize,
+    /// The number of bytes to send from each source.
+    #[arg(long, default_value = "100KiB", value_parser = parse_bytes_string)]
+    bytes_to_send: usize,
 
     /// Set the frame overhead (protocol) bytes.
-    #[arg(long, default_value = "8")]
+    #[arg(long, default_value = "8", value_parser = parse_bytes_string)]
     frame_overhead_bytes: usize,
 
     /// Set the frame payload bytes.
-    #[arg(long, default_value = "8")]
+    #[arg(long, default_value = "8", value_parser = parse_bytes_string)]
     frame_payload_bytes: usize,
 
     /// Set many bits per clock tick the RX port can accept.
@@ -124,15 +125,14 @@ fn main() -> Result<(), SimError> {
     let clock = engine.default_clock();
     let spawner = engine.spawner();
 
-    let num_payload_bytes_to_send = args.kib_to_send * 1024;
-    let num_send_frames = num_payload_bytes_to_send / args.frame_payload_bytes;
+    let num_send_frames = args.bytes_to_send / args.frame_payload_bytes;
     let total_expected_frames = num_send_frames;
 
     let top = engine.top().clone();
     info!(top ;
-        "Sending {} frames ({}KiB) through pipe with: data delay={}, credit delay={}, buffer entries={}, rx={}bps, tx={}bps.",
+        "Sending {} frames ({} bytes) through pipe with: data delay={}, credit delay={}, buffer entries={}, rx={}bps, tx={}bps.",
         num_send_frames,
-        args.kib_to_send,
+        args.bytes_to_send,
         args.pipe_data_delay,
         args.pipe_credit_delay,
         args.pipe_buffer_entries,

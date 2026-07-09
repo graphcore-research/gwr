@@ -8,7 +8,7 @@ use gwr_components::delay::Delay;
 use gwr_components::flow_controls::limiter::Limiter;
 use gwr_components::sink::Sink;
 use gwr_components::source::Source;
-use gwr_components::store::Store;
+use gwr_components::store::ObjectStore;
 use gwr_components::test_helpers::{ArbiterInputData, priority_policy_test_core};
 use gwr_components::{connect_port, option_box_repeat, rc_limiter};
 use gwr_engine::engine::Engine;
@@ -34,7 +34,7 @@ pub fn spawn_source_store_sink() -> Engine {
 
     let top = engine.top();
     let source = Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; num_puts));
-    let store = Store::new_and_register(&engine, &clock, top, "store", capacity).unwrap();
+    let store = ObjectStore::new_and_register(&engine, &clock, top, "store", capacity).unwrap();
     let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 
     source.connect_port_tx(store.port_rx()).unwrap();

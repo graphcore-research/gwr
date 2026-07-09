@@ -25,7 +25,7 @@ use std::rc::Rc;
 use async_trait::async_trait;
 use gwr_components::flow_controls::limiter::Limiter;
 use gwr_components::router::{DefaultAlgorithm, Route};
-use gwr_components::store::Store;
+use gwr_components::store::{ByteStore, Store};
 use gwr_components::{connect_port, rc_limiter};
 use gwr_engine::engine::Engine;
 use gwr_engine::events::repeated::Repeated;
@@ -117,12 +117,12 @@ where
                 Some(&rx_buffer_limiter_aka),
                 port_limiter.clone(),
             );
-            let rx_buffer = Store::new_and_register(
+            let rx_buffer = ByteStore::new_and_register(
                 engine,
                 clock,
                 &entity,
                 &format!("rx_buf_{i}"),
-                config.rx_buffer_entries,
+                config.rx_buffer_bytes,
             )?;
             connect_port!(rx_buffer_limiter, tx => rx_buffer, rx)
                 .expect("Internal ports should connect without error");
@@ -146,13 +146,13 @@ where
             );
 
             let tx_buffer_aka = build_aka!(aka, &entity, &[(&format!("egress_{i}"), "tx")]);
-            let tx_buffer = Store::new_and_register_with_renames(
+            let tx_buffer = ByteStore::new_and_register_with_renames(
                 engine,
                 clock,
                 &entity,
                 &format!("tx_buf_{i}"),
                 Some(&tx_buffer_aka),
-                config.tx_buffer_entries,
+                config.tx_buffer_bytes,
             )?;
             connect_port!(tx_buffer_limiter, tx => tx_buffer, rx)
                 .expect("Internal ports should connect without error");
@@ -268,6 +268,7 @@ where
 /// This allows it to be easily shared across all rx and tx handlers.
 struct PortState<T> {
     data_for_tx: RefCell<VecDeque<(T, ClockTick)>>,
+    data_for_tx_bytes: RefCell<usize>,
     waiting_for_data: Repeated<()>,
     waiting_for_room: Repeated<()>,
     inputs_waiting_for_room: RefCell<VecDeque<usize>>,
@@ -277,6 +278,7 @@ impl<T> Default for PortState<T> {
     fn default() -> Self {
         Self {
             data_for_tx: RefCell::new(VecDeque::new()),
+            data_for_tx_bytes: RefCell::new(0),
             waiting_for_data: Repeated::default(),
             waiting_for_room: Repeated::default(),
             inputs_waiting_for_room: RefCell::new(VecDeque::new()),
@@ -296,14 +298,14 @@ async fn run_rx<T>(
 where
     T: SimObject + Routable,
 {
-    // Not quite right - but use the size of the TX buffer to configure the internal
-    // buffering
-    let max_internal_buffer_entries = config.tx_buffer_entries;
+    // Use the size of the TX buffer to configure the internal buffering.
+    let max_internal_buffer_bytes = config.tx_buffer_bytes;
 
     loop {
         let value = internal_rx.get()?.await;
         let value_id = value.id();
         entity.track_enter(value_id);
+        let value_bytes = value.total_bytes();
 
         let dest_index = routing_algorithm.route(&value)?;
         let delay_ticks = manhatten_rx_to_tx_cycles(&config, port_index, dest_index);
@@ -312,13 +314,16 @@ where
         tick.set_tick(tick.tick() + delay_ticks as u64);
 
         // If the queue to the destination is too full then wait for space
-        while port_states[dest_index].data_for_tx.borrow().len() > max_internal_buffer_entries {
+        while *port_states[dest_index].data_for_tx_bytes.borrow() + value_bytes
+            > max_internal_buffer_bytes
+        {
             port_states[dest_index]
                 .inputs_waiting_for_room
                 .borrow_mut()
                 .push_back(port_index);
             port_states[port_index].waiting_for_room.listen().await;
         }
+        *port_states[dest_index].data_for_tx_bytes.borrow_mut() += value_bytes;
         port_states[dest_index]
             .data_for_tx
             .borrow_mut()
@@ -339,6 +344,10 @@ where
 {
     loop {
         let next = port_states[port_index].data_for_tx.borrow_mut().pop_front();
+
+        if let Some((value, _)) = &next {
+            *port_states[port_index].data_for_tx_bytes.borrow_mut() -= value.total_bytes();
+        }
 
         if let Some(waiting_input) = port_states[port_index]
             .inputs_waiting_for_room

@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use gwr_components::connect_port;
 use gwr_components::sink::Sink;
-use gwr_components::store::Store;
+use gwr_components::store::ObjectStore;
 use gwr_engine::engine::Engine;
 use gwr_engine::port::OutPort;
 use gwr_engine::traits::SimObject;
@@ -46,7 +46,8 @@ pub fn setup_frame_simulation() -> (Engine, Rc<Sink<EthernetFrame>>) {
     }
 
     let store_capacity = num_frames / 4;
-    let store = Store::new_and_register(&engine, &clock, top, "store", store_capacity).unwrap();
+    let store =
+        ObjectStore::new_and_register(&engine, &clock, top, "store", store_capacity).unwrap();
 
     {
         let mut frame_tx = OutPort::new(engine.top(), "frame_tx");
@@ -84,7 +85,8 @@ pub fn setup_box_frame_simulation() -> (Engine, Rc<Sink<Box<EthernetFrame>>>) {
     }
 
     let store_capacity = num_frames / 4;
-    let store = Store::new_and_register(&engine, &clock, top, "store", store_capacity).unwrap();
+    let store =
+        ObjectStore::new_and_register(&engine, &clock, top, "store", store_capacity).unwrap();
 
     {
         let mut frame_tx = OutPort::new(engine.top(), "frame_tx");

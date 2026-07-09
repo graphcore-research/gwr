@@ -12,15 +12,15 @@ arguments:
   - name: FABRIC_PORTS_PER_NODE
     default: 2
     comment: Number of ingress or egress ports attached to each node
-  - name: KIB_TO_SEND
-    default: 1024
-    comment: Traffic injected by each source in KiB
-  - name: TX_BUFFER_ENTRIES
-    default: 32
-    comment: Number of frames each TX port can queue
-  - name: RX_BUFFER_ENTRIES
-    default: 32
-    comment: Number of frames each RX port can queue
+  - name: BYTES_TO_SEND
+    default: 1MiB
+    comment: Traffic injected by each source
+  - name: TX_BUFFER_BYTES
+    default: 32KiB
+    comment: Bytes each TX port can queue
+  - name: RX_BUFFER_BYTES
+    default: 32KiB
+    comment: Bytes each RX port can queue
   - name: PORT_BITS_PER_TICK
     default: 128
     comment: Link width in bits per tick
@@ -57,9 +57,10 @@ ingredients:
   - comment: Show the chosen exploration parameters
     command:
       echo "sim-fabric ${FABRIC_COLUMNS}x${FABRIC_ROWS}
-      ports=${FABRIC_PORTS_PER_NODE} send=${KIB_TO_SEND}KiB
+      ports=${FABRIC_PORTS_PER_NODE} send=${BYTES_TO_SEND}
       traffic=${TRAFFIC_PATTERN} width=${PORT_BITS_PER_TICK}b/tick
-      payload=${FRAME_PAYLOAD_BYTES}B hops='${TICKS_PER_HOPS}'
+      buffers=${RX_BUFFER_BYTES}/${TX_BUFFER_BYTES}
+      payload=${FRAME_PAYLOAD_BYTES} hops='${TICKS_PER_HOPS}'
       output=${OUTPUT_DIR} extra='${EXTRA_ARGS}'"
   - comment: Create the output folder for all sweep artifacts
     command: mkdir -p ${OUTPUT_DIR}
@@ -77,9 +78,9 @@ ingredients:
         if cargo run --bin sim-fabric --release -- --stdout --stdout-level info \
           --fabric-columns ${FABRIC_COLUMNS} \
           --fabric-rows ${FABRIC_ROWS} --fabric-ports-per-node \
-          ${FABRIC_PORTS_PER_NODE} --kib-to-send ${KIB_TO_SEND} \
-          --tx-buffer-entries ${TX_BUFFER_ENTRIES} --rx-buffer-entries \
-          ${RX_BUFFER_ENTRIES} --port-bits-per-tick ${PORT_BITS_PER_TICK} \
+          ${FABRIC_PORTS_PER_NODE} --bytes-to-send ${BYTES_TO_SEND} \
+          --tx-buffer-bytes ${TX_BUFFER_BYTES} --rx-buffer-bytes \
+          ${RX_BUFFER_BYTES} --port-bits-per-tick ${PORT_BITS_PER_TICK} \
           --frame-overhead-bytes ${FRAME_OVERHEAD_BYTES} \
           --frame-payload-bytes ${FRAME_PAYLOAD_BYTES} --ticks-per-hop \
           ${ticks_per_hop} --ticks-overhead ${TICKS_OVERHEAD} \

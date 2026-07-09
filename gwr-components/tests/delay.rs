@@ -6,7 +6,7 @@ use std::rc::Rc;
 use gwr_components::delay::Delay;
 use gwr_components::sink::Sink;
 use gwr_components::source::Source;
-use gwr_components::store::Store;
+use gwr_components::store::{ObjectStore, Store};
 use gwr_components::{connect_port, option_box_repeat};
 use gwr_engine::engine::Engine;
 use gwr_engine::port::{InPort, OutPort};
@@ -25,7 +25,7 @@ fn put_get() {
     let top = engine.top();
     // Create a pair of tasks that use a delay
     let delay = Delay::new_and_register(&engine, &clock, top, "delay", 20);
-    let buffer = Store::new_and_register(&engine, &clock, top, "buffer", 1).unwrap();
+    let buffer = ObjectStore::new_and_register(&engine, &clock, top, "buffer", 1).unwrap();
 
     connect_port!(delay, tx => buffer, rx).unwrap();
 
@@ -103,7 +103,7 @@ fn error_on_output_stall() {
         Source::new_and_register(&engine, top, "source", option_box_repeat!(500 ; NUM_PUTS));
     let delay = Delay::new_and_register(&engine, &clock, top, "delay", DELAY);
     delay.set_error_on_output_stall();
-    let store = Store::new_and_register(&engine, &clock, top, "store", 1).unwrap();
+    let store = ObjectStore::new_and_register(&engine, &clock, top, "store", 1).unwrap();
 
     connect_port!(source, tx => delay, rx).unwrap();
     connect_port!(delay, tx => store, rx).unwrap();

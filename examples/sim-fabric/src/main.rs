@@ -6,6 +6,7 @@
 use std::rc::Rc;
 
 use clap::Parser;
+use gwr_components::cli::parse_bytes_string;
 use gwr_components::connect_port;
 use gwr_engine::engine::Engine;
 use gwr_engine::executor::Spawner;
@@ -59,28 +60,28 @@ struct Cli {
     #[arg(long, default_value = "2")]
     fabric_ports_per_node: usize,
 
-    /// The number of KiB to send from each source.
-    #[arg(long, default_value = "100")]
-    kib_to_send: usize,
+    /// The number of bytes to send from each source.
+    #[arg(long, default_value = "100KiB", value_parser = parse_bytes_string)]
+    bytes_to_send: usize,
 
-    /// Set the number of frames each fabric TX port can hold.
-    #[arg(long, default_value = "32")]
-    tx_buffer_entries: usize,
+    /// Set the number of bytes each fabric TX port can hold.
+    #[arg(long, default_value = "32KiB", value_parser = parse_bytes_string)]
+    tx_buffer_bytes: usize,
 
-    /// Set the number of frames each fabric RX port can hold.
-    #[arg(long, default_value = "32")]
-    rx_buffer_entries: usize,
+    /// Set the number of bytes each fabric RX port can hold.
+    #[arg(long, default_value = "32KiB", value_parser = parse_bytes_string)]
+    rx_buffer_bytes: usize,
 
     /// Set many bits per clock tick the fabric TX/RX ports move.
     #[arg(long, default_value = "128")]
     port_bits_per_tick: usize,
 
     /// Set the frame overhead (protocol) bytes.
-    #[arg(long, default_value = "8")]
+    #[arg(long, default_value = "8", value_parser = parse_bytes_string)]
     frame_overhead_bytes: usize,
 
     /// Set the default frame payload bytes.
-    #[arg(long, default_value = "32")]
+    #[arg(long, default_value = "32", value_parser = parse_bytes_string)]
     frame_payload_bytes: usize,
 
     /// Set the clock ticks required to move one hop in the fabric.
@@ -155,27 +156,27 @@ fn create_config(engine: &Engine, args: &Cli) -> (Rc<FabricConfig>, usize) {
         None,
         args.ticks_per_hop,
         args.ticks_overhead,
-        args.rx_buffer_entries,
-        args.tx_buffer_entries,
+        args.rx_buffer_bytes,
+        args.tx_buffer_bytes,
         args.port_bits_per_tick,
     );
     let config = Rc::new(config);
 
-    let num_payload_bytes_to_send = args.kib_to_send * 1024;
+    let num_payload_bytes_to_send = args.bytes_to_send;
 
     // Size of max-sized frames
     let num_send_frames = num_payload_bytes_to_send / args.frame_payload_bytes;
 
     let top = engine.top();
     info!(top ;
-        "Fabric of {}x{}x{} sources, each sending {} frames ({}KiB) with buffers {}/{} frames.",
+        "Fabric of {}x{}x{} sources, each sending {} frames ({} bytes) with buffers {}/{} bytes.",
         config.num_columns(),
         config.num_rows(),
         config.num_ports_per_node(),
         num_send_frames,
-        args.kib_to_send,
-        args.rx_buffer_entries,
-        args.tx_buffer_entries,
+        args.bytes_to_send,
+        args.rx_buffer_bytes,
+        args.tx_buffer_bytes,
     );
     info!(top ; "Using traffic pattern {}. Random seed {}", args.traffic_pattern, args.seed);
 

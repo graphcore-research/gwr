@@ -11,6 +11,8 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
+use futures::future::FusedFuture;
+
 use crate::traits::{Resolve, Resolver};
 
 /// ClockTick structure for representing a number of Clock ticks and a phase.
@@ -287,6 +289,7 @@ impl Clock {
             until,
             can_exit: false,
             waiter_id: None,
+            done: false,
         }
     }
 
@@ -304,6 +307,7 @@ impl Clock {
             until,
             can_exit: true,
             waiter_id: None,
+            done: false,
         }
     }
 
@@ -318,6 +322,7 @@ impl Clock {
             until,
             can_exit: false,
             waiter_id: None,
+            done: false,
         }
     }
 
@@ -332,6 +337,7 @@ impl Clock {
             until,
             can_exit: false,
             waiter_id: None,
+            done: false,
         }
     }
 
@@ -392,11 +398,16 @@ pub struct ClockDelay {
     until: ClockTick,
     can_exit: bool,
     waiter_id: Option<u64>,
+    done: bool,
 }
 
 impl Future for ClockDelay {
     type Output = ();
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if self.done {
+            return Poll::Ready(());
+        }
+
         if self.until > *self.shared_state.now.borrow() {
             if let Some(waiter_id) = self.waiter_id {
                 self.shared_state.unschedule(self.until, waiter_id);
@@ -406,8 +417,15 @@ impl Future for ClockDelay {
             Poll::Pending
         } else {
             self.waiter_id = None;
+            self.done = true;
             Poll::Ready(())
         }
+    }
+}
+
+impl FusedFuture for ClockDelay {
+    fn is_terminated(&self) -> bool {
+        self.done
     }
 }
 
@@ -422,8 +440,10 @@ impl Drop for ClockDelay {
 #[cfg(test)]
 mod tests {
     use std::mem::drop;
+    use std::pin::Pin;
     use std::task::Context;
 
+    use futures::future::FusedFuture;
     use futures::task::noop_waker;
 
     use super::*;
@@ -523,6 +543,24 @@ mod tests {
         assert_eq!(waiting.len(), 1);
         assert_eq!(waiting[0].len(), 1);
         assert_eq!(waiting[0][0].id, second_waiter_id);
+    }
+
+    #[test]
+    fn clock_delay_is_fused_after_completion() {
+        let clock = Clock::new(1000.0);
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let mut delay = clock.wait_ticks(1);
+
+        assert!(!delay.is_terminated());
+        assert_eq!(Pin::new(&mut delay).poll(&mut cx), Poll::Pending);
+        assert!(!delay.is_terminated());
+
+        clock.advance_time(ClockTick::new().set_tick(1));
+        assert_eq!(Pin::new(&mut delay).poll(&mut cx), Poll::Ready(()));
+        assert!(delay.is_terminated());
+        assert_eq!(Pin::new(&mut delay).poll(&mut cx), Poll::Ready(()));
+        assert!(delay.is_terminated());
     }
 
     #[cfg(feature = "phase")]

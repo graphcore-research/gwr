@@ -30,7 +30,7 @@ rand.workspace = true
 
 [dev-dependencies]
 arc-swap = "1.6.0"
-gwr-components = { path = "../gwr-components", version = "0.10.0" }
+gwr-components = { path = "../gwr-components", version = "0.11.0" }
 
 [features]
 default = ["global_allocator"]

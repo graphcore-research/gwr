@@ -10,7 +10,7 @@ use gwr_components::arbiter::policy::{
 use gwr_components::flow_controls::limiter::Limiter;
 use gwr_components::sink::Sink;
 use gwr_components::source::Source;
-use gwr_components::store::Store;
+use gwr_components::store::{ObjectStore, Store};
 use gwr_components::test_helpers::{
     ArbiterInputData, check_round_robin, priority_policy_test_core,
 };
@@ -128,7 +128,7 @@ fn input_order() {
 
     let write_limiter = rc_limiter!(&clock, 1);
     let store_limiter = Limiter::new_and_register(&engine, &clock, top, "limit_wr", write_limiter);
-    let store = Store::new_and_register(&engine, &clock, top, "store", total_count).unwrap();
+    let store = ObjectStore::new_and_register(&engine, &clock, top, "store", total_count).unwrap();
 
     connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
     connect_port!(source_b, tx => arbiter, rx, 1).unwrap();
@@ -172,7 +172,7 @@ fn more_inputs() {
     let source_a = Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na));
     let source_b = Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; nb));
     let source_c = Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc));
-    let store = Store::new_and_register(&engine, &clock, top, "store", na + nb + nc).unwrap();
+    let store = ObjectStore::new_and_register(&engine, &clock, top, "store", na + nb + nc).unwrap();
 
     connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
     connect_port!(source_b, tx => arbiter, rx, 1).unwrap();
@@ -201,7 +201,7 @@ fn no_output() {
     let source_b = Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; nb));
     let source_c = Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc));
     let _store: Rc<Store<i32>> =
-        Store::new_and_register(&engine, &clock, top, "store", na + nb + nc).unwrap();
+        ObjectStore::new_and_register(&engine, &clock, top, "store", na + nb + nc).unwrap();
 
     connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
     connect_port!(source_b, tx => arbiter, rx, 1).unwrap();
@@ -257,7 +257,7 @@ fn weighted_policy() {
     );
     let write_limiter = rc_limiter!(&clock, 1);
     let store_limiter = Limiter::new_and_register(&engine, &clock, top, "limit_wr", write_limiter);
-    let store = Store::new_and_register(&engine, &clock, top, "store", total_count).unwrap();
+    let store = ObjectStore::new_and_register(&engine, &clock, top, "store", total_count).unwrap();
 
     connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
     connect_port!(source_b, tx => arbiter, rx, 1).unwrap();

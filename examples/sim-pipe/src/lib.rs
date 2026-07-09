@@ -14,7 +14,7 @@
 //!
 //! Running a basic simulation
 //! ```text
-//! cargo run --bin sim-pipe --release -- --kib-to-send 1024 --stdout
+//! cargo run --bin sim-pipe --release -- --bytes-to-send 1MiB --stdout
 //! ```
 //!
 //! # Impact of buffer size
@@ -30,18 +30,18 @@
 //! (data and credit) of 5 ticks. This results in a maximum data rate of the
 //! 14.9GiB/s.
 //! ```text
-//! cargo run --bin sim-pipe --release -- --kib-to-send 1024 --stdout --progress
+//! cargo run --bin sim-pipe --release -- --bytes-to-send 1MiB --stdout --progress
 //! ```
 //!
 //! However, if you reduce the size of the buffer in the pipeline then you will
 //! see the effective data rate reduce:
 //! ```text
-//! cargo run --bin sim-pipe --release -- --kib-to-send 1024 --stdout --progress --pipe-buffer-entries 9
+//! cargo run --bin sim-pipe --release -- --bytes-to-send 1MiB --stdout --progress --pipe-buffer-entries 9
 //! ```
 //!
 //! In order to observe the bubbles in the pipeline you can use perfetto logs:
 //! ```text
-//! cargo run --bin sim-pipe --release -- --kib-to-send 1024 --stdout --progress --pipe-buffer-entries 9 --perfetto
+//! cargo run --bin sim-pipe --release -- --bytes-to-send 1MiB --stdout --progress --pipe-buffer-entries 9 --perfetto
 //! ```
 //! Then browse to <https://ui.perfetto.dev> and open the `trace.pftrace` file
 //! that will have been generated. Within the `top::pipe::credit_pipe` row you

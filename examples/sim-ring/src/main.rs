@@ -6,13 +6,13 @@
 use std::rc::Rc;
 
 use clap::Parser;
+use gwr_components::cli::parse_bytes_string;
 use gwr_components::connect_port;
 use gwr_engine::engine::Engine;
 use gwr_engine::executor::Spawner;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::types::SimError;
 use gwr_engine::{run_simulation, sim_error};
-use gwr_models::ethernet_frame::FRAME_OVERHEAD_BYTES;
 use gwr_track::builder::{TrackerArgs, setup_trackers};
 use gwr_track::{Track, error, info};
 use indicatif::ProgressBar;
@@ -49,24 +49,24 @@ struct Cli {
     #[arg(long, default_value = "8")]
     ring_size: usize,
 
-    /// The number of KiB to send from each source.
-    #[arg(long, default_value = "100")]
-    kib_to_send: usize,
+    /// The number of bytes to send from each source.
+    #[arg(long, default_value = "100KiB", value_parser = parse_bytes_string)]
+    bytes_to_send: usize,
 
     /// The priority of ring traffic over local traffic in the arbiter.
     #[arg(long, default_value = "1")]
     ring_priority: usize,
 
-    /// Override the default number of KiB in the Tx buffer.
-    #[arg(long, default_value = "32")]
-    tx_buffer_kib: usize,
+    /// Override the default number of bytes in the Tx buffer.
+    #[arg(long, default_value = "32KiB", value_parser = parse_bytes_string)]
+    tx_buffer_bytes: usize,
 
-    /// Override the default number of KiB in the Rx buffer.
-    #[arg(long, default_value = "32")]
-    rx_buffer_kib: usize,
+    /// Override the default number of bytes in the Rx buffer.
+    #[arg(long, default_value = "32KiB", value_parser = parse_bytes_string)]
+    rx_buffer_bytes: usize,
 
     /// Override the default frame payload bytes.
-    #[arg(long, default_value = "256")]
+    #[arg(long, default_value = "256", value_parser = parse_bytes_string)]
     frame_payload_bytes: usize,
 }
 
@@ -113,31 +113,24 @@ fn main() -> Result<(), SimError> {
     let spawner = engine.spawner();
     let clock = engine.default_clock();
 
-    let tx_buffer_bytes = args.tx_buffer_kib * 1024;
-    let rx_buffer_bytes = args.rx_buffer_kib * 1024;
-    let num_payload_bytes_to_send = args.kib_to_send * 1024;
-
-    // Size of max-sized frames
-    let frame_bytes = args.frame_payload_bytes + FRAME_OVERHEAD_BYTES;
-
     let config = Config {
         ring_size: args.ring_size,
         ring_priority: args.ring_priority,
-        rx_buffer_frames: rx_buffer_bytes / frame_bytes,
-        tx_buffer_frames: tx_buffer_bytes / frame_bytes,
+        rx_buffer_bytes: args.rx_buffer_bytes,
+        tx_buffer_bytes: args.tx_buffer_bytes,
         frame_payload_bytes: args.frame_payload_bytes,
-        num_send_frames: num_payload_bytes_to_send / args.frame_payload_bytes,
+        num_send_frames: args.bytes_to_send / args.frame_payload_bytes,
     };
 
     let top = engine.top().clone();
     info!(top ;
-        "Ring of {} sources, priority {}, each sending {} frames ({}KiB) with buffers {}/{} frames.",
+        "Ring of {} sources, priority {}, each sending {} frames ({} bytes) with buffers {}/{} bytes.",
         config.ring_size,
         config.ring_priority,
         config.num_send_frames,
-        args.kib_to_send,
-        config.rx_buffer_frames,
-        config.tx_buffer_frames
+        args.bytes_to_send,
+        args.rx_buffer_bytes,
+        args.tx_buffer_bytes
     );
 
     let ring_nodes = build_ring_nodes(&mut engine, &clock, &config);

@@ -9,15 +9,15 @@ arguments:
   - name: RING_SIZE
     default: 8
     comment: Number of nodes in the ring
-  - name: KIB_TO_SEND
-    default: 1024
-    comment: Traffic injected by each source in KiB
-  - name: TX_BUFFER_KIB
-    default: 32
-    comment: Source-side transmit buffering in KiB
-  - name: RX_BUFFER_KIB
-    default: 32
-    comment: Sink-side receive buffering in KiB
+  - name: BYTES_TO_SEND
+    default: 1MiB
+    comment: Traffic injected by each source
+  - name: TX_BUFFER_BYTES
+    default: 32KiB
+    comment: Source-side transmit buffering
+  - name: RX_BUFFER_BYTES
+    default: 32KiB
+    comment: Sink-side receive buffering
   - name: FRAME_PAYLOAD_BYTES
     default: 256
     comment: Payload bytes in each generated frame
@@ -30,10 +30,9 @@ arguments:
 ingredients:
   - comment: Show the chosen exploration parameters
     command:
-      echo "sim-ring ring_size=${RING_SIZE} send=${KIB_TO_SEND}KiB
-      priorities='${RING_PRIORITIES}' tx=${TX_BUFFER_KIB}KiB
-      rx=${RX_BUFFER_KIB}KiB payload=${FRAME_PAYLOAD_BYTES}B
-      output=${OUTPUT_DIR}"
+      echo "sim-ring ring_size=${RING_SIZE} send=${BYTES_TO_SEND}
+      priorities='${RING_PRIORITIES}' tx=${TX_BUFFER_BYTES}
+      rx=${RX_BUFFER_BYTES} payload=${FRAME_PAYLOAD_BYTES} output=${OUTPUT_DIR}"
   - comment: Create the output folder for all sweep artifacts
     command: mkdir -p ${OUTPUT_DIR}
   - comment:
@@ -47,9 +46,9 @@ ingredients:
         status_file="${OUTPUT_DIR}/sim-ring-priority-${priority}.status"
         echo "Running sim-ring with ring priority ${priority}"
         if cargo run --bin sim-ring --release -- --stdout --stdout-level info --progress \
-          --ring-size ${RING_SIZE} --kib-to-send ${KIB_TO_SEND} \
-          --ring-priority "${priority}" --tx-buffer-kib ${TX_BUFFER_KIB} \
-          --rx-buffer-kib ${RX_BUFFER_KIB} \
+          --ring-size ${RING_SIZE} --bytes-to-send ${BYTES_TO_SEND} \
+          --ring-priority "${priority}" --tx-buffer-bytes ${TX_BUFFER_BYTES} \
+          --rx-buffer-bytes ${RX_BUFFER_BYTES} \
           --frame-payload-bytes ${FRAME_PAYLOAD_BYTES} --monitor-window-ticks \
           ${MONITOR_WINDOW_TICKS} --perfetto --perfetto-file "${trace_file}" \
           > "${log_file}" 2>&1; then
