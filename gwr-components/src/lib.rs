@@ -3,6 +3,7 @@
 #![doc = include_str!(gwr_build::generated_crate_docs_path!())]
 
 pub mod arbiter;
+pub mod cli;
 pub mod connect;
 pub mod delay;
 pub mod flow_controls;

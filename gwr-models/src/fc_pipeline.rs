@@ -22,7 +22,7 @@ use async_trait::async_trait;
 use gwr_components::delay::Delay;
 use gwr_components::flow_controls::credit_issuer::CreditIssuer;
 use gwr_components::flow_controls::credit_limiter::CreditLimiter;
-use gwr_components::store::Store;
+use gwr_components::store::ObjectStore;
 use gwr_components::types::Credit;
 use gwr_components::{connect_port, connect_tx, port_rx};
 use gwr_engine::engine::Engine;
@@ -96,7 +96,8 @@ where
         // never have to stall at their outputs
         data_delay.set_error_on_output_stall();
 
-        let buffer = Store::new_and_register(engine, clock, &entity, "buf", config.buffer_size)?;
+        let buffer =
+            ObjectStore::new_and_register(engine, clock, &entity, "buf", config.buffer_size)?;
 
         connect_port!(credit_limiter, tx => data_delay, rx)
             .expect("Internal ports should connect without error");

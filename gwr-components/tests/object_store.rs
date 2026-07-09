@@ -2,19 +2,19 @@
 
 use gwr_components::sink::Sink;
 use gwr_components::source::Source;
-use gwr_components::store::Store;
+use gwr_components::store::ObjectStore;
 use gwr_components::{connect_port, option_box_repeat};
 use gwr_engine::port::InPort;
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
 
-/// Basic end-to-end test: Source → Store → Sink.
+/// Basic end-to-end test: Source -> ObjectStore -> Sink.
 ///
 /// Verifies:
 ///  * all values make it through the store
-///  * the store is empty at the end (fill_level == 0)
+///  * the store is empty at the end (capacity_used == 0)
 #[test]
-fn store_basic_flow() {
+fn object_store_basic_flow() {
     const NUM_PUTS: usize = 50;
     const CAPACITY: usize = 8;
 
@@ -26,7 +26,7 @@ fn store_basic_flow() {
     // Simple source that repeatedly produces the same value.
     let source = Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; NUM_PUTS));
 
-    let store = Store::new_and_register(&engine, &clock, top, "store", CAPACITY).unwrap();
+    let store = ObjectStore::new_and_register(&engine, &clock, top, "store", CAPACITY).unwrap();
 
     let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 
@@ -38,35 +38,35 @@ fn store_basic_flow() {
 
     // All items should have been sunk.
     assert_eq!(sink.num_sunk(), NUM_PUTS);
-    // Store must be empty at the end of simulation.
-    assert_eq!(store.fill_level(), 0);
+    // ObjectStore must be empty at the end of simulation.
+    assert_eq!(store.capacity_used(), 0);
 }
 
-/// Creating a store with zero capacity should fail with a SimError.
+/// Creating an object store with zero capacity should fail with a SimError.
 ///
 /// This directly exercises the constructor error path.
 #[test]
-fn store_zero_capacity_fails() {
+fn object_store_zero_capacity_fails() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
     let top = engine.top();
 
-    let result = Store::<i32>::new_and_register(&engine, &clock, top, "store_zero", 0);
+    let result = ObjectStore::<i32>::new_and_register(&engine, &clock, top, "store_zero", 0);
 
     assert!(
         result.is_err(),
-        "Expected zero-capacity Store construction to return an error"
+        "Expected zero-capacity ObjectStore construction to return an error"
     );
 
     let err = result.err().unwrap();
     let msg = err.to_string(); // Display impl prefixes with "Error: "
     assert!(
-        msg.contains("Unsupported Store with 0 capacity"),
+        msg.contains("Unsupported Store with capacity of 0"),
         "Unexpected error message: {msg}"
     );
 }
 
-/// When `set_error_on_overflow` is enabled, overflowing the store should
+/// When `set_error_on_overflow` is enabled, overflowing the object store should
 /// cause the simulation to fail with an overflow error.
 ///
 /// We connect a source that keeps pushing data into the store and
@@ -77,7 +77,7 @@ fn store_zero_capacity_fails() {
 /// on the exact formatting of the entity name.
 #[test]
 #[should_panic(expected = "Overflow in")]
-fn store_overflow_panics_when_error_on_overflow_set() {
+fn object_store_overflow_panics_when_error_on_overflow_set() {
     const CAPACITY: usize = 2;
     const NUM_PUTS: usize = 10;
 
@@ -88,7 +88,8 @@ fn store_overflow_panics_when_error_on_overflow_set() {
 
     let source = Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; NUM_PUTS));
 
-    let store = Store::new_and_register(&engine, &clock, top, "store_overflow", CAPACITY).unwrap();
+    let store =
+        ObjectStore::new_and_register(&engine, &clock, top, "store_overflow", CAPACITY).unwrap();
 
     // Switch to "error on overflow" mode so `run_rx` no longer blocks once full
     // and instead allows `State::push_value` to return a SimError.

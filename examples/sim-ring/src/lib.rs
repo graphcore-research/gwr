@@ -19,12 +19,12 @@
 //!
 //! Running a ring node that will lock up:
 //! ```txt
-//! cargo run --bin sim-ring --release -- --kib-to-send 1024 --stdout
+//! cargo run --bin sim-ring --release -- --bytes-to-send 1MiB --stdout
 //! ```
 //!
 //! But with increased ring priority the same model will pass:
 //! ```txt
-//! cargo run --bin sim-ring --release -- --kib-to-send 1024 --ring-priority 10 --stdout
+//! cargo run --bin sim-ring --release -- --bytes-to-send 1MiB --ring-priority 10 --stdout
 //! ```
 //!
 //! # Diagram

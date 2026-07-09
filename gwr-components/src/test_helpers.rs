@@ -7,7 +7,7 @@ use std::rc::Rc;
 use futures::channel::oneshot;
 use futures::channel::oneshot::{Receiver, Sender};
 use gwr_engine::engine::Engine;
-use gwr_engine::port::InPort;
+use gwr_engine::port::{InPort, PortPut};
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::SimObject;
 use gwr_engine::types::SimResult;
@@ -19,7 +19,7 @@ use crate::arbiter::Arbiter;
 use crate::arbiter::policy::{Priority, PriorityRoundRobin};
 use crate::flow_controls::limiter::Limiter;
 use crate::source::Source;
-use crate::store::Store;
+use crate::store::ObjectStore;
 use crate::{connect_port, option_box_repeat, rc_limiter};
 
 #[derive(Clone)]
@@ -113,7 +113,7 @@ pub fn priority_policy_test_core(engine: &mut Engine, inputs: &[ArbiterInputData
     let store_limiter =
         Limiter::new_and_register(engine, &clock, engine.top(), "limit_wr", write_limiter);
     let store =
-        Store::new_and_register(engine, &clock, engine.top(), "store", total_count).unwrap();
+        ObjectStore::new_and_register(engine, &clock, engine.top(), "store", total_count).unwrap();
     connect_port!(store_limiter, tx => store, rx).unwrap();
 
     for (i, source) in sources.iter_mut().enumerate() {
@@ -172,6 +172,27 @@ pub async fn expect_no_traffic(
     }
 
     Ok(())
+}
+
+pub async fn expect_pending_send<T>(
+    location: impl std::fmt::Display,
+    clock: &Clock,
+    port: impl std::fmt::Debug,
+    mut send: PortPut<T>,
+    ticks: u64,
+) where
+    T: SimObject,
+{
+    let mut timeout = clock.wait_ticks(ticks);
+
+    futures::select! {
+        _ = send => {
+            panic!("{location}: {port:?}: send completed before {ticks} ticks elapsed");
+        }
+        _ = timeout => {}
+    }
+
+    send.await;
 }
 
 pub trait ValueCheck<T> {
@@ -841,6 +862,12 @@ macro_rules! build_component_harness {
                     port: Port,
                     value: $rx_ty,
                 },)*
+                $([<ExpectPendingSend $rx_variant>] {
+                    location: $crate::test_helpers::StepLocation,
+                    port: Port,
+                    value: $rx_ty,
+                    ticks: u64,
+                },)*
                 $([<Expect $tx_variant>] {
                     location: $crate::test_helpers::StepLocation,
                     port: Port,
@@ -850,6 +877,12 @@ macro_rules! build_component_harness {
                     location: $crate::test_helpers::StepLocation,
                     port: Port,
                     value: $rx_array_ty,
+                },)*
+                $([<ExpectPendingSend $rx_array_variant>] {
+                    location: $crate::test_helpers::StepLocation,
+                    port: Port,
+                    value: $rx_array_ty,
+                    ticks: u64,
                 },)*
                 $([<Expect $tx_array_variant>] {
                     location: $crate::test_helpers::StepLocation,
@@ -876,8 +909,10 @@ macro_rules! build_component_harness {
                         Step::Seq { location, .. }
                         | Step::Par { location, .. }
                         $(| Step::[<Send $rx_variant>] { location, .. })*
+                        $(| Step::[<ExpectPendingSend $rx_variant>] { location, .. })*
                         $(| Step::[<Expect $tx_variant>] { location, .. })*
                         $(| Step::[<Send $rx_array_variant>] { location, .. })*
+                        $(| Step::[<ExpectPendingSend $rx_array_variant>] { location, .. })*
                         $(| Step::[<Expect $tx_array_variant>] { location, .. })*
                         | Step::ExpectNoTraffic { location, .. }
                         | Step::Delay { location, .. } => *location,
@@ -1030,12 +1065,22 @@ macro_rules! build_component_harness {
                         }
                         )*
                         $(
+                        Step::<$item_ty, $expected_ty>::[<ExpectPendingSend $rx_variant>] { port, .. } => {
+                            ports.insert(*port);
+                        }
+                        )*
+                        $(
                         Step::<$item_ty, $expected_ty>::[<Expect $tx_variant>] { port, .. } => {
                             ports.insert(*port);
                         }
                         )*
                         $(
                         Step::<$item_ty, $expected_ty>::[<Send $rx_array_variant>] { port, .. } => {
+                            ports.insert(*port);
+                        }
+                        )*
+                        $(
+                        Step::<$item_ty, $expected_ty>::[<ExpectPendingSend $rx_array_variant>] { port, .. } => {
                             ports.insert(*port);
                         }
                         )*
@@ -1126,6 +1171,25 @@ macro_rules! build_component_harness {
                                 }
                                 )*
                                 $(
+                                Step::<$item_ty, $expected_ty>::[<ExpectPendingSend $rx_variant>] { port, value, ticks, .. } => {
+                                    let Port::$rx_variant = port else {
+                                        panic!("{location}: {port:?}: pending send step is for {}", stringify!($rx_variant));
+                                    };
+                                    let mut send = self.[<$rx_field _driver>]
+                                        .as_mut()
+                                        .expect(concat!(stringify!($rx_field), " driver already taken"))
+                                        .put(value.clone())?;
+                                    $crate::test_helpers::expect_pending_send(
+                                        location,
+                                        &clock,
+                                        port,
+                                        send,
+                                        ticks,
+                                    )
+                                    .await;
+                                }
+                                )*
+                                $(
                                 Step::<$item_ty, $expected_ty>::[<Expect $tx_variant>] { port, value, .. } => {
                                     let Port::$tx_variant = port else {
                                         panic!("{location}: {port:?}: step is for {}", stringify!($tx_variant));
@@ -1153,6 +1217,26 @@ macro_rules! build_component_harness {
                                         .unwrap_or_else(|| panic!("{location}: {} driver index {idx} out of range or already taken", stringify!($rx_array_field)))
                                         .put(value.clone())?
                                         .await;
+                                }
+                                )*
+                                $(
+                                Step::<$item_ty, $expected_ty>::[<ExpectPendingSend $rx_array_variant>] { port, value, ticks, .. } => {
+                                    let Port::$rx_array_variant(idx) = port else {
+                                        panic!("{location}: {port:?}: pending send step is for {}", stringify!($rx_array_variant));
+                                    };
+                                    let mut send = self.[<$rx_array_field _drivers>]
+                                        .get_mut(idx)
+                                        .and_then(|driver| driver.as_mut())
+                                        .unwrap_or_else(|| panic!("{location}: {} driver index {idx} out of range or already taken", stringify!($rx_array_field)))
+                                        .put(value.clone())?;
+                                    $crate::test_helpers::expect_pending_send(
+                                        location,
+                                        &clock,
+                                        port,
+                                        send,
+                                        ticks,
+                                    )
+                                    .await;
                                 }
                                 )*
                                 $(
@@ -1491,6 +1575,23 @@ macro_rules! build_component_harness {
 
             $(
                 #[allow(unused_macros)]
+                macro_rules! [<expect_pending_send_ $rx_field>] {
+                    ($value:expr, $ticks:expr,) => {
+                        [<expect_pending_send_ $rx_field>]!($value, $ticks)
+                    };
+                    ($value:expr, $ticks:expr) => {
+                        Step::[<ExpectPendingSend $rx_variant>] {
+                            location: step_location!(),
+                            port: Port::$rx_variant,
+                            value: $value,
+                            ticks: $ticks,
+                        }
+                    };
+                }
+            )*
+
+            $(
+                #[allow(unused_macros)]
                 macro_rules! [<expect_ $tx_field>] {
                     ($value:expr,) => {
                         [<expect_ $tx_field>]!($value)
@@ -1516,6 +1617,23 @@ macro_rules! build_component_harness {
                             location: step_location!(),
                             port: Port::$rx_array_variant($idx),
                             value: $value,
+                        }
+                    };
+                }
+            )*
+
+            $(
+                #[allow(unused_macros)]
+                macro_rules! [<expect_pending_send_ $rx_array_field>] {
+                    ($idx:expr, $value:expr, $ticks:expr,) => {
+                        [<expect_pending_send_ $rx_array_field>]!($idx, $value, $ticks)
+                    };
+                    ($idx:expr, $value:expr, $ticks:expr) => {
+                        Step::[<ExpectPendingSend $rx_array_variant>] {
+                            location: step_location!(),
+                            port: Port::$rx_array_variant($idx),
+                            value: $value,
+                            ticks: $ticks,
                         }
                     };
                 }

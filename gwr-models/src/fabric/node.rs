@@ -91,7 +91,7 @@ use gwr_components::arbiter::Arbiter;
 use gwr_components::arbiter::policy::RoundRobin;
 use gwr_components::flow_controls::limiter::Limiter;
 use gwr_components::router::{Route, Router};
-use gwr_components::store::Store;
+use gwr_components::store::{ByteStore, Store};
 use gwr_components::{connect_port, rc_limiter};
 use gwr_engine::engine::Engine;
 use gwr_engine::port::PortStateResult;
@@ -384,12 +384,12 @@ where
             Some(&ingress_buffer_limiter_aka),
             port_limiter.clone(),
         );
-        let ingress_buffer = Store::new_and_register(
+        let ingress_buffer = ByteStore::new_and_register(
             engine,
             clock,
             node,
             &format!("ingress_buf_{i}"),
-            config.rx_buffer_entries,
+            config.rx_buffer_bytes,
         )?;
         connect_port!(ingress_buffer_limiter, tx => ingress_buffer, rx)
             .expect("Internal ports should connect without error");
@@ -406,13 +406,13 @@ where
             port_limiter.clone(),
         );
         let egress_buffer_aka = build_aka!(aka, node, &[(&format!("egress_{i}"), "tx")]);
-        let egress_buffer = Store::new_and_register_with_renames(
+        let egress_buffer = ByteStore::new_and_register_with_renames(
             engine,
             clock,
             node,
             &format!("egress_buf_{i}"),
             Some(&egress_buffer_aka),
-            config.tx_buffer_entries,
+            config.tx_buffer_bytes,
         )?;
         connect_port!(egress_buffer_limiter, tx => egress_buffer, rx)
             .expect("Internal ports should connect without error");

@@ -31,7 +31,7 @@ use gwr_components::connect_port;
 use gwr_components::flow_controls::limiter::Limiter;
 use gwr_components::flow_controls::rate_limiter::RateLimiter;
 use gwr_components::router::{Route, Router};
-use gwr_components::store::Store;
+use gwr_components::store::{ByteStore, Store};
 use gwr_engine::engine::Engine;
 use gwr_engine::port::PortStateResult;
 use gwr_engine::time::clock::Clock;
@@ -51,8 +51,8 @@ pub struct RingConfig<T>
 where
     T: SimObject,
 {
-    rx_buffer_entries: usize,
-    tx_buffer_entries: usize,
+    rx_buffer_bytes: usize,
+    tx_buffer_bytes: usize,
     write_limiter: Rc<RateLimiter<T>>,
 }
 
@@ -62,13 +62,13 @@ where
 {
     #[must_use]
     pub fn new(
-        rx_buffer_entries: usize,
-        tx_buffer_entries: usize,
+        rx_buffer_bytes: usize,
+        tx_buffer_bytes: usize,
         write_limiter: Rc<RateLimiter<T>>,
     ) -> Self {
         Self {
-            rx_buffer_entries,
-            tx_buffer_entries,
+            rx_buffer_bytes,
+            tx_buffer_bytes,
             write_limiter,
         }
     }
@@ -113,7 +113,7 @@ where
             config.write_limiter.clone(),
         );
         let rx_buffer =
-            Store::new_and_register(engine, clock, &entity, "rx_buf", config.rx_buffer_entries)?;
+            ByteStore::new_and_register(engine, clock, &entity, "rx_buf", config.rx_buffer_bytes)?;
         connect_port!(rx_buffer_limiter, tx => rx_buffer, rx)
             .expect("Internal ports should connect without error");
 
@@ -125,13 +125,13 @@ where
             config.write_limiter.clone(),
         );
         let tx_buffer_aka = build_aka!(aka, &entity, &[("ring_tx", "tx")]);
-        let tx_buffer = Store::new_and_register_with_renames(
+        let tx_buffer = ByteStore::new_and_register_with_renames(
             engine,
             clock,
             &entity,
             "tx_buf",
             Some(&tx_buffer_aka),
-            config.tx_buffer_entries,
+            config.tx_buffer_bytes,
         )?;
         connect_port!(tx_buffer_limiter, tx => tx_buffer, rx)
             .expect("Internal ports should connect without error");

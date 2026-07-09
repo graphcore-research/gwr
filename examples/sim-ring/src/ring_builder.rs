@@ -30,8 +30,8 @@ pub type Sinks = Vec<Rc<Sink<EthernetFrame>>>;
 pub struct Config {
     pub ring_size: usize,
     pub ring_priority: usize,
-    pub rx_buffer_frames: usize,
-    pub tx_buffer_frames: usize,
+    pub rx_buffer_bytes: usize,
+    pub tx_buffer_bytes: usize,
     pub frame_payload_bytes: usize,
     pub num_send_frames: usize,
 }
@@ -53,8 +53,8 @@ where
 pub fn build_ring_nodes(engine: &mut Engine, clock: &Clock, config: &Config) -> Nodes {
     let limiter_128_gbps = rc_limiter!(clock, 128);
     let ring_config = RingConfig::new(
-        config.rx_buffer_frames,
-        config.tx_buffer_frames,
+        config.rx_buffer_bytes,
+        config.tx_buffer_bytes,
         limiter_128_gbps.clone(),
     );
     let top = engine.top();

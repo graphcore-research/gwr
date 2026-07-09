@@ -151,7 +151,7 @@
 //! # use gwr_components::delay::Delay;
 //! # use gwr_components::sink::Sink;
 //! # use gwr_components::source::Source;
-//! # use gwr_components::store::Store;
+//! # use gwr_components::store::ObjectStore;
 //! # use gwr_components::{connect_port, option_box_repeat};
 //! # use gwr_engine::engine::Engine;
 //! # use gwr_engine::port::{InPort, OutPort};

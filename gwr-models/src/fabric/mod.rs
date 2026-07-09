@@ -51,11 +51,11 @@ pub struct FabricConfig {
     /// Fixed overhead to be added to routing delay
     cycles_overhead: usize,
 
-    /// Number of entries in the rx buffer for each fabric port
-    rx_buffer_entries: usize,
+    /// Number of bytes in the rx buffer for each fabric port
+    rx_buffer_bytes: usize,
 
-    /// Number of entries in the tx buffer for each fabric port
-    tx_buffer_entries: usize,
+    /// Number of bytes in the tx buffer for each fabric port
+    tx_buffer_bytes: usize,
 
     /// Set the throughput limit on each port (in bits per tick)
     port_bits_per_tick: usize,
@@ -151,8 +151,8 @@ impl FabricConfig {
         ports_per_node_limit: Option<usize>,
         cycles_per_hop: usize,
         cycles_overhead: usize,
-        rx_buffer_entries: usize,
-        tx_buffer_entries: usize,
+        rx_buffer_bytes: usize,
+        tx_buffer_bytes: usize,
         port_bits_per_tick: usize,
     ) -> Self {
         let fabric_port_indices = create_populated_indices(
@@ -168,8 +168,8 @@ impl FabricConfig {
             ports_per_node_limit,
             cycles_per_hop,
             cycles_overhead,
-            rx_buffer_entries,
-            tx_buffer_entries,
+            rx_buffer_bytes,
+            tx_buffer_bytes,
             port_bits_per_tick,
             fabric_port_indices,
         }

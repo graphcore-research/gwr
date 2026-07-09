@@ -106,8 +106,8 @@ fn default_config() -> Rc<FabricConfig> {
     let num_ports_per_node = 2;
     let cycles_per_hop = 5;
     let cycles_overhead = 1;
-    let rx_buffer_entries = 1;
-    let tx_buffer_entries = 1;
+    let rx_buffer_bytes = 1024;
+    let tx_buffer_bytes = 1024;
     let port_bits_per_tick = 128;
 
     let config = FabricConfig::new(
@@ -117,8 +117,8 @@ fn default_config() -> Rc<FabricConfig> {
         None,
         cycles_per_hop,
         cycles_overhead,
-        rx_buffer_entries,
-        tx_buffer_entries,
+        rx_buffer_bytes,
+        tx_buffer_bytes,
         port_bits_per_tick,
     );
     Rc::new(config)
@@ -245,7 +245,7 @@ mod routed_fabric_harness {
         let mut engine = start_test(file!());
         let clock = engine.clock_ghz(1.0);
         let top = engine.top();
-        let config = Rc::new(FabricConfig::new(2, 2, 1, None, 2, 1, 2, 2, 128));
+        let config = Rc::new(FabricConfig::new(2, 2, 1, None, 2, 1, 1024, 1024, 128));
         let fabric = RoutedFabric::new_and_register(
             &engine,
             &clock,
@@ -330,7 +330,7 @@ fn invalid_functional_fabric() {
 }
 
 #[test]
-fn invalid_functional_fabric_rx_buffer_entries() {
+fn invalid_functional_fabric_rx_buffer_bytes() {
     let config = Rc::new(FabricConfig::new(1, 1, 2, None, 1, 1, 0, 1, 1));
     let mut engine = start_test(file!());
     let clock = engine.clock_ghz(1.0);
@@ -343,13 +343,13 @@ fn invalid_functional_fabric_rx_buffer_entries() {
         panic!("Expected zero-capacity RX buffer creation to return an error");
     };
     assert!(
-        format!("{err}").contains("Unsupported Store with 0 capacity"),
+        format!("{err}").contains("Unsupported Store with capacity of 0"),
         "Unexpected error: {err}"
     );
 }
 
 #[test]
-fn invalid_functional_fabric_tx_buffer_entries() {
+fn invalid_functional_fabric_tx_buffer_bytes() {
     let config = Rc::new(FabricConfig::new(1, 1, 2, None, 1, 1, 1, 0, 1));
     let mut engine = start_test(file!());
     let clock = engine.clock_ghz(1.0);
@@ -362,7 +362,7 @@ fn invalid_functional_fabric_tx_buffer_entries() {
         panic!("Expected zero-capacity TX buffer creation to return an error");
     };
     assert!(
-        format!("{err}").contains("Unsupported Store with 0 capacity"),
+        format!("{err}").contains("Unsupported Store with capacity of 0"),
         "Unexpected error: {err}"
     );
 }

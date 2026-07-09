@@ -12,7 +12,7 @@ use gwr_components::flow_controls::limiter::Limiter;
 use gwr_components::flow_controls::rate_limiter::RateLimiter;
 use gwr_components::sink::Sink;
 use gwr_components::source::Source;
-use gwr_components::store::Store;
+use gwr_components::store::{ObjectStore, Store};
 use gwr_components::types::Credit;
 use gwr_engine::test_helpers::start_test;
 
@@ -101,11 +101,11 @@ mod delay_harness {
     }
 }
 
-mod store_harness {
+mod object_store_harness {
     use super::*;
 
     build_component_harness! {
-        harness StoreHarness<T> {
+        harness ObjectStoreHarness<T> {
             component: store: Rc<Store<T>>,
             rx ports: {
                 Rx<T> => rx
@@ -117,16 +117,37 @@ mod store_harness {
     }
 
     #[test]
-    fn harness_supports_store_ports() {
+    fn harness_supports_object_store_ports() {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
-        let store = Store::new_and_register(&engine, &clock, engine.top(), "store", 2).unwrap();
-        let mut harness = StoreHarness::new(engine, store);
+        let store =
+            ObjectStore::new_and_register(&engine, &clock, engine.top(), "store", 2).unwrap();
+        let mut harness = ObjectStoreHarness::new(engine, store);
 
         harness.run_steps([send_rx!(10), send_rx!(20), expect_tx!(10), expect_tx!(20)]);
     }
 
-    struct StoreFillGenerator {
+    #[test]
+    fn harness_supports_pending_send_steps() {
+        let mut engine = start_test(file!());
+        let clock = engine.default_clock();
+        let store =
+            ObjectStore::new_and_register(&engine, &clock, engine.top(), "store", 1).unwrap();
+        let mut harness = ObjectStoreHarness::new(engine, store);
+
+        harness.run_steps([
+            send_rx!(10),
+            par!([
+                expect_pending_send_rx!(20, 1),
+                seq!([delay!(1), expect_tx!(10)]),
+            ]),
+            expect_tx!(20),
+        ]);
+
+        assert_eq!(harness.clock.time_now_ns(), 1.0);
+    }
+
+    struct ObjectStoreFillGenerator {
         store: Rc<Store<usize>>,
         next_value: usize,
         next_expected: usize,
@@ -134,7 +155,7 @@ mod store_harness {
         capacity: usize,
     }
 
-    impl Iterator for StoreFillGenerator {
+    impl Iterator for ObjectStoreFillGenerator {
         type Item = Step<usize>;
 
         fn next(&mut self) -> Option<Self::Item> {
@@ -142,7 +163,7 @@ mod store_harness {
                 return None;
             }
 
-            if self.store.fill_level() < self.capacity && self.next_value < self.num_to_receive {
+            if self.store.capacity_used() < self.capacity && self.next_value < self.num_to_receive {
                 let value = self.next_value;
                 self.next_value += 1;
                 return Some(send_rx!(value));
@@ -158,19 +179,20 @@ mod store_harness {
     fn harness_supports_stateful_step_generator() {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
-        let store = Store::new_and_register(&engine, &clock, engine.top(), "store", 2).unwrap();
-        let generator = StoreFillGenerator {
+        let store =
+            ObjectStore::new_and_register(&engine, &clock, engine.top(), "store", 2).unwrap();
+        let generator = ObjectStoreFillGenerator {
             store: store.clone(),
             next_value: 0,
             next_expected: 0,
             num_to_receive: 8,
             capacity: 2,
         };
-        let mut harness = StoreHarness::new(engine, store.clone());
+        let mut harness = ObjectStoreHarness::new(engine, store.clone());
 
         harness.run_step_generator(generator);
 
-        assert_eq!(store.fill_level(), 0);
+        assert_eq!(store.capacity_used(), 0);
     }
 }
 

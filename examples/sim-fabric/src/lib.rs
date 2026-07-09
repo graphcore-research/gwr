@@ -16,7 +16,7 @@
 //!
 //! Running a basic all-to-all simulation
 //! ```text
-//! cargo run --bin sim-fabric --release -- --kib-to-send 1024 --stdout --traffic-pattern all-to-all-fixed
+//! cargo run --bin sim-fabric --release -- --bytes-to-send 1MiB --stdout --traffic-pattern all-to-all-fixed
 //! ```
 //!
 //! In order to achieve the maximum throughput it is essential to make the
@@ -24,7 +24,7 @@
 //! port and the 20-byte ethernet frame overhead an ideal frame size would
 //! be something like 1484:
 //! ```text
-//! cargo run --bin sim-fabric --release -- --port-bits-per-tick 128 --frame-overhead-bytes 20 --frame-payload-bytes 1484 --kib-to-send 1024 --stdout
+//! cargo run --bin sim-fabric --release -- --port-bits-per-tick 128 --frame-overhead-bytes 20 --frame-payload-bytes 1484 --bytes-to-send 1MiB --stdout
 //! ```
 //!
 //! This achieves the peak bandwith at one port of 14.9 GiB/s and if run with
@@ -36,7 +36,7 @@
 //! different       value for `--seed` to observe this behaviour.
 //!
 //! ```text
-//! cargo run --bin sim-fabric --release -- --port-bits-per-tick 128 --frame-overhead-bytes 20 --frame-payload-bytes 1484 --kib-to-send 1024 --traffic-pattern all-to-all-fixed --seed 3 --stdout
+//! cargo run --bin sim-fabric --release -- --port-bits-per-tick 128 --frame-overhead-bytes 20 --frame-payload-bytes 1484B --bytes-to-send 1MiB --traffic-pattern all-to-all-fixed --seed 3 --stdout
 //! ```
 
 pub mod access_gen;

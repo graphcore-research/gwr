@@ -2,7 +2,7 @@
 
 //! This is an example component that delays data and also randomly drop data.
 //!
-//! This component uses the existing `Delay` and `Store` components.
+//! This component uses the existing `Delay` and `ObjectStore` components.
 //!
 //! The `main.rs` in this folder shows how it can be used.
 //!
@@ -20,7 +20,7 @@ use std::rc::Rc;
 
 use async_trait::async_trait;
 use gwr_components::delay::Delay;
-use gwr_components::store::Store;
+use gwr_components::store::{ObjectStore, Store};
 /// The gwr components crate provides many connectable building blocks.
 /// Component traits and types are provided along with the components
 /// themselves.
@@ -98,8 +98,8 @@ where
     /// when the Engine is run.
     tx: RefCell<Option<OutPort<T>>>,
 
-    /// After the `Delay` data will be placed into a `Store` from where it can
-    /// be pulled and either passed on or dropped.
+    /// After the `Delay` data will be placed into a `ObjectStore` from where it
+    /// can be pulled and either passed on or dropped.
     ///
     /// It is again placed within an `Option` so that it can be removed later
     /// when the Engine is run.
@@ -162,7 +162,7 @@ where
         // Build up a renaming that shows that this component's `tx` port is the same
         // as the buffer's `tx` port and the user will be able to use either name.
         let buffer_aka = build_aka!(aka, &entity, &[("tx", "tx")]);
-        let buffer = Store::new_and_register_with_renames(
+        let buffer = ObjectStore::new_and_register_with_renames(
             engine,
             clock,
             &entity,
