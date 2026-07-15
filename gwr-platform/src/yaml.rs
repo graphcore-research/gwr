@@ -191,8 +191,8 @@ fn emit_fabrics(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std
         )?;
         emit_optional_kv(&mut out, "ticks_per_hop", fabric.ticks_per_hop, 2)?;
         emit_optional_kv(&mut out, "ticks_overhead", fabric.ticks_overhead, 2)?;
-        emit_optional_kv(&mut out, "rx_buffer_entries", fabric.rx_buffer_entries, 2)?;
-        emit_optional_kv(&mut out, "tx_buffer_entries", fabric.tx_buffer_entries, 2)?;
+        emit_optional_kv(&mut out, "rx_buffer_bytes", fabric.rx_buffer_bytes, 2)?;
+        emit_optional_kv(&mut out, "tx_buffer_bytes", fabric.tx_buffer_bytes, 2)?;
         emit_optional_kv(&mut out, "port_bits_per_tick", fabric.port_bits_per_tick, 2)?;
         if let Some(routing) = fabric.routing {
             emit_line(
