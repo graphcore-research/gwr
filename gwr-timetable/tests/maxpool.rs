@@ -96,6 +96,11 @@ edges:
     let timetable = Timetable::new(&top, timetable_file, &platform).unwrap();
 
     timetable.set_task_completed(1).unwrap();
+    timetable.set_task_completed(1).unwrap();
+
+    let (done, ready_node_indices) = timetable.ready_task_indices("pe0").unwrap();
+    assert!(done);
+    assert!(ready_node_indices.is_empty());
 
     timetable.check_tasks_complete().unwrap();
 }
