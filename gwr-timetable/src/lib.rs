@@ -130,11 +130,15 @@ pub struct Timetable {
     platform: Rc<Platform>,
     nodes: Vec<Node>,
     edges: Vec<EdgeSection>,
+    node_pe_indices: Vec<Option<usize>>,
     completed_node_indices: RefCell<HashSet<usize>>,
     active_node_indices: RefCell<HashSet<usize>>,
     // Use BTreeSet for the cases where we iterate over the set as they have
     // deterministic iteration order.
-    nodes_per_pe: RefCell<HashMap<usize, BTreeSet<usize>>>,
+    nodes_per_pe: HashMap<usize, BTreeSet<usize>>,
+    ready_nodes_per_pe: RefCell<HashMap<usize, BTreeSet<usize>>>,
+    remaining_nodes_per_pe: RefCell<HashMap<usize, usize>>,
+    unresolved_input_counts: RefCell<Vec<usize>>,
     ready_nodes_changed: Repeated<()>,
 }
 
@@ -199,25 +203,30 @@ impl Timetable {
         let entity = Rc::new(Entity::new(parent, "timetable"));
         let mut node_idx_by_id = HashMap::new();
         let mut nodes_per_pe = HashMap::new();
+        let mut node_pe_indices = Vec::with_capacity(timetable_file.nodes.len());
         let mut nodes = Vec::with_capacity(timetable_file.nodes.len());
 
         for (i, node_section) in timetable_file.nodes.drain(..).enumerate() {
             let (id, pe) = node_section.id_pe();
             node_idx_by_id.insert(id.clone(), i);
 
-            if let Some(pe_id) = &pe {
+            let pe_idx = if let Some(pe_id) = &pe {
                 let pe_idx = platform.pe_idx_from_name(pe_id)?;
                 nodes_per_pe
                     .entry(pe_idx)
                     .or_insert_with(BTreeSet::new)
                     .insert(i);
-            }
+                Some(pe_idx)
+            } else {
+                None
+            };
 
             nodes.push(Node {
                 node_section,
                 inputs: Vec::new(),
                 outputs: Vec::new(),
             });
+            node_pe_indices.push(pe_idx);
         }
 
         // Wire up the new node inputs/outputs to build the graph connectivity
@@ -252,16 +261,21 @@ impl Timetable {
             entity,
             nodes,
             edges: timetable_file.edges,
+            node_pe_indices,
             platform: platform.clone(),
             completed_node_indices: RefCell::new(HashSet::new()),
             active_node_indices: RefCell::new(HashSet::new()),
-            nodes_per_pe: RefCell::new(nodes_per_pe),
+            nodes_per_pe,
+            ready_nodes_per_pe: RefCell::new(HashMap::new()),
+            remaining_nodes_per_pe: RefCell::new(HashMap::new()),
+            unresolved_input_counts: RefCell::new(Vec::new()),
             ready_nodes_changed: Repeated::new(()),
         };
 
         timetable.validate()?;
 
         timetable.update_complete_tensors();
+        timetable.initialize_scheduler_state();
 
         Ok(timetable)
     }
@@ -419,21 +433,26 @@ impl Timetable {
         validate_access_in_range(id, "Store", store_config, config)
     }
 
-    /// Check a given tensor index and move it if it is now complete
-    fn update_complete_tensor(&self, tensor_idx: usize) {
+    /// Check a given tensor index and move it if it is now complete.
+    fn update_complete_tensor(&self, tensor_idx: usize) -> bool {
         let mut completed_node_indices = self.completed_node_indices.borrow_mut();
+        if completed_node_indices.contains(&tensor_idx) {
+            return false;
+        }
+
         let tensor_node = &self.nodes[tensor_idx];
 
         // Look for an input node that is not complete
         for idx in tensor_node.inputs.iter().flatten() {
             if !completed_node_indices.contains(idx) {
-                return;
+                return false;
             }
         }
 
         // No active inputs remain, this is now complete
         self.active_node_indices.borrow_mut().remove(&tensor_idx);
         completed_node_indices.insert(tensor_idx);
+        true
     }
 
     /// Iterate across all active tensors and move those that are now complete
@@ -442,6 +461,74 @@ impl Timetable {
             if let NodeSection::Tensor { .. } = node.node_section {
                 self.update_complete_tensor(idx);
             }
+        }
+    }
+
+    fn initialize_scheduler_state(&self) {
+        let completed_node_indices = self.completed_node_indices.borrow();
+        let mut unresolved_input_counts = vec![0; self.nodes.len()];
+        let mut ready_nodes_per_pe: HashMap<usize, BTreeSet<usize>> = HashMap::new();
+        let mut remaining_nodes_per_pe = HashMap::new();
+
+        for (pe_idx, node_indices) in &self.nodes_per_pe {
+            let mut remaining_nodes = 0;
+            for node_idx in node_indices {
+                if completed_node_indices.contains(node_idx) {
+                    continue;
+                }
+
+                remaining_nodes += 1;
+                let unresolved_inputs = self.nodes[*node_idx]
+                    .inputs
+                    .iter()
+                    .flatten()
+                    .filter(|input_idx| !completed_node_indices.contains(input_idx))
+                    .count();
+                unresolved_input_counts[*node_idx] = unresolved_inputs;
+                if unresolved_inputs == 0 {
+                    ready_nodes_per_pe
+                        .entry(*pe_idx)
+                        .or_default()
+                        .insert(*node_idx);
+                }
+            }
+            remaining_nodes_per_pe.insert(*pe_idx, remaining_nodes);
+        }
+
+        *self.unresolved_input_counts.borrow_mut() = unresolved_input_counts;
+        *self.ready_nodes_per_pe.borrow_mut() = ready_nodes_per_pe;
+        *self.remaining_nodes_per_pe.borrow_mut() = remaining_nodes_per_pe;
+    }
+
+    fn mark_dependency_completed(&self, node_idx: usize) {
+        let Some(pe_idx) = self.node_pe_indices[node_idx] else {
+            return;
+        };
+        if self.completed_node_indices.borrow().contains(&node_idx)
+            || self.active_node_indices.borrow().contains(&node_idx)
+        {
+            return;
+        }
+
+        let mut unresolved_input_counts = self.unresolved_input_counts.borrow_mut();
+        let unresolved_inputs = &mut unresolved_input_counts[node_idx];
+        if *unresolved_inputs == 0 {
+            return;
+        }
+
+        *unresolved_inputs -= 1;
+        if *unresolved_inputs == 0 {
+            self.ready_nodes_per_pe
+                .borrow_mut()
+                .entry(pe_idx)
+                .or_default()
+                .insert(node_idx);
+        }
+    }
+
+    fn mark_successors_updated(&self, node_idx: usize) {
+        for output_node_idx in self.nodes[node_idx].outputs.iter().flatten() {
+            self.mark_dependency_completed(*output_node_idx);
         }
     }
 
@@ -668,6 +755,13 @@ impl Dispatch for Timetable {
 
     fn set_task_active(&self, node_idx: usize) -> SimResult {
         debug!(self.entity; "task{node_idx}: active");
+        if let Some(pe_idx) = self.node_pe_indices[node_idx] {
+            self.ready_nodes_per_pe
+                .borrow_mut()
+                .entry(pe_idx)
+                .or_default()
+                .remove(&node_idx);
+        }
         self.active_node_indices.borrow_mut().insert(node_idx);
         self.ready_nodes_changed.notify();
         Ok(())
@@ -676,30 +770,46 @@ impl Dispatch for Timetable {
     fn set_task_completed(&self, node_idx: usize) -> SimResult {
         debug!(self.entity; "task{node_idx}: completed");
 
+        if self.completed_node_indices.borrow().contains(&node_idx) {
+            return Ok(());
+        }
+
         let node = &self.nodes[node_idx];
-        let pe = node.node_section.pe();
-        if let Some(pe) = pe {
-            let pe_idx = self.platform.pe_idx_from_name(pe)?;
-            let mut nodes_per_pe_guard = self.nodes_per_pe.borrow_mut();
-            nodes_per_pe_guard
-                .get_mut(&pe_idx)
-                .unwrap()
+        if let Some(pe_idx) = self.node_pe_indices[node_idx] {
+            self.ready_nodes_per_pe
+                .borrow_mut()
+                .entry(pe_idx)
+                .or_default()
                 .remove(&node_idx);
+
+            let mut remaining_nodes_per_pe = self.remaining_nodes_per_pe.borrow_mut();
+            let remaining_nodes = remaining_nodes_per_pe.get_mut(&pe_idx).ok_or_else(|| {
+                SimError(format!("No remaining node count for PE index {pe_idx}"))
+            })?;
+            if *remaining_nodes == 0 {
+                return sim_error!("PE remaining node count underflow for task {node_idx}");
+            }
+            *remaining_nodes -= 1;
         }
         self.active_node_indices.borrow_mut().remove(&node_idx);
         self.completed_node_indices.borrow_mut().insert(node_idx);
+        self.mark_successors_updated(node_idx);
 
         match node.node_section {
             NodeSection::Compute { .. } => {
                 for tensor_node_idx in node.outputs.iter().flatten() {
-                    self.update_complete_tensor(*tensor_node_idx);
+                    if self.update_complete_tensor(*tensor_node_idx) {
+                        self.mark_successors_updated(*tensor_node_idx);
+                    }
                 }
             }
             NodeSection::Memory { op, .. } => {
                 if let MemoryOp::Store = op {
                     // Only stores are completing their output tensors
                     let tensor_node_idx = node.get_output_tensor_node_idx().unwrap();
-                    self.update_complete_tensor(tensor_node_idx);
+                    if self.update_complete_tensor(tensor_node_idx) {
+                        self.mark_successors_updated(tensor_node_idx);
+                    }
                 }
             }
             NodeSection::Tensor { .. } => {}
@@ -711,52 +821,21 @@ impl Dispatch for Timetable {
 
     fn ready_task_indices(&self, pe_id: &str) -> Result<(bool, Vec<usize>), SimError> {
         trace!(self.entity ; "ready_node_indices for {pe_id}");
-        let mut pe_done = true;
-        let completed_guard = self.completed_node_indices.borrow();
-        let active_guard = self.active_node_indices.borrow();
-        let mut ready_node_indices = Vec::new();
         let pe_idx = self.platform.pe_idx_from_name(pe_id)?;
-        let nodes_per_pe_guard = self.nodes_per_pe.borrow();
-        if let Some(nodes) = nodes_per_pe_guard.get(&pe_idx) {
-            for node_idx in nodes {
-                trace!(self.entity ; "ready? {node_idx}");
-                if active_guard.contains(node_idx) {
-                    trace!(self.entity ; "{node_idx} active");
-                    continue;
-                }
-                if completed_guard.contains(node_idx) {
-                    trace!(self.entity ; "{node_idx} complete");
-                    continue;
-                }
-                pe_done = false;
+        let pe_done = self
+            .remaining_nodes_per_pe
+            .borrow()
+            .get(&pe_idx)
+            .copied()
+            .unwrap_or_default()
+            == 0;
+        let ready_node_indices = self
+            .ready_nodes_per_pe
+            .borrow()
+            .get(&pe_idx)
+            .map(|nodes| nodes.iter().copied().collect())
+            .unwrap_or_default();
 
-                let mut ready = true;
-
-                let to_node = &self.nodes[*node_idx];
-                let to_pe = to_node.node_section.pe();
-                for from_node_idx in &to_node.inputs {
-                    if from_node_idx.is_none() || to_pe.is_none() {
-                        continue;
-                    }
-
-                    let from_node_idx = from_node_idx.as_ref().unwrap();
-                    let to_pe_id = to_pe.as_ref().unwrap();
-                    trace!(self.entity ; "-> {to_pe_id}");
-                    let to_pe_idx = self.platform.pe_idx_from_name(to_pe_id)?;
-                    trace!(self.entity ; "idx {to_pe_idx}");
-                    if to_pe_idx == pe_idx && !completed_guard.contains(from_node_idx) {
-                        trace!(self.entity ; "{node_idx} not ready");
-                        ready = false;
-                        break;
-                    }
-                }
-
-                if ready {
-                    trace!(self.entity ; "{node_idx} ready");
-                    ready_node_indices.push(*node_idx);
-                }
-            }
-        }
         debug!(self.entity; "PE {pe_id}: done: {pe_done}, ready indices: {ready_node_indices:?}");
         Ok((pe_done, ready_node_indices))
     }
@@ -766,16 +845,13 @@ impl Dispatch for Timetable {
     }
 
     fn total_tasks_for_pe(&self, pe_name: &str) -> usize {
-        let mut num_nodes = 0;
-        for node in &self.nodes {
-            let pe = node.node_section.pe();
-            if let Some(pe) = pe
-                && pe == pe_name
-            {
-                num_nodes += 1;
-            }
-        }
-        num_nodes
+        let Ok(pe_idx) = self.platform.pe_idx_from_name(pe_name) else {
+            return 0;
+        };
+        self.nodes_per_pe
+            .get(&pe_idx)
+            .map(BTreeSet::len)
+            .unwrap_or_default()
     }
 }
 
