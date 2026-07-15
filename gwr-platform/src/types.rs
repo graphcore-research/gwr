@@ -140,8 +140,8 @@ pub struct FabricSection {
     pub fabric_ports_per_node: Option<usize>,
     pub ticks_per_hop: Option<usize>,
     pub ticks_overhead: Option<usize>,
-    pub rx_buffer_entries: Option<usize>,
-    pub tx_buffer_entries: Option<usize>,
+    pub rx_buffer_bytes: Option<usize>,
+    pub tx_buffer_bytes: Option<usize>,
     pub port_bits_per_tick: Option<usize>,
     pub routing: Option<FabricRoutingAlgorithm>,
 }

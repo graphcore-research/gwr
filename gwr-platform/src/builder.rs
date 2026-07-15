@@ -201,8 +201,8 @@ pub fn build_caches(
 pub const DEFAULT_FABRIC_PORTS_PER_NODE: usize = 1;
 pub const DEFAULT_FABRIC_TICKS_PER_HOP: usize = 2;
 pub const DEFAULT_FABRIC_TICKS_OVERHEAD: usize = 10;
-pub const DEFAULT_FABRIC_RX_BUFFER_ENTRIES: usize = 256;
-pub const DEFAULT_FABRIC_TX_BUFFER_ENTRIES: usize = 256;
+pub const DEFAULT_FABRIC_RX_BUFFER_BYTES: usize = 256;
+pub const DEFAULT_FABRIC_TX_BUFFER_BYTES: usize = 256;
 pub const DEFAULT_FABRIC_PORT_BITS_PER_TICK: usize = 32 * 8; // 32 bytes per cycle
 pub const DEFAULT_FABRIC_ROUTING: FabricRoutingAlgorithm = FabricRoutingAlgorithm::ColumnFirst;
 
@@ -226,12 +226,12 @@ pub fn build_fabrics(
             let ticks_overhead = fabric_section
                 .ticks_overhead
                 .unwrap_or(DEFAULT_FABRIC_TICKS_OVERHEAD);
-            let rx_buffer_entries = fabric_section
-                .rx_buffer_entries
-                .unwrap_or(DEFAULT_FABRIC_RX_BUFFER_ENTRIES);
-            let tx_buffer_entries = fabric_section
-                .tx_buffer_entries
-                .unwrap_or(DEFAULT_FABRIC_TX_BUFFER_ENTRIES);
+            let rx_buffer_bytes = fabric_section
+                .rx_buffer_bytes
+                .unwrap_or(DEFAULT_FABRIC_RX_BUFFER_BYTES);
+            let tx_buffer_bytes = fabric_section
+                .tx_buffer_bytes
+                .unwrap_or(DEFAULT_FABRIC_TX_BUFFER_BYTES);
             let port_bits_per_tick = fabric_section
                 .port_bits_per_tick
                 .unwrap_or(DEFAULT_FABRIC_PORT_BITS_PER_TICK);
@@ -244,8 +244,8 @@ pub fn build_fabrics(
                 None,
                 ticks_per_hop,
                 ticks_overhead,
-                rx_buffer_entries,
-                tx_buffer_entries,
+                rx_buffer_bytes,
+                tx_buffer_bytes,
                 port_bits_per_tick,
             ));
 
