@@ -9,7 +9,7 @@ use gwr_engine::traits::{Routable, SimObject, TotalBytes};
 use gwr_engine::types::AccessType;
 use gwr_track::entity::Entity;
 use gwr_track::id::Unique;
-use gwr_track::{Id, create_id};
+use gwr_track::{Id, create_id, track_create_object};
 
 pub const PREAMBLE_BYTES: usize = 7;
 pub const SFD_BYTES: usize = 1;
@@ -61,12 +61,13 @@ impl EthernetFrame {
             payload_size_bytes,
         };
         // Having just created the frame the req_type must be valid
-        created_by.track_create_object(
+        track_create_object!(
+            created_by;
             frame.id,
             frame.total_bytes(),
             "bytes",
             frame.access_type() as u8,
-            &format!("EthernetFrame: {frame}"),
+            "EthernetFrame: {frame}"
         );
         frame
     }

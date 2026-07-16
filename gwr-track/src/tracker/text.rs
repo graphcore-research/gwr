@@ -35,17 +35,22 @@ impl Track for TextTracker {
         self.entity_manager.unique_id()
     }
 
-    fn is_entity_enabled(&self, id: Id, level: log::Level) -> bool {
-        self.entity_manager.is_log_enabled_at_level(id, level)
+    fn enabled_level(&self, id: Id) -> log::Level {
+        self.entity_manager.enabled_level(id)
     }
 
     fn monitoring_window_size_for(&self, id: Id) -> Option<u64> {
         self.entity_manager.monitoring_window_size_for(id)
     }
 
-    fn add_entity(&self, id: Id, entity_name: &str, alternative_names: AlternativeNames) {
+    fn add_entity(
+        &self,
+        id: Id,
+        entity_name: &str,
+        alternative_names: AlternativeNames,
+    ) -> log::Level {
         self.entity_manager
-            .add_entity(id, entity_name, alternative_names);
+            .add_entity(id, entity_name, alternative_names)
     }
 
     fn enter(&self, id: Id, object: Id) {

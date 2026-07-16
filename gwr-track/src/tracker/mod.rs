@@ -42,16 +42,25 @@ pub trait Track {
     /// Allocate a new global ID
     fn unique_id(&self) -> Id;
 
-    /// Determine whether tracking is enabled, and at what level for an
-    /// entity looked up by its ID.
-    fn is_entity_enabled(&self, id: Id, level: log::Level) -> bool;
+    /// Determine the most verbose tracking level enabled for an entity.
+    fn enabled_level(&self, id: Id) -> log::Level;
+
+    /// Determine whether tracking is enabled at a given level for an entity.
+    fn is_entity_enabled(&self, id: Id, level: log::Level) -> bool {
+        level <= self.enabled_level(id)
+    }
 
     /// Return the monitoring window size if it is to be enabled.
     /// Entity looked up by its ID.
     fn monitoring_window_size_for(&self, id: Id) -> Option<u64>;
 
     /// Record an entity being created.
-    fn add_entity(&self, id: Id, entity_name: &str, alternative_names: AlternativeNames);
+    fn add_entity(
+        &self,
+        id: Id,
+        entity_name: &str,
+        alternative_names: AlternativeNames,
+    ) -> log::Level;
 
     /// Track when an entity with the given ID arrives.
     fn enter(&self, enter_into: Id, enter_obj: Id);
@@ -185,10 +194,10 @@ impl EntityManager {
         Id(id)
     }
 
-    fn is_log_enabled_at_level(&self, id: Id, level: log::Level) -> bool {
+    fn enabled_level(&self, id: Id) -> log::Level {
         match self.log_entity_lookup.borrow().get(&id) {
-            None => level <= self.default_entity_level,
-            Some(entity_level) => level <= *entity_level,
+            None => self.default_entity_level,
+            Some(entity_level) => *entity_level,
         }
     }
 
@@ -196,7 +205,12 @@ impl EntityManager {
         self.monitor_window_size_lookup.borrow().get(&id).copied()
     }
 
-    fn add_entity(&self, id: Id, entity_name: &str, alternative_names: AlternativeNames) {
+    fn add_entity(
+        &self,
+        id: Id,
+        entity_name: &str,
+        alternative_names: AlternativeNames,
+    ) -> log::Level {
         let entity_level = self.log_level_for(entity_name, alternative_names);
         if entity_level != self.default_entity_level
             && self
@@ -215,6 +229,8 @@ impl EntityManager {
                 .borrow_mut()
                 .insert(id, window_size_ticks);
         }
+
+        entity_level
     }
 
     fn log_level_for(&self, entity_name: &str, alternative_names: AlternativeNames) -> log::Level {

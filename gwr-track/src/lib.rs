@@ -73,10 +73,32 @@ pub const ROOT: Id = id::Id(1);
 ///
 /// **Note:** this macro should be used when the object being assigned the
 ///           [`Id`] will have its creation tracked with the
-///           [crate::entity::Entity::track_create_object] function.
+///           [`track_create_object`] macro.
 #[macro_export]
 macro_rules! create_id {
     ($entity:expr) => {{ $entity.tracker.unique_id() }};
+}
+
+/// Add an object creation event.
+///
+/// The details string is only formatted when trace-level events are enabled for
+/// the entity.
+#[macro_export]
+macro_rules! track_create_object {
+    ($entity:expr ; $created:expr, $size:expr, $units:expr, $req_type:expr, $($details:tt)+) => {{
+        let entity = &$entity;
+        if entity.trace_enabled() {
+            let details = format!($($details)+);
+            entity.tracker.create_object(
+                entity.id,
+                $created,
+                $size,
+                $units,
+                $req_type,
+                &details,
+            );
+        }
+    }};
 }
 
 /// Destroy an ID
@@ -127,9 +149,13 @@ macro_rules! set_time {
 /// stream.
 #[macro_export]
 macro_rules! log_base {
-    ($entity:expr ; $lvl:expr, $($arg:tt)+) => (
-        $entity.tracker.log($entity.id, $lvl, format_args!($($arg)+));
-    );
+    ($entity:expr ; $lvl:expr, $($arg:tt)+) => {{
+        let entity = &$entity;
+        let level = $lvl;
+        if entity.enabled_for(level) {
+            entity.tracker.log(entity.id, level, format_args!($($arg)+));
+        }
+    }};
 }
 
 /// The `trace` macro provides a wrapper for the [`log`](macro.log.html) macro
