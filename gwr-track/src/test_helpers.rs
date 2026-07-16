@@ -64,16 +64,21 @@ impl Track for TestTracker {
         Id(id)
     }
 
-    fn is_entity_enabled(&self, _id: Id, level: log::Level) -> bool {
-        level <= self.level
+    fn enabled_level(&self, _id: Id) -> log::Level {
+        self.level
     }
 
     fn monitoring_window_size_for(&self, _id: Id) -> Option<u64> {
         None
     }
 
-    fn add_entity(&self, _id: Id, _entity_name: &str, _alternative_names: AlternativeNames) {
-        // Do nothing
+    fn add_entity(
+        &self,
+        _id: Id,
+        _entity_name: &str,
+        _alternative_names: AlternativeNames,
+    ) -> log::Level {
+        self.level
     }
 
     fn enter(&self, id: Id, item: Id) {

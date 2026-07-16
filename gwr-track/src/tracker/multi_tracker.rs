@@ -34,13 +34,12 @@ impl Track for MultiTracker {
         self.entity_manager.unique_id()
     }
 
-    fn is_entity_enabled(&self, id: Id, level: log::Level) -> bool {
-        for tracker in &self.trackers {
-            if tracker.is_entity_enabled(id, level) {
-                return true;
-            }
-        }
-        false
+    fn enabled_level(&self, id: Id) -> log::Level {
+        self.trackers
+            .iter()
+            .map(|tracker| tracker.enabled_level(id))
+            .max()
+            .unwrap_or(log::Level::Error)
     }
 
     fn monitoring_window_size_for(&self, id: Id) -> Option<u64> {
@@ -52,10 +51,17 @@ impl Track for MultiTracker {
         None
     }
 
-    fn add_entity(&self, id: Id, entity_name: &str, alternative_names: AlternativeNames) {
-        for tracker in &self.trackers {
-            tracker.add_entity(id, entity_name, alternative_names);
-        }
+    fn add_entity(
+        &self,
+        id: Id,
+        entity_name: &str,
+        alternative_names: AlternativeNames,
+    ) -> log::Level {
+        self.trackers
+            .iter()
+            .map(|tracker| tracker.add_entity(id, entity_name, alternative_names))
+            .max()
+            .unwrap_or(log::Level::Error)
     }
 
     fn enter(&self, id: Id, object: Id) {

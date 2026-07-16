@@ -8,7 +8,7 @@ use gwr_engine::traits::{Routable, SimObject, TotalBytes};
 use gwr_engine::types::{AccessType, SimError};
 use gwr_track::entity::Entity;
 use gwr_track::id::Unique;
-use gwr_track::{Id, create_id};
+use gwr_track::{Id, create_id, track_create_object};
 
 use crate::memory::CacheHintType;
 use crate::memory::memory_map::DeviceId;
@@ -145,12 +145,13 @@ impl MemoryAccess {
             cache_hint: CacheHintType::Allocate,
             overhead_size_bytes,
         };
-        created_by.track_create_object(
+        track_create_object!(
+            created_by;
             access.id,
             access.total_bytes(),
             "bytes",
             access.access_type() as u8,
-            &format!("MemoryAccess: {access}"),
+            "MemoryAccess: {access}"
         );
         access
     }

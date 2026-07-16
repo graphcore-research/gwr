@@ -2,13 +2,17 @@
 
 //! Ensure that all version of each macro can be used
 
+use std::cell::Cell;
 use std::fmt::Display;
 use std::rc::Rc;
 
 use gwr_track::entity::{Entity, EntityLane, toplevel};
 use gwr_track::id::Unique;
+use gwr_track::tracker::Tracker;
+use gwr_track::tracker::multi_tracker::MultiTracker;
 use gwr_track::{
-    Id, create_id, debug, destroy_id, error, info, set_time, test_helpers, test_init, trace, warn,
+    Id, create_id, debug, destroy_id, error, info, set_time, test_helpers, test_init, trace,
+    track_create_object, warn,
 };
 
 #[derive(Debug)]
@@ -20,7 +24,7 @@ impl TestObject {
     fn new(entity: &Rc<Entity>, size: usize) -> Self {
         let id = create_id!(entity);
         let object = Self { id };
-        entity.track_create_object(id, size, "bytes", u8::MAX, &format!("{object}"));
+        track_create_object!(entity ; id, size, "bytes", u8::MAX, "{object}");
         object
     }
 }
@@ -67,6 +71,75 @@ build_with_entity!(info_with_entity, info, "INFO");
 build_with_entity!(debug_with_entity, debug, "DEBUG");
 build_with_entity!(warn_with_entity, warn, "WARN");
 build_with_entity!(error_with_entity, error, "ERROR");
+
+fn count_format_evaluation(evaluations: &Cell<usize>) -> &'static str {
+    evaluations.set(evaluations.get() + 1);
+    "evaluated"
+}
+
+#[test]
+fn disabled_log_macro_does_not_evaluate_format_arguments() {
+    let test_tracker = Rc::new(test_helpers::TestTracker::new(500, log::Level::Error));
+    let tracker: Tracker = test_tracker.clone();
+
+    let top = toplevel(&tracker, "top");
+    let evaluations = Cell::new(0);
+
+    trace!(top ; "{}", count_format_evaluation(&evaluations));
+
+    assert_eq!(evaluations.get(), 0);
+    test_helpers::check_and_clear(&test_tracker, &["0: created entity 500, top"]);
+}
+
+#[test]
+fn disabled_create_object_macro_does_not_evaluate_format_arguments() {
+    let test_tracker = Rc::new(test_helpers::TestTracker::new(550, log::Level::Error));
+    let tracker: Tracker = test_tracker.clone();
+
+    let top = toplevel(&tracker, "top");
+    let evaluations = Cell::new(0);
+
+    track_create_object!(
+        top;
+        Id(551),
+        1,
+        "bytes",
+        0,
+        "{}",
+        count_format_evaluation(&evaluations)
+    );
+
+    assert_eq!(evaluations.get(), 0);
+    test_helpers::check_and_clear(&test_tracker, &["0: created entity 550, top"]);
+}
+
+#[test]
+fn log_macro_evaluates_format_arguments_when_any_tracker_enables_level() {
+    let trace_tracker = Rc::new(test_helpers::TestTracker::new(600, log::Level::Trace));
+    let error_tracker = Rc::new(test_helpers::TestTracker::new(700, log::Level::Error));
+
+    let mut multi_tracker = MultiTracker::default();
+    let trace_tracker_dyn: Tracker = trace_tracker.clone();
+    let error_tracker_dyn: Tracker = error_tracker.clone();
+    multi_tracker.add_tracker(trace_tracker_dyn);
+    multi_tracker.add_tracker(error_tracker_dyn);
+    let tracker: Tracker = Rc::new(multi_tracker);
+
+    let top = toplevel(&tracker, "top");
+    let evaluations = Cell::new(0);
+
+    trace!(top ; "{}", count_format_evaluation(&evaluations));
+
+    assert_eq!(evaluations.get(), 1);
+    test_helpers::check_and_clear(
+        &trace_tracker,
+        &["0: created entity 2, top", "2:TRACE: evaluated"],
+    );
+    test_helpers::check_and_clear(
+        &error_tracker,
+        &["0: created entity 2, top", "2:TRACE: evaluated"],
+    );
+}
 
 #[test]
 fn create_destroy() {

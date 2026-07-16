@@ -53,6 +53,9 @@ pub struct Entity {
 
     /// [`Tracker`] used to handle trace/log events.
     pub tracker: Tracker,
+
+    /// Most verbose log level enabled for this entity by any tracker.
+    enabled_level: log::Level,
 }
 
 static JOIN: &str = "::";
@@ -74,13 +77,14 @@ impl Entity {
 
         let tracker = parent.tracker.clone();
         let id = create_id!(parent);
-        tracker.add_entity(id, &full_name, alternative_names);
+        let enabled_level = tracker.add_entity(id, &full_name, alternative_names);
 
         let entity = Self {
             name: String::from(name),
             parent: Some(parent.clone()),
             id,
             tracker,
+            enabled_level,
         };
         entity.track_create(parent.id, &full_name);
 
@@ -107,6 +111,19 @@ impl Entity {
         }
     }
 
+    /// Return whether trace-level events for this entity will be emitted.
+    #[must_use]
+    pub fn trace_enabled(&self) -> bool {
+        self.enabled_for(log::Level::Trace)
+    }
+
+    /// Return whether events at the given level will be emitted for this
+    /// entity.
+    #[must_use]
+    pub fn enabled_for(&self, level: log::Level) -> bool {
+        level <= self.enabled_level
+    }
+
     /// Emit the capacity represented by this simulation entity.
     pub fn track_capacity(&self, value: usize, units: impl Into<String>) {
         self.tracker.capacity(self.id, Capacity::new(value, units));
@@ -120,19 +137,6 @@ impl Entity {
     /// Emit an exit event for an object.
     pub fn track_exit(&self, exited: Id) {
         self.tracker.exit(self.id, exited);
-    }
-
-    /// Emit an object creation event.
-    pub fn track_create_object(
-        &self,
-        created: Id,
-        size: usize,
-        units: &str,
-        req_type: u8,
-        details: &str,
-    ) {
-        self.tracker
-            .create_object(self.id, created, size, units, req_type, details);
     }
 
     fn track_create(&self, created_by: Id, full_name: &str) {
@@ -171,12 +175,13 @@ impl fmt::Display for Entity {
 /// parent.
 pub fn toplevel(tracker: &Tracker, name: &str) -> Rc<Entity> {
     let id = tracker.unique_id();
-    tracker.add_entity(id, name, None);
+    let enabled_level = tracker.add_entity(id, name, None);
     let top = Rc::new(Entity {
         parent: None,
         name: String::from(name),
         id,
         tracker: tracker.clone(),
+        enabled_level,
     });
     top.track_create(crate::NO_ID, name);
     top

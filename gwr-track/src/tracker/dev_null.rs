@@ -16,13 +16,20 @@ impl Track for DevNullTracker {
     fn unique_id(&self) -> Id {
         Id(0)
     }
-    fn is_entity_enabled(&self, _id: Id, _level: log::Level) -> bool {
-        false
+    fn enabled_level(&self, _id: Id) -> log::Level {
+        log::Level::Error
     }
     fn monitoring_window_size_for(&self, _id: Id) -> Option<u64> {
         None
     }
-    fn add_entity(&self, _id: Id, _entity_name: &str, _alternative_names: AlternativeNames) {}
+    fn add_entity(
+        &self,
+        _id: Id,
+        _entity_name: &str,
+        _alternative_names: AlternativeNames,
+    ) -> log::Level {
+        log::Level::Error
+    }
     fn enter(&self, _id: Id, _obj: Id) {}
     fn exit(&self, _id: Id, _obj: Id) {}
     fn value(&self, _id: Id, _value: f64) {}
