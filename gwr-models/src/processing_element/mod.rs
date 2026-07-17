@@ -57,6 +57,26 @@ pub enum MachineOp {
     Mul,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct MachineOpCounts {
+    pub adds: usize,
+    pub compares: usize,
+    pub muls: usize,
+}
+
+impl MachineOpCounts {
+    #[must_use]
+    pub fn total(&self) -> usize {
+        self.adds + self.compares + self.muls
+    }
+
+    pub fn add_assign(&mut self, other: Self) {
+        self.adds += other.adds;
+        self.compares += other.compares;
+        self.muls += other.muls;
+    }
+}
+
 type Dispatcher = Rc<dyn Dispatch>;
 
 pub struct ProcessingElementConfig {
@@ -113,7 +133,7 @@ impl ComputeCapabilities {
 
 #[derive(Default)]
 struct ProcessingElementStats {
-    total_flops: usize,
+    machine_ops: MachineOpCounts,
 }
 
 struct Lane {
@@ -310,10 +330,21 @@ impl ProcessingElement {
         }
     }
 
+    #[must_use]
+    pub fn total_flops(&self) -> usize {
+        self.stats.borrow().machine_ops.total()
+    }
+
+    #[must_use]
+    pub fn machine_ops(&self) -> MachineOpCounts {
+        self.stats.borrow().machine_ops
+    }
+
     pub fn dump_stats(&self, time_now_ns: f64) {
         let stats = self.stats.borrow();
         let time_now_s = time_now_ns / 1e9;
-        let total_gflops = stats.total_flops as f64 / 1e9;
+        let total_flops = stats.machine_ops.total();
+        let total_gflops = total_flops as f64 / 1e9;
         let average_gflops_per_second = if time_now_s == 0.0 {
             0.0
         } else {
@@ -323,7 +354,14 @@ impl ProcessingElement {
         info!(self.entity ; "ProcessingElement {}:", self.entity.full_name());
         info!(self.entity ;
             "  FLOPs: {}, {total_gflops:.2} GFLOPs, {average_gflops_per_second:.2} GFLOP/s",
-            stats.total_flops
+            total_flops
+        );
+        info!(self.entity ;
+            "  Machine ops: {} total, {} add, {} mul, {} compare",
+            stats.machine_ops.total(),
+            stats.machine_ops.adds,
+            stats.machine_ops.muls,
+            stats.machine_ops.compares
         );
     }
 }
@@ -488,9 +526,10 @@ async fn handle_compute_task(
             &partition.inputs,
             &partition.outputs,
         )?;
-        let compute_flops = config
+        let machine_ops = config
             .op
-            .compute_flops(&partition.inputs, &partition.outputs)?;
+            .compute_machine_ops(&partition.inputs, &partition.outputs)?;
+        let compute_flops = machine_ops.total();
         if let Some(flop_monitor) = &flop_monitor {
             flop_monitor.record_interval(compute_ticks as u64, compute_flops as f64);
         }
@@ -508,7 +547,7 @@ async fn handle_compute_task(
             );
             clock.wait_ticks(compute_ticks as u64).await;
         }
-        stats.borrow_mut().total_flops += compute_flops;
+        stats.borrow_mut().machine_ops.add_assign(machine_ops);
 
         for (idx, view) in partition.outputs.iter().enumerate() {
             let Some(view) = view else {

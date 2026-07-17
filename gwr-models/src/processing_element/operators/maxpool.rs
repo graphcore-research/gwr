@@ -17,7 +17,7 @@ use crate::processing_element::operators::{
     DimPartition, ExpansionDirection, HasShape, TensorView, apply_dim_partitions,
     partition_across_dimensions,
 };
-use crate::processing_element::{ComputeCapabilities, MachineOp};
+use crate::processing_element::{ComputeCapabilities, MachineOp, MachineOpCounts};
 
 const NAME: &str = "MaxPool";
 const BATCH_DIM: usize = 0;
@@ -725,12 +725,15 @@ impl Operator for OperatorMaxPool {
         compute_capabilities.cycles_for_ops(comparisons, MachineOp::Compare)
     }
 
-    fn compute_flops(
+    fn compute_machine_ops(
         &self,
         inputs: &[Option<TensorView>],
         outputs: &[Option<TensorView>],
-    ) -> Result<usize, SimError> {
-        maxpool_comparisons(self, inputs, outputs)
+    ) -> Result<MachineOpCounts, SimError> {
+        Ok(MachineOpCounts {
+            compares: maxpool_comparisons(self, inputs, outputs)?,
+            ..MachineOpCounts::default()
+        })
     }
 
     fn partition_views(

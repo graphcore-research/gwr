@@ -14,7 +14,7 @@ use super::{Operator, Tensor, TensorPartition};
 use crate::processing_element::operators::{
     HasShape, Shape, TensorView, apply_dim_partitions, partition_across_dimensions,
 };
-use crate::processing_element::{ComputeCapabilities, MachineOp};
+use crate::processing_element::{ComputeCapabilities, MachineOp, MachineOpCounts};
 
 const NAME: &str = "Gemm";
 
@@ -362,13 +362,17 @@ impl Operator for OperatorGemm {
         )
     }
 
-    fn compute_flops(
+    fn compute_machine_ops(
         &self,
         inputs: &[Option<TensorView>],
         outputs: &[Option<TensorView>],
-    ) -> Result<usize, SimError> {
+    ) -> Result<MachineOpCounts, SimError> {
         let (num_muls, num_adds) = gemm_op_counts(inputs, outputs)?;
-        Ok(num_muls + num_adds)
+        Ok(MachineOpCounts {
+            adds: num_adds,
+            muls: num_muls,
+            ..MachineOpCounts::default()
+        })
     }
 
     fn partition_views(

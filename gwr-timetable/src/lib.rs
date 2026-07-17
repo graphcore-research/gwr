@@ -19,6 +19,7 @@ use gwr_engine::sim_error;
 use gwr_engine::traits::Event;
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::EntityGet;
+use gwr_models::processing_element::MachineOpCounts;
 use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::operators::{Tensor, TensorView};
 use gwr_models::processing_element::task::{
@@ -632,6 +633,7 @@ impl Timetable {
     pub fn dump_stats(&self) -> SimResult {
         let mut total_load_bytes = 0;
         let mut total_store_bytes = 0;
+        let mut machine_ops = MachineOpCounts::default();
         let mut num_compute_nodes = 0;
         let mut num_tensor_nodes = 0;
         let mut num_memory_nodes = 0;
@@ -645,8 +647,9 @@ impl Timetable {
                     }
                     num_memory_nodes += 1;
                 }
-                NodeSection::Compute { .. } => {
+                NodeSection::Compute { op, .. } => {
                     let (inputs, outputs) = self.get_input_output_tensors(idx)?;
+                    machine_ops.add_assign(op.compute_machine_ops(&inputs, &outputs)?);
                     for input_view in inputs.iter().flatten() {
                         total_load_bytes += input_view.num_bytes();
                     }
@@ -664,6 +667,13 @@ impl Timetable {
             "  {num_compute_nodes} compute nodes, {num_tensor_nodes} tensor nodes, {num_memory_nodes} memory nodes"
         );
         info!(self.entity ; "  loads {total_load_bytes} bytes, stores {total_store_bytes} bytes");
+        info!(self.entity ;
+            "  machine ops {} total, {} add, {} mul, {} compare",
+            machine_ops.total(),
+            machine_ops.adds,
+            machine_ops.muls,
+            machine_ops.compares
+        );
 
         Ok(())
     }
