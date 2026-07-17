@@ -14,7 +14,7 @@ use super::{Operator, Shape, Tensor, TensorPartition};
 use crate::processing_element::operators::{
     HasShape, TensorView, apply_dim_partitions, partition_across_dimensions,
 };
-use crate::processing_element::{ComputeCapabilities, MachineOp};
+use crate::processing_element::{ComputeCapabilities, MachineOp, MachineOpCounts};
 
 const NAME: &str = "Add";
 
@@ -204,12 +204,15 @@ impl Operator for OperatorAdd {
         compute_capabilities.cycles_for_ops(num_adds, MachineOp::Add)
     }
 
-    fn compute_flops(
+    fn compute_machine_ops(
         &self,
         inputs: &[Option<TensorView>],
         outputs: &[Option<TensorView>],
-    ) -> Result<usize, SimError> {
-        num_add_flops(inputs, outputs)
+    ) -> Result<MachineOpCounts, SimError> {
+        Ok(MachineOpCounts {
+            adds: num_add_flops(inputs, outputs)?,
+            ..MachineOpCounts::default()
+        })
     }
 
     fn partition_views(

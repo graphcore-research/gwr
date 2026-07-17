@@ -8,8 +8,8 @@ use std::rc::Rc;
 use gwr_engine::sim_error;
 use gwr_engine::types::{SimError, SimResult};
 
-use crate::processing_element::ComputeCapabilities;
 use crate::processing_element::operators::dtype::DataType;
+use crate::processing_element::{ComputeCapabilities, MachineOpCounts};
 
 pub mod dtype;
 
@@ -387,7 +387,17 @@ pub trait Operator {
         &self,
         inputs: &[Option<TensorView>],
         outputs: &[Option<TensorView>],
-    ) -> Result<usize, SimError>;
+    ) -> Result<usize, SimError> {
+        Ok(self.compute_machine_ops(inputs, outputs)?.total())
+    }
+
+    /// Returns the number of machine operations performed by the specified
+    /// computation, broken down by operation type.
+    fn compute_machine_ops(
+        &self,
+        inputs: &[Option<TensorView>],
+        outputs: &[Option<TensorView>],
+    ) -> Result<MachineOpCounts, SimError>;
 
     /// Partition the operation into one or more views that can be executed in
     /// parallel. Implementations may return fewer than `num_partitions` if the

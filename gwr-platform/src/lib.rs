@@ -10,6 +10,7 @@ use std::rc::Rc;
 use gwr_engine::engine::Engine;
 use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
+use gwr_engine::time::compute_adjusted_value_and_rate;
 use gwr_engine::types::SimError;
 use gwr_model_builder::EntityGet;
 use gwr_models::fabric::Fabric;
@@ -17,9 +18,10 @@ use gwr_models::memory::Memory;
 use gwr_models::memory::cache::Cache;
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::memory_map::DeviceId;
-use gwr_models::processing_element::ProcessingElement;
 use gwr_models::processing_element::dispatch::Dispatch;
+use gwr_models::processing_element::{MachineOpCounts, ProcessingElement};
 use gwr_track::entity::{Entity, GetEntity};
+use gwr_track::info;
 
 use crate::builder::{build_caches, build_fabrics, build_memories, build_memory_maps, build_pes};
 use crate::connect::connect_ports;
@@ -190,12 +192,62 @@ impl Platform {
     }
 
     pub fn dump_stats(&self, time_now_ns: f64) {
+        self.dump_memory_totals(time_now_ns);
+        self.dump_pe_totals(time_now_ns);
         for mem in &self.memories {
             mem.dump_stats(time_now_ns);
         }
         for pe in &self.processing_elements {
             pe.dump_stats(time_now_ns);
         }
+    }
+
+    fn dump_memory_totals(&self, time_now_ns: f64) {
+        let total_bytes_read: usize = self.memories.iter().map(|mem| mem.bytes_read()).sum();
+        let total_bytes_written: usize = self.memories.iter().map(|mem| mem.bytes_written()).sum();
+
+        let (read_value, read_per_second) =
+            compute_adjusted_value_and_rate(time_now_ns, total_bytes_read);
+        let (write_value, write_per_second) =
+            compute_adjusted_value_and_rate(time_now_ns, total_bytes_written);
+
+        info!(self.entity ; "Memory totals:");
+        info!(self.entity ;
+            "  Read: {total_bytes_read} bytes, {read_value:.2}, {read_per_second:.2}/s"
+        );
+        info!(self.entity ;
+            "  Written: {total_bytes_written} bytes, {write_value:.2}, {write_per_second:.2}/s"
+        );
+    }
+
+    fn dump_pe_totals(&self, time_now_ns: f64) {
+        let machine_ops: MachineOpCounts =
+            self.processing_elements
+                .iter()
+                .fold(MachineOpCounts::default(), |mut total, pe| {
+                    total.add_assign(pe.machine_ops());
+                    total
+                });
+        let total_flops = machine_ops.total();
+        let time_now_s = time_now_ns / 1e9;
+        let total_gflops = total_flops as f64 / 1e9;
+        let average_gflops_per_second = if time_now_s == 0.0 {
+            0.0
+        } else {
+            total_gflops / time_now_s
+        };
+
+        info!(self.entity ; "ProcessingElement totals:");
+        info!(self.entity ;
+            "  FLOPs: {total_flops}, {total_gflops:.2} GFLOPs, {average_gflops_per_second:.2} GFLOP/s"
+        );
+        info!(self.entity ;
+            "  Machine ops: {} total, {} add, {} mul, {} compare",
+            machine_ops.total(),
+            machine_ops.adds,
+            machine_ops.muls,
+            machine_ops.compares
+        );
     }
 }
 

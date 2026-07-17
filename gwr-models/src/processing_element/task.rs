@@ -6,11 +6,11 @@ use gwr_engine::types::SimError;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 
-use crate::processing_element::ComputeCapabilities;
 use crate::processing_element::operators::add::OperatorAdd;
 use crate::processing_element::operators::gemm::OperatorGemm;
 use crate::processing_element::operators::maxpool::OperatorMaxPool;
 use crate::processing_element::operators::{Operator, TensorPartition, TensorView};
+use crate::processing_element::{ComputeCapabilities, MachineOpCounts};
 
 #[derive(Debug, Clone)]
 pub struct ComputeTaskConfig {
@@ -84,6 +84,18 @@ impl ComputeOp {
             ComputeOp::Add => OperatorAdd {}.compute_flops(input_views, output_views),
             ComputeOp::Gemm => OperatorGemm {}.compute_flops(input_views, output_views),
             ComputeOp::MaxPool(operator) => operator.compute_flops(input_views, output_views),
+        }
+    }
+
+    pub fn compute_machine_ops(
+        &self,
+        input_views: &[Option<TensorView>],
+        output_views: &[Option<TensorView>],
+    ) -> Result<MachineOpCounts, SimError> {
+        match self {
+            ComputeOp::Add => OperatorAdd {}.compute_machine_ops(input_views, output_views),
+            ComputeOp::Gemm => OperatorGemm {}.compute_machine_ops(input_views, output_views),
+            ComputeOp::MaxPool(operator) => operator.compute_machine_ops(input_views, output_views),
         }
     }
 
