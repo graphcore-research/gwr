@@ -1,0 +1,31 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directories:
+      - "/"
+      - "/.github/actions/*"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "infra"
+
+  - package-ecosystem: "rust-toolchain"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "infra"
+
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore"
+    groups:
+      # Group multiple updates together into a single PR
+      non-major:
+        update-types: ["minor", "patch"]

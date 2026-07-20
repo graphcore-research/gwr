@@ -6,13 +6,36 @@ on:
   push:
     branches-ignore:
       - "pr-**"
+      - "dependabot/**"
   pull_request:
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  gate:
+    # Single gate to guard the whole workflow. Every top-level job
+    # `needs: gate` (via `warm-build-deps-cache`) so a skip here halts the
+    # entire CI run.
+    #
+    # The `regenerate-licenses-on-dependabot` workflow amends Dependabot's
+    # Cargo update commits with an updated `licenses.html`, and force-pushes the
+    # result under a different identity. Pushing the amended commit re-triggers
+    # CI here with `github.actor` no longer set to `dependabot[bot]`.
+    #
+    # This guard only skips running CI on the initial Dependabot Cargo update
+    # pushes. All other Dependabot PRs (e.g. `dependabot/github-actions/*`,
+    # `dependabot/rust-toolchain/*`) are not amended by other  workflows and
+    # therefore must run CI normally.
+    if: >-
+      ${{ !(github.actor == 'dependabot[bot]' &&
+            startsWith(github.head_ref, 'dependabot/cargo/')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: ":"
+
   warm-build-deps-cache:
+    needs: gate
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
