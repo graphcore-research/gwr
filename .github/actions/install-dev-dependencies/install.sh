@@ -2,6 +2,7 @@
 
 # Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
+# Assumes `install-build-dependencies/install.sh` has already run.
 set -e
 echo "Installing dev dependencies"
 
