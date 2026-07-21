@@ -1,7 +1,10 @@
 # Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
 name: Install dev dependencies
-description: Install all dependencies required when developing the repo source
+description: >
+  Install all dependencies required when developing the repo source.
+
+  Assumes the `install-build-dependencies` action has already run.
 
 runs:
   using: composite
