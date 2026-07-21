@@ -34,6 +34,7 @@
 //!  ----------------------------
 //! ```
 use std::cell::RefCell;
+use std::fmt::{self, Display};
 use std::rc::Rc;
 
 use async_trait::async_trait;
@@ -46,6 +47,7 @@ use gwr_engine::executor::Spawner;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
+use gwr_engine::time::compute_adjusted_value_and_rate;
 use gwr_engine::traits::{Runnable, SimObject};
 use gwr_engine::types::{AccessType, SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
@@ -53,6 +55,7 @@ use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
 use gwr_track::{build_aka, trace};
 
+use crate::log_stats;
 #[cfg(test)]
 use crate::memory::memory_access::MemoryAccess;
 use crate::memory::traits::{AccessMemory, ReadMemory};
@@ -94,6 +97,68 @@ struct CacheMetrics {
     payload_bytes_written: usize,
     num_hits: usize,
     num_misses: usize,
+}
+
+pub struct CacheStatsDisplay {
+    prefix: String,
+    time_now_ns: f64,
+    payload_bytes_read: usize,
+    payload_bytes_written: usize,
+    num_hits: usize,
+    num_misses: usize,
+}
+
+impl CacheStatsDisplay {
+    #[must_use]
+    pub fn new(
+        prefix: impl Into<String>,
+        time_now_ns: f64,
+        payload_bytes_read: usize,
+        payload_bytes_written: usize,
+        num_hits: usize,
+        num_misses: usize,
+    ) -> Self {
+        Self {
+            prefix: prefix.into(),
+            time_now_ns,
+            payload_bytes_read,
+            payload_bytes_written,
+            num_hits,
+            num_misses,
+        }
+    }
+}
+
+impl Display for CacheStatsDisplay {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (read_value, read_per_second) =
+            compute_adjusted_value_and_rate(self.time_now_ns, self.payload_bytes_read);
+        let (write_value, write_per_second) =
+            compute_adjusted_value_and_rate(self.time_now_ns, self.payload_bytes_written);
+        let num_accesses = self.num_hits + self.num_misses;
+        let hit_rate = if num_accesses == 0 {
+            0.0
+        } else {
+            self.num_hits as f64 / num_accesses as f64 * 100.0
+        };
+
+        writeln!(f, "{}:", self.prefix)?;
+        writeln!(
+            f,
+            "  Payload read: {} bytes, {read_value:.2}, {read_per_second:.2}/s",
+            self.payload_bytes_read
+        )?;
+        writeln!(
+            f,
+            "  Payload written: {} bytes, {write_value:.2}, {write_per_second:.2}/s",
+            self.payload_bytes_written
+        )?;
+        write!(
+            f,
+            "  Hits: {}, misses: {}, hit rate: {hit_rate:.2}%",
+            self.num_hits, self.num_misses
+        )
+    }
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
@@ -405,6 +470,21 @@ where
     #[must_use]
     pub fn num_misses(&self) -> usize {
         self.metrics.borrow().num_misses
+    }
+
+    pub fn dump_stats(&self, time_now_ns: f64) {
+        let metrics = self.metrics.borrow();
+        log_stats(
+            &self.entity,
+            CacheStatsDisplay::new(
+                format!("Cache {}", self.entity.full_name()),
+                time_now_ns,
+                metrics.payload_bytes_read,
+                metrics.payload_bytes_written,
+                metrics.num_hits,
+                metrics.num_misses,
+            ),
+        );
     }
 }
 

@@ -1,6 +1,7 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
 use std::cell::RefCell;
+use std::fmt::{self, Display};
 use std::rc::Rc;
 
 use async_trait::async_trait;
@@ -16,8 +17,9 @@ use gwr_engine::types::{AccessType, SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
-use gwr_track::{build_aka, debug, info};
+use gwr_track::{build_aka, debug};
 
+use crate::log_stats;
 use crate::memory::traits::{AccessMemory, ReadMemory};
 
 pub mod cache;
@@ -61,6 +63,51 @@ impl MemoryConfig {
 pub struct MemoryStats {
     bytes_read: usize,
     bytes_written: usize,
+}
+
+pub struct MemoryStatsDisplay {
+    prefix: String,
+    time_now_ns: f64,
+    bytes_read: usize,
+    bytes_written: usize,
+}
+
+impl MemoryStatsDisplay {
+    #[must_use]
+    pub fn new(
+        prefix: impl Into<String>,
+        time_now_ns: f64,
+        bytes_read: usize,
+        bytes_written: usize,
+    ) -> Self {
+        Self {
+            prefix: prefix.into(),
+            time_now_ns,
+            bytes_read,
+            bytes_written,
+        }
+    }
+}
+
+impl Display for MemoryStatsDisplay {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (read_value, read_per_second) =
+            compute_adjusted_value_and_rate(self.time_now_ns, self.bytes_read);
+        let (write_value, write_per_second) =
+            compute_adjusted_value_and_rate(self.time_now_ns, self.bytes_written);
+
+        writeln!(f, "{}:", self.prefix)?;
+        writeln!(
+            f,
+            "  Read: {} bytes, {read_value:.2}, {read_per_second:.2}/s",
+            self.bytes_read
+        )?;
+        write!(
+            f,
+            "  Written: {} bytes, {write_value:.2}, {write_per_second:.2}/s",
+            self.bytes_written
+        )
+    }
 }
 
 #[derive(EntityGet, EntityDisplay)]
@@ -163,20 +210,14 @@ where
 
     pub fn dump_stats(&self, time_now_ns: f64) {
         let stats = self.stats.borrow();
-
-        let (read_value, read_per_second) =
-            compute_adjusted_value_and_rate(time_now_ns, stats.bytes_read);
-        let (write_value, write_per_second) =
-            compute_adjusted_value_and_rate(time_now_ns, stats.bytes_written);
-
-        info!(self.entity ; "Memory {}:", self.entity.full_name());
-        info!(self.entity ;
-            "  Read: {} bytes, {read_value:.2}, {read_per_second:.2}/s",
-            stats.bytes_read
-        );
-        info!(self.entity ;
-            "  Written: {} bytes, {write_value:.2}, {write_per_second:.2}/s",
-            stats.bytes_written
+        log_stats(
+            &self.entity,
+            MemoryStatsDisplay::new(
+                format!("Memory {}", self.entity.full_name()),
+                time_now_ns,
+                stats.bytes_read,
+                stats.bytes_written,
+            ),
         );
     }
 }

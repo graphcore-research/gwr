@@ -22,6 +22,7 @@
 //! that are managed by the `LoadStoreUnit`
 
 use std::cell::RefCell;
+use std::fmt::{self, Display};
 use std::rc::Rc;
 
 use async_trait::async_trait;
@@ -32,10 +33,11 @@ use gwr_engine::time::clock::{Clock, phase};
 use gwr_engine::traits::Runnable;
 use gwr_engine::types::{AccessType, SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
+use gwr_track::debug;
 use gwr_track::entity::{Entity, EntityGroup, EntityLane};
 use gwr_track::tracker::aka::Aka;
-use gwr_track::{debug, info};
 
+use crate::log_stats;
 use crate::memory::memory_access::MemoryAccess;
 use crate::memory::memory_map::{DeviceId, MemoryMap};
 use crate::processing_element::dispatch::Dispatch;
@@ -74,6 +76,50 @@ impl MachineOpCounts {
         self.adds += other.adds;
         self.compares += other.compares;
         self.muls += other.muls;
+    }
+}
+
+pub struct ProcessingElementStatsDisplay {
+    prefix: String,
+    time_now_ns: f64,
+    machine_ops: MachineOpCounts,
+}
+
+impl ProcessingElementStatsDisplay {
+    #[must_use]
+    pub fn new(prefix: impl Into<String>, time_now_ns: f64, machine_ops: MachineOpCounts) -> Self {
+        Self {
+            prefix: prefix.into(),
+            time_now_ns,
+            machine_ops,
+        }
+    }
+}
+
+impl Display for ProcessingElementStatsDisplay {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let total_flops = self.machine_ops.total();
+        let time_now_s = self.time_now_ns / 1e9;
+        let total_gflops = total_flops as f64 / 1e9;
+        let average_gflops_per_second = if time_now_s == 0.0 {
+            0.0
+        } else {
+            total_gflops / time_now_s
+        };
+
+        writeln!(f, "{}:", self.prefix)?;
+        writeln!(
+            f,
+            "  FLOPs: {total_flops}, {total_gflops:.2} GFLOPs, {average_gflops_per_second:.2} GFLOP/s"
+        )?;
+        write!(
+            f,
+            "  Machine ops: {} total, {} add, {} mul, {} compare",
+            self.machine_ops.total(),
+            self.machine_ops.adds,
+            self.machine_ops.muls,
+            self.machine_ops.compares
+        )
     }
 }
 
@@ -342,26 +388,13 @@ impl ProcessingElement {
 
     pub fn dump_stats(&self, time_now_ns: f64) {
         let stats = self.stats.borrow();
-        let time_now_s = time_now_ns / 1e9;
-        let total_flops = stats.machine_ops.total();
-        let total_gflops = total_flops as f64 / 1e9;
-        let average_gflops_per_second = if time_now_s == 0.0 {
-            0.0
-        } else {
-            total_gflops / time_now_s
-        };
-
-        info!(self.entity ; "ProcessingElement {}:", self.entity.full_name());
-        info!(self.entity ;
-            "  FLOPs: {}, {total_gflops:.2} GFLOPs, {average_gflops_per_second:.2} GFLOP/s",
-            total_flops
-        );
-        info!(self.entity ;
-            "  Machine ops: {} total, {} add, {} mul, {} compare",
-            stats.machine_ops.total(),
-            stats.machine_ops.adds,
-            stats.machine_ops.muls,
-            stats.machine_ops.compares
+        log_stats(
+            &self.entity,
+            ProcessingElementStatsDisplay::new(
+                format!("ProcessingElement {}", self.entity.full_name()),
+                time_now_ns,
+                stats.machine_ops,
+            ),
         );
     }
 }

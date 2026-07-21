@@ -1,0 +1,30 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+nodes:
+  - id: tensor_A
+    kind: tensor
+    config:
+      addr: 0x1_0000_0000
+      dtype: fp32
+      shape: [8]
+
+  - id: load0
+    kind: memory
+    op: load
+    pe: pe0
+    config: {}
+
+  - id: load1
+    kind: memory
+    op: load
+    pe: pe0
+    config: {}
+
+edges:
+  - from: tensor_A
+    to: load0
+    kind: data
+
+  - from: tensor_A
+    to: load1
+    kind: data
