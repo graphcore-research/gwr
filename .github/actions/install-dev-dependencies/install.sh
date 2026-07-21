@@ -24,7 +24,6 @@ npm install --no-save prettier@3.8.1
 rustup toolchain install --profile minimal --component rustfmt nightly
 
 cargo binstall --disable-telemetry --no-confirm --locked   \
-  cargo-about@0.8.4                                        \
   cargo-deny@0.19.0                                        \
   cargo-semver-checks@0.47.0                               \
   lychee@0.22.0                                            \
@@ -32,3 +31,7 @@ cargo binstall --disable-telemetry --no-confirm --locked   \
   release-plz@0.3.153                                      \
   taplo-cli@0.10.0
 cargo binstall --disable-telemetry --no-confirm --locked --bin=cog cocogitto@6.5.0
+
+# The license generation tools are also required for development, but installed
+# via a separate script (to optimise certain CI workflows).
+"$(dirname "$0")/../install-license-tools/install.sh"

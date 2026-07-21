@@ -1,0 +1,30 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+name: Install license tools
+description: >
+  Install all dependencies required to regenerate `licenses.html`
+
+  Assumes the `install-build-dependencies` action has already run.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v5
+      with:
+        path: |
+          ~/.cargo/.crates.toml
+          ~/.cargo/.crates2.json
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+        key: ${{ runner.os }}-cargo-license-tools-${{ hashFiles('./.github/actions/install-license-tools/**') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-license-tools-
+          ${{ runner.os }}-cargo-dev-deps-
+          ${{ runner.os }}-cargo-build-deps-
+
+    - name: Run install.sh
+      id: run-install
+      run: ./.github/actions/install-license-tools/install.sh
+      shell: bash
