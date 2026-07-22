@@ -8,7 +8,6 @@ use gwr_components::arbiter::policy::{
     Priority, PriorityRoundRobin, RoundRobin, WeightedRoundRobin,
 };
 use gwr_components::flow_controls::limiter::Limiter;
-use gwr_components::sink::Sink;
 use gwr_components::source::Source;
 use gwr_components::store::{ObjectStore, Store};
 use gwr_components::test_helpers::{
@@ -20,61 +19,115 @@ use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
 use gwr_track::entity::Entity;
 
-#[test]
-fn source_sink() {
-    const NUM_PUTS: usize = 25;
+mod arbiter_harness {
+    use gwr_components::build_component_harness;
 
-    let mut engine = start_test(file!());
-    let clock = engine.default_clock();
+    use super::*;
 
-    let top = engine.top();
-    let arbiter =
-        Arbiter::new_and_register(&engine, &clock, top, "arb", 3, Box::new(RoundRobin::new()));
-    let source_a =
-        Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; NUM_PUTS));
-    let source_b =
-        Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; NUM_PUTS));
-    let source_c =
-        Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; NUM_PUTS));
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
+    build_component_harness! {
+        harness ArbiterHarness<T> {
+            component: arbiter: Rc<Arbiter<T>>,
+            rx port arrays: {
+                Rx<T> => rx {
+                    count: num_rx
+                }
+            },
+            tx ports: {
+                Tx<T> => tx,
+            },
+        }
+    }
 
-    connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
-    connect_port!(source_b, tx => arbiter, rx, 1).unwrap();
-    connect_port!(source_c, tx => arbiter, rx, 2).unwrap();
-    connect_port!(arbiter, tx => sink, rx).unwrap();
+    #[test]
+    fn source_sink() {
+        const NUM_PUTS: usize = 25;
+        const VALUE: i32 = 1;
 
-    run_simulation!(engine);
+        let mut engine = start_test(file!());
+        let clock = engine.default_clock();
 
-    let num_sunk = sink.num_sunk();
-    assert_eq!(num_sunk, NUM_PUTS * 3);
-}
+        let top = engine.top();
 
-#[test]
-fn two_active_inputs() {
-    let mut engine = start_test(file!());
-    let clock = engine.default_clock();
+        let arbiter =
+            Arbiter::new_and_register(&engine, &clock, top, "arb", 3, Box::new(RoundRobin::new()));
+        let mut harness = ArbiterHarness::new(engine, arbiter, 3);
 
-    let na = 10;
-    let nb = 0;
-    let nc = 20;
+        let mut sends_a = Vec::new();
+        let mut sends_b = Vec::new();
+        let mut sends_c = Vec::new();
+        let mut expects = Vec::new();
 
-    let top = engine.top();
-    let arbiter =
-        Arbiter::new_and_register(&engine, &clock, top, "arb", 3, Box::new(RoundRobin::new()));
-    let source_a = Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na));
-    let source_b = Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; nb));
-    let source_c = Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc));
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
+        for _ in 0..NUM_PUTS {
+            sends_a.push(send_rx!(0, VALUE));
+            sends_b.push(send_rx!(1, VALUE));
+            sends_c.push(send_rx!(2, VALUE));
+        }
 
-    connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
-    connect_port!(source_b, tx => arbiter, rx, 1).unwrap();
-    connect_port!(source_c, tx => arbiter, rx, 2).unwrap();
-    connect_port!(arbiter, tx => sink, rx).unwrap();
+        for _ in 0..NUM_PUTS * 3 {
+            expects.push(expect_tx!(VALUE));
+        }
 
-    run_simulation!(engine);
+        harness.run_steps([par!([
+            seq!(sends_a),
+            seq!(sends_b),
+            seq!(sends_c),
+            seq!(expects),
+        ])]);
+    }
 
-    let num_sunk = sink.num_sunk();
-    assert_eq!(num_sunk, 30);
+    #[test]
+    fn two_active_inputs() {
+        const NUM_A_PUTS: usize = 10;
+        const NUM_C_PUTS: usize = 20;
+        const VALUE: i32 = 1;
+
+        let mut engine = start_test(file!());
+        let clock = engine.default_clock();
+        let top = engine.top();
+        let arbiter =
+            Arbiter::new_and_register(&engine, &clock, top, "arb", 3, Box::new(RoundRobin::new()));
+
+        let mut harness = ArbiterHarness::new(engine, arbiter, 3);
+
+        let mut sends_a = Vec::new();
+        let mut sends_c = Vec::new();
+        let mut expects = Vec::new();
+
+        for _ in 0..NUM_A_PUTS {
+            sends_a.push(send_rx!(0, VALUE));
+        }
+
+        for _ in 0..NUM_C_PUTS {
+            sends_c.push(send_rx!(2, VALUE));
+        }
+
+        for _ in 0..(NUM_A_PUTS + NUM_C_PUTS) {
+            expects.push(expect_tx!(VALUE));
+        }
+
+        harness.run_steps([par!([seq!(sends_a), seq!(sends_c), seq!(expects),])]);
+    }
+
+    #[test]
+    #[should_panic(expected = "index out of bounds: the len is 2 but the index is 2")]
+    fn more_inputs() {
+        let mut engine = start_test(file!());
+        let clock = engine.default_clock();
+
+        let top = engine.top();
+        let arbiter = Arbiter::<i32>::new_and_register(
+            &engine,
+            &clock,
+            top,
+            "arb",
+            2,
+            Box::new(RoundRobin::new()),
+        );
+
+        // Try and connect three sources to an arbiter that only has two inputs. This
+        // should panic.
+        let _harness = ArbiterHarness::new(engine, arbiter, 3);
+    }
 }
 
 #[test]
@@ -152,32 +205,6 @@ fn input_order() {
         check_round_robin(&inputs, &store_get);
         Ok(())
     });
-
-    run_simulation!(engine);
-}
-
-#[test]
-#[should_panic(expected = "index out of bounds: the len is 2 but the index is 2")]
-fn more_inputs() {
-    let mut engine = start_test(file!());
-    let clock = engine.default_clock();
-
-    let na = 10;
-    let nb = 5;
-    let nc = 15;
-
-    let top = engine.top();
-    let arbiter =
-        Arbiter::new_and_register(&engine, &clock, top, "arb", 2, Box::new(RoundRobin::new()));
-    let source_a = Source::new_and_register(&engine, top, "source_a", option_box_repeat!(1; na));
-    let source_b = Source::new_and_register(&engine, top, "source_b", option_box_repeat!(2; nb));
-    let source_c = Source::new_and_register(&engine, top, "source_c", option_box_repeat!(3; nc));
-    let store = ObjectStore::new_and_register(&engine, &clock, top, "store", na + nb + nc).unwrap();
-
-    connect_port!(source_a, tx => arbiter, rx, 0).unwrap();
-    connect_port!(source_b, tx => arbiter, rx, 1).unwrap();
-    connect_port!(source_c, tx => arbiter, rx, 2).unwrap();
-    connect_port!(arbiter, tx => store, rx).unwrap();
 
     run_simulation!(engine);
 }

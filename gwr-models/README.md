@@ -99,25 +99,28 @@ API as `build_component_harness!`, but uses `MemoryTxn` to check objects coming
 out of the model.
 
 `MemoryTxn` lets tests match only the memory access fields that matter for a
-scenario. For example, this test harness only checks the destination address
-when the `expect_tx()` is called:
+scenario. For example, this test harness checks that a `Memory` model produces a
+read response for the expected destination address, while ignoring fields that
+are not specified:
 
 ```rust,no_run
-mod delay_harness {
+mod memory_harness {
     use std::rc::Rc;
 
-    use gwr_components::delay::Delay;
     use gwr_engine::test_helpers::start_test;
     use gwr_models::build_model_harness;
     use gwr_models::memory::memory_access::MemoryAccess;
+    use gwr_models::memory::{Memory, MemoryConfig};
     use gwr_models::test_helpers::{MemoryTxn, create_default_memory_map, create_read};
 
     const DST_ADDR: u64 = 0x80000;
     const SRC_ADDR: u64 = 0x90000;
+    const ACCESS_SIZE_BYTES: usize = 64;
+    const OVERHEAD_SIZE_BYTES: usize = 8;
 
     build_model_harness! {
-        harness DelayHarness<T> {
-            component: delay: Rc<Delay<T>>,
+        harness MemoryHarness<T> {
+            component: memory: Rc<Memory<T>>,
             rx ports: {
                 Rx<T> => rx,
             },
@@ -131,14 +134,29 @@ mod delay_harness {
     fn model_harness_matches_selected_memory_fields() {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
-        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1).unwrap();
+        let config = MemoryConfig::new(DST_ADDR, 0x40000, 32, 1);
+        let memory = Memory::<MemoryAccess>::new_and_register(
+            &engine,
+            &clock,
+            engine.top(),
+            "memory",
+            config,
+        )
+        .unwrap();
         let memory_map = Rc::new(create_default_memory_map());
-        let access = create_read(engine.top(), &memory_map, 64, DST_ADDR, SRC_ADDR, 8);
-        let mut harness = DelayHarness::new(engine, delay);
+        let request = create_read(
+            engine.top(),
+            &memory_map,
+            ACCESS_SIZE_BYTES,
+            DST_ADDR,
+            SRC_ADDR,
+            OVERHEAD_SIZE_BYTES,
+        );
+        let mut harness = MemoryHarness::new(engine, memory);
 
         harness.run_steps([
-            send_rx!(access),
-            expect_tx!(MemoryTxn::read_req(DST_ADDR)),
+            send_rx!(request),
+            expect_tx!(MemoryTxn::read_rsp(DST_ADDR)),
         ]);
     }
 }

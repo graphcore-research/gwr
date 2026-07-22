@@ -5,9 +5,6 @@ use std::rc::Rc;
 
 use futures::executor::block_on;
 use gwr_components::queue::{Queue, QueueCore};
-use gwr_components::sink::Sink;
-use gwr_components::source::Source;
-use gwr_components::{connect_port, option_box_repeat};
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::Event;
@@ -177,24 +174,45 @@ fn queue_changed_event_fires_for_mutations() {
     assert_eq!(clock.time_now_ns(), 4.0);
 }
 
-#[test]
-fn queue_component_connects_rx_to_tx_ports() {
-    const NUM_VALUES: usize = 10;
+mod queue_harness {
+    use gwr_components::build_component_harness;
 
-    let mut engine = start_test(file!());
-    let clock = engine.default_clock();
-    let top = engine.top();
+    use super::*;
 
-    let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(5 ; NUM_VALUES));
-    let queue = Queue::new_and_register(&engine, &clock, top, "queue", Some(2)).unwrap();
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
+    build_component_harness! {
+        harness QueueHarness<T> {
+            component: queue: Rc<Queue<T>>,
+            rx ports: {
+                Rx<T> => rx
+            },
+            tx ports: {
+                Tx<T> => tx
+            },
+        }
+    }
 
-    connect_port!(source, tx => queue, rx).unwrap();
-    connect_port!(queue, tx => sink, rx).unwrap();
+    #[test]
+    fn queue_component_connects_rx_to_tx_ports() {
+        const NUM_VALUES: usize = 10;
+        const VALUE: i32 = 5;
 
-    run_simulation!(engine);
+        let mut engine = start_test(file!());
+        let clock = engine.default_clock();
+        let top = engine.top();
 
-    assert_eq!(sink.num_sunk(), NUM_VALUES);
-    assert!(queue.is_empty());
+        let queue = Queue::new_and_register(&engine, &clock, top, "queue", Some(2)).unwrap();
+        let mut harness = QueueHarness::new(engine, queue.clone());
+
+        let mut sends = Vec::new();
+        let mut expects = Vec::new();
+
+        for _ in 0..NUM_VALUES {
+            sends.push(send_rx!(VALUE));
+            expects.push(expect_tx!(VALUE));
+        }
+
+        harness.run_steps([par!([seq!(sends), seq!(expects)])]);
+
+        assert!(queue.is_empty());
+    }
 }

@@ -297,6 +297,7 @@ pub struct MemoryTxn {
     dst_addr: u64,
     src_addr: Option<u64>,
     bytes: Option<usize>,
+    total_bytes: Option<usize>,
     destination: Option<u64>,
     dst_device: Option<DeviceId>,
     src_device: Option<DeviceId>,
@@ -311,6 +312,7 @@ impl MemoryTxn {
             dst_addr,
             src_addr: None,
             bytes: None,
+            total_bytes: None,
             destination: None,
             dst_device: None,
             src_device: None,
@@ -357,6 +359,12 @@ impl MemoryTxn {
     #[must_use]
     pub fn with_bytes(mut self, bytes: usize) -> Self {
         self.bytes = Some(bytes);
+        self
+    }
+
+    #[must_use]
+    pub fn with_total_bytes(mut self, total_bytes: usize) -> Self {
+        self.total_bytes = Some(total_bytes);
         self
     }
 
@@ -421,6 +429,13 @@ where
                 "{check_id}: byte count mismatch for actual {actual:?}",
             );
         }
+        if let Some(total_bytes) = self.total_bytes {
+            assert_eq!(
+                actual.total_bytes(),
+                total_bytes,
+                "{check_id}: total byte count mismatch for actual {actual:?}",
+            );
+        }
         if let Some(destination) = self.destination {
             assert_eq!(
                 actual.destination(),
@@ -460,6 +475,7 @@ where
         MemoryTxn::new(self.access_type(), self.dst_addr())
             .with_src_addr(self.src_addr())
             .with_bytes(self.access_size_bytes())
+            .with_total_bytes(self.total_bytes())
             .with_destination(self.destination())
             .with_dst_device(self.dst_device())
             .with_src_device(self.src_device())

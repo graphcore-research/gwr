@@ -8,57 +8,81 @@ use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
 use gwr_models::fc_pipeline::{FcPipeline, FcPipelineConfig};
 
-fn test_fc_pipeline(buffer_size: usize, data_delay: usize, credit_delay: usize) {
-    let mut engine = start_test(file!());
-    let clock = engine.default_clock();
+mod fc_pipeline_harness {
+    use std::rc::Rc;
 
-    let num_puts = 10;
+    use gwr_components::build_component_harness;
 
-    // Create a pair of tasks that use a pipeline
-    let top = engine.top();
-    let source = Source::new_and_register(&engine, top, "source", option_box_repeat!(1 ; num_puts));
-    let pipe_config = FcPipelineConfig::new(buffer_size, data_delay, credit_delay);
-    let pipeline =
-        FcPipeline::new_and_register(&engine, &clock, top, "pipe", &pipe_config).unwrap();
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
+    use super::*;
 
-    connect_port!(source, tx => pipeline, rx).unwrap();
-    connect_port!(pipeline, tx => sink, rx).unwrap();
+    build_component_harness! {
+        harness FcPipelineHarness<T> {
+            component: pipeline: Rc<FcPipeline<T>>,
+            rx ports: {
+                Rx<T> => rx,
+            },
+            tx ports: {
+                Tx<T> => tx,
+            },
+        }
+    }
 
-    run_simulation!(engine);
+    fn test_fc_pipeline(buffer_size: usize, data_delay: usize, credit_delay: usize) {
+        const NUM_PUTS: usize = 10;
+        const VALUE: i32 = 1;
 
-    assert_eq!(sink.num_sunk(), num_puts);
-}
+        let mut engine = start_test(file!());
+        let clock = engine.default_clock();
 
-#[test]
-fn matched() {
-    test_fc_pipeline(1, 1, 1);
-    test_fc_pipeline(10, 10, 10);
-}
+        let top = engine.top();
 
-#[test]
-fn long_credit() {
-    test_fc_pipeline(1, 1, 10);
-}
+        let pipe_config = FcPipelineConfig::new(buffer_size, data_delay, credit_delay);
+        let pipeline =
+            FcPipeline::new_and_register(&engine, &clock, top, "pipe", &pipe_config).unwrap();
 
-#[test]
-fn long_data() {
-    test_fc_pipeline(1, 10, 1);
-}
+        let mut harness = FcPipelineHarness::new(engine, pipeline);
 
-#[test]
-fn instant_credit() {
-    test_fc_pipeline(1, 1, 0);
-}
+        let mut sends = Vec::new();
+        let mut expects = Vec::new();
 
-#[test]
-fn instant_data() {
-    test_fc_pipeline(1, 0, 1);
-}
+        for _ in 0..NUM_PUTS {
+            sends.push(send_rx!(VALUE));
+            expects.push(expect_tx!(VALUE));
+        }
 
-#[test]
-fn both_instant() {
-    test_fc_pipeline(1, 0, 0);
+        harness.run_steps([par!([seq!(sends), seq!(expects)])]);
+    }
+
+    #[test]
+    fn matched() {
+        test_fc_pipeline(1, 1, 1);
+        test_fc_pipeline(10, 10, 10);
+    }
+
+    #[test]
+    fn long_credit() {
+        test_fc_pipeline(1, 1, 10);
+    }
+
+    #[test]
+    fn long_data() {
+        test_fc_pipeline(1, 10, 1);
+    }
+
+    #[test]
+    fn instant_credit() {
+        test_fc_pipeline(1, 1, 0);
+    }
+
+    #[test]
+    fn instant_data() {
+        test_fc_pipeline(1, 0, 1);
+    }
+
+    #[test]
+    fn both_instant() {
+        test_fc_pipeline(1, 0, 0);
+    }
 }
 
 fn test_fc_pipeline_throughput(
