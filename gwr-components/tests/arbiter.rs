@@ -52,27 +52,15 @@ mod arbiter_harness {
             Arbiter::new_and_register(&engine, &clock, top, "arb", 3, Box::new(RoundRobin::new()));
         let mut harness = ArbiterHarness::new(engine, arbiter, 3);
 
-        let mut sends_a = Vec::new();
-        let mut sends_b = Vec::new();
-        let mut sends_c = Vec::new();
-        let mut expects = Vec::new();
-
-        for _ in 0..NUM_PUTS {
-            sends_a.push(send_rx!(0, VALUE));
-            sends_b.push(send_rx!(1, VALUE));
-            sends_c.push(send_rx!(2, VALUE));
-        }
-
-        for _ in 0..NUM_PUTS * 3 {
-            expects.push(expect_tx!(VALUE));
-        }
-
-        harness.run_steps([par!([
-            seq!(sends_a),
-            seq!(sends_b),
-            seq!(sends_c),
-            seq!(expects),
-        ])]);
+        harness.run_steps([
+            par!([
+                seq!(vec![send_rx!(0, VALUE); NUM_PUTS]),
+                seq!(vec![send_rx!(1, VALUE); NUM_PUTS]),
+                seq!(vec![send_rx!(2, VALUE); NUM_PUTS]),
+                seq!(vec![expect_tx!(VALUE); NUM_PUTS * 3]),
+            ]),
+            expect_no_traffic!(&[Port::Tx], 1),
+        ]);
     }
 
     #[test]
@@ -89,23 +77,14 @@ mod arbiter_harness {
 
         let mut harness = ArbiterHarness::new(engine, arbiter, 3);
 
-        let mut sends_a = Vec::new();
-        let mut sends_c = Vec::new();
-        let mut expects = Vec::new();
-
-        for _ in 0..NUM_A_PUTS {
-            sends_a.push(send_rx!(0, VALUE));
-        }
-
-        for _ in 0..NUM_C_PUTS {
-            sends_c.push(send_rx!(2, VALUE));
-        }
-
-        for _ in 0..(NUM_A_PUTS + NUM_C_PUTS) {
-            expects.push(expect_tx!(VALUE));
-        }
-
-        harness.run_steps([par!([seq!(sends_a), seq!(sends_c), seq!(expects),])]);
+        harness.run_steps([
+            par!([
+                seq!(vec![send_rx!(0, VALUE); NUM_A_PUTS]),
+                seq!(vec![send_rx!(2, VALUE); NUM_C_PUTS]),
+                seq!(vec![expect_tx!(VALUE); NUM_A_PUTS + NUM_C_PUTS]),
+            ]),
+            expect_no_traffic!(&[Port::Tx], 1),
+        ]);
     }
 
     #[test]
