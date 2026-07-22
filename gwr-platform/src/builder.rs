@@ -347,6 +347,7 @@ mod tests {
                     name: "hbm0".to_string(),
                 }],
             }],
+            defaults: None,
             processing_elements: None,
             caches: None,
             fabrics: None,

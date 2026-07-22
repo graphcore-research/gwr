@@ -345,6 +345,7 @@ fn build_platform(args: &Args) -> Result<PlatformConfig, String> {
 
     Ok(PlatformConfig {
         memory_maps: vec![memory_map],
+        defaults: None,
         processing_elements: Some(build_processing_elements(args, &pe_config)?),
         caches: build_caches(args)?,
         fabrics: Some(build_fabrics(args)),
