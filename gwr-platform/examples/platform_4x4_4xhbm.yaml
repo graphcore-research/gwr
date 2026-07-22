@@ -17,9 +17,10 @@ fabrics:
     routing: column-first
 
 # A default PE config so that it doesn't have to be repeated
-default_pe_config: &default_pe_config
-  num_active_requests: 8
-  lsu_access_bytes: 32
+defaults:
+  pe_config: &default_pe_config
+    num_active_requests: 8
+    lsu_access_bytes: 32
 
 processing_elements:
   - name: pe_0_0

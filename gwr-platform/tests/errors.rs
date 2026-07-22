@@ -4,6 +4,94 @@ use gwr_engine::test_helpers::start_test;
 use gwr_platform::Platform;
 
 #[test]
+fn unknown_top_level_field_is_rejected() {
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
+    let err = Platform::from_string(
+        &engine,
+        &clock,
+        "
+memory_maps: []
+processing_elementz: []
+",
+    )
+    .unwrap_err();
+
+    assert!(format!("{err}").contains("unknown field `processing_elementz`"));
+}
+
+#[test]
+fn unknown_pe_config_field_is_rejected() {
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
+    let err = Platform::from_string(
+        &engine,
+        &clock,
+        "
+memory_maps:
+  - name: mm0
+    devices: []
+
+processing_elements:
+  - name: pe0
+    memory_map: mm0
+    config:
+      lsu_acess_bytes: 32
+",
+    )
+    .unwrap_err();
+
+    assert!(format!("{err}").contains("unknown field `lsu_acess_bytes`"));
+}
+
+#[test]
+fn defaults_pe_config_anchor_is_allowed() {
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
+    let platform = Platform::from_string(
+        &engine,
+        &clock,
+        "
+memory_maps:
+  - name: mm0
+    devices: []
+
+defaults:
+  pe_config: &default_pe_config
+    lsu_access_bytes: 32
+
+processing_elements:
+  - name: pe0
+    memory_map: mm0
+    config: *default_pe_config
+",
+    )
+    .unwrap();
+
+    assert_eq!(platform.num_pes(), 1);
+}
+
+#[test]
+fn defaults_pe_config_anchor_is_type_checked() {
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
+    let err = Platform::from_string(
+        &engine,
+        &clock,
+        "
+memory_maps: []
+
+defaults:
+  pe_config:
+    lsu_acess_bytes: 32
+",
+    )
+    .unwrap_err();
+
+    assert!(format!("{err}").contains("unknown field `lsu_acess_bytes`"));
+}
+
+#[test]
 #[should_panic(expected = "Duplicate device")]
 fn duplicate_pe_name() {
     let mut engine = start_test(file!());

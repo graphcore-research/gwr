@@ -77,8 +77,10 @@ where
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PlatformConfig {
     pub memory_maps: Vec<MemoryMapSection>,
+    pub defaults: Option<DefaultsSection>,
     pub processing_elements: Option<Vec<ProcessingElementSection>>,
     pub caches: Option<Vec<CacheSection>>,
     pub fabrics: Option<Vec<FabricSection>>,
@@ -86,18 +88,27 @@ pub struct PlatformConfig {
     pub connections: Option<Vec<ConnectSection>>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct DefaultsSection {
+    pub pe_config: Option<ProcessingElementConfigSection>,
+    pub cache_config: Option<CacheConfigSection>,
+}
+
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct MemoryMapSection {
     pub name: String,
     pub devices: Vec<MemoryDeviceSection>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct MemoryDeviceSection {
     pub name: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct ProcessingElementSection {
     pub name: String,
     pub memory_map: String,
@@ -105,6 +116,7 @@ pub struct ProcessingElementSection {
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ProcessingElementConfigSection {
     pub num_active_requests: Option<usize>,
     pub lsu_access_bytes: Option<usize>,
@@ -117,12 +129,14 @@ pub struct ProcessingElementConfigSection {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct CacheSection {
     pub name: String,
     pub config: CacheConfigSection,
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct CacheConfigSection {
     pub bw_bytes_per_cycle: Option<usize>,
     pub line_size_bytes: Option<usize>,
@@ -132,6 +146,7 @@ pub struct CacheConfigSection {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct FabricSection {
     pub name: String,
     pub kind: FabricKind,
@@ -147,6 +162,7 @@ pub struct FabricSection {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct MemorySection {
     pub name: String,
     pub kind: MemoryKind,
@@ -173,6 +189,7 @@ pub enum MemoryKind {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct ConnectSection {
     pub connect: Vec<String>,
 }

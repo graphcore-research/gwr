@@ -92,6 +92,57 @@ fn timetable_file() {
     Timetable::new(&top, timetable_file, &platform).unwrap();
 }
 
+#[test]
+fn timetable_rejects_unknown_top_level_field() {
+    let err = TimetableFile::from_string(
+        "
+nodes: []
+edges: []
+edegs: []
+",
+    )
+    .unwrap_err();
+    assert!(format!("{err}").contains("unknown field `edegs`"));
+}
+
+#[test]
+fn memory_node_rejects_unknown_view_field() {
+    let err = TimetableFile::from_string(
+        "
+nodes:
+  - id: load0
+    kind: memory
+    op: load
+    pe: pe0
+    config:
+      view:
+        shape: [4]
+        offsets: [0]
+        stride: [1]
+
+edges:
+",
+    )
+    .unwrap_err();
+    assert!(format!("{err}").contains("unknown field `stride`"));
+}
+
+#[test]
+fn edge_rejects_unknown_field() {
+    let err = TimetableFile::from_string(
+        "
+nodes: []
+edges:
+  - from: a
+    to: b
+    kind: data
+    label: typo
+",
+    )
+    .unwrap_err();
+    assert!(format!("{err}").contains("unknown field `label`"));
+}
+
 // Node errors
 
 #[test]

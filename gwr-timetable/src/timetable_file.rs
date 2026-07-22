@@ -14,6 +14,7 @@ use gwr_platform::Platform;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct TimetableFile {
     pub nodes: Vec<NodeSection>,
     pub edges: Vec<EdgeSection>,
@@ -79,6 +80,7 @@ impl TimetableFile {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 #[serde(tag = "kind")]
 pub enum NodeSection {
     #[serde(rename = "compute")]
@@ -104,6 +106,7 @@ pub enum NodeSection {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct TensorViewSection {
     pub offsets: Vec<usize>,
     pub shape: Vec<usize>,
@@ -117,6 +120,7 @@ impl TensorViewSection {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct MemoryConfigSection {
     pub view: Option<TensorViewSection>,
 }
@@ -129,6 +133,7 @@ pub fn dtype_num_bytes(dtype: &DataType, num_elements: usize) -> usize {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct TensorConfigSection {
     #[serde(deserialize_with = "gwr_platform::types::parse_u64_byte_str")]
     pub addr: u64,
@@ -193,6 +198,7 @@ pub enum EdgeKind {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct EdgeSection {
     pub from: String,
     pub to: String,

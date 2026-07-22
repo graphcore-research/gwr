@@ -366,6 +366,7 @@ mod tests {
         };
         let platform = PlatformConfig {
             memory_maps: vec![test_memory_map()],
+            defaults: None,
             processing_elements: Some(vec![
                 ProcessingElementSection {
                     name: "pe0".to_string(),
@@ -433,6 +434,7 @@ mod tests {
         };
         let platform = PlatformConfig {
             memory_maps: vec![test_memory_map()],
+            defaults: None,
             processing_elements: Some(vec![ProcessingElementSection {
                 name: "pe0".to_string(),
                 memory_map: "memory_map".to_string(),
