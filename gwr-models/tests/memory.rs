@@ -7,11 +7,9 @@ use gwr_components::sink::Sink;
 use gwr_components::source::Source;
 use gwr_components::{connect_port, option_box_repeat};
 use gwr_engine::engine::Engine;
-use gwr_engine::port::{InPort, OutPort};
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
-use gwr_engine::traits::{Routable, SimObject, TotalBytes};
-use gwr_engine::types::AccessType;
+use gwr_engine::traits::SimObject;
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::memory_map::MemoryMap;
 use gwr_models::memory::traits::AccessMemory;
@@ -121,49 +119,51 @@ fn memory_write_np() {
     let last_event_time = max(last_bw_limit_event, last_packet_ack);
     assert_eq!(engine.time_now_ns(), last_event_time as f64);
 }
+mod memory_harness {
+    use gwr_models::build_model_harness;
+    use gwr_models::test_helpers::MemoryTxn;
 
-#[test]
-fn read_becomes_read_response() {
-    let mut engine = start_test(file!());
-    let clock = engine.default_clock();
-    let memory = create_memory(&mut engine);
-    let memory_map = Rc::new(create_default_memory_map());
-    let top = engine.top();
+    use super::*;
 
-    let mut mem_rx_driver = OutPort::new(top, "mem_rx_driver");
-    mem_rx_driver.connect(memory.port_rx()).unwrap();
+    build_model_harness! {
+        harness MemoryHarness<T> {
+            component: memory: Rc<Memory<T>>,
+            rx ports: {
+                Rx<T> => rx,
+            },
+            tx ports: {
+                Tx<T> => tx,
+            },
+        }
+    }
 
-    let mut mem_tx_recv = InPort::new(&engine, &clock, top, "mem_tx_recv");
-    memory.connect_port_tx(mem_tx_recv.state()).unwrap();
-
-    engine.spawn(async move {
+    #[test]
+    fn read_becomes_read_response() {
+        let mut engine = start_test(file!());
+        let memory = create_memory(&mut engine);
+        let memory_map = Rc::new(create_default_memory_map());
         let dst_addr = DST_ADDR + 0x40;
 
-        // Make a device request
         let request = create_read(
-            mem_rx_driver.entity(),
+            engine.top(),
             &memory_map,
             ACCESS_SIZE_BYTES,
             dst_addr,
             SRC_ADDR,
             OVERHEAD_SIZE_BYTES,
         );
-        mem_rx_driver.put(request)?.await;
 
-        let response = mem_tx_recv.get()?.await;
+        let mut harness = MemoryHarness::new(engine, memory);
 
-        // The memory should reply to a Read with a ReadResponse
-        assert_eq!(response.access_type(), AccessType::ReadResponse);
-        assert_eq!(response.access_size_bytes(), ACCESS_SIZE_BYTES);
-        assert_eq!(
-            response.total_bytes(),
-            ACCESS_SIZE_BYTES + OVERHEAD_SIZE_BYTES
-        );
+        harness.run_steps([
+            send_rx!(request),
+            expect_tx!(
+                MemoryTxn::read_rsp(dst_addr)
+                    .with_bytes(ACCESS_SIZE_BYTES)
+                    .with_total_bytes(ACCESS_SIZE_BYTES + OVERHEAD_SIZE_BYTES)
+            ),
+        ]);
 
-        Ok(())
-    });
-
-    run_simulation!(engine);
-
-    assert_eq!(engine.time_now_ns(), DELAY_TICKS as f64);
+        assert_eq!(harness.engine.time_now_ns(), DELAY_TICKS as f64);
+    }
 }

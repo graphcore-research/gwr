@@ -4,7 +4,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gwr_components::delay::Delay;
-use gwr_components::sink::Sink;
 use gwr_components::source::Source;
 use gwr_components::store::{ObjectStore, Store};
 use gwr_components::{connect_port, option_box_repeat};
@@ -65,27 +64,46 @@ fn put_get() {
     assert_eq!(total, NUM_PUTS);
 }
 
-#[test]
-fn source_sink() {
-    const DELAY: usize = 3;
-    const NUM_PUTS: usize = DELAY * 10;
+mod delay_harness {
+    use gwr_components::build_component_harness;
 
-    let mut engine = start_test(file!());
-    let clock = engine.default_clock();
+    use super::*;
 
-    let top = engine.top();
-    let source =
-        Source::new_and_register(&engine, top, "source", option_box_repeat!(500 ; NUM_PUTS));
-    let delay = Delay::new_and_register(&engine, &clock, top, "delay", DELAY);
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
+    build_component_harness! {
+        harness DelayHarness<T> {
+            component: delay: Rc<Delay<T>>,
+            rx ports: {
+                Rx<T> => rx,
+            },
+            tx ports: {
+                Tx<T> => tx,
+            },
+        }
+    }
 
-    connect_port!(source, tx => delay, rx).unwrap();
-    connect_port!(delay, tx => sink, rx).unwrap();
+    #[test]
+    fn source_sink() {
+        const DELAY_TICKS: usize = 3;
+        const NUM_PUTS: usize = 30;
+        const VALUE: i32 = 500;
 
-    run_simulation!(engine);
+        let mut engine = start_test(file!());
+        let clock = engine.default_clock();
+        let top = engine.top();
 
-    let num_sunk = sink.num_sunk();
-    assert_eq!(num_sunk, NUM_PUTS);
+        let delay = Delay::new_and_register(&engine, &clock, top, "delay", DELAY_TICKS);
+        let mut harness = DelayHarness::new(engine, delay);
+
+        let mut sends = Vec::new();
+        let mut expects = Vec::new();
+
+        for _ in 0..NUM_PUTS {
+            sends.push(send_rx!(VALUE));
+            expects.push(expect_tx!(VALUE));
+        }
+
+        harness.run_steps([par!([seq!(sends), seq!(expects)])]);
+    }
 }
 
 #[test]
