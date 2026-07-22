@@ -94,15 +94,13 @@ mod delay_harness {
         let delay = Delay::new_and_register(&engine, &clock, top, "delay", DELAY_TICKS);
         let mut harness = DelayHarness::new(engine, delay);
 
-        let mut sends = Vec::new();
-        let mut expects = Vec::new();
-
-        for _ in 0..NUM_PUTS {
-            sends.push(send_rx!(VALUE));
-            expects.push(expect_tx!(VALUE));
-        }
-
-        harness.run_steps([par!([seq!(sends), seq!(expects)])]);
+        harness.run_steps([
+            par!([
+                seq!(vec![send_rx!(VALUE); NUM_PUTS]),
+                seq!(vec![expect_tx!(VALUE); NUM_PUTS]),
+            ]),
+            expect_no_traffic!(&[Port::Tx], (DELAY_TICKS + 1) as u64),
+        ]);
     }
 }
 

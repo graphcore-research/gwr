@@ -27,7 +27,12 @@ mod fc_pipeline_harness {
         }
     }
 
-    fn test_fc_pipeline(buffer_size: usize, data_delay: usize, credit_delay: usize) {
+    fn test_fc_pipeline(
+        buffer_size: usize,
+        data_delay: usize,
+        credit_delay: usize,
+        expected_ticks: u64,
+    ) {
         const NUM_PUTS: usize = 10;
         const VALUE: i32 = 1;
 
@@ -42,46 +47,43 @@ mod fc_pipeline_harness {
 
         let mut harness = FcPipelineHarness::new(engine, pipeline);
 
-        let mut sends = Vec::new();
-        let mut expects = Vec::new();
+        harness.run_steps([par!([
+            seq!(vec![send_rx!(VALUE); NUM_PUTS]),
+            seq!(vec![expect_tx!(VALUE); NUM_PUTS]),
+        ])]);
 
-        for _ in 0..NUM_PUTS {
-            sends.push(send_rx!(VALUE));
-            expects.push(expect_tx!(VALUE));
-        }
-
-        harness.run_steps([par!([seq!(sends), seq!(expects)])]);
+        assert_eq!(harness.clock.tick_now().tick(), expected_ticks);
     }
 
     #[test]
     fn matched() {
-        test_fc_pipeline(1, 1, 1);
-        test_fc_pipeline(10, 10, 10);
+        test_fc_pipeline(1, 1, 1, 19);
+        test_fc_pipeline(10, 10, 10, 10);
     }
 
     #[test]
     fn long_credit() {
-        test_fc_pipeline(1, 1, 10);
+        test_fc_pipeline(1, 1, 10, 100);
     }
 
     #[test]
     fn long_data() {
-        test_fc_pipeline(1, 10, 1);
+        test_fc_pipeline(1, 10, 1, 109);
     }
 
     #[test]
     fn instant_credit() {
-        test_fc_pipeline(1, 1, 0);
+        test_fc_pipeline(1, 1, 0, 10);
     }
 
     #[test]
     fn instant_data() {
-        test_fc_pipeline(1, 0, 1);
+        test_fc_pipeline(1, 0, 1, 9);
     }
 
     #[test]
     fn both_instant() {
-        test_fc_pipeline(1, 0, 0);
+        test_fc_pipeline(1, 0, 0, 0);
     }
 }
 
