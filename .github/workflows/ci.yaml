@@ -18,18 +18,19 @@ jobs:
     # `needs: gate` (via `warm-build-deps-cache`) so a skip here halts the
     # entire CI run.
     #
-    # The `regenerate-licenses-on-dependabot` workflow amends Dependabot's
-    # Cargo update commits with an updated `licenses.html`, and force-pushes the
-    # result under a different identity. Pushing the amended commit re-triggers
-    # CI here with `github.actor` no longer set to `dependabot[bot]`.
+    # The Dependabot amendment workflows force-push Cargo and GitHub Actions
+    # update commits under a different identity. Pushing the amended commit
+    # re-triggers CI here with `github.actor` no longer set to
+    # `dependabot[bot]`.
     #
-    # This guard only skips running CI on the initial Dependabot Cargo update
-    # pushes. All other Dependabot PRs (e.g. `dependabot-github-actions-*`,
-    # `dependabot-rust-toolchain-*`) are not amended by other workflows and
-    # therefore must run CI normally.
+    # Skip CI on the initial Dependabot-authored Cargo and GitHub Actions
+    # commits. CI runs once the corresponding workflow has amended and pushed
+    # the final commit through `gwr-bot`. Other Dependabot ecosystems (e.g.
+    # `rust-toolchain`) run CI normally.
     if: >-
       ${{ !(github.actor == 'dependabot[bot]' &&
-            startsWith(github.head_ref, 'dependabot-cargo-')) }}
+            (startsWith(github.head_ref, 'dependabot-cargo-') ||
+             startsWith(github.head_ref, 'dependabot-github_actions-'))) }}
     runs-on: ubuntu-latest
     steps:
       - run: ":"

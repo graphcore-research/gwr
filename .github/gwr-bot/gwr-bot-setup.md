@@ -1,6 +1,6 @@
 <!-- Copyright (c) 2026 Graphcore Ltd. All rights reserved. -->
 
-# Setting up `gwr-bot` for the Dependabot license-regeneration workflow
+# Setting up `gwr-bot` for Dependabot amendment workflows
 
 <div align="center">
 
@@ -11,13 +11,27 @@
 The [`regenerate-licenses-on-dependabot`](../workflows/regenerate-licenses-on-dependabot.yaml)
 workflow regenerates `licenses.html`, makes `gwr-bot` the amended commit's
 author and committer, credits Dependabot as a co-author in the commit message,
-and force-pushes the result. It needs a token with `contents: write` on the
-repository, because:
+and force-pushes the result.
+The
+[`amend-dependabot-github-actions-update`](../workflows/amend-dependabot-github-actions-update.yaml)
+workflow amends Dependabot's GitHub Actions commits so that grouped update
+commit summaries and PR titles include the dependency's old and new versions,
+and their commit bodies and PR descriptions contain only one copy of the
+repeated per-directory release information.
+Its secret-bearing work is delegated to
+[`trusted-amend-dependabot-github-actions-update`](../workflows/trusted-amend-dependabot-github-actions-update.yaml)
+from the `main` branch, so proposed action versions are not executed with the
+`gwr-bot` private key.
+
+The workflows need a token with read/write access to repository contents and
+pull requests, because:
 
 - The default `GITHUB_TOKEN` supplied to Dependabot-triggered workflows is
   read-only and cannot push.
 - Pushes made with `GITHUB_TOKEN` do not trigger downstream workflow runs,
   so even if it were writable, CI would not re-run on the amended commit.
+- Updating a Dependabot PR title and description requires pull-request write
+  access.
 
 The recommended way to provide such a token is a dedicated GitHub App —
 called `gwr-bot` in this repo — whose installation token is minted per
@@ -48,6 +62,8 @@ provided a repository admin approves the installation (see step 3).
      events; it is only used to mint installation tokens.
    - **Repository permissions**:
      - **Contents**: `Read and write` — needed to push the amended commit.
+     - **Pull requests**: `Read and write` — needed to update the title and
+       description of a grouped GitHub Actions update.
      - **Metadata**: `Read-only` — this is added automatically and cannot
        be removed.
      - Leave everything else set to `No access`.
@@ -96,7 +112,7 @@ they have received the request notification.
 
 ## 5. Store the credentials as *Dependabot* secrets
 
-The workflow runs in a Dependabot-triggered context, so the credentials
+These workflows run in a Dependabot-triggered context, so the credentials
 must live under **Dependabot** secrets, not regular Actions secrets.
 
 Go to **Settings → Secrets and variables → Dependabot → New repository
@@ -109,9 +125,8 @@ secret** and add:
 
 ## 6. Confirm the workflow is wired up
 
-The workflow at
-[`.github/workflows/regenerate-licenses-on-dependabot.yaml`](../workflows/regenerate-licenses-on-dependabot.yaml)
-is already set up to mint an installation token via
+The workflows in [`.github/workflows`](../workflows) are already set up to mint
+an installation token via
 [`actions/create-github-app-token`][create-app-token] from the two
 secrets you just created. No workflow edits are required.
 
@@ -124,9 +139,8 @@ secrets you just created. No workflow edits are required.
    `Regenerate dependency licenses on Dependabot cargo PRs` workflow run
    under **Actions**. It should succeed and produce a force-push.
 3. On the PR, confirm that:
-   - The tip commit is authored and committed by `gwr-bot[bot]`.
-   - The commit message ends with a `Co-authored-by` trailer for
-     `dependabot[bot]`.
+   - The tip commit is authored by `dependabot[bot]` and committed by
+     `gwr-bot[bot]`.
    - CI has run against the amended commit (the `gate` job is not
      skipped, because `github.actor` is now `gwr-bot[bot]`, not
      `dependabot[bot]`).
