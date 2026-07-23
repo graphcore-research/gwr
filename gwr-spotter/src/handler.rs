@@ -92,11 +92,9 @@ pub fn handle_key_events_default(key_event: KeyEvent, app: &mut App) -> AppResul
                 app.set_state(InputState::Help);
             }
 
-            KeyCode::Char(c) => {
-                if c.is_ascii_digit() {
-                    app.push_number_char(c);
-                    app.set_state(InputState::Numbers);
-                }
+            KeyCode::Char(c) if c.is_ascii_digit() => {
+                app.push_number_char(c);
+                app.set_state(InputState::Numbers);
             }
 
             _ => {}

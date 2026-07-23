@@ -22,7 +22,7 @@ fn put_get_synced() {
             tx_port.put(1)?.await;
 
             // The `put()` should not have completed until the matching `get()` happens
-            assert!(clock.time_now_ns() == 1.0);
+            assert_eq!(clock.time_now_ns(), 1.0);
 
             tx_port.put(2)?.await;
             Ok(())
@@ -39,7 +39,7 @@ fn put_get_synced() {
             assert_eq!(i, 2);
 
             // Time should not change for any other reason than the `wait_ticks()`
-            assert!(clock.time_now_ns() == 1.0);
+            assert_eq!(clock.time_now_ns(), 1.0);
 
             Ok(())
         });
@@ -109,12 +109,12 @@ fn select_on_ports() {
             loop {
                 let i = select! {
                     a = rx1 => {
-                        assert!((a & 0x1) == 1);
+                        assert_eq!((a & 0x1), 1);
                         rx1 = rx_port1.get()?;
                         a
                     }
                     b = rx2 => {
-                        assert!((b & 0x1) == 0);
+                        assert_eq!((b & 0x1), 0);
                         rx2 = rx_port2.get()?;
                         b
                     }
