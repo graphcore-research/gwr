@@ -32,8 +32,15 @@ where
         capacity: usize,
     ) -> Result<Rc<Store<T>>, SimError> {
         let entity = Rc::new(Entity::new(parent, name));
-        entity.track_capacity(capacity, "objects");
-        let store = Rc::new(Store::new(engine, clock, &entity, aka, capacity, |_| 1)?);
+        let store = Rc::new(Store::new(
+            engine,
+            clock,
+            &entity,
+            aka,
+            capacity,
+            "objects",
+            |_| 1,
+        )?);
         engine.register(store.clone());
         Ok(store)
     }
