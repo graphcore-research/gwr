@@ -54,7 +54,7 @@ approx = "0.5.1"
 async-trait = "0.1.88"
 byte-unit = "5.1.6"
 capnp = "0.25.0"
-capnpc = "0.25.0"
+capnpc = "0.26.0"
 cfg-if = "1.0.4"
 clap = { version = "4.4.6", features = ["derive"] }
 criterion = "0.8.2"
