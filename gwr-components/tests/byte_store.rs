@@ -133,7 +133,7 @@ fn byte_store_overflow_panics_when_value_fits_but_store_is_full() {
 }
 
 #[test]
-#[should_panic(expected = "Cannot store 9 bytes")]
+#[should_panic(expected = "Cannot allocate 9 bytes")]
 fn byte_store_oversized_object_panics() {
     let (_store, mut harness) = byte_store_harness(8);
 
@@ -141,19 +141,10 @@ fn byte_store_oversized_object_panics() {
 }
 
 #[test]
-#[should_panic(expected = "Cannot store 9 bytes")]
+#[should_panic(expected = "Cannot allocate 9 bytes")]
 fn byte_store_oversized_object_panics_when_error_on_overflow_set() {
     let (store, mut harness) = byte_store_harness(8);
     store.set_error_on_overflow();
-
-    harness.run_steps([send_rx!(ByteObject::new(1, 9))]);
-}
-
-#[test]
-#[should_panic(expected = "Cannot store 9 flits")]
-fn byte_store_capacity_unit_can_be_overridden() {
-    let (store, mut harness) = byte_store_harness(8);
-    store.set_capacity_unit("flits");
 
     harness.run_steps([send_rx!(ByteObject::new(1, 9))]);
 }

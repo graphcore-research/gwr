@@ -34,16 +34,15 @@ where
         capacity_bytes: usize,
     ) -> Result<Rc<Store<T>>, SimError> {
         let entity = Rc::new(Entity::new(parent, name));
-        entity.track_capacity(capacity_bytes, "bytes");
         let store = Rc::new(Store::new(
             engine,
             clock,
             &entity,
             aka,
             capacity_bytes,
+            "bytes",
             |value: &T| value.total_bytes(),
         )?);
-        store.set_capacity_unit("bytes");
         engine.register(store.clone());
         Ok(store)
     }
