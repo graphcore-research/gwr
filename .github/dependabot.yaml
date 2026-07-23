@@ -10,6 +10,9 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "infra"
+    groups:
+      actions-by-dependency:
+        group-by: dependency-name
 
   - package-ecosystem: "rust-toolchain"
     directory: "/"
