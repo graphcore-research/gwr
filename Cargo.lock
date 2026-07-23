@@ -339,9 +339,18 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "capnp"
-version = "0.25.2"
+version = "0.25.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c982cc37b8f646c753f3b0a24d4d40ca2eac8a9c2b9ea6fff524be67ddc184cb"
+checksum = "4777a3bc19b8f8e5fb2d0196c6b5dfcbbcc8b2fe08ae57f873f2f35f15cfc210"
+dependencies = [
+ "embedded-io",
+]
+
+[[package]]
+name = "capnp"
+version = "0.26.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58ddce707ad9fb2ae92770523cd0e17a0cf34e79b66a9ca4db2dd993535fe718"
 dependencies = [
  "embedded-io",
 ]
@@ -352,7 +361,7 @@ version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6cdfa6b0df161a71201367910265b97180541ecdb48bd08e05ef8694c295d1f"
 dependencies = [
- "capnp",
+ "capnp 0.25.6",
 ]
 
 [[package]]
@@ -1347,7 +1356,7 @@ dependencies = [
 name = "gwr-spotter"
 version = "0.9.0"
 dependencies = [
- "capnp",
+ "capnp 0.26.2",
  "clap",
  "crossterm",
  "gwr-track",
@@ -1398,7 +1407,7 @@ dependencies = [
 name = "gwr-track"
 version = "0.13.0"
 dependencies = [
- "capnp",
+ "capnp 0.26.2",
  "capnpc",
  "clap",
  "figment",
