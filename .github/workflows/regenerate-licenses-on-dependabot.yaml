@@ -18,7 +18,7 @@
 # token via the `gwr-bot` App is what causes the amended commit to be picked up
 # by CI on the resulting force-push.
 #
-# See `.github/gwr-bot-setup.md` for step-by-step instructions on
+# See `.github/gwr-bot/gwr-bot-setup.md` for step-by-step instructions on
 # provisioning the `gwr-bot` GitHub App and its Dependabot secrets.
 
 name: Regenerate dependency licenses on Dependabot cargo PRs
