@@ -1,0 +1,248 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+# Dependabot names cross-directory groups after the configured group identifier,
+# which omits the dependency's old and new versions. For grouped GitHub Actions
+# updates, replace both the PR title and the commit summary with the usual
+# single-dependency form and collapse Dependabot's repeated per-directory
+# release information to one copy resulting in summary lines in the form:
+#
+#   infra: bump actions/cache from 5 to 6
+#
+# This is the `main`-trusted implementation of the amendment workflow. The
+# `pull_request` entry point calls this file explicitly from `main`, so action
+# versions proposed by a Dependabot PR are never executed in the same job that
+# receives the `gwr-bot` private key.
+#
+# Every GitHub Actions update is amended and pushed with the App, including
+# ungrouped security updates whose message is left unchanged. The resulting
+# `pull_request: synchronize` event triggers CI for the new commit SHA; CI skips
+# the initial Dependabot-authored commit.
+#
+# See `.github/gwr-bot/gwr-bot-setup.md` for step-by-step instructions on
+# provisioning the `gwr-bot` GitHub App and its Dependabot secrets.
+
+name: Amend Dependabot GitHub Actions update (trusted)
+
+on:
+  workflow_call:
+    secrets:
+      GWR_BOT_APP_ID:
+        required: true
+      GWR_BOT_PRIVATE_KEY:
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  amend-update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v3
+
+      - name: Mint gwr-bot installation token
+        id: gwr-bot-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.GWR_BOT_APP_ID }}
+          private-key: ${{ secrets.GWR_BOT_PRIVATE_KEY }}
+
+      - name: Check out the Dependabot branch
+        uses: actions/checkout@v6
+        with:
+          # Check out the PR branch itself (not the merge commit) so that we
+          # can amend the tip commit and push it back.
+          ref: ${{ github.event.pull_request.head.ref }}
+          # Avoid the default shallow clone behaviour as we need the parent
+          # commit to be able to perform the amend soundly.
+          fetch-depth: 2
+          # Do not persist the token in `.git/config` for the whole job.
+          # The push step below sets up credentials via `gh auth setup-git`
+          # just before it needs them.
+          persist-credentials: false
+
+      - name: Build update summary
+        if: >-
+          steps.metadata.outputs.dependency-group == 'actions-by-dependency'
+        id: summary
+        env:
+          UPDATED_DEPENDENCIES: >-
+            ${{ steps.metadata.outputs.updated-dependencies-json }}
+        run: |
+          set -euo pipefail
+
+          dependency=$(
+            jq -er '
+              map(.dependencyName) | unique |
+              if length == 1 then .[0]
+              else error("expected exactly one dependency in the group")
+              end
+            ' <<< "$UPDATED_DEPENDENCIES"
+          )
+          previous=$(
+            jq -er --arg dependency "$dependency" '
+              map(
+                select(.dependencyName == $dependency) |
+                .prevVersion |
+                select(length > 0)
+              ) |
+              unique |
+              if length == 1 then .[0]
+              else error("expected exactly one previous version")
+              end
+            ' <<< "$UPDATED_DEPENDENCIES"
+          )
+          next=$(
+            jq -er --arg dependency "$dependency" '
+              map(
+                select(.dependencyName == $dependency) |
+                .newVersion |
+                select(length > 0)
+              ) |
+              unique |
+              if length == 1 then .[0]
+              else error("expected exactly one new version")
+              end
+            ' <<< "$UPDATED_DEPENDENCIES"
+          )
+
+          {
+            echo "dependency=$dependency"
+            echo "previous=$previous"
+            echo "next=$next"
+            echo "value=infra: bump $dependency from $previous to $next"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Configure git identity from push token
+        env:
+          GH_TOKEN: ${{ steps.gwr-bot-token.outputs.token }}
+          APP_SLUG: ${{ steps.gwr-bot-token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          user_login="${APP_SLUG}[bot]"
+          user_id=$(gh api "/users/${user_login}" --jq .id)
+          git config user.name "$user_login"
+          git config user.email \
+            "${user_id}+${user_login}@users.noreply.github.com"
+
+      - name: Amend commit and update grouped PR
+        env:
+          DEPENDENCY: ${{ steps.summary.outputs.dependency }}
+          DEPENDENCY_GROUP: ${{ steps.metadata.outputs.dependency-group }}
+          GH_TOKEN: ${{ steps.gwr-bot-token.outputs.token }}
+          NEW_VERSION: ${{ steps.summary.outputs.next }}
+          PREVIOUS_VERSION: ${{ steps.summary.outputs.previous }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SUMMARY: ${{ steps.summary.outputs.value }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$DEPENDENCY_GROUP" == "actions-by-dependency" ]]; then
+            old_message="$RUNNER_TEMP/old-commit-message"
+            new_message="$RUNNER_TEMP/new-commit-message"
+            old_pr_body="$RUNNER_TEMP/old-pr-body"
+            new_pr_body="$RUNNER_TEMP/new-pr-body"
+            pr_update="$RUNNER_TEMP/pr-update.json"
+
+            git log -1 --format=%B > "$old_message"
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+              --jq '.body // ""' \
+              > "$old_pr_body"
+
+            python3 - \
+              "$old_message" \
+              "$new_message" \
+              "$old_pr_body" \
+              "$new_pr_body" <<'PY'
+          import os
+          import re
+          import sys
+          from pathlib import Path
+
+          dependency = os.environ["DEPENDENCY"]
+          previous = os.environ["PREVIOUS_VERSION"]
+          new = os.environ["NEW_VERSION"]
+          summary = os.environ["SUMMARY"]
+          header = f"Updates `{dependency}` from {previous} to {new}"
+
+
+          def collapse_repeated_sections(text: str, footer: str) -> str:
+              starts = [
+                  match.start()
+                  for match in re.finditer(
+                      rf"(?m)^{re.escape(header)}$", text
+                  )
+              ]
+              if len(starts) < 2:
+                  return text
+
+              footer_start = text.find(footer, starts[-1])
+              if footer_start < 0:
+                  raise ValueError(
+                      f"could not find the footer after repeated {header!r} sections"
+                  )
+
+              ends = starts[1:] + [footer_start]
+              sections = [
+                  text[start:end].strip()
+                  for start, end in zip(starts, ends, strict=True)
+              ]
+              if any(section != sections[0] for section in sections[1:]):
+                  raise ValueError(
+                      f"repeated {header!r} sections are not identical"
+                  )
+
+              return (
+                  text[: starts[0]]
+                  + sections[0]
+                  + text[footer_start:]
+              )
+
+
+          old_message, new_message, old_pr_body, new_pr_body = map(
+              Path, sys.argv[1:]
+          )
+
+          message = collapse_repeated_sections(
+              old_message.read_text(encoding="utf-8"),
+              "\n\n---\nupdated-dependencies:",
+          )
+          _, separator, body = message.partition("\n")
+          new_message.write_text(
+              summary + separator + body, encoding="utf-8"
+          )
+
+          pr_body = collapse_repeated_sections(
+              old_pr_body.read_text(encoding="utf-8"),
+              "\n\nDependabot will resolve any conflicts with this PR",
+          )
+          new_pr_body.write_text(pr_body, encoding="utf-8")
+          PY
+
+            jq -n \
+              --arg title "$SUMMARY" \
+              --rawfile body "$new_pr_body" \
+              '{title: $title, body: $body}' \
+              > "$pr_update"
+            gh api \
+              --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+              --input "$pr_update" \
+              > /dev/null
+
+            git commit --amend --file "$new_message"
+          else
+            # Ungrouped GitHub Actions security updates already include their
+            # versions, but still need a gwr-bot authored SHA to trigger the
+            # full CI run.
+            git commit --amend --no-edit
+          fi
+
+          gh auth setup-git
+          git push --force-with-lease origin "HEAD:${PR_HEAD_REF}"
