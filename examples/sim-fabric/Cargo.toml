@@ -28,6 +28,6 @@ gwr-models = { path = "../../gwr-models", version = "0.20.0" }
 gwr-track = { path = "../../gwr-track", features = ["perfetto"], version = "0.13.0" }
 indicatif.workspace = true
 log.workspace = true
-rand_xoshiro = "0.7.0"
+rand_xoshiro = "0.8.1"
 rand.workspace = true
 serde.workspace = true
