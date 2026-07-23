@@ -6,7 +6,7 @@ on:
   push:
     branches-ignore:
       - "pr-**"
-      - "dependabot/**"
+      - "dependabot-*"
   pull_request:
 
 env:
@@ -24,12 +24,12 @@ jobs:
     # CI here with `github.actor` no longer set to `dependabot[bot]`.
     #
     # This guard only skips running CI on the initial Dependabot Cargo update
-    # pushes. All other Dependabot PRs (e.g. `dependabot/github-actions/*`,
-    # `dependabot/rust-toolchain/*`) are not amended by other  workflows and
+    # pushes. All other Dependabot PRs (e.g. `dependabot-github-actions-*`,
+    # `dependabot-rust-toolchain-*`) are not amended by other workflows and
     # therefore must run CI normally.
     if: >-
       ${{ !(github.actor == 'dependabot[bot]' &&
-            startsWith(github.head_ref, 'dependabot/cargo/')) }}
+            startsWith(github.head_ref, 'dependabot-cargo-')) }}
     runs-on: ubuntu-latest
     steps:
       - run: ":"

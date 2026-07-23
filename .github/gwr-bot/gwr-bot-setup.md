@@ -119,7 +119,7 @@ secrets you just created. No workflow edits are required.
 1. Trigger a Dependabot run manually (**Insights → Dependency graph →
    Dependabot → Recent update jobs → Check for updates**) or wait for the
    next scheduled run.
-2. When a `dependabot/cargo/*` PR appears, watch the
+2. When a `dependabot-cargo-*` PR appears, watch the
    `Regenerate dependency licenses on Dependabot cargo PRs` workflow run
    under **Actions**. It should succeed and produce a force-push.
 3. On the PR, confirm that:
