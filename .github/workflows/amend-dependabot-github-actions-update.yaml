@@ -1,0 +1,30 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+# This PR-side wrapper intentionally runs no actions. Loading the implementation
+# from `main` prevents proposed action versions from accessing `gwr-bot`
+# credentials before they have been reviewed and merged.
+
+name: Amend Dependabot GitHub Actions updates
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: amend-dependabot-actions-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  amend-update:
+    if: >-
+      github.actor == 'dependabot[bot]' &&
+      startsWith(github.head_ref, 'dependabot-github_actions-')
+    uses: >-
+      graphcore-research/gwr/.github/workflows/trusted-amend-dependabot-github-actions-update.yaml@main
+    secrets:
+      GWR_BOT_APP_ID: ${{ secrets.GWR_BOT_APP_ID }}
+      GWR_BOT_PRIVATE_KEY: ${{ secrets.GWR_BOT_PRIVATE_KEY }}
