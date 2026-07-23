@@ -1201,7 +1201,7 @@ dependencies = [
  "regex",
  "serde",
  "serial_test",
- "syn 2.0.117",
+ "syn 3.0.3",
  "trybuild",
 ]
 
@@ -1220,7 +1220,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex",
- "syn 1.0.109",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -1230,7 +1230,7 @@ dependencies = [
  "gwr-doc-builder",
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 3.0.3",
  "tempfile",
 ]
 
@@ -1258,7 +1258,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex",
- "syn 1.0.109",
+ "syn 3.0.3",
 ]
 
 [[package]]
