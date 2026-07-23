@@ -242,7 +242,7 @@ impl Timetable {
                 .map_err(|err| {
                     SimError(format!(
                         "Node {from_node_idx} '{}': {err}",
-                        &nodes[*from_node_idx].node_section.id()
+                        nodes[*from_node_idx].node_section.id()
                     ))
                 })?;
             update_edge_indices(
@@ -253,7 +253,7 @@ impl Timetable {
             .map_err(|err| {
                 SimError(format!(
                     "Node {to_node_idx} '{}': {err}",
-                    &nodes[*to_node_idx].node_section.id()
+                    nodes[*to_node_idx].node_section.id()
                 ))
             })?;
         }
