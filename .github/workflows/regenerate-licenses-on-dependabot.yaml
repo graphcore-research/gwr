@@ -54,6 +54,9 @@ jobs:
           # can amend the tip commit and push it back.
           ref: ${{ github.event.pull_request.head.ref }}
           submodules: true
+          # Avoid the default shallow clone behaviour as we need the parent
+          # commit to be able to perform the amend soundly.
+          fetch-depth: 2
           # Do not persist the token in `.git/config` for the whole job.
           # The push step below sets up credentials via `gh auth setup-git`
           # just before it needs them.
