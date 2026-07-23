@@ -10,6 +10,8 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "infra"
+    pull-request-branch-name:
+      separator: "-"
     groups:
       actions-by-dependency:
         group-by: dependency-name
@@ -20,6 +22,8 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "infra"
+    pull-request-branch-name:
+      separator: "-"
 
   - package-ecosystem: "cargo"
     directory: "/"
@@ -27,6 +31,8 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "chore"
+    pull-request-branch-name:
+      separator: "-"
     groups:
       # Group multiple updates together into a single PR
       non-major:

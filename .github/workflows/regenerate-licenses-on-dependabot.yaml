@@ -37,7 +37,7 @@ jobs:
   regenerate-licenses:
     if: >-
       github.actor == 'dependabot[bot]' &&
-      startsWith(github.head_ref, 'dependabot/cargo/')
+      startsWith(github.head_ref, 'dependabot-cargo-')
     runs-on: macos-latest
 
     steps:
