@@ -10,6 +10,9 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "infra"
+    labels:
+      - "A - dependencies"
+      - "A - infrastructure"
     pull-request-branch-name:
       separator: "-"
     groups:
@@ -22,6 +25,9 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "infra"
+    labels:
+      - "A - dependencies"
+      - "A - infrastructure"
     pull-request-branch-name:
       separator: "-"
 
@@ -31,6 +37,8 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "chore"
+    labels:
+      - "A - dependencies"
     pull-request-branch-name:
       separator: "-"
     groups:
