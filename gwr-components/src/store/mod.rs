@@ -30,6 +30,7 @@ use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
 
+use crate::capacity_allocator::CapacityAllocator;
 use crate::{connect_tx, port_rx, take_option};
 
 mod byte_store;
@@ -40,77 +41,16 @@ pub use object_store::ObjectStore;
 
 type ObjectToCapacity<T> = fn(&T) -> usize;
 
+#[derive(Clone)]
 struct State<T>
 where
     T: SimObject,
 {
     entity: Rc<Entity>,
-    capacity: usize,
-    capacity_unit: RefCell<String>,
-    used: RefCell<usize>,
-    data: RefCell<VecDeque<T>>,
-    error_on_overflow: RefCell<bool>,
-    level_change: Repeated<usize>,
+    capacity: CapacityAllocator,
+    data: Rc<RefCell<VecDeque<T>>>,
+    error_on_overflow: Rc<RefCell<bool>>,
     object_to_capacity: ObjectToCapacity<T>,
-}
-
-impl<T> State<T>
-where
-    T: SimObject,
-{
-    fn new(entity: &Rc<Entity>, capacity: usize, object_to_capacity: ObjectToCapacity<T>) -> Self {
-        Self {
-            entity: entity.clone(),
-            capacity,
-            capacity_unit: RefCell::new("objects".to_string()),
-            used: RefCell::new(0),
-            data: RefCell::new(VecDeque::new()),
-            error_on_overflow: RefCell::new(false),
-            level_change: Repeated::new(usize::default()),
-            object_to_capacity,
-        }
-    }
-
-    fn has_capacity_for(&self, units: usize) -> bool {
-        units <= self.capacity - *self.used.borrow()
-    }
-
-    fn check_units_can_fit(&self, units: usize) -> SimResult {
-        if units > self.capacity {
-            let capacity_unit = self.capacity_unit.borrow();
-            return sim_error!(
-                "Cannot store {units} {capacity_unit} in {:?} with capacity {}",
-                self.entity.full_name(),
-                self.capacity
-            );
-        }
-        Ok(())
-    }
-
-    fn push_value(&self, value: T) -> SimResult {
-        let units = (self.object_to_capacity)(&value);
-        self.entity.track_enter(value.id());
-        if *self.error_on_overflow.borrow() {
-            if !self.has_capacity_for(units) {
-                return sim_error!("Overflow in {:?}", self.entity.full_name());
-            }
-        } else {
-            assert!(self.has_capacity_for(units));
-        }
-
-        self.data.borrow_mut().push_back(value);
-        *self.used.borrow_mut() += units;
-        self.level_change.notify_result(*self.used.borrow());
-        Ok(())
-    }
-
-    fn pop_value(&self) -> Result<T, SimError> {
-        let value = self.data.borrow_mut().pop_front().unwrap();
-        *self.used.borrow_mut() -= (self.object_to_capacity)(&value);
-        self.level_change.notify_result(*self.used.borrow());
-        self.entity.track_exit(value.id());
-        Ok(value)
-    }
 }
 
 /// A component that can support a configurable number of capacity units.
@@ -124,7 +64,10 @@ where
 {
     entity: Rc<Entity>,
     spawner: Spawner,
-    state: Rc<State<T>>,
+    capacity: CapacityAllocator,
+    data: Rc<RefCell<VecDeque<T>>>,
+    error_on_overflow: Rc<RefCell<bool>>,
+    object_to_capacity: ObjectToCapacity<T>,
     tx: RefCell<Option<OutPort<T>>>,
     rx: RefCell<Option<InPort<T>>>,
 }
@@ -139,15 +82,20 @@ where
         entity: &Rc<Entity>,
         aka: Option<&Aka>,
         capacity: usize,
+        capacity_unit: &str,
         object_to_capacity: ObjectToCapacity<T>,
     ) -> Result<Self, SimError> {
         if capacity == 0 {
             return sim_error!("Unsupported Store with capacity of 0");
         }
+        let capacity = CapacityAllocator::for_entity(entity, capacity, capacity_unit)?;
         Ok(Self {
             entity: entity.clone(),
             spawner: engine.spawner(),
-            state: Rc::new(State::new(entity, capacity, object_to_capacity)),
+            capacity,
+            data: Rc::new(RefCell::new(VecDeque::new())),
+            error_on_overflow: Rc::new(RefCell::new(false)),
+            object_to_capacity,
             tx: RefCell::new(Some(OutPort::new_with_renames(entity, "tx", aka))),
             rx: RefCell::new(Some(InPort::new_with_renames(
                 engine, clock, entity, "rx", aka,
@@ -165,20 +113,26 @@ where
 
     #[must_use]
     pub fn capacity_used(&self) -> usize {
-        *self.state.used.borrow()
+        self.capacity.used()
     }
 
     pub fn set_error_on_overflow(&self) {
-        *self.state.error_on_overflow.borrow_mut() = true;
-    }
-
-    pub fn set_capacity_unit(&self, capacity_unit: impl Into<String>) {
-        *self.state.capacity_unit.borrow_mut() = capacity_unit.into();
+        *self.error_on_overflow.borrow_mut() = true;
     }
 
     #[must_use]
     pub fn get_level_change_event(&self) -> Repeated<usize> {
-        self.state.level_change.clone()
+        self.capacity.level_change_event()
+    }
+
+    fn state(&self) -> State<T> {
+        State {
+            entity: self.entity.clone(),
+            capacity: self.capacity.clone(),
+            data: self.data.clone(),
+            error_on_overflow: self.error_on_overflow.clone(),
+            object_to_capacity: self.object_to_capacity,
+        }
     }
 }
 
@@ -189,46 +143,71 @@ where
 {
     async fn run(&self) -> SimResult {
         let rx = take_option!(self.rx);
-        let state = self.state.clone();
-        self.spawner.spawn(async move { run_rx(rx, state).await });
+        let state = self.state();
+        self.spawner.spawn(async move { state.run_rx(rx).await });
 
         let tx = take_option!(self.tx);
-        let state = self.state.clone();
-        self.spawner.spawn(async move { run_tx(tx, state).await });
+        let state = self.state();
+        self.spawner.spawn(async move { state.run_tx(tx).await });
         Ok(())
     }
 }
 
-async fn run_rx<T>(mut rx: InPort<T>, state: Rc<State<T>>) -> SimResult
+impl<T> State<T>
 where
     T: SimObject,
 {
-    let level_change = state.level_change.clone();
-    loop {
-        let value = rx.start_get()?.await;
-        let units = (state.object_to_capacity)(&value);
-        state.check_units_can_fit(units)?;
-        while !state.has_capacity_for(units) && !*state.error_on_overflow.borrow() {
-            level_change.listen().await;
+    fn check_units_can_fit(&self, units: usize) -> SimResult {
+        if units > self.capacity.capacity() {
+            return sim_error!(
+                "Cannot store {units} {} in {:?} with capacity {}",
+                self.capacity.capacity_unit(),
+                self.entity.full_name(),
+                self.capacity.capacity()
+            );
         }
-        state.push_value(value)?;
-        rx.finish_get();
+        Ok(())
     }
-}
 
-async fn run_tx<T>(mut tx: OutPort<T>, state: Rc<State<T>>) -> SimResult
-where
-    T: SimObject,
-{
-    let level_change = state.level_change.clone();
-    loop {
-        let level = state.data.borrow().len();
-        if level > 0 {
-            tx.try_put()?.await;
-            let value = state.pop_value()?;
-            tx.put(value)?.await;
-        } else {
-            level_change.listen().await;
+    fn push_value(&self, value: T) -> SimResult {
+        let units = (self.object_to_capacity)(&value);
+        self.capacity.allocate(units)?;
+        self.entity.track_enter(value.id());
+        self.data.borrow_mut().push_back(value);
+        Ok(())
+    }
+
+    fn pop_value(&self) -> Result<T, SimError> {
+        let value = self.data.borrow_mut().pop_front().unwrap();
+        self.capacity.release((self.object_to_capacity)(&value));
+        self.entity.track_exit(value.id());
+        Ok(value)
+    }
+
+    async fn run_rx(&self, mut rx: InPort<T>) -> SimResult {
+        loop {
+            let value = rx.start_get()?.await;
+            let units = (self.object_to_capacity)(&value);
+            self.check_units_can_fit(units)?;
+            if !*self.error_on_overflow.borrow() {
+                self.capacity.wait_for_capacity(units).await?;
+            }
+            self.push_value(value)?;
+            rx.finish_get();
+        }
+    }
+
+    async fn run_tx(&self, mut tx: OutPort<T>) -> SimResult {
+        let level_change = self.capacity.level_change_event();
+        loop {
+            let level = self.data.borrow().len();
+            if level > 0 {
+                tx.try_put()?.await;
+                let value = self.pop_value()?;
+                tx.put(value)?.await;
+            } else {
+                level_change.listen().await;
+            }
         }
     }
 }
