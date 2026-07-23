@@ -6,7 +6,7 @@ description: Install all dependencies required to build the repo source
 runs:
   using: composite
   steps:
-    - uses: actions/cache@v5
+    - uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/.crates.toml
