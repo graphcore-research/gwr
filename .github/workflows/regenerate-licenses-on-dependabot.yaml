@@ -70,6 +70,7 @@ jobs:
       - name: Configure git identity from push token
         env:
           GH_TOKEN: ${{ steps.gwr-bot-token.outputs.token }}
+          APP_SLUG: ${{ steps.gwr-bot-token.outputs.app-slug }}
         run: |
           # Resolve the committer identity from the App that owns the token
           # minted above, so the commit's git committer matches the identity
@@ -77,10 +78,15 @@ jobs:
           # Deriving the identity at run time means a future App rename or
           # swap only requires updating the two Dependabot secrets -- no
           # workflow edits.
+          #
+          # Note: `gh api /user` cannot be used here because the mint step
+          # produces a GitHub App *installation* token, which is not tied to
+          # a user account and gets a 403 from `/user`. Instead, resolve the
+          # bot user via the public `/users/{login}` endpoint, using the
+          # `app-slug` output exposed by `actions/create-github-app-token`.
           set -euo pipefail
-          user_json=$(gh api /user)
-          user_id=$(jq -r .id <<<"$user_json")
-          user_login=$(jq -r .login <<<"$user_json")
+          user_login="${APP_SLUG}[bot]"
+          user_id=$(gh api "/users/${user_login}" --jq .id)
           git config user.name "$user_login"
           git config user.email "${user_id}+${user_login}@users.noreply.github.com"
 
