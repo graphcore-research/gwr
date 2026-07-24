@@ -9,9 +9,10 @@
 </div>
 
 The [`regenerate-licenses-on-dependabot`](../workflows/regenerate-licenses-on-dependabot.yaml)
-workflow amends Dependabot's commits and force-pushes the result so that
-CI runs against a branch with an up-to-date `licenses.html`. It needs a
-token with `contents: write` on the repository, because:
+workflow regenerates `licenses.html`, makes `gwr-bot` the amended commit's
+author and committer, credits Dependabot as a co-author in the commit message,
+and force-pushes the result. It needs a token with `contents: write` on the
+repository, because:
 
 - The default `GITHUB_TOKEN` supplied to Dependabot-triggered workflows is
   read-only and cannot push.
@@ -123,8 +124,9 @@ secrets you just created. No workflow edits are required.
    `Regenerate dependency licenses on Dependabot cargo PRs` workflow run
    under **Actions**. It should succeed and produce a force-push.
 3. On the PR, confirm that:
-   - The tip commit is authored by `dependabot[bot]` and committed by
-     `gwr-bot[bot]`.
+   - The tip commit is authored and committed by `gwr-bot[bot]`.
+   - The commit message ends with a `Co-authored-by` trailer for
+     `dependabot[bot]`.
    - CI has run against the amended commit (the `gate` job is not
      skipped, because `github.actor` is now `gwr-bot[bot]`, not
      `dependabot[bot]`).
