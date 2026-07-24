@@ -42,15 +42,10 @@ mod object_store_harness {
         let store = ObjectStore::new_and_register(&engine, &clock, top, "store", CAPACITY).unwrap();
         let mut harness = ObjectStoreHarness::new(engine, store.clone());
 
-        let mut sends = Vec::new();
-        let mut expects = Vec::new();
-
-        for _ in 0..NUM_PUTS {
-            sends.push(send_rx!(VALUE));
-            expects.push(expect_tx!(VALUE));
-        }
-
-        harness.run_steps([par!([seq!(sends), seq!(expects)])]);
+        harness.run_steps([par!([
+            seq!(vec![send_rx!(VALUE); NUM_PUTS]),
+            seq!(vec![expect_tx!(VALUE); NUM_PUTS]),
+        ])]);
 
         assert_eq!(store.capacity_used(), 0);
     }
@@ -84,12 +79,7 @@ mod object_store_harness {
 
         let mut harness = ObjectStoreHarness::new(engine, store.clone());
 
-        let mut sends = Vec::new();
-        for _ in 0..NUM_PUTS {
-            sends.push(send_rx!(1));
-        }
-
-        harness.run_steps(sends);
+        harness.run_steps(vec![send_rx!(1); NUM_PUTS]);
     }
 }
 /// Creating an object store with zero capacity should fail with a SimError.
