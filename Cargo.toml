@@ -5,6 +5,7 @@ members = [
   "check-copyright",
   "examples/flaky-component",
   "examples/flaky-with-delay",
+  "examples/multi-engine",
   "examples/scrambler",
   "examples/sim-fabric",
   "examples/sim-pipe",
