@@ -203,15 +203,10 @@ mod queue_harness {
         let queue = Queue::new_and_register(&engine, &clock, top, "queue", Some(2)).unwrap();
         let mut harness = QueueHarness::new(engine, queue.clone());
 
-        let mut sends = Vec::new();
-        let mut expects = Vec::new();
-
-        for _ in 0..NUM_VALUES {
-            sends.push(send_rx!(VALUE));
-            expects.push(expect_tx!(VALUE));
-        }
-
-        harness.run_steps([par!([seq!(sends), seq!(expects)])]);
+        harness.run_steps([par!([
+            seq!(vec![send_rx!(VALUE); NUM_VALUES]),
+            seq!(vec![expect_tx!(VALUE); NUM_VALUES]),
+        ])]);
 
         assert!(queue.is_empty());
     }
