@@ -1,22 +1,15 @@
 # Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-# Dependabot names cross-directory groups after the configured group identifier,
-# which omits the dependency's old and new versions. For grouped GitHub Actions
-# updates, replace both the PR title and the commit summary with the usual
-# single-dependency form and collapse Dependabot's repeated per-directory
-# release information to one copy resulting in summary lines in the form:
+# Trusted implementation for GitHub Actions Dependabot updates. The PR wrapper
+# loads this workflow from `main`, so only reviewed action versions can access
+# `gwr-bot` credentials.
 #
-#   infra: bump actions/cache from 5 to 6
+# Grouped cross-directory updates omit versions from their title and summary and
+# repeat release information for each directory. Restore the usual summary form
+# (`infra: bump actions/cache from 5 to 6`) and keep one copy of that information.
 #
-# This is the `main`-trusted implementation of the amendment workflow. The
-# `pull_request` entry point calls this file explicitly from `main`, so action
-# versions proposed by a Dependabot PR are never executed in the same job that
-# receives the `gwr-bot` private key.
-#
-# Every GitHub Actions update is amended and pushed with the App, including
-# ungrouped security updates whose message is left unchanged. The resulting
-# `pull_request: synchronize` event triggers CI for the new commit SHA; CI skips
-# the initial Dependabot-authored commit.
+# Every update is amended and pushed with the App so CI runs against the final
+# commit. Ungrouped security updates keep their existing message.
 #
 # See `.github/gwr-bot/gwr-bot-setup.md` for step-by-step instructions on
 # provisioning the `gwr-bot` GitHub App and its Dependabot secrets.
@@ -54,15 +47,11 @@ jobs:
       - name: Check out the Dependabot branch
         uses: actions/checkout@v6
         with:
-          # Check out the PR branch itself (not the merge commit) so that we
-          # can amend the tip commit and push it back.
+          # Amend the PR tip rather than the generated merge commit.
           ref: ${{ github.event.pull_request.head.ref }}
-          # Avoid the default shallow clone behaviour as we need the parent
-          # commit to be able to perform the amend soundly.
+          # Include the parent required by `git commit --amend`.
           fetch-depth: 2
-          # Do not persist the token in `.git/config` for the whole job.
-          # The push step below sets up credentials via `gh auth setup-git`
-          # just before it needs them.
+          # Keep the push token out of .git/config until gh auth setup-git runs.
           persist-credentials: false
 
       - name: Build update summary
@@ -75,6 +64,7 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Name the updated action in the summary.
           dependency=$(
             jq -er '
               map(.dependencyName) | unique |
@@ -83,27 +73,29 @@ jobs:
               end
             ' <<< "$UPDATED_DEPENDENCIES"
           )
-          previous=$(
+
+          # Name the version being replaced in the summary.
+          previous_version=$(
             jq -er --arg dependency "$dependency" '
               map(
                 select(.dependencyName == $dependency) |
                 .prevVersion |
                 select(length > 0)
-              ) |
-              unique |
+              ) | unique |
               if length == 1 then .[0]
               else error("expected exactly one previous version")
               end
             ' <<< "$UPDATED_DEPENDENCIES"
           )
-          next=$(
+
+          # Name the replacement version in the summary.
+          new_version=$(
             jq -er --arg dependency "$dependency" '
               map(
                 select(.dependencyName == $dependency) |
                 .newVersion |
                 select(length > 0)
-              ) |
-              unique |
+              ) | unique |
               if length == 1 then .[0]
               else error("expected exactly one new version")
               end
@@ -112,9 +104,9 @@ jobs:
 
           {
             echo "dependency=$dependency"
-            echo "previous=$previous"
-            echo "next=$next"
-            echo "value=infra: bump $dependency from $previous to $next"
+            echo "previous_version=$previous_version"
+            echo "new_version=$new_version"
+            echo "summary=infra: bump $dependency from $previous_version to $new_version"
           } >> "$GITHUB_OUTPUT"
 
       - name: Configure git identity from push token
@@ -126,19 +118,18 @@ jobs:
           user_login="${APP_SLUG}[bot]"
           user_id=$(gh api "/users/${user_login}" --jq .id)
           git config user.name "$user_login"
-          git config user.email \
-            "${user_id}+${user_login}@users.noreply.github.com"
+          git config user.email "${user_id}+${user_login}@users.noreply.github.com"
 
       - name: Amend commit and update grouped PR
         env:
           DEPENDENCY: ${{ steps.summary.outputs.dependency }}
           DEPENDENCY_GROUP: ${{ steps.metadata.outputs.dependency-group }}
           GH_TOKEN: ${{ steps.gwr-bot-token.outputs.token }}
-          NEW_VERSION: ${{ steps.summary.outputs.next }}
-          PREVIOUS_VERSION: ${{ steps.summary.outputs.previous }}
+          NEW_VERSION: ${{ steps.summary.outputs.new_version }}
+          PREVIOUS_VERSION: ${{ steps.summary.outputs.previous_version }}
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          SUMMARY: ${{ steps.summary.outputs.value }}
+          SUMMARY: ${{ steps.summary.outputs.summary }}
         run: |
           set -euo pipefail
 
@@ -147,13 +138,9 @@ jobs:
             new_message="$RUNNER_TEMP/new-commit-message"
             old_pr_body="$RUNNER_TEMP/old-pr-body"
             new_pr_body="$RUNNER_TEMP/new-pr-body"
-            pr_update="$RUNNER_TEMP/pr-update.json"
 
             git log -1 --format=%B > "$old_message"
-            gh api \
-              "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
-              --jq '.body // ""' \
-              > "$old_pr_body"
+            gh pr view "$PR_NUMBER" --json body --jq .body > "$old_pr_body"
 
             python3 - \
               "$old_message" \
@@ -166,43 +153,34 @@ jobs:
           from pathlib import Path
 
           dependency = os.environ["DEPENDENCY"]
-          previous = os.environ["PREVIOUS_VERSION"]
-          new = os.environ["NEW_VERSION"]
+          previous_version = os.environ["PREVIOUS_VERSION"]
+          new_version = os.environ["NEW_VERSION"]
           summary = os.environ["SUMMARY"]
-          header = f"Updates `{dependency}` from {previous} to {new}"
+          header = f"Updates `{dependency}` from {previous_version} to {new_version}"
 
 
           def collapse_repeated_sections(text: str, footer: str) -> str:
-              starts = [
-                  match.start()
-                  for match in re.finditer(
-                      rf"(?m)^{re.escape(header)}$", text
-                  )
-              ]
-              if len(starts) < 2:
+              prefix, *sections = re.split(
+                  rf"(?m)^{re.escape(header)}$", text
+              )
+              if len(sections) < 2:
                   return text
 
-              footer_start = text.find(footer, starts[-1])
-              if footer_start < 0:
+              sections[-1], marker, suffix = sections[-1].partition(footer)
+              if not marker:
                   raise ValueError(
                       f"could not find the footer after repeated {header!r} sections"
                   )
 
-              ends = starts[1:] + [footer_start]
               sections = [
-                  text[start:end].strip()
-                  for start, end in zip(starts, ends, strict=True)
+                  (header + section).strip() for section in sections
               ]
-              if any(section != sections[0] for section in sections[1:]):
+              if len(set(sections)) != 1:
                   raise ValueError(
                       f"repeated {header!r} sections are not identical"
                   )
 
-              return (
-                  text[: starts[0]]
-                  + sections[0]
-                  + text[footer_start:]
-              )
+              return prefix + sections[0] + marker + suffix
 
 
           old_message, new_message, old_pr_body, new_pr_body = map(
@@ -225,16 +203,9 @@ jobs:
           new_pr_body.write_text(pr_body, encoding="utf-8")
           PY
 
-            jq -n \
-              --arg title "$SUMMARY" \
-              --rawfile body "$new_pr_body" \
-              '{title: $title, body: $body}' \
-              > "$pr_update"
-            gh api \
-              --method PATCH \
-              "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
-              --input "$pr_update" \
-              > /dev/null
+            gh pr edit "$PR_NUMBER" \
+              --title "$SUMMARY" \
+              --body-file "$new_pr_body"
 
             git commit --amend --file "$new_message"
           else
