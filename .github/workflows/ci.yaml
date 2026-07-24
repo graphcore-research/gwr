@@ -93,7 +93,7 @@ jobs:
       - uses: ./.github/actions/install-build-dependencies
       - uses: ./.github/actions/run-build-command
         with:
-          command: cargo build --all-features --verbose
+          command: cargo build --all-features ${{ case(runner.debug == '1', '--verbose', '') }}
           cache-name: ${{ github.job }}
 
   test:
@@ -113,7 +113,7 @@ jobs:
       - uses: ./.github/actions/install-build-dependencies
       - uses: ./.github/actions/run-build-command
         with:
-          command: cargo test --all-features --verbose
+          command: cargo test --all-features ${{ case(runner.debug == '1', '--verbose', '') }}
           cache-name: ${{ github.job }}
 
   benchmark:
@@ -138,7 +138,7 @@ jobs:
         id: build-all-benchmarks
         uses: ./.github/actions/run-build-command
         with:
-          command: cargo bench --all-features --verbose --no-run
+          command: cargo bench --all-features ${{ case(runner.debug == '1', '--verbose', '') }} --no-run
           cache-name: ${{ github.job }}
 
       - name: Get ID of latest successful benchmark run on baseline branch
@@ -168,7 +168,7 @@ jobs:
       - name: Run one-shot benchmarks and update baseline results
         id: run-benchmarks-save-results
         if: github.ref == format('refs/heads/{0}', env.BASELINE_BRANCH_NAME)
-        run: cargo bench --all-features --verbose --bench one_shot_benchmarks -- --save-baseline=$BASELINE_BRANCH_NAME
+        run: cargo bench --all-features ${{ case(runner.debug == '1', '--verbose', '') }} --bench one_shot_benchmarks -- --save-baseline=$BASELINE_BRANCH_NAME
 
       - name: Upload baseline benchmark results
         id: upload-baseline-benchmark-results
@@ -182,4 +182,4 @@ jobs:
       - name: Run one-shot benchmarks
         id: run-benchmarks
         if: github.ref != format('refs/heads/{0}', env.BASELINE_BRANCH_NAME)
-        run: cargo bench --all-features --verbose --bench one_shot_benchmarks -- --baseline=$BASELINE_BRANCH_NAME
+        run: cargo bench --all-features ${{ case(runner.debug == '1', '--verbose', '') }} --bench one_shot_benchmarks -- --baseline=$BASELINE_BRANCH_NAME
