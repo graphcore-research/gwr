@@ -5,6 +5,7 @@ use std::future::Future;
 use std::mem;
 use std::pin::Pin;
 use std::rc::Rc;
+use std::sync::{Arc, Condvar, Mutex};
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use gwr_track::entity::Entity;
@@ -16,59 +17,88 @@ use crate::time::clock::Clock;
 use crate::time::simtime::SimTime;
 use crate::types::SimResult;
 
-fn no_op(_: *const ()) {}
+type TaskId = usize;
 
 unsafe fn drop_task(data: *const ()) {
     unsafe {
-        drop(Rc::from_raw(data as *const Task));
+        drop(Arc::from_raw(data as *const TaskWake));
     }
 }
 
-static VTABLE: RawWakerVTable = RawWakerVTable::new(clone_raw_waker, wake_task, no_op, drop_task);
+static VTABLE: RawWakerVTable =
+    RawWakerVTable::new(clone_raw_waker, wake_task, wake_by_ref, drop_task);
 
-fn task_raw_waker(task: Rc<Task>) -> RawWaker {
-    let ptr = Rc::into_raw(task) as *const ();
+fn task_raw_waker(wake: Arc<TaskWake>) -> RawWaker {
+    let ptr = Arc::into_raw(wake) as *const ();
     RawWaker::new(ptr, &VTABLE)
 }
 
-fn waker_for_task(task: Rc<Task>) -> Waker {
-    unsafe { Waker::from_raw(task_raw_waker(task)) }
+fn waker_for_task(task: &Rc<Task>) -> Waker {
+    let wake = Arc::new(TaskWake {
+        task_id: task.id,
+        external_wake: ExternalWakeHandle {
+            state: task.executor_state.external.clone(),
+        },
+    });
+
+    unsafe { Waker::from_raw(task_raw_waker(wake)) }
 }
 
 unsafe fn clone_raw_waker(data: *const ()) -> RawWaker {
     unsafe {
-        // Tasks are always wrapped in a reference counter to allow them to be shared
-        // read-only. The input `data` pointer is borrowed — we must not decrement its
-        // refcount, so we mem::forget the reconstructed Rc rather than letting it drop.
-        let rc_task = Rc::from_raw(data as *const Task);
-        let clone = rc_task.clone();
-        mem::forget(rc_task);
-        let ptr = Rc::into_raw(clone) as *const ();
+        // Raw wakers store an Arc<TaskWake>. The input pointer is borrowed here,
+        // so reconstruct it only long enough to clone it.
+        let wake = Arc::from_raw(data as *const TaskWake);
+        let clone = wake.clone();
+        mem::forget(wake);
+        let ptr = Arc::into_raw(clone) as *const ();
         RawWaker::new(ptr, &VTABLE)
     }
 }
 
 unsafe fn wake_task(data: *const ()) {
     unsafe {
-        // Tasks are always wrapped in a reference counter to allow them to be shared
-        // read-only.
-        let rc_task = Rc::from_raw(data as *const Task);
-        let cloned = rc_task.clone();
-        rc_task.executor_state.new_tasks.borrow_mut().push(cloned);
+        // We can safely take ownership of the Arc here, because the waker is being
+        // consumed.
+        let wake = Arc::from_raw(data as *const TaskWake);
+        wake.wake();
+        drop(wake);
+    }
+}
+
+unsafe fn wake_by_ref(data: *const ()) {
+    unsafe {
+        let wake = Arc::from_raw(data as *const TaskWake);
+        wake.wake();
+        mem::forget(wake);
+    }
+}
+
+struct TaskWake {
+    task_id: TaskId,
+    external_wake: ExternalWakeHandle,
+}
+
+impl TaskWake {
+    fn wake(&self) {
+        self.external_wake.wake_task(self.task_id);
     }
 }
 
 struct Task {
+    id: TaskId,
     future: RefCell<Option<Pin<Box<dyn Future<Output = SimResult>>>>>,
     executor_state: Rc<ExecutorState>,
 }
 
 impl Task {
     pub fn new(
+        id: TaskId,
         future: impl Future<Output = SimResult> + 'static,
         executor_state: Rc<ExecutorState>,
     ) -> Task {
         Task {
+            id,
             future: RefCell::new(Some(Box::pin(future))),
             executor_state,
         }
@@ -92,9 +122,12 @@ impl Task {
 struct ExecutorState {
     task_queue: RefCell<Vec<Rc<Task>>>,
     new_tasks: RefCell<Vec<Rc<Task>>>,
+    next_task_id: Cell<TaskId>,
     time: RefCell<SimTime>,
     randomize_task_order: Cell<bool>,
     task_order_rng: RefCell<StdRng>,
+    external: Arc<ExternalState>,
+    tasks: RefCell<Vec<Option<Rc<Task>>>>,
 }
 
 impl ExecutorState {
@@ -102,10 +135,107 @@ impl ExecutorState {
         Self {
             task_queue: RefCell::new(Vec::new()),
             new_tasks: RefCell::new(Vec::new()),
+            next_task_id: Cell::new(0),
             time: RefCell::new(SimTime::new(top)),
             randomize_task_order: Cell::new(false),
             task_order_rng: RefCell::new(StdRng::seed_from_u64(rand::random())),
+            external: Arc::new(ExternalState {
+                data: Mutex::new(ExternalStateData {
+                    waits: 0,
+                    time_blocking_waits: 0,
+                    wakes: Vec::new(),
+                }),
+                changed: Condvar::new(),
+            }),
+            tasks: RefCell::new(Vec::new()),
         }
+    }
+}
+
+struct ExternalStateData {
+    waits: usize,
+    time_blocking_waits: usize,
+    wakes: Vec<TaskId>,
+}
+
+struct ExternalState {
+    data: Mutex<ExternalStateData>,
+    changed: Condvar,
+}
+
+#[derive(Clone)]
+struct ExternalWakeHandle {
+    state: Arc<ExternalState>,
+}
+
+impl ExternalWakeHandle {
+    fn wake_task(&self, task_id: TaskId) {
+        {
+            let mut external_wakes = self.state.data.lock().unwrap();
+            external_wakes.wakes.push(task_id);
+        }
+        self.state.changed.notify_all();
+    }
+}
+
+/// Handle used to tell the executor that a task is waiting for external
+/// progress.
+#[derive(Clone)]
+pub struct ExternalWaitHandle {
+    state: Arc<ExternalState>,
+}
+
+/// Guard that keeps the executor alive while a task waits for external
+/// progress.
+pub struct ExternalWaitGuard {
+    state: Arc<ExternalState>,
+    blocks_time: bool,
+}
+
+impl ExternalWaitHandle {
+    /// Register that a task is waiting for progress from outside this executor.
+    #[must_use]
+    pub fn begin_wait(&self) -> ExternalWaitGuard {
+        let mut state = self.state.data.lock().unwrap();
+        state.waits += 1;
+        ExternalWaitGuard {
+            state: self.state.clone(),
+            blocks_time: false,
+        }
+    }
+
+    /// Register that a task is waiting for external progress and simulated time
+    /// must not advance until that progress happens.
+    #[must_use]
+    pub fn begin_time_blocking_wait(&self) -> ExternalWaitGuard {
+        let mut state = self.state.data.lock().unwrap();
+        state.waits += 1;
+        state.time_blocking_waits += 1;
+        ExternalWaitGuard {
+            state: self.state.clone(),
+            blocks_time: true,
+        }
+    }
+}
+
+impl Drop for ExternalWaitGuard {
+    fn drop(&mut self) {
+        {
+            let mut state = self.state.data.lock().unwrap();
+            assert!(
+                state.waits > 0,
+                "ExternalWaitGuard dropped without a matching begin_wait"
+            );
+            state.waits -= 1;
+            if self.blocks_time {
+                assert!(
+                    state.time_blocking_waits > 0,
+                    "ExternalWaitGuard dropped without a matching begin_time_blocking_wait"
+                );
+                state.time_blocking_waits -= 1;
+            }
+        }
+        self.state.changed.notify_all();
     }
 }
 
@@ -130,16 +260,22 @@ impl Executor {
                 break;
             }
 
+            self.queue_external_wakes();
+
             if self.state.new_tasks.borrow().is_empty() {
-                if self.state.time.borrow().can_exit() {
+                if self.can_exit_now() {
                     break;
                 }
 
-                if let Some(wakers) = self.state.time.borrow_mut().advance_time() {
+                if self.has_time_blocking_external_waits() {
+                    self.wait_for_time_blocking_external_progress();
+                } else if let Some(wakers) = self.state.time.borrow_mut().advance_time() {
                     // No events left, advance time
                     for task_waker in wakers.into_iter() {
                         task_waker.waker.wake();
                     }
+                } else if self.has_external_waits() {
+                    self.wait_for_external_progress();
                 } else {
                     break;
                 }
@@ -148,7 +284,53 @@ impl Executor {
         Ok(())
     }
 
+    fn wait_for_external_progress(&self) {
+        let mut external_waits = self.state.external.data.lock().unwrap();
+        while external_waits.waits > 0 && external_waits.wakes.is_empty() {
+            external_waits = self.state.external.changed.wait(external_waits).unwrap();
+        }
+    }
+
+    fn wait_for_time_blocking_external_progress(&self) {
+        let mut external_waits = self.state.external.data.lock().unwrap();
+        while external_waits.time_blocking_waits > 0 && external_waits.wakes.is_empty() {
+            external_waits = self.state.external.changed.wait(external_waits).unwrap();
+        }
+    }
+
+    fn take_external_wakes(&self) -> Vec<TaskId> {
+        let mut external_wakes = self.state.external.data.lock().unwrap();
+        std::mem::take(&mut external_wakes.wakes)
+    }
+
+    fn queue_external_wakes(&self) {
+        let tasks = self.state.tasks.borrow();
+        let new_tasks = &mut self.state.new_tasks.borrow_mut();
+
+        for task_id in self.take_external_wakes() {
+            if let Some(Some(task)) = tasks.get(task_id) {
+                new_tasks.push(task.clone());
+            }
+        }
+    }
+
+    fn can_exit_now(&self) -> bool {
+        self.state.time.borrow().can_exit() && !self.has_external_waits()
+    }
+
+    fn has_external_waits(&self) -> bool {
+        let external_waits = self.state.external.data.lock().unwrap();
+        external_waits.waits > 0
+    }
+
+    fn has_time_blocking_external_waits(&self) -> bool {
+        let external_waits = self.state.external.data.lock().unwrap();
+        external_waits.time_blocking_waits > 0
+    }
+
     pub fn step(&self, finished: &Rc<RefCell<bool>>) -> SimResult {
+        self.queue_external_wakes();
+
         // Append new tasks created since the last step into the task queue
         let mut task_queue = self.state.task_queue.borrow_mut();
         task_queue.append(&mut self.state.new_tasks.borrow_mut());
@@ -164,16 +346,18 @@ impl Executor {
             }
 
             // Dummy waker and context (not used as we poll all tasks)
-            let waker = waker_for_task(task.clone());
+            let waker = waker_for_task(&task);
             let mut context = Context::from_waker(&waker);
 
             match task.poll(&mut context) {
                 Poll::Ready(Err(e)) => {
                     // Error - return early
+                    self.state.tasks.borrow_mut()[task.id] = None;
                     return Err(e);
                 }
                 Poll::Ready(Ok(())) => {
                     // Otherwise, drop task as it is complete
+                    self.state.tasks.borrow_mut()[task.id] = None;
                 }
                 Poll::Pending => {
                     // Task will have parked itself waiting somewhere
@@ -181,6 +365,13 @@ impl Executor {
             }
         }
         Ok(())
+    }
+
+    #[must_use]
+    pub fn external_wait_handle(&self) -> ExternalWaitHandle {
+        ExternalWaitHandle {
+            state: self.state.external.clone(),
+        }
     }
 
     #[must_use]
@@ -210,10 +401,13 @@ pub struct Spawner {
 
 impl Spawner {
     pub fn spawn(&self, future: impl Future<Output = SimResult> + 'static) {
-        self.state
-            .new_tasks
-            .borrow_mut()
-            .push(Rc::new(Task::new(future, self.state.clone())));
+        let id = self.state.next_task_id.get();
+        self.state.next_task_id.set(id + 1);
+
+        let task = Rc::new(Task::new(id, future, self.state.clone()));
+        self.state.tasks.borrow_mut().push(Some(task.clone()));
+
+        self.state.new_tasks.borrow_mut().push(task);
     }
 }
 
@@ -230,11 +424,13 @@ pub fn new_executor_and_spawner(top: &Rc<Entity>) -> (Executor, Spawner) {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::future::Future;
     use std::pin::Pin;
     use std::rc::Rc;
-    use std::task::{Context, Poll};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::task::{Context, Poll, Waker};
 
     use futures::task::noop_waker;
     use gwr_track::entity::toplevel;
@@ -242,6 +438,51 @@ mod tests {
 
     use super::*;
     use crate::time::clock::TaskWaker;
+
+    struct StoresWakerThenCompletes {
+        polls: Rc<Cell<usize>>,
+        stored_waker: Arc<Mutex<Option<Waker>>>,
+    }
+
+    impl Future for StoresWakerThenCompletes {
+        type Output = SimResult;
+
+        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            let polls = self.polls.get() + 1;
+            self.polls.set(polls);
+
+            if polls == 1 {
+                *self.stored_waker.lock().unwrap() = Some(cx.waker().clone());
+                Poll::Pending
+            } else {
+                Poll::Ready(Ok(()))
+            }
+        }
+    }
+
+    struct WaitsForExternalProgress {
+        wait_handle: ExternalWaitHandle,
+        wait: Arc<Mutex<Option<ExternalWaitGuard>>>,
+        blocks_time: bool,
+        started: bool,
+    }
+
+    impl Future for WaitsForExternalProgress {
+        type Output = SimResult;
+
+        fn poll(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+            if !self.started {
+                let wait = if self.blocks_time {
+                    self.wait_handle.begin_time_blocking_wait()
+                } else {
+                    self.wait_handle.begin_wait()
+                };
+                *self.wait.lock().unwrap() = Some(wait);
+                self.started = true;
+            }
+            Poll::Pending
+        }
+    }
 
     struct PanicIfPolled;
 
@@ -251,6 +492,135 @@ mod tests {
         fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
             panic!("finished executor step polled a task");
         }
+    }
+
+    #[test]
+    fn stored_waker_can_wake_task_from_another_thread() {
+        let tracker = dev_null_tracker();
+        let top = toplevel(&tracker, "top");
+        let (executor, spawner) = new_executor_and_spawner(&top);
+
+        let polls = Rc::new(Cell::new(0));
+        let stored_waker = Arc::new(Mutex::new(None));
+
+        spawner.spawn(StoresWakerThenCompletes {
+            polls: polls.clone(),
+            stored_waker: stored_waker.clone(),
+        });
+
+        let finished = Rc::new(RefCell::new(false));
+        executor.step(&finished).unwrap();
+        assert_eq!(polls.get(), 1, "Task should have been polled once");
+
+        let waker_option = stored_waker.lock().unwrap().take();
+        assert!(
+            waker_option.is_some(),
+            "Waker should have been stored in the mutex"
+        );
+
+        let waker_clone = waker_option.unwrap();
+        let thread_handle = std::thread::spawn(move || {
+            waker_clone.wake();
+        });
+
+        thread_handle.join().unwrap();
+
+        executor.step(&finished).unwrap();
+        assert_eq!(polls.get(), 2, "Task should have been polled twice");
+
+        assert!(
+            executor.state.tasks.borrow()[0].as_ref().is_none(),
+            "Task should be removed after completing"
+        );
+    }
+
+    #[test]
+    fn external_wait_blocks_time_advance() {
+        let tracker = dev_null_tracker();
+        let top = toplevel(&tracker, "top");
+        let (executor, spawner) = new_executor_and_spawner(&top);
+        let clock = executor.get_clock(1000.0);
+
+        let wait = Arc::new(Mutex::new(None));
+        let late_task_ran = Arc::new(AtomicBool::new(false));
+
+        spawner.spawn(WaitsForExternalProgress {
+            wait_handle: executor.external_wait_handle(),
+            wait: wait.clone(),
+            blocks_time: true,
+            started: false,
+        });
+
+        let late_task_clock = clock.clone();
+        let late_task_ran_for_task = late_task_ran.clone();
+        spawner.spawn(async move {
+            late_task_clock.wait_ticks(10).await;
+            late_task_ran_for_task.store(true, Ordering::SeqCst);
+            Ok(())
+        });
+
+        let time_advanced_before_wait_finished = Arc::new(AtomicBool::new(false));
+        let time_advanced_for_thread = time_advanced_before_wait_finished.clone();
+        let thread_handle = std::thread::spawn(move || {
+            while wait.lock().unwrap().is_none() {
+                std::thread::yield_now();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            time_advanced_for_thread.store(late_task_ran.load(Ordering::SeqCst), Ordering::SeqCst);
+            drop(wait.lock().unwrap().take());
+        });
+
+        executor.run(&Rc::new(RefCell::new(false))).unwrap();
+        thread_handle.join().unwrap();
+        assert!(!time_advanced_before_wait_finished.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn external_wait_allows_time_advance() {
+        let tracker = dev_null_tracker();
+        let top = toplevel(&tracker, "top");
+        let (executor, spawner) = new_executor_and_spawner(&top);
+        let clock = executor.get_clock(1000.0);
+
+        let wait = Arc::new(Mutex::new(None));
+        let late_task_ran = Arc::new(AtomicBool::new(false));
+
+        spawner.spawn(WaitsForExternalProgress {
+            wait_handle: executor.external_wait_handle(),
+            wait: wait.clone(),
+            blocks_time: false,
+            started: false,
+        });
+
+        let late_task_clock = clock.clone();
+        let late_task_ran_for_task = late_task_ran.clone();
+        spawner.spawn(async move {
+            late_task_clock.wait_ticks(10).await;
+            late_task_ran_for_task.store(true, Ordering::SeqCst);
+            Ok(())
+        });
+
+        let time_advanced_before_wait_finished = Arc::new(AtomicBool::new(false));
+        let time_advanced_for_thread = time_advanced_before_wait_finished.clone();
+        let thread_handle = std::thread::spawn(move || {
+            while wait.lock().unwrap().is_none() {
+                std::thread::yield_now();
+            }
+
+            for _ in 0..100 {
+                if late_task_ran.load(Ordering::SeqCst) {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+
+            time_advanced_for_thread.store(late_task_ran.load(Ordering::SeqCst), Ordering::SeqCst);
+            drop(wait.lock().unwrap().take());
+        });
+
+        executor.run(&Rc::new(RefCell::new(false))).unwrap();
+        thread_handle.join().unwrap();
+        assert!(time_advanced_before_wait_finished.load(Ordering::SeqCst));
     }
 
     #[test]

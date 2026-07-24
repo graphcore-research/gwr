@@ -8,7 +8,7 @@ use gwr_track::entity::{Entity, toplevel};
 use gwr_track::tracker::stdout_tracker;
 use gwr_track::{Tracker, trace};
 
-use crate::executor::{self, Executor, Spawner};
+use crate::executor::{self, Executor, ExternalWaitHandle, Spawner};
 use crate::time::clock::Clock;
 use crate::types::{Component, Eventable, SimResult};
 
@@ -142,6 +142,11 @@ impl Engine {
     #[must_use]
     pub fn time_now_ns(&self) -> f64 {
         self.executor.time_now_ns()
+    }
+
+    #[must_use]
+    pub fn external_wait_handle(&self) -> ExternalWaitHandle {
+        self.executor.external_wait_handle()
     }
 
     #[must_use]
