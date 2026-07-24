@@ -66,8 +66,10 @@ impl Routable for i32 {
             0 => AccessType::ReadRequest,
             1 => AccessType::WriteRequest,
             2 => AccessType::WriteNonPostedRequest,
-            3 => AccessType::ReadResponse,
-            4 => AccessType::WriteNonPostedResponse,
+            3 => AccessType::BarrierRequest,
+            4 => AccessType::ReadResponse,
+            5 => AccessType::WriteNonPostedResponse,
+            6 => AccessType::BarrierResponse,
             _ => AccessType::Control,
         }
     }
@@ -91,8 +93,10 @@ impl Routable for usize {
             0 => AccessType::ReadRequest,
             1 => AccessType::WriteRequest,
             2 => AccessType::WriteNonPostedRequest,
-            3 => AccessType::ReadResponse,
-            4 => AccessType::WriteNonPostedResponse,
+            3 => AccessType::BarrierRequest,
+            4 => AccessType::ReadResponse,
+            5 => AccessType::WriteNonPostedResponse,
+            6 => AccessType::BarrierResponse,
             _ => AccessType::Control,
         }
     }
@@ -184,18 +188,22 @@ mod tests {
         assert_eq!(0_i32.access_type(), AccessType::ReadRequest);
         assert_eq!(1_i32.access_type(), AccessType::WriteRequest);
         assert_eq!(2_i32.access_type(), AccessType::WriteNonPostedRequest);
-        assert_eq!(3_i32.access_type(), AccessType::ReadResponse);
-        assert_eq!(4_i32.access_type(), AccessType::WriteNonPostedResponse);
-        assert_eq!(5_i32.access_type(), AccessType::Control);
+        assert_eq!(3_i32.access_type(), AccessType::BarrierRequest);
+        assert_eq!(4_i32.access_type(), AccessType::ReadResponse);
+        assert_eq!(5_i32.access_type(), AccessType::WriteNonPostedResponse);
+        assert_eq!(6_i32.access_type(), AccessType::BarrierResponse);
+        assert_eq!(7_i32.access_type(), AccessType::Control);
 
         assert_eq!(0_usize.total_bytes(), size_of::<usize>());
         assert_eq!(7_usize.destination(), 7);
         assert_eq!(0_usize.access_type(), AccessType::ReadRequest);
         assert_eq!(1_usize.access_type(), AccessType::WriteRequest);
         assert_eq!(2_usize.access_type(), AccessType::WriteNonPostedRequest);
-        assert_eq!(3_usize.access_type(), AccessType::ReadResponse);
-        assert_eq!(4_usize.access_type(), AccessType::WriteNonPostedResponse);
-        assert_eq!(5_usize.access_type(), AccessType::Control);
+        assert_eq!(3_usize.access_type(), AccessType::BarrierRequest);
+        assert_eq!(4_usize.access_type(), AccessType::ReadResponse);
+        assert_eq!(5_usize.access_type(), AccessType::WriteNonPostedResponse);
+        assert_eq!(6_usize.access_type(), AccessType::BarrierResponse);
+        assert_eq!(7_usize.access_type(), AccessType::Control);
     }
 
     struct PassiveRunnable;

@@ -8,6 +8,7 @@ use std::rc::Rc;
 use gwr_track::entity::Entity;
 use gwr_track::info;
 
+pub mod cache;
 pub mod ethernet_frame;
 pub mod ethernet_link;
 pub mod fabric;

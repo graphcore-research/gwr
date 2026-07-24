@@ -22,17 +22,10 @@ use gwr_track::{build_aka, debug};
 use crate::log_stats;
 use crate::memory::traits::{AccessMemory, ReadMemory};
 
-pub mod cache;
 pub mod memory_access;
 pub mod memory_access_gen;
 pub mod memory_map;
 pub mod traits;
-
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub enum CacheHintType {
-    Allocate,
-    NoAllocate,
-}
 
 #[derive(Clone)]
 pub struct MemoryConfig {
@@ -235,20 +228,21 @@ where
             let access = rx.get()?.await;
             debug!(self.entity ; "Memory access {}", access);
 
+            let access_type = access.access_type();
             let begin = access.dst_addr();
             let payload_bytes = access.access_size_bytes();
-            let end = begin + (payload_bytes as u64) - 1;
-
             let config = &self.config;
-            assert!(
-                begin >= config.base_address
-                    && end < (config.base_address + config.capacity_bytes as u64),
-                "Out of bounds memory access received [0x{begin:x},0x{end:x}] not in [0x{:x},0x{:x}]",
-                config.base_address,
-                config.base_address + config.capacity_bytes as u64
-            );
+            if access_type != AccessType::BarrierRequest {
+                let end = begin + (payload_bytes as u64) - 1;
+                assert!(
+                    begin >= config.base_address
+                        && end < (config.base_address + config.capacity_bytes as u64),
+                    "Out of bounds memory access received [0x{begin:x},0x{end:x}] not in [0x{:x},0x{:x}]",
+                    config.base_address,
+                    config.base_address + config.capacity_bytes as u64
+                );
+            }
 
-            let access_type = access.access_type();
             match access_type {
                 AccessType::ReadRequest => {
                     self.stats.borrow_mut().bytes_read += payload_bytes;
@@ -263,7 +257,13 @@ where
                     let response = access.to_response(self)?;
                     response_tx.put(response)?.await;
                 }
-                AccessType::ReadResponse | AccessType::WriteNonPostedResponse => {
+                AccessType::BarrierRequest => {
+                    let response = access.to_response(self)?;
+                    response_tx.put(response)?.await;
+                }
+                AccessType::ReadResponse
+                | AccessType::WriteNonPostedResponse
+                | AccessType::BarrierResponse => {
                     return sim_error!("{}: unsupported {access_type} received", self.entity);
                 }
                 AccessType::Control => {

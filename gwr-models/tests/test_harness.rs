@@ -53,9 +53,9 @@ mod delay_harness {
         let clock = engine.default_clock();
         let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
         let memory_map = Rc::new(create_default_memory_map());
-        let access = test_read(engine.top(), &memory_map);
 
         let mut harness = DelayHarness::new(engine, delay);
+        let access = test_read(&harness.entity, &memory_map);
         harness.run_steps([
             send_rx!(access.clone()),
             expect_tx!(MemoryTxn::read_req(DST_ADDR)),
@@ -68,9 +68,9 @@ mod delay_harness {
         let clock = engine.default_clock();
         let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
         let memory_map = Rc::new(create_default_memory_map());
-        let creator = Rc::new(Entity::new(engine.top(), "creator"));
+        let mut harness = DelayHarness::new(engine, delay);
         let access = create_write(
-            &creator,
+            &harness.entity,
             &memory_map,
             ACCESS_SIZE_BYTES,
             DST_ADDR,
@@ -78,7 +78,6 @@ mod delay_harness {
             OVERHEAD_SIZE_BYTES,
         );
 
-        let mut harness = DelayHarness::new(engine, delay);
         harness.run_steps([
             send_rx!(access),
             expect_tx!(MemoryTxn::write_req(DST_ADDR).with_bytes(ACCESS_SIZE_BYTES)),
@@ -91,9 +90,9 @@ mod delay_harness {
         let clock = engine.default_clock();
         let delay_component = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 3);
         let memory_map = Rc::new(create_default_memory_map());
-        let access = test_read(engine.top(), &memory_map);
 
         let mut harness = DelayHarness::new(engine, delay_component);
+        let access = test_read(&harness.entity, &memory_map);
         harness.run_steps([
             send_rx!(access),
             expect_no_traffic!(&[Port::Tx], 2),
@@ -108,9 +107,9 @@ mod delay_harness {
         let clock = engine.default_clock();
         let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
         let memory_map = Rc::new(create_default_memory_map());
-        let access = test_read(engine.top(), &memory_map);
 
         let mut harness = DelayHarness::new(engine, delay);
+        let access = test_read(&harness.entity, &memory_map);
         harness.run_steps([par!([
             send_rx!(access),
             expect_tx!(MemoryTxn::read_req(DST_ADDR)),
@@ -148,7 +147,6 @@ mod arbiter_harness {
             Box::new(RoundRobin::new()),
         );
         let memory_map = Rc::new(create_default_memory_map());
-        let top = engine.top().clone();
 
         let addr0 = DST_ADDR;
         let addr1 = DST_ADDR + 0x1000;
@@ -158,12 +156,12 @@ mod arbiter_harness {
         let mut harness = ArbiterHarness::new(engine, arbiter, 2);
         harness.run_steps([par!([
             seq!([
-                send_rx!(0, test_read_at(&top, &memory_map, addr0)),
-                send_rx!(0, test_read_at(&top, &memory_map, addr2)),
+                send_rx!(0, test_read_at(&harness.entity, &memory_map, addr0)),
+                send_rx!(0, test_read_at(&harness.entity, &memory_map, addr2)),
             ]),
             seq!([
-                send_rx!(1, test_read_at(&top, &memory_map, addr1)),
-                send_rx!(1, test_read_at(&top, &memory_map, addr3)),
+                send_rx!(1, test_read_at(&harness.entity, &memory_map, addr1)),
+                send_rx!(1, test_read_at(&harness.entity, &memory_map, addr3)),
             ]),
             seq!([
                 expect_tx!(MemoryTxn::read_req(addr0)),

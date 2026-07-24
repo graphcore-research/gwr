@@ -1312,6 +1312,7 @@ macro_rules! build_component_harness {
             $($struct_head)* {
                 pub engine: gwr_engine::engine::Engine,
                 pub clock: gwr_engine::time::clock::Clock,
+                pub entity: std::rc::Rc<gwr_track::entity::Entity>,
                 pub $component_field: $component_ty,
                 $(
                     [<$rx_field _driver>]: Option<gwr_engine::port::OutPort<$rx_ty>>,
@@ -1337,6 +1338,10 @@ macro_rules! build_component_harness {
                 ) -> Self {
                     let clock = engine.default_clock();
                     let top = engine.top();
+                    let entity = std::rc::Rc::new(gwr_track::entity::Entity::new(
+                        top,
+                        concat!(stringify!($harness), "_harness"),
+                    ));
 
                     $(
                         let mut [<$rx_field _driver>] = gwr_engine::port::OutPort::new(
@@ -1391,6 +1396,7 @@ macro_rules! build_component_harness {
                     Self {
                         engine,
                         clock,
+                        entity,
                         $component_field,
                         $(
                             [<$rx_field _driver>]: Some([<$rx_field _driver>]),
@@ -1547,7 +1553,6 @@ macro_rules! build_component_harness {
                         panic!("test harness did not complete");
                     }
                 }
-
             }
 
             #[allow(unused_macros)]

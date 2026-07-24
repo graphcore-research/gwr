@@ -189,6 +189,16 @@ fn emit_fabrics(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std
             fabric.fabric_ports_per_node,
             2,
         )?;
+        if let Some(port_devices) = &fabric.port_devices {
+            emit_line(&mut out, "port_devices:", 2)?;
+            for port_device in port_devices {
+                emit_line(&mut out, format_args!("- port: {}", port_device.port), 3)?;
+                emit_line(&mut out, "devices:", 4)?;
+                for device in &port_device.devices {
+                    emit_line(&mut out, format_args!("- {device}"), 5)?;
+                }
+            }
+        }
         emit_optional_kv(&mut out, "ticks_per_hop", fabric.ticks_per_hop, 2)?;
         emit_optional_kv(&mut out, "ticks_overhead", fabric.ticks_overhead, 2)?;
         emit_optional_kv(&mut out, "rx_buffer_bytes", fabric.rx_buffer_bytes, 2)?;
@@ -229,6 +239,24 @@ fn emit_caches(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std:
         let config = &cache.config;
 
         emit_line(&mut out, format_args!("- name: {}", cache.name), 1)?;
+        emit_line(
+            &mut out,
+            format_args!("memory_map: {}", cache.memory_map),
+            2,
+        )?;
+        if let Some(coherency_manager) = &cache.coherency_manager {
+            emit_line(
+                &mut out,
+                format_args!("coherency_manager: {coherency_manager}"),
+                2,
+            )?;
+        }
+        if let Some(coherency_managers) = &cache.coherency_managers {
+            emit_line(&mut out, "coherency_managers:", 2)?;
+            for coherency_manager in coherency_managers {
+                emit_line(&mut out, format_args!("- {coherency_manager}"), 3)?;
+            }
+        }
         if emitted_anchors[config_idx] {
             emit_line(&mut out, format_args!("config: *{anchor}"), 2)?;
         } else {
@@ -250,6 +278,38 @@ fn emit_caches(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std:
             }
         }
     }
+    Ok(Some(out))
+}
+
+fn emit_coherency_managers(
+    platform: &PlatformConfig,
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    let Some(coherency_managers) = &platform.coherency_managers else {
+        return Ok(None);
+    };
+
+    let mut out = start_section("coherency_managers")?;
+
+    for manager in coherency_managers {
+        emit_line(&mut out, format_args!("- name: {}", manager.name), 1)?;
+        emit_line(
+            &mut out,
+            format_args!("memory_map: {}", manager.memory_map),
+            2,
+        )?;
+        if manager.config.line_size_bytes.is_none() {
+            emit_line(&mut out, "config: {}", 2)?;
+        } else {
+            emit_line(&mut out, "config:", 2)?;
+            emit_optional_kv(
+                &mut out,
+                "line_size_bytes",
+                manager.config.line_size_bytes,
+                3,
+            )?;
+        }
+    }
+
     Ok(Some(out))
 }
 
@@ -321,6 +381,7 @@ pub fn platform_to_yaml_str(
     emit_optional_section(&mut out, emit_processing_elements(platform)?);
     emit_optional_section(&mut out, emit_fabrics(platform)?);
     emit_optional_section(&mut out, emit_caches(platform)?);
+    emit_optional_section(&mut out, emit_coherency_managers(platform)?);
     emit_optional_section(&mut out, emit_memories(platform)?);
     emit_optional_section(&mut out, emit_connections(platform)?);
 
@@ -331,8 +392,9 @@ pub fn platform_to_yaml_str(
 mod tests {
     use super::platform_to_yaml_str;
     use crate::types::{
-        CacheConfigSection, CacheSection, ConnectSection, MemoryDeviceSection, MemoryMapSection,
-        PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
+        CacheConfigSection, CacheSection, CoherencyManagerConfigSection, CoherencyManagerSection,
+        ConnectSection, FabricKind, FabricPortDevicesSection, FabricSection, MemoryDeviceSection,
+        MemoryMapSection, PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
     };
 
     fn test_memory_map() -> MemoryMapSection {
@@ -385,6 +447,7 @@ mod tests {
                 },
             ]),
             caches: None,
+            coherency_managers: None,
             fabrics: None,
             memories: None,
             connections: None,
@@ -414,6 +477,7 @@ mod tests {
         assert_eq!(pes[2].config, shared_config);
     }
 
+    #[expect(clippy::too_many_lines)]
     #[test]
     fn emits_empty_pe_and_cache_configs_as_inline_maps() {
         let empty_pe_config = ProcessingElementConfigSection {
@@ -443,14 +507,57 @@ mod tests {
             caches: Some(vec![
                 CacheSection {
                     name: "l1a".to_string(),
+                    memory_map: "memory_map".to_string(),
+                    coherency_manager: None,
+                    coherency_managers: None,
                     config: empty_cache_config.clone(),
                 },
                 CacheSection {
                     name: "l1b".to_string(),
+                    memory_map: "memory_map".to_string(),
+                    coherency_manager: None,
+                    coherency_managers: None,
                     config: empty_cache_config.clone(),
                 },
             ]),
-            fabrics: None,
+            coherency_managers: Some(vec![CoherencyManagerSection {
+                name: "cm0".to_string(),
+                memory_map: "memory_map".to_string(),
+                config: CoherencyManagerConfigSection {
+                    line_size_bytes: Some(32),
+                },
+            }]),
+            fabrics: Some(vec![FabricSection {
+                name: "fabric0".to_string(),
+                kind: FabricKind::Functional,
+                columns: 1,
+                rows: 2,
+                fabric_ports_per_node: Some(1),
+                port_devices: Some(vec![
+                    FabricPortDevicesSection {
+                        port: crate::types::FabricPortLocation {
+                            column: 0,
+                            row: 0,
+                            port: 0,
+                        },
+                        devices: vec!["pe0".to_string()],
+                    },
+                    FabricPortDevicesSection {
+                        port: crate::types::FabricPortLocation {
+                            column: 0,
+                            row: 1,
+                            port: 0,
+                        },
+                        devices: vec!["l1a".to_string()],
+                    },
+                ]),
+                ticks_per_hop: None,
+                ticks_overhead: None,
+                rx_buffer_bytes: None,
+                tx_buffer_bytes: None,
+                port_bits_per_tick: None,
+                routing: None,
+            }]),
             memories: None,
             connections: Some(vec![ConnectSection {
                 connect: vec!["pe.pe0".to_string(), "cache.l1a.dev".to_string()],
@@ -462,6 +569,10 @@ mod tests {
         assert!(yaml.contains("config: &pe_config_0 {}"));
         assert!(yaml.contains("config: &cache_config_0 {}"));
         assert!(yaml.contains("config: *cache_config_0"));
+        assert!(yaml.contains("port_devices:"));
+        assert!(yaml.contains("port: (0,0)"));
+        assert!(yaml.contains("devices:\n          - pe0"));
+        assert!(yaml.contains("coherency_managers:"));
 
         let round_trip: PlatformConfig =
             serde_yaml::from_str(&yaml).expect("generated yaml should deserialize");
@@ -474,5 +585,10 @@ mod tests {
         assert_eq!(pe.config, empty_pe_config);
         assert_eq!(caches[0].config, empty_cache_config);
         assert_eq!(caches[1].config, empty_cache_config);
+        let fabrics = round_trip.fabrics.expect("fabrics should be present");
+        assert_eq!(
+            fabrics[0].port_devices.as_ref().expect("port devices")[0].devices[0],
+            "pe0"
+        );
     }
 }

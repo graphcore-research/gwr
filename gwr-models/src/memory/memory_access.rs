@@ -10,7 +10,9 @@ use gwr_track::entity::Entity;
 use gwr_track::id::Unique;
 use gwr_track::{Id, create_id, track_create_object};
 
-use crate::memory::CacheHintType;
+use crate::cache::CacheHintType;
+use crate::cache::coherency_manager::CoherenceOp;
+use crate::cache::traits::CoherentAccess;
 use crate::memory::memory_map::DeviceId;
 use crate::memory::traits::{AccessMemory, ReadMemory};
 
@@ -25,6 +27,7 @@ pub struct MemoryAccess {
     dst_device: DeviceId,
     src_device: DeviceId,
     cache_hint: CacheHintType,
+    coherence_op: Option<CoherenceOp>,
 
     /// Non-data overhead. Control/Read accesses don't contain any data.
     overhead_size_bytes: usize,
@@ -34,8 +37,13 @@ impl Display for MemoryAccess {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "{}: {}@{:x}",
-            self.access_type, self.access_size_bytes, self.dst_addr
+            "{} {}: {} bytes @ 0x{:x}. {} -> {}",
+            self.access_type,
+            self.id,
+            self.access_size_bytes,
+            self.dst_addr,
+            self.src_device,
+            self.dst_device,
         )
     }
 }
@@ -43,9 +51,11 @@ impl Display for MemoryAccess {
 impl TotalBytes for MemoryAccess {
     fn total_bytes(&self) -> usize {
         match self.access_type {
-            AccessType::Control | AccessType::ReadRequest | AccessType::WriteNonPostedResponse => {
-                self.overhead_size_bytes
-            }
+            AccessType::Control
+            | AccessType::ReadRequest
+            | AccessType::WriteNonPostedResponse
+            | AccessType::BarrierRequest
+            | AccessType::BarrierResponse => self.overhead_size_bytes,
             AccessType::WriteRequest
             | AccessType::WriteNonPostedRequest
             | AccessType::ReadResponse => self.access_size_bytes + self.overhead_size_bytes,
@@ -77,7 +87,7 @@ impl AccessMemory for MemoryAccess {
     }
 
     fn cache_hint(&self) -> CacheHintType {
-        CacheHintType::Allocate
+        self.cache_hint
     }
 
     fn access_size_bytes(&self) -> usize {
@@ -89,8 +99,10 @@ impl AccessMemory for MemoryAccess {
             AccessType::Control => AccessType::Control,
             AccessType::ReadRequest => AccessType::ReadResponse,
             AccessType::WriteNonPostedRequest => AccessType::WriteNonPostedResponse,
+            AccessType::BarrierRequest => AccessType::BarrierResponse,
             AccessType::ReadResponse
             | AccessType::WriteNonPostedResponse
+            | AccessType::BarrierResponse
             | AccessType::WriteRequest => {
                 return sim_error!("{}: unsupported by to_response()", self.access_type);
             }
@@ -105,8 +117,36 @@ impl AccessMemory for MemoryAccess {
             dst_device: self.src_device,
             src_device: self.dst_device,
             cache_hint: self.cache_hint,
+            coherence_op: self.coherence_op,
             overhead_size_bytes: self.overhead_size_bytes,
         })
+    }
+}
+
+impl CoherentAccess for MemoryAccess {
+    fn coherence_op(&self) -> Option<CoherenceOp> {
+        self.coherence_op
+    }
+
+    fn with_access_type(mut self, access_type: AccessType) -> Self {
+        self.access_type = access_type;
+        self
+    }
+
+    fn with_dst_addr(mut self, dst_addr: u64) -> Self {
+        self.dst_addr = dst_addr;
+        self
+    }
+
+    fn with_coherence_op(mut self, coherence_op: Option<CoherenceOp>) -> Self {
+        self.coherence_op = coherence_op;
+        self
+    }
+
+    fn with_routing(mut self, dst_device: DeviceId, src_device: DeviceId) -> Self {
+        self.dst_device = dst_device;
+        self.src_device = src_device;
+        self
     }
 }
 
@@ -143,6 +183,7 @@ impl MemoryAccess {
             dst_device,
             src_device,
             cache_hint: CacheHintType::Allocate,
+            coherence_op: None,
             overhead_size_bytes,
         };
         track_create_object!(
@@ -154,6 +195,12 @@ impl MemoryAccess {
             "MemoryAccess: {access}"
         );
         access
+    }
+
+    #[must_use]
+    pub fn with_cache_hint(mut self, cache_hint: CacheHintType) -> Self {
+        self.cache_hint = cache_hint;
+        self
     }
 }
 

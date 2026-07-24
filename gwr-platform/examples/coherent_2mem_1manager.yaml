@@ -1,0 +1,84 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+memory_maps:
+  - name: pe_memory_map
+    devices:
+      - name: hbm0
+      - name: hbm1
+  - name: coherency_memory_map
+    devices:
+      - name: hbm0
+      - name: hbm1
+
+processing_elements:
+  - name: pe0
+    memory_map: pe_memory_map
+    config:
+      num_active_requests: 8
+      lsu_access_bytes: 32
+
+caches:
+  - name: l1_0
+    memory_map: pe_memory_map
+    coherency_manager: cm0
+    config:
+      bw_bytes_per_cycle: 32
+      line_size_bytes: 32
+      num_ways: 4
+      num_sets: 128
+      delay_ticks: 4
+
+coherency_managers:
+  - name: cm0
+    memory_map: coherency_memory_map
+    config:
+      line_size_bytes: 32
+
+fabrics:
+  - name: fabric0
+    kind: functional
+    columns: 1
+    rows: 5
+    port_devices:
+      - port: (0,1)
+        devices:
+          - hbm0
+      - port: (0,2)
+        devices:
+          - hbm1
+      - port: (0,3)
+        devices:
+          - pe0
+          - l1_0
+      - port: (0,4)
+        devices:
+          - cm0
+
+memories:
+  - name: hbm0
+    kind: hbm
+    base_address: 0x1_0000_0000
+    capacity_bytes: 1GiB
+    delay_ticks: 20
+  - name: hbm1
+    kind: hbm
+    base_address: 0x2_0000_0000
+    capacity_bytes: 1GiB
+    delay_ticks: 20
+
+connections:
+  - connect:
+      - pe.pe0
+      - cache.l1_0.dev
+  - connect:
+      - cache.l1_0.mem
+      - fabric.fabric0@(0,3)
+  - connect:
+      - coherency_manager.cm0
+      - fabric.fabric0@(0,4)
+  - connect:
+      - mem.hbm0
+      - fabric.fabric0@(0,1)
+  - connect:
+      - mem.hbm1
+      - fabric.fabric0@(0,2)
