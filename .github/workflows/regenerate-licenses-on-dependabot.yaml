@@ -2,15 +2,15 @@
 
 # When Dependabot bumps cargo dependencies, the workspace's dependency-
 # license report (`licenses.html`) also needs updating. This workflow
-# regenerates it and amends the change into Dependabot's commit and force pushes
-# back to the PR opened by Dependabot.
+# regenerates it, makes `gwr-bot` the amended commit's author and committer,
+# credits Dependabot as a co-author in the commit message, and force pushes back
+# to the PR opened by Dependabot.
 #
 # Prerequisites (repository configuration):
 #   - A `gwr-bot` GitHub App installed on this repository with
-#     `contents: write` permission. Its App ID and private key must be
-#     stored as *Dependabot* secrets named `GWR_BOT_APP_ID` and
-#     `GWR_BOT_PRIVATE_KEY` under
-#     Settings -> Secrets and variables -> Dependabot.
+#     `contents: write` permission. Its App ID and private key must be stored as
+#     *Dependabot* secrets named `GWR_BOT_APP_ID` and `GWR_BOT_PRIVATE_KEY`
+#     under Settings -> Secrets and variables -> Dependabot.
 #
 # Regular Actions secrets are not accessible to Dependabot-triggered workflows,
 # so they must be Dependabot secrets. Because pushes made with the default
@@ -75,8 +75,8 @@ jobs:
           GH_TOKEN: ${{ steps.gwr-bot-token.outputs.token }}
           APP_SLUG: ${{ steps.gwr-bot-token.outputs.app-slug }}
         run: |
-          # Resolve the committer identity from the App that owns the token
-          # minted above, so the commit's git committer matches the identity
+          # Resolve the author and committer identity from the App that owns the
+          # token minted above, so the amended commit matches the identity
           # GitHub records as the pusher of the resulting force-push.
           # Deriving the identity at run time means a future App rename or
           # swap only requires updating the two Dependabot secrets -- no
@@ -93,21 +93,29 @@ jobs:
           git config user.name "$user_login"
           git config user.email "${user_id}+${user_login}@users.noreply.github.com"
 
-      - name: Amend Dependabot commit with regenerated licenses
+      - name: Amend licenses and commit attribution
         env:
           GH_TOKEN: ${{ steps.gwr-bot-token.outputs.token }}
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           # Always amend and force-push, even when the regenerated
           # `licenses.html` matches the version already on the branch.
-          # Re-amending with a different committer identity produces a
-          # new commit SHA, which triggers `pull_request: synchronize`
-          # and causes CI (guarded on `github.actor`) to run against
-          # the amended commit. Without this, PRs whose dependency
-          # bumps did not affect the license report would leave CI
-          # stuck in the skipped state.
+          # Re-amending with a different author and committer identity produces
+          # a new commit SHA, which triggers `pull_request: synchronize` and
+          # causes CI (guarded on `github.actor`) to run against the amended
+          # commit. Without this, PRs whose dependency bumps did not affect the
+          # license report would leave CI stuck in the skipped state.
           set -euo pipefail
+
+          trailer_args=()
+          if [[ $(git log -1 --format=%an) != "$(git config user.name)" ]]; then
+            trailer_args=(
+              --trailer
+              "Co-authored-by: $(git log -1 --format='%an <%ae>')"
+            )
+          fi
+
           gh auth setup-git
           git add licenses.html
-          git commit --amend --no-edit
+          git commit --amend --reset-author --no-edit "${trailer_args[@]}"
           git push --force-with-lease origin "HEAD:${PR_HEAD_REF}"
