@@ -1,0 +1,17 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+[package]
+name = "multi-engine"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Example showing multiple GWR engines running concurrently"
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+gwr-engine = { path = "../../gwr-engine", version = "0.13.0" }
+gwr-track = { path = "../../gwr-track", version = "0.13.0" }

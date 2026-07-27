@@ -89,6 +89,7 @@ pub mod events;
 pub mod executor;
 #[cfg(feature = "global_allocator")]
 mod global_allocator;
+pub mod multi_engine;
 pub mod port;
 pub mod test_helpers;
 pub mod time;
