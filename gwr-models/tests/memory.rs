@@ -70,24 +70,27 @@ mod memory_harness {
 
         let mut harness = MemoryHarness::new(engine, memory.clone());
 
-        harness.run_steps([par!([
-            seq!(vec![send_rx!(request); num_accesses]),
-            seq!(vec![
-                expect_tx!(
-                    MemoryTxn::read_rsp(DST_ADDR)
-                        .with_bytes(ACCESS_SIZE_BYTES)
-                        .with_total_bytes(ACCESS_SIZE_BYTES + OVERHEAD_SIZE_BYTES)
-                );
-                num_accesses
+        harness.run_steps([
+            par!([
+                seq!(vec![send_rx!(request); num_accesses]),
+                seq!(vec![
+                    expect_tx!(
+                        MemoryTxn::read_rsp(DST_ADDR)
+                            .with_bytes(ACCESS_SIZE_BYTES)
+                            .with_total_bytes(ACCESS_SIZE_BYTES + OVERHEAD_SIZE_BYTES)
+                    );
+                    num_accesses
+                ]),
             ]),
-        ])]);
+            expect_no_traffic!(&[Port::Tx], DELAY_TICKS as u64),
+        ]);
 
         assert_eq!(memory.bytes_read(), num_accesses * ACCESS_SIZE_BYTES);
         assert_eq!(memory.bytes_written(), 0);
 
         let last_bw_limit_event = CYCLES_PER_ACCESS * num_accesses as u64;
         let last_packet_ack = CYCLES_PER_ACCESS * ((num_accesses - 1) as u64) + DELAY_TICKS as u64;
-        let last_event_time = max(last_bw_limit_event, last_packet_ack);
+        let last_event_time = max(last_bw_limit_event, last_packet_ack) + DELAY_TICKS as u64;
 
         assert_eq!(harness.engine.time_now_ns(), last_event_time as f64);
     }
@@ -144,6 +147,7 @@ mod memory_harness {
         harness.run_steps([
             seq!(vec![send_rx!(request); num_accesses]),
             expect_no_traffic!(&[Port::Tx], CYCLES_PER_ACCESS),
+            expect_no_traffic!(&[Port::Tx], DELAY_TICKS as u64),
         ]);
 
         assert_eq!(memory.bytes_written(), num_accesses * ACCESS_SIZE_BYTES);
@@ -152,7 +156,7 @@ mod memory_harness {
         // Simulation will only complete once the Memory has finished handling all the
         // delay imposed by the data it is carrying
         let last_bw_limit_event = CYCLES_PER_ACCESS * num_accesses as u64;
-        let last_event_time = last_bw_limit_event;
+        let last_event_time = last_bw_limit_event + DELAY_TICKS as u64;
         assert_eq!(harness.engine.time_now_ns(), last_event_time as f64);
     }
 
@@ -175,24 +179,27 @@ mod memory_harness {
 
         let mut harness = MemoryHarness::new(engine, memory.clone());
 
-        harness.run_steps([par!([
-            seq!(vec![send_rx!(request); num_accesses]),
-            seq!(vec![
-                expect_tx!(
-                    MemoryTxn::write_np_rsp(DST_ADDR)
-                        .with_bytes(ACCESS_SIZE_BYTES)
-                        .with_total_bytes(OVERHEAD_SIZE_BYTES)
-                );
-                num_accesses
+        harness.run_steps([
+            par!([
+                seq!(vec![send_rx!(request); num_accesses]),
+                seq!(vec![
+                    expect_tx!(
+                        MemoryTxn::write_np_rsp(DST_ADDR)
+                            .with_bytes(ACCESS_SIZE_BYTES)
+                            .with_total_bytes(OVERHEAD_SIZE_BYTES)
+                    );
+                    num_accesses
+                ]),
             ]),
-        ])]);
+            expect_no_traffic!(&[Port::Tx], DELAY_TICKS as u64),
+        ]);
 
         assert_eq!(memory.bytes_written(), num_accesses * ACCESS_SIZE_BYTES);
         assert_eq!(memory.bytes_read(), 0);
 
         let last_bw_limit_event = CYCLES_PER_ACCESS * num_accesses as u64;
         let last_packet_ack = CYCLES_PER_ACCESS * ((num_accesses - 1) as u64) + DELAY_TICKS as u64;
-        let last_event_time = max(last_bw_limit_event, last_packet_ack);
+        let last_event_time = max(last_bw_limit_event, last_packet_ack) + DELAY_TICKS as u64;
         assert_eq!(harness.engine.time_now_ns(), last_event_time as f64);
     }
 }

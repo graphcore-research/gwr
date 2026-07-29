@@ -56,8 +56,14 @@ mod ethernet_link_harness {
         let mut harness = EthernetLinkHarness::new(engine, link);
 
         harness.run_steps([par!([
-            seq!([send_rx_a!(value), expect_tx_a!(value),]),
-            expect_no_traffic!(&[Port::TxB], ethernet_link::DELAY_TICKS as u64),
+            send_rx_a!(value),
+            seq!([
+                expect_no_traffic!(
+                    &[Port::TxA, Port::TxB],
+                    (ethernet_link::DELAY_TICKS - 1) as u64
+                ),
+                expect_tx_a!(value),
+            ]),
         ])]);
 
         assert_eq!(
@@ -134,10 +140,12 @@ mod ethernet_link_harness {
 
         harness.run_steps([par!([
             seq!(vec![send_rx_a!(frame.clone()); num_puts]),
-            seq!(vec![expect_tx_a!(frame); num_puts]),
-            expect_no_traffic!(&[Port::TxB], expected_ticks as u64),
+            seq!([
+                seq!(vec![expect_tx_a!(frame); num_puts]),
+                expect_no_traffic!(&[Port::TxA, Port::TxB], 1),
+            ]),
         ])]);
 
-        assert_eq!(harness.clock.tick_now().tick(), expected_ticks as u64);
+        assert_eq!(harness.clock.tick_now().tick(), expected_ticks as u64 + 1);
     }
 }
