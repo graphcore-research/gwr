@@ -39,7 +39,7 @@ pub fn u64_to_mac(value: u64) -> [u8; DEST_MAC_BYTES] {
     mac
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct EthernetFrame {
     id: Id,
 
