@@ -175,6 +175,7 @@ mod full_cache_harness {
                 ),
             ]),
             expect_no_traffic!(&[Port::DevTx, Port::MemTx], cycles_per_request),
+            expect_no_traffic!(&[Port::DevTx, Port::MemTx], DELAY_TICKS as u64),
         ]);
 
         // All accesses are to the same address, so only the first should be passed
