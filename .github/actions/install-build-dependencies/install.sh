@@ -79,7 +79,7 @@ cargo binstall --disable-telemetry --no-confirm --locked   \
 
 if [[ $OSTYPE == "linux"* ]]; then
   cargo binstall --disable-telemetry --no-confirm --locked   \
-    gungraun-runner@0.17.2
+    gungraun-runner@0.19.4
 fi
 
 if $show_exit_message; then
