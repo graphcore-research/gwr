@@ -3,21 +3,14 @@
 use std::cmp::max;
 use std::rc::Rc;
 
-use gwr_components::sink::Sink;
-use gwr_components::source::Source;
-use gwr_components::{connect_port, option_box_repeat};
 use gwr_engine::engine::Engine;
-use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::SimObject;
-use gwr_models::memory::memory_access::MemoryAccess;
-use gwr_models::memory::memory_map::MemoryMap;
 use gwr_models::memory::traits::AccessMemory;
 use gwr_models::memory::{Memory, MemoryConfig};
 use gwr_models::test_helpers::{
     create_default_memory_map, create_read, create_write, create_write_np,
 };
-use gwr_track::entity::{Entity, GetEntity};
 
 const DST_ADDR: u64 = 0x80000;
 const SRC_ADDR: u64 = DST_ADDR + 0x1000;
@@ -40,85 +33,6 @@ where
     Memory::new_and_register(engine, &clock, top, "memory", config).unwrap()
 }
 
-#[expect(clippy::type_complexity)]
-fn setup_system(
-    num_accesses: usize,
-    create_fn: fn(&Rc<Entity>, &Rc<MemoryMap>, usize, u64, u64, usize) -> MemoryAccess,
-) -> (Engine, Rc<Sink<MemoryAccess>>, Rc<Memory<MemoryAccess>>) {
-    let mut engine = start_test(file!());
-    let clock = engine.default_clock();
-    let memory = create_memory(&mut engine);
-    let memory_map = Rc::new(create_default_memory_map());
-    let top = engine.top();
-
-    let source = Source::new_and_register(&engine, top, "source", None);
-    let to_put = create_fn(
-        source.entity(),
-        &memory_map,
-        ACCESS_SIZE_BYTES,
-        DST_ADDR,
-        SRC_ADDR,
-        OVERHEAD_SIZE_BYTES,
-    );
-    source.set_generator(option_box_repeat!(to_put ; num_accesses));
-
-    let sink = Sink::new_and_register(&engine, &clock, top, "sink");
-
-    connect_port!(source, tx => memory, rx).unwrap();
-    connect_port!(memory, tx => sink, rx).unwrap();
-
-    (engine, sink, memory)
-}
-
-#[test]
-fn memory_read() {
-    let num_accesses = 100;
-    let (mut engine, sink, memory) = setup_system(num_accesses, create_read);
-
-    run_simulation!(engine);
-    assert_eq!(sink.num_sunk(), num_accesses);
-    assert_eq!(memory.bytes_read(), (num_accesses * ACCESS_SIZE_BYTES));
-    assert_eq!(memory.bytes_written(), 0);
-
-    let last_bw_limit_event = CYCLES_PER_ACCESS * num_accesses as u64;
-    let last_packet_ack = CYCLES_PER_ACCESS * ((num_accesses - 1) as u64) + DELAY_TICKS as u64;
-    let last_event_time = max(last_bw_limit_event, last_packet_ack);
-    assert_eq!(engine.time_now_ns(), last_event_time as f64);
-}
-
-#[test]
-fn memory_write() {
-    let num_accesses = 100;
-    let (mut engine, sink, memory) = setup_system(num_accesses, create_write);
-
-    run_simulation!(engine);
-    assert_eq!(sink.num_sunk(), 0);
-    assert_eq!(memory.bytes_written(), num_accesses * ACCESS_SIZE_BYTES);
-    assert_eq!(memory.bytes_read(), 0);
-
-    // Simulation will only complete once the Memory has finished handling all the
-    // delay imposed by the data it is carrying
-    let last_bw_limit_event = CYCLES_PER_ACCESS * num_accesses as u64;
-    let last_event_time = last_bw_limit_event;
-    assert_eq!(engine.time_now_ns(), last_event_time as f64);
-}
-
-#[test]
-fn memory_write_np() {
-    let num_accesses = 100;
-    let (mut engine, sink, memory) = setup_system(num_accesses, create_write_np);
-
-    run_simulation!(engine);
-
-    assert_eq!(sink.num_sunk(), num_accesses);
-    assert_eq!(memory.bytes_written(), num_accesses * ACCESS_SIZE_BYTES);
-    assert_eq!(memory.bytes_read(), 0);
-
-    let last_bw_limit_event = CYCLES_PER_ACCESS * num_accesses as u64;
-    let last_packet_ack = CYCLES_PER_ACCESS * ((num_accesses - 1) as u64) + DELAY_TICKS as u64;
-    let last_event_time = max(last_bw_limit_event, last_packet_ack);
-    assert_eq!(engine.time_now_ns(), last_event_time as f64);
-}
 mod memory_harness {
     use gwr_models::build_model_harness;
     use gwr_models::test_helpers::MemoryTxn;
@@ -135,6 +49,47 @@ mod memory_harness {
                 Tx<T> => tx,
             },
         }
+    }
+
+    #[test]
+    fn memory_read() {
+        let num_accesses = 100;
+
+        let mut engine = start_test(file!());
+        let memory = create_memory(&mut engine);
+        let memory_map = Rc::new(create_default_memory_map());
+
+        let request = create_read(
+            engine.top(),
+            &memory_map,
+            ACCESS_SIZE_BYTES,
+            DST_ADDR,
+            SRC_ADDR,
+            OVERHEAD_SIZE_BYTES,
+        );
+
+        let mut harness = MemoryHarness::new(engine, memory.clone());
+
+        harness.run_steps([par!([
+            seq!(vec![send_rx!(request); num_accesses]),
+            seq!(vec![
+                expect_tx!(
+                    MemoryTxn::read_rsp(DST_ADDR)
+                        .with_bytes(ACCESS_SIZE_BYTES)
+                        .with_total_bytes(ACCESS_SIZE_BYTES + OVERHEAD_SIZE_BYTES)
+                );
+                num_accesses
+            ]),
+        ])]);
+
+        assert_eq!(memory.bytes_read(), num_accesses * ACCESS_SIZE_BYTES);
+        assert_eq!(memory.bytes_written(), 0);
+
+        let last_bw_limit_event = CYCLES_PER_ACCESS * num_accesses as u64;
+        let last_packet_ack = CYCLES_PER_ACCESS * ((num_accesses - 1) as u64) + DELAY_TICKS as u64;
+        let last_event_time = max(last_bw_limit_event, last_packet_ack);
+
+        assert_eq!(harness.engine.time_now_ns(), last_event_time as f64);
     }
 
     #[test]
@@ -165,5 +120,79 @@ mod memory_harness {
         ]);
 
         assert_eq!(harness.engine.time_now_ns(), DELAY_TICKS as f64);
+    }
+
+    #[test]
+    fn memory_write() {
+        let num_accesses = 100;
+
+        let mut engine = start_test(file!());
+        let memory = create_memory(&mut engine);
+        let memory_map = Rc::new(create_default_memory_map());
+
+        let request = create_write(
+            engine.top(),
+            &memory_map,
+            ACCESS_SIZE_BYTES,
+            DST_ADDR,
+            SRC_ADDR,
+            OVERHEAD_SIZE_BYTES,
+        );
+
+        let mut harness = MemoryHarness::new(engine, memory.clone());
+
+        harness.run_steps([
+            seq!(vec![send_rx!(request); num_accesses]),
+            expect_no_traffic!(&[Port::Tx], CYCLES_PER_ACCESS),
+        ]);
+
+        assert_eq!(memory.bytes_written(), num_accesses * ACCESS_SIZE_BYTES);
+        assert_eq!(memory.bytes_read(), 0);
+
+        // Simulation will only complete once the Memory has finished handling all the
+        // delay imposed by the data it is carrying
+        let last_bw_limit_event = CYCLES_PER_ACCESS * num_accesses as u64;
+        let last_event_time = last_bw_limit_event;
+        assert_eq!(harness.engine.time_now_ns(), last_event_time as f64);
+    }
+
+    #[test]
+    fn memory_write_np() {
+        let num_accesses = 100;
+
+        let mut engine = start_test(file!());
+        let memory = create_memory(&mut engine);
+        let memory_map = Rc::new(create_default_memory_map());
+
+        let request = create_write_np(
+            engine.top(),
+            &memory_map,
+            ACCESS_SIZE_BYTES,
+            DST_ADDR,
+            SRC_ADDR,
+            OVERHEAD_SIZE_BYTES,
+        );
+
+        let mut harness = MemoryHarness::new(engine, memory.clone());
+
+        harness.run_steps([par!([
+            seq!(vec![send_rx!(request); num_accesses]),
+            seq!(vec![
+                expect_tx!(
+                    MemoryTxn::write_np_rsp(DST_ADDR)
+                        .with_bytes(ACCESS_SIZE_BYTES)
+                        .with_total_bytes(OVERHEAD_SIZE_BYTES)
+                );
+                num_accesses
+            ]),
+        ])]);
+
+        assert_eq!(memory.bytes_written(), num_accesses * ACCESS_SIZE_BYTES);
+        assert_eq!(memory.bytes_read(), 0);
+
+        let last_bw_limit_event = CYCLES_PER_ACCESS * num_accesses as u64;
+        let last_packet_ack = CYCLES_PER_ACCESS * ((num_accesses - 1) as u64) + DELAY_TICKS as u64;
+        let last_event_time = max(last_bw_limit_event, last_packet_ack);
+        assert_eq!(harness.engine.time_now_ns(), last_event_time as f64);
     }
 }

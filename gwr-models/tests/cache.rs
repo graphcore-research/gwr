@@ -1,12 +1,8 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 use std::rc::Rc;
 
-use gwr_components::sink::Sink;
-use gwr_components::source::Source;
-use gwr_components::{connect_port, option_box_repeat};
+use gwr_components::connect_port;
 use gwr_engine::engine::Engine;
-use gwr_engine::port::OutPort;
-use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::SimObject;
 use gwr_models::build_model_harness;
@@ -75,49 +71,6 @@ where
     connect_port!(memory, tx => cache, mem_rx).unwrap();
 
     memory
-}
-
-#[test]
-fn cache_dev_read_goes_to_mem() {
-    let num_accesses = 100;
-
-    let mut engine = start_test(file!());
-    let clock = engine.default_clock();
-
-    let memory_map = Rc::new(create_default_memory_map());
-
-    let cache = create_cache(&mut engine);
-    let top = engine.top();
-    let source = Source::new_and_register(&engine, top, "source", None);
-    let to_put = create_read(
-        source.entity(),
-        &memory_map,
-        ACCESS_SIZE_BYTES,
-        DST_ADDR,
-        SRC_ADDR,
-        OVERHEAD_SIZE_BYTES,
-    );
-    source.set_generator(option_box_repeat!(to_put ; num_accesses));
-
-    let dev_req_sink = Sink::new_and_register(&engine, &clock, top, "dev_req_sink");
-    let mem_req_sink = Sink::new_and_register(&engine, &clock, top, "mem_req_sink");
-
-    connect_port!(source, tx => cache, dev_rx).unwrap();
-    connect_port!(cache, dev_tx => dev_req_sink, rx).unwrap();
-    connect_port!(cache, mem_tx => mem_req_sink, rx).unwrap();
-
-    // Even though we are not driving it we need to connect it.
-    let mut mem_rx_driver = OutPort::new(top, "mem_rx_driver");
-    mem_rx_driver.connect(cache.port_mem_rx()).unwrap();
-
-    run_simulation!(engine);
-    assert_eq!(dev_req_sink.num_sunk(), 0);
-
-    // All accesses are to the same address, so only the first should be passed
-    // through
-    assert_eq!(mem_req_sink.num_sunk(), 1);
-    assert_eq!(cache.payload_bytes_read(), num_accesses * ACCESS_SIZE_BYTES);
-    assert_eq!(cache.payload_bytes_written(), 0);
 }
 
 /// Test the basics of the cache by driving/handling all of the ports manually
@@ -190,6 +143,44 @@ mod full_cache_harness {
         assert_eq!(cache.payload_bytes_written(), 0);
         assert_eq!(cache.num_misses(), 1);
         assert_eq!(cache.num_hits(), 1);
+    }
+
+    #[test]
+    fn cache_dev_read_goes_to_mem() {
+        let num_accesses = 100;
+        let cycles_per_request = OVERHEAD_SIZE_BYTES.div_ceil(BW_BYTES_PER_CYCLE) as u64;
+
+        let mut engine = start_test(file!());
+        let cache = create_cache(&mut engine);
+        let memory_map = Rc::new(create_default_memory_map());
+
+        let request = create_read(
+            cache.entity(),
+            &memory_map,
+            ACCESS_SIZE_BYTES,
+            DST_ADDR,
+            SRC_ADDR,
+            OVERHEAD_SIZE_BYTES,
+        );
+
+        let mut harness = CacheHarness::<MemoryAccess>::new(engine, cache.clone());
+
+        harness.run_steps([
+            par!([
+                seq!(vec![send_dev_rx!(request); num_accesses]),
+                expect_mem_tx!(
+                    MemoryTxn::read_req(DST_ADDR)
+                        .with_src_addr(SRC_ADDR)
+                        .with_bytes(ACCESS_SIZE_BYTES)
+                ),
+            ]),
+            expect_no_traffic!(&[Port::DevTx, Port::MemTx], cycles_per_request),
+        ]);
+
+        // All accesses are to the same address, so only the first should be passed
+        // through
+        assert_eq!(cache.payload_bytes_read(), num_accesses * ACCESS_SIZE_BYTES);
+        assert_eq!(cache.payload_bytes_written(), 0);
     }
 }
 

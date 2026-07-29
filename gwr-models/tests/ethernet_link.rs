@@ -2,167 +2,142 @@
 
 use std::rc::Rc;
 
-use gwr_components::sink::Sink;
-use gwr_components::source::Source;
-use gwr_components::{connect_port, option_box_repeat};
-use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
-use gwr_engine::time::clock::Clock;
 use gwr_models::ethernet_frame::{EthernetFrame, FRAME_OVERHEAD_BYTES};
 use gwr_models::ethernet_link::{self, EthernetLink};
-use gwr_track::entity::GetEntity;
 
-fn run_test(
-    num_put_a: usize,
-    num_put_b: usize,
-    payload_bytes: usize,
-) -> (Rc<Sink<EthernetFrame>>, Rc<Sink<EthernetFrame>>, Clock) {
-    let mut engine = start_test(file!());
+mod ethernet_link_harness {
+    use gwr_components::build_component_harness;
 
-    let clock = engine.clock_ghz(1.0);
-    let top = engine.top();
+    use super::*;
 
-    let source_a = Source::new_and_register(&engine, top, "src_a", None);
-    let frame_a = EthernetFrame::new(source_a.entity(), payload_bytes);
-    source_a.set_generator(option_box_repeat!(frame_a; num_put_a));
+    build_component_harness! {
+        harness EthernetLinkHarness<T> {
+            component: link: Rc<EthernetLink<T>>,
+            rx ports: {
+                RxA<T> => rx_a,
+                RxB<T> => rx_b,
+            },
+            tx ports: {
+                TxA<T> => tx_a,
+                TxB<T> => tx_b,
+            },
+        }
+    }
+    #[test]
+    fn change_delay() {
+        let delay_ticks = 100;
+        let value = 42;
 
-    let source_b = Source::new_and_register(&engine, top, "src_b", None);
-    let frame_b = EthernetFrame::new(source_b.entity(), payload_bytes);
-    source_b.set_generator(option_box_repeat!(frame_b; num_put_b));
+        let mut engine = start_test(file!());
+        let clock = engine.clock_ghz(1.0);
+        let top = engine.top();
 
-    let link = EthernetLink::new_and_register(&engine, &clock, top, "link").unwrap();
+        let link = EthernetLink::<i32>::new_and_register(&engine, &clock, top, "link").unwrap();
+        link.set_delay(delay_ticks).unwrap();
 
-    let sink_a = Sink::new_and_register(&engine, &clock, top, "sink_a");
-    let sink_b = Sink::new_and_register(&engine, &clock, top, "sink_b");
+        let mut harness = EthernetLinkHarness::new(engine, link);
 
-    connect_port!(source_a, tx => link, rx_a).unwrap();
-    connect_port!(source_b, tx => link, rx_b).unwrap();
-    connect_port!(link, tx_a => sink_a, rx).unwrap();
-    connect_port!(link, tx_b => sink_b, rx).unwrap();
+        harness.run_steps([send_rx_a!(value), expect_tx_a!(value)]);
 
-    run_simulation!(engine);
-    (sink_a, sink_b, clock)
-}
+        assert_eq!(harness.clock.time_now_ns(), delay_ticks as f64);
+    }
 
-#[test]
-fn source_sink() {
-    let num_puts_a = 100;
-    let num_puts_b = 50;
-    let (sink_a, sink_b, _) = run_test(num_puts_a, num_puts_b, 128);
+    #[test]
+    fn latency() {
+        let value = 42;
 
-    let num_sunk = sink_a.num_sunk();
-    assert_eq!(num_sunk, num_puts_a);
+        let mut engine = start_test(file!());
+        let clock = engine.clock_ghz(1.0);
+        let top = engine.top();
 
-    let num_sunk = sink_b.num_sunk();
-    assert_eq!(num_sunk, num_puts_b);
-}
+        let link = EthernetLink::<i32>::new_and_register(&engine, &clock, top, "link").unwrap();
 
-#[test]
-fn latency() {
-    let num_puts_a = 1;
-    let num_puts_b = 0;
-    let (sink_a, sink_b, clock) = run_test(num_puts_a, num_puts_b, 128);
+        let mut harness = EthernetLinkHarness::new(engine, link);
 
-    let num_sunk = sink_a.num_sunk();
-    assert_eq!(num_sunk, num_puts_a);
+        harness.run_steps([par!([
+            seq!([send_rx_a!(value), expect_tx_a!(value),]),
+            expect_no_traffic!(&[Port::TxB], ethernet_link::DELAY_TICKS as u64),
+        ])]);
 
-    let num_sunk = sink_b.num_sunk();
-    assert_eq!(num_sunk, num_puts_b);
+        assert_eq!(
+            harness.clock.time_now_ns(),
+            ethernet_link::DELAY_TICKS as f64
+        );
+    }
 
-    let expected_time = ethernet_link::DELAY_TICKS as f64;
-    assert_eq!(clock.time_now_ns(), expected_time);
-}
+    #[test]
+    fn source_sink() {
+        let num_puts_a = 100;
+        let num_puts_b = 50;
+        let value_a = 42;
+        let value_b = 43;
 
-#[test]
-fn throughput() {
-    let num_puts_a = 1000;
-    let num_puts_b = 0;
-    let payload_bytes: usize = 128;
-    let (sink_a, sink_b, clock) = run_test(num_puts_a, num_puts_b, payload_bytes);
+        let mut engine = start_test(file!());
+        let clock = engine.clock_ghz(1.0);
+        let top = engine.top();
 
-    let num_sunk = sink_a.num_sunk();
-    assert_eq!(num_sunk, num_puts_a);
+        let link = EthernetLink::<i32>::new_and_register(&engine, &clock, top, "link").unwrap();
 
-    let num_sunk = sink_b.num_sunk();
-    assert_eq!(num_sunk, num_puts_b);
+        let mut harness = EthernetLinkHarness::new(engine, link);
 
-    let latency = ethernet_link::DELAY_TICKS as f64;
-    let frame_bits = (payload_bytes + FRAME_OVERHEAD_BYTES) * 8;
-    let frame_ticks = frame_bits.div_ceil(ethernet_link::BITS_PER_TICK);
+        harness.run_steps([
+            par!([
+                seq!(vec![send_rx_a!(value_a); num_puts_a]),
+                seq!(vec![send_rx_b!(value_b); num_puts_b]),
+                seq!(vec![expect_tx_a!(value_a); num_puts_a]),
+                seq!(vec![expect_tx_b!(value_b); num_puts_b]),
+            ]),
+            expect_no_traffic!(&[Port::TxA, Port::TxB], 1),
+        ]);
+    }
 
-    // Assume each tick is 1ns (1GHz clock) and that the throughput of the last
-    // frame doesn't need to be counted
-    let frames_time = (frame_ticks * (num_puts_a - 1)) as f64;
-    assert_eq!(clock.time_now_ns(), (latency + frames_time));
-}
+    #[test]
+    fn change_delay_after_simulation_started_errors() {
+        let delay_ticks = 100;
 
-#[test]
-fn change_delay() {
-    const DELAY_TICKS: usize = 100;
+        let mut engine = start_test(file!());
+        let clock = engine.clock_ghz(1.0);
+        let top = engine.top();
 
-    let mut engine = start_test(file!());
+        let link = EthernetLink::<i32>::new_and_register(&engine, &clock, top, "link").unwrap();
+        let mut harness = EthernetLinkHarness::new(engine, link);
 
-    let clock = engine.clock_ghz(1.0);
-    let top = engine.top();
+        // Starting the simulation causes the component to take ownership of its ports.
+        harness.run_steps([delay!(1)]);
 
-    let source_a = Source::new_and_register(&engine, top, "src_a", None);
-    let etwr = EthernetFrame::new(source_a.entity(), 128);
-    source_a.set_generator(option_box_repeat!(etwr; 1));
+        let error = harness.link.set_delay(delay_ticks).unwrap_err();
 
-    let source_b = Source::new_and_register(&engine, top, "src_b", None);
+        assert_eq!(
+            format!("{error}"),
+            "top::link::a: can't change the delay after the simulation has started"
+        );
+    }
 
-    let link = EthernetLink::new_and_register(&engine, &clock, top, "link").unwrap();
-    link.set_delay(DELAY_TICKS).unwrap();
+    #[test]
+    fn throughput() {
+        let num_puts = 1000;
+        let payload_bytes = 128;
 
-    let sink_a = Sink::new_and_register(&engine, &clock, top, "sink_a");
-    let sink_b = Sink::new_and_register(&engine, &clock, top, "sink_b");
+        let mut engine = start_test(file!());
+        let clock = engine.clock_ghz(1.0);
+        let top = engine.top();
 
-    connect_port!(source_a, tx => link, rx_a).unwrap();
-    connect_port!(source_b, tx => link, rx_b).unwrap();
-    connect_port!(link, tx_a => sink_a, rx).unwrap();
-    connect_port!(link, tx_b => sink_b, rx).unwrap();
+        let frame = EthernetFrame::new(top, payload_bytes);
+        let link =
+            EthernetLink::<EthernetFrame>::new_and_register(&engine, &clock, top, "link").unwrap();
+        let mut harness = EthernetLinkHarness::new(engine, link);
 
-    run_simulation!(engine);
+        let frame_bits = (payload_bytes + FRAME_OVERHEAD_BYTES) * 8;
+        let frame_ticks = frame_bits.div_ceil(ethernet_link::BITS_PER_TICK);
+        let expected_ticks = ethernet_link::DELAY_TICKS + frame_ticks * (num_puts - 1);
 
-    let num_sunk = sink_a.num_sunk();
-    assert_eq!(num_sunk, 1);
+        harness.run_steps([par!([
+            seq!(vec![send_rx_a!(frame.clone()); num_puts]),
+            seq!(vec![expect_tx_a!(frame); num_puts]),
+            expect_no_traffic!(&[Port::TxB], expected_ticks as u64),
+        ])]);
 
-    let expected_time = DELAY_TICKS as f64;
-    assert_eq!(clock.time_now_ns(), expected_time);
-}
-
-#[test]
-fn change_delay_after_simulation_started_errors() {
-    const DELAY_TICKS: usize = 100;
-
-    let mut engine = start_test(file!());
-
-    let clock = engine.clock_ghz(1.0);
-    let top = engine.top();
-
-    let source_a = Source::new_and_register(&engine, top, "src_a", None);
-    let frame_a = EthernetFrame::new(source_a.entity(), 128);
-    source_a.set_generator(option_box_repeat!(frame_a; 1));
-
-    let source_b = Source::new_and_register(&engine, top, "src_b", None);
-
-    let link = EthernetLink::new_and_register(&engine, &clock, top, "link").unwrap();
-
-    let sink_a = Sink::new_and_register(&engine, &clock, top, "sink_a");
-    let sink_b = Sink::new_and_register(&engine, &clock, top, "sink_b");
-
-    connect_port!(source_a, tx => link, rx_a).unwrap();
-    connect_port!(source_b, tx => link, rx_b).unwrap();
-    connect_port!(link, tx_a => sink_a, rx).unwrap();
-    connect_port!(link, tx_b => sink_b, rx).unwrap();
-
-    engine.spawn(async move {
-        clock.wait_ticks(1).await;
-        link.set_delay(DELAY_TICKS)
-    });
-
-    run_simulation!(
-        engine,
-        "top::link::a: can't change the delay after the simulation has started"
-    );
+        assert_eq!(harness.clock.tick_now().tick(), expected_ticks as u64);
+    }
 }
