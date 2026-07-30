@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use gwr_engine::sim_error;
 use gwr_engine::types::{SimError, SimResult};
-use rand::Rng;
+use rand::RngExt;
 
 use super::{Operator, Tensor, TensorPartition};
 use crate::processing_element::operators::{
@@ -66,7 +66,7 @@ pub fn gemm_rhs_shape<T: HasShape>(input_a: &T) -> Result<Shape, SimError> {
 ///
 /// Starts with the maximum of M and N and then grows or shrinks depending
 /// on the `expand_ratio` specified
-fn choose_gemm_k(output: &Tensor, rng: &mut impl Rng, expand_ratio: f64) -> usize {
+fn choose_gemm_k(output: &Tensor, rng: &mut impl RngExt, expand_ratio: f64) -> usize {
     let m = get_inner_dim(output, OUTPUT_OFFSET_M);
     let n = get_inner_dim(output, OUTPUT_OFFSET_N);
     let reference = m.max(n);
@@ -81,7 +81,7 @@ fn choose_gemm_k(output: &Tensor, rng: &mut impl Rng, expand_ratio: f64) -> usiz
     }
 }
 
-fn should_add_input_c(rng: &mut impl Rng, expand_ratio: f64) -> bool {
+fn should_add_input_c(rng: &mut impl RngExt, expand_ratio: f64) -> bool {
     if !expand_ratio.is_finite() || expand_ratio <= 0.0 {
         false
     } else if expand_ratio >= 1.0 {
@@ -112,7 +112,7 @@ fn output_tensor_from_inputs(inputs: &[Option<Tensor>]) -> Result<Tensor, SimErr
 pub fn maybe_add_input_c(
     inputs: &mut Vec<Option<Tensor>>,
     expand_ratio: f64,
-    rng: &mut impl Rng,
+    rng: &mut impl RngExt,
 ) -> Result<bool, SimError> {
     if inputs.len() >= 3 || !should_add_input_c(rng, expand_ratio) {
         return Ok(false);
@@ -300,7 +300,7 @@ impl OperatorGemm {
         &self,
         inputs: &[Option<Tensor>],
         _expand_ratio: f64,
-        _rng: &mut impl Rng,
+        _rng: &mut impl RngExt,
     ) -> Result<Vec<Option<Tensor>>, gwr_engine::types::SimError> {
         Ok(vec![Some(output_tensor_from_inputs(inputs)?)])
     }
@@ -309,7 +309,7 @@ impl OperatorGemm {
         &self,
         outputs: &[Option<Tensor>],
         expand_ratio: f64,
-        rng: &mut impl Rng,
+        rng: &mut impl RngExt,
     ) -> Result<Vec<Option<Tensor>>, gwr_engine::types::SimError> {
         let output = validate_outputs(outputs)?;
 

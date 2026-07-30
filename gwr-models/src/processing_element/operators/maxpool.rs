@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use gwr_engine::sim_error;
 use gwr_engine::types::{SimError, SimResult};
-use rand::Rng;
+use rand::RngExt;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::{Operator, Shape, Tensor, TensorPartition};
@@ -529,7 +529,7 @@ fn validate_tensor_dtypes(input: &Tensor, output: &Tensor, indices: Option<&Tens
     Ok(())
 }
 
-fn should_add_indices_output(rng: &mut impl Rng, expand_ratio: f64) -> bool {
+fn should_add_indices_output(rng: &mut impl RngExt, expand_ratio: f64) -> bool {
     if !expand_ratio.is_finite() || expand_ratio <= 0.0 {
         false
     } else if expand_ratio >= 1.0 {
@@ -542,7 +542,7 @@ fn should_add_indices_output(rng: &mut impl Rng, expand_ratio: f64) -> bool {
 pub fn maybe_add_indices_output(
     outputs: &mut Vec<Option<Tensor>>,
     expand_ratio: f64,
-    rng: &mut impl Rng,
+    rng: &mut impl RngExt,
 ) -> Result<bool, SimError> {
     if outputs.len() >= 2 || !should_add_indices_output(rng, expand_ratio) {
         return Ok(false);
@@ -667,7 +667,7 @@ impl OperatorMaxPool {
         &self,
         inputs: &[Option<Tensor>],
         expand_ratio: f64,
-        rng: &mut impl Rng,
+        rng: &mut impl RngExt,
     ) -> Result<Vec<Option<Tensor>>, SimError> {
         let input = validate_inputs(inputs)?;
         let (output_shape, _) = self.output_shape_and_resolved_params(input)?;
@@ -686,7 +686,7 @@ impl OperatorMaxPool {
         &self,
         outputs: &[Option<Tensor>],
         _expand_ratio: f64,
-        _rng: &mut impl Rng,
+        _rng: &mut impl RngExt,
     ) -> Result<Vec<Option<Tensor>>, SimError> {
         let (output, indices) = validate_outputs(outputs)?;
         if let Some(indices) = indices

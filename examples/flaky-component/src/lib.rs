@@ -34,7 +34,7 @@ use gwr_track::trace;
 /// Random library is just used by this component to implement its drop
 /// decisions.
 use rand::rngs::StdRng;
-use rand::{RngCore, SeedableRng};
+use rand::{Rng, SeedableRng};
 
 // ANCHOR_END: use
 

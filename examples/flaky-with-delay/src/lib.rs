@@ -40,7 +40,7 @@ use gwr_track::{build_aka, trace};
 /// Random library is just used by this component to implement its drop
 /// decisions.
 use rand::rngs::StdRng;
-use rand::{RngCore, SeedableRng};
+use rand::{Rng, SeedableRng};
 
 /// A struct containing configuration options for the component
 pub struct Config {
