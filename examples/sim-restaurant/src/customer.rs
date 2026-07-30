@@ -12,7 +12,7 @@ use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::Event;
 use gwr_engine::types::SimResult;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
 use crate::config::RestaurantConfig;
 use crate::menu::choose_order_index;

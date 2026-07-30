@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use gwr_engine::sim_error;
 use gwr_engine::types::{SimError, SimResult};
-use rand::Rng;
+use rand::RngExt;
 
 use super::{Operator, Shape, Tensor, TensorPartition};
 use crate::processing_element::operators::{
@@ -59,7 +59,7 @@ fn broadcast_shapes(a: &Shape, b: &Shape) -> Result<Shape, SimError> {
     Ok(Shape(result))
 }
 
-fn choose_input_shape(output: &Tensor, rng: &mut impl Rng, expand_ratio: f64) -> Shape {
+fn choose_input_shape(output: &Tensor, rng: &mut impl RngExt, expand_ratio: f64) -> Shape {
     let keep_prob = expand_ratio.clamp(0.0, 1.0);
     let mut dims = output.shape.0.clone();
 
@@ -129,7 +129,7 @@ impl OperatorAdd {
         &self,
         inputs: &[Option<Tensor>],
         _expand_ratio: f64,
-        _rng: &mut impl Rng,
+        _rng: &mut impl RngExt,
     ) -> Result<Vec<Option<Tensor>>, gwr_engine::types::SimError> {
         let (input_a, input_b) = validate_inputs(inputs)?;
 
@@ -152,7 +152,7 @@ impl OperatorAdd {
         &self,
         outputs: &[Option<Tensor>],
         expand_ratio: f64,
-        rng: &mut impl Rng,
+        rng: &mut impl RngExt,
     ) -> Result<Vec<Option<Tensor>>, gwr_engine::types::SimError> {
         let output = validate_outputs(outputs)?;
 
@@ -263,7 +263,9 @@ impl Operator for OperatorAdd {
 
 #[cfg(test)]
 mod tests {
-    use rand::RngCore;
+    use std::convert::Infallible;
+
+    use rand::TryRng;
 
     use super::*;
     use crate::processing_element::operators::dtype::DataType;
@@ -298,20 +300,23 @@ mod tests {
         }
     }
 
-    impl RngCore for FixedBoolRng {
-        fn next_u32(&mut self) -> u32 {
-            if self.next_bool() { 0 } else { u32::MAX }
+    impl TryRng for FixedBoolRng {
+        type Error = Infallible;
+
+        fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+            Ok(if self.next_bool() { 0 } else { u32::MAX })
         }
 
-        fn next_u64(&mut self) -> u64 {
-            if self.next_bool() { 0 } else { u64::MAX }
+        fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+            Ok(if self.next_bool() { 0 } else { u64::MAX })
         }
 
-        fn fill_bytes(&mut self, dst: &mut [u8]) {
+        fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
             for chunk in dst.chunks_mut(size_of::<u64>()) {
-                let bytes = self.next_u64().to_le_bytes();
+                let bytes = self.try_next_u64()?.to_le_bytes();
                 chunk.copy_from_slice(&bytes[..chunk.len()]);
             }
+            Ok(())
         }
     }
 

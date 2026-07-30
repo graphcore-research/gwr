@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use rand::Rng;
+use rand::RngExt;
 use rand::rngs::StdRng;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

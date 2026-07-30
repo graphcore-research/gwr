@@ -5,7 +5,7 @@ use std::rc::Rc;
 use gwr_engine::types::AccessType;
 use gwr_track::entity::Entity;
 use rand::rngs::StdRng;
-use rand::{RngCore, SeedableRng};
+use rand::{Rng, SeedableRng};
 
 use crate::memory::memory_access::MemoryAccess;
 use crate::memory::memory_map::MemoryMap;
