@@ -22,6 +22,15 @@ publish.workspace = true
 proc-macro = true
 path = "src/lib.rs"
 
+# `test = false` keeps the target defined so `cargo expand --test
+# documentation-fixture` can select it, but excludes it from the default
+# `cargo test` build.
+[[test]]
+name = "documentation-fixture"
+path = "tests/fixtures/documentation.rs"
+harness = false
+test = false
+
 [dependencies]
 gwr-doc-builder = { path = "../gwr-doc-builder", version = "0.2.0" }
 proc-macro2.workspace = true

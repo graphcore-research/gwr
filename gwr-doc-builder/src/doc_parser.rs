@@ -331,3 +331,27 @@ impl Parse for CommentDescriptor {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolves_paths_relative_to_the_parent_module() {
+        let root = DocNodeCommon::new_rc("crate".to_owned(), None, DocNode::Module(Module::new()));
+        let parent = DocNodeCommon::new(
+            "outer".to_owned(),
+            Some(root),
+            DocNode::Module(Module::new()),
+        );
+        let parser = DocParser::new(false);
+
+        for (path, expected) in [
+            ("self", "crate::outer"),
+            ("self::nested", "crate::outer::nested"),
+            ("crate::nested", "crate::nested"),
+        ] {
+            assert_eq!(parser.process_path(path, &parent), expected);
+        }
+    }
+}

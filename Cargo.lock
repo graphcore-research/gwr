@@ -1282,6 +1282,7 @@ dependencies = [
  "quote",
  "regex",
  "syn 1.0.109",
+ "tempfile",
 ]
 
 [[package]]
