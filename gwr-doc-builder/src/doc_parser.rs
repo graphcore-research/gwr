@@ -10,8 +10,7 @@ use std::process::exit;
 use std::rc::Rc;
 
 use regex::Regex;
-use syn::parse::{self, Parse, ParseStream};
-use syn::{Attribute, Item};
+use syn::{Attribute, Expr, Item, Lit, Meta};
 
 use crate::asciidoctor_pp::AsciiDoctorPreProcessor;
 use crate::doc_nodes::{
@@ -216,9 +215,6 @@ impl DocParser {
             Item::Macro(_) => {
                 trace!(self, "Macro");
             }
-            Item::Macro2(_) => {
-                trace!(self, "Macro2");
-            }
             Item::Mod(item_mod) => {
                 trace!(self, "Mod: {}", item_mod.ident);
                 let name = item_mod.ident.to_string();
@@ -276,17 +272,13 @@ impl DocParser {
     }
 
     fn process_attribute(&mut self, obj: &mut Rc<RefCell<DocNodeCommon>>, attr: &Attribute) {
-        if attr.path.is_ident("doc") {
-            match syn::parse2::<CommentDescriptor>(attr.tokens.clone()) {
-                Ok(descriptor) => {
-                    let str = descriptor.comment.to_owned();
-                    obj.borrow_mut().push_doc_string(self, str.as_str());
-                }
-                Err(_) => {
-                    // Probably a different doc directive like
-                    //  #![doc(test(attr(warn(unused))))]
-                }
-            }
+        if attr.path().is_ident("doc")
+            && let Meta::NameValue(name_value) = &attr.meta
+            && let Expr::Lit(expr) = &name_value.value
+            && let Lit::Str(comment) = &expr.lit
+        {
+            obj.borrow_mut()
+                .push_doc_string(self, comment.value().as_str());
         }
     }
 
@@ -310,25 +302,6 @@ impl DocParser {
     #[must_use]
     pub fn preprocess_doc(&self, input: &str, depth: usize) -> String {
         self.adoc_pp.preprocess_doc(input, depth)
-    }
-}
-
-/// Represents the TokenStream for comment lines.
-///
-/// They are of the form #[doc = "Comment"] where the `doc` is pulled off
-/// and the `= "Comment"` is the TokenStream
-struct CommentDescriptor {
-    comment: String,
-}
-
-/// Parse comment token streams to build [`CommentDescriptor`]
-impl Parse for CommentDescriptor {
-    fn parse(input: ParseStream) -> parse::Result<Self> {
-        let _eq = input.parse::<syn::token::Eq>()?;
-        let comment = input.parse::<syn::LitStr>()?;
-        Ok(CommentDescriptor {
-            comment: comment.value(),
-        })
     }
 }
 
