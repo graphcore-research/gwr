@@ -1,0 +1,7 @@
+error: unexpected end of input, expected string literal
+ --> tests/ui/include_str_rejects_missing_path.rs:3:23
+  |
+3 | const INVALID: &str = gwr_docpp::include_str!();
+  |                       ^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `gwr_docpp::include_str` (in Nightly builds, run with -Z macro-backtrace for more info)

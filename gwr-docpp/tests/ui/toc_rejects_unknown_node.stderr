@@ -1,0 +1,5 @@
+error: expected `+` or `-`
+ --> tests/ui/toc_rejects_unknown_node.rs:6:9
+  |
+6 |         * "Unknown"
+  |         ^

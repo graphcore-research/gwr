@@ -1,0 +1,5 @@
+error: expected string literal
+ --> tests/ui/toc_rejects_non_string_section_path.rs:6:23
+  |
+6 |         - "Overview", 42
+  |                       ^^

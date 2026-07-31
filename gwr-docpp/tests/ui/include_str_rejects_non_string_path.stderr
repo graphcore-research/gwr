@@ -1,0 +1,5 @@
+error: expected string literal
+ --> tests/ui/include_str_rejects_non_string_path.rs:3:47
+  |
+3 | const INVALID: &str = gwr_docpp::include_str!(42);
+  |                                               ^^

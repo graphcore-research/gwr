@@ -36,7 +36,7 @@ pub fn process(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             .arg("-f") // Set the output format to SVG
             .arg("svg")
             .arg(tmp.path())
-            .arg("/dev/stdout") // And get it written to stdout
+            .arg("-") // And get it written to stdout
             .output()
             .expect("\n\n**Failed to run typst - make sure it is on the path**");
 

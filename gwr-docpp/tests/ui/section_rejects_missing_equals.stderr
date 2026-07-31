@@ -1,0 +1,5 @@
+error: expected `=`
+ --> tests/ui/section_rejects_missing_equals.rs:3:49
+  |
+3 | const INVALID: &str = gwr_docpp::section!(title "Title", text = "Body");
+  |                                                 ^^^^^^^

@@ -1,0 +1,5 @@
+error: expected `,`
+ --> tests/ui/toc_rejects_missing_section_comma.rs:6:22
+  |
+6 |         - "Overview" "crate"
+  |                      ^^^^^^^
