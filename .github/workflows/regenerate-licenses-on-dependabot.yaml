@@ -1,23 +1,10 @@
 # Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-# When Dependabot bumps cargo dependencies, the workspace's dependency-
-# license report (`licenses.html`) also needs updating. This workflow
-# regenerates it, makes `gwr-bot` the amended commit's author and committer,
-# credits Dependabot as a co-author in the commit message, and force pushes back
-# to the PR opened by Dependabot.
+# Cargo dependency updates can change the workspace's dependency-license report
+# (`licenses.html`). Regenerate it on Dependabot Cargo PRs.
 #
-# Prerequisites (repository configuration):
-#   - A `gwr-bot` GitHub App installed on this repository with
-#     `contents: write` permission. Its client ID and private key must be stored
-#     as *Dependabot* secrets named `GWR_BOT_CLIENT_ID` and
-#     `GWR_BOT_PRIVATE_KEY`
-#     under Settings -> Secrets and variables -> Dependabot.
-#
-# Regular Actions secrets are not accessible to Dependabot-triggered workflows,
-# so they must be Dependabot secrets. Because pushes made with the default
-# `GITHUB_TOKEN` do not trigger workflow runs, minting a separate installation
-# token via the `gwr-bot` App is what causes the amended commit to be picked up
-# by CI on the resulting force-push.
+# Every update is amended and pushed with `gwr-bot` so CI runs against the final
+# commit, even when the regenerated report is unchanged.
 #
 # See `.github/gwr-bot/gwr-bot-setup.md` for step-by-step instructions on
 # provisioning the `gwr-bot` GitHub App and its Dependabot secrets.
@@ -49,18 +36,15 @@ jobs:
           client-id: ${{ secrets.GWR_BOT_CLIENT_ID }}
           private-key: ${{ secrets.GWR_BOT_PRIVATE_KEY }}
 
-      - uses: actions/checkout@v6
+      - name: Check out the Dependabot branch
+        uses: actions/checkout@v6
         with:
-          # Check out the PR branch itself (not the merge commit) so that we
-          # can amend the tip commit and push it back.
+          # Amend the PR tip rather than the generated merge commit.
           ref: ${{ github.event.pull_request.head.ref }}
           submodules: true
-          # Avoid the default shallow clone behaviour as we need the parent
-          # commit to be able to perform the amend soundly.
+          # Include the parent required by `git commit --amend`.
           fetch-depth: 2
-          # Do not persist the token in `.git/config` for the whole job.
-          # The push step below sets up credentials via `gh auth setup-git`
-          # just before it needs them.
+          # Keep the push token out of .git/config until gh auth setup-git runs.
           persist-credentials: false
 
       - uses: ./.github/actions/install-build-dependencies
@@ -76,18 +60,6 @@ jobs:
           GH_TOKEN: ${{ steps.gwr-bot-token.outputs.token }}
           APP_SLUG: ${{ steps.gwr-bot-token.outputs.app-slug }}
         run: |
-          # Resolve the author and committer identity from the App that owns the
-          # token minted above, so the amended commit matches the identity
-          # GitHub records as the pusher of the resulting force-push.
-          # Deriving the identity at run time means a future App rename or
-          # swap only requires updating the two Dependabot secrets -- no
-          # workflow edits.
-          #
-          # Note: `gh api /user` cannot be used here because the mint step
-          # produces a GitHub App *installation* token, which is not tied to
-          # a user account and gets a 403 from `/user`. Instead, resolve the
-          # bot user via the public `/users/{login}` endpoint, using the
-          # `app-slug` output exposed by `actions/create-github-app-token`.
           set -euo pipefail
           user_login="${APP_SLUG}[bot]"
           user_id=$(gh api "/users/${user_login}" --jq .id)
@@ -99,13 +71,8 @@ jobs:
           GH_TOKEN: ${{ steps.gwr-bot-token.outputs.token }}
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          # Always amend and force-push, even when the regenerated
-          # `licenses.html` matches the version already on the branch.
-          # Re-amending with a different author and committer identity produces
-          # a new commit SHA, which triggers `pull_request: synchronize` and
-          # causes CI (guarded on `github.actor`) to run against the amended
-          # commit. Without this, PRs whose dependency bumps did not affect the
-          # license report would leave CI stuck in the skipped state.
+          # Always amend and force-push so a `gwr-bot` authored SHA triggers the
+          # full CI run when the regenerated report is unchanged.
           set -euo pipefail
 
           trailer_args=()
