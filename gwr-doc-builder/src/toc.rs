@@ -5,7 +5,7 @@
 use proc_macro2::Span;
 use quote::ToTokens;
 use syn::parse::{self, Parse, ParseStream};
-use syn::token::{Add, Comma, Eq, Sub};
+use syn::token::{Comma, Eq, Minus, Plus};
 use syn::{LitStr, bracketed};
 
 use crate::helpers::{env_doc_builder, handle_error, unprocessed};
@@ -115,7 +115,7 @@ impl TocChapter {
 /// Implementation to parse the token stream and convert it to a [`TocChapter`]
 impl Parse for TocChapter {
     fn parse(input: ParseStream) -> parse::Result<Self> {
-        input.parse::<Add>()?;
+        input.parse::<Plus>()?;
         let title = input.parse::<LitStr>()?;
 
         let content;
@@ -152,7 +152,7 @@ impl TocSection {
 /// Implementation to parse the token stream and convert it to a [`TocSection`]
 impl Parse for TocSection {
     fn parse(input: ParseStream) -> parse::Result<Self> {
-        input.parse::<Sub>()?;
+        input.parse::<Minus>()?;
         let title = input.parse::<LitStr>()?;
         input.parse::<Comma>()?;
         let path = input.parse::<LitStr>()?;
@@ -167,10 +167,10 @@ impl Parse for TocSection {
 impl Parse for TocNode {
     fn parse(input: ParseStream) -> parse::Result<Self> {
         let lookahead = input.lookahead1();
-        if lookahead.peek(Add) {
+        if lookahead.peek(Plus) {
             let chapter = input.parse::<TocChapter>()?;
             Ok(TocNode::Chapter(chapter))
-        } else if lookahead.peek(Sub) {
+        } else if lookahead.peek(Minus) {
             let section = input.parse::<TocSection>()?;
             Ok(TocNode::Section(section))
         } else {
