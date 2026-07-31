@@ -1,0 +1,5 @@
+error: expected string literal
+ --> tests/ui/toc_rejects_non_string_section_title.rs:6:11
+  |
+6 |         - 42, "crate"
+  |           ^^

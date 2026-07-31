@@ -1,0 +1,5 @@
+error: no command given
+ --> tests/ui/cmd_rejects_empty_command.rs:3:39
+  |
+3 | const INVALID: &str = gwr_docpp::cmd!("");
+  |                                       ^^

@@ -1,0 +1,5 @@
+error: unexpected token
+ --> tests/ui/cmd_rejects_extra_arguments.rs:3:53
+  |
+3 | const INVALID: &str = gwr_docpp::cmd!("printf first", "printf second");
+  |                                                     ^

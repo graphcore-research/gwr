@@ -1,0 +1,5 @@
+error: expected identifier
+ --> tests/ui/section_rejects_missing_key.rs:3:43
+  |
+3 | const INVALID: &str = gwr_docpp::section!(= "Title", text = "Body");
+  |                                           ^

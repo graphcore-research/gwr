@@ -1,0 +1,5 @@
+error: unexpected token
+ --> tests/ui/include_str_rejects_extra_arguments.rs:3:58
+  |
+3 | const INVALID: &str = gwr_docpp::include_str!("first.txt", "second.txt");
+  |                                                          ^

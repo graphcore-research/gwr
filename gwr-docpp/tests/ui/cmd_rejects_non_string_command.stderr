@@ -1,0 +1,5 @@
+error: expected string literal
+ --> tests/ui/cmd_rejects_non_string_command.rs:3:39
+  |
+3 | const INVALID: &str = gwr_docpp::cmd!(42);
+  |                                       ^^

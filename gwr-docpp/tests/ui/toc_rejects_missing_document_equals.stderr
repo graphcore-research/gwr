@@ -1,0 +1,5 @@
+error: expected `=`
+ --> tests/ui/toc_rejects_missing_document_equals.rs:3:39
+  |
+3 | const INVALID: &str = gwr_docpp::toc!("Guide" []);
+  |                                       ^^^^^^^

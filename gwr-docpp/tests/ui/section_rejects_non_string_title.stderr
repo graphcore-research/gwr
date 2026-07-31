@@ -1,0 +1,5 @@
+error: expected string literal
+ --> tests/ui/section_rejects_non_string_title.rs:3:51
+  |
+3 | const INVALID: &str = gwr_docpp::section!(title = 42, text = "Body");
+  |                                                   ^^

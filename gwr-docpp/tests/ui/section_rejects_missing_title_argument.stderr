@@ -1,0 +1,7 @@
+error: unexpected end of input, missing required `title` argument
+ --> tests/ui/section_rejects_missing_title_argument.rs:3:23
+  |
+3 | const INVALID: &str = gwr_docpp::section!(text = "Only body text");
+  |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `gwr_docpp::section` (in Nightly builds, run with -Z macro-backtrace for more info)

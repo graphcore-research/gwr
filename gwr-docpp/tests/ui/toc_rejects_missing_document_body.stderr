@@ -1,0 +1,7 @@
+error: unexpected end of input, expected square brackets
+ --> tests/ui/toc_rejects_missing_document_body.rs:3:23
+  |
+3 | const INVALID: &str = gwr_docpp::toc!(= "Guide");
+  |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `gwr_docpp::toc` (in Nightly builds, run with -Z macro-backtrace for more info)

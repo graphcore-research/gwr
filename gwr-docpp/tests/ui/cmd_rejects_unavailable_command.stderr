@@ -1,0 +1,5 @@
+error: failed to run command `gwr-docpp-command-that-does-not-exist`
+ --> tests/ui/cmd_rejects_unavailable_command.rs:3:39
+  |
+3 | const INVALID: &str = gwr_docpp::cmd!("gwr-docpp-command-that-does-not-exist");
+  |                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
