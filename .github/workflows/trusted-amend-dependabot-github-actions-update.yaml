@@ -19,7 +19,7 @@ name: Amend Dependabot GitHub Actions update (trusted)
 on:
   workflow_call:
     secrets:
-      GWR_BOT_APP_ID:
+      GWR_BOT_CLIENT_ID:
         required: true
       GWR_BOT_PRIVATE_KEY:
         required: true
@@ -41,7 +41,7 @@ jobs:
         id: gwr-bot-token
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.GWR_BOT_APP_ID }}
+          client-id: ${{ secrets.GWR_BOT_CLIENT_ID }}
           private-key: ${{ secrets.GWR_BOT_PRIVATE_KEY }}
 
       - name: Check out the Dependabot branch

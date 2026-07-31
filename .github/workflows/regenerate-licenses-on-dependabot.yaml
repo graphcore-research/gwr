@@ -8,8 +8,9 @@
 #
 # Prerequisites (repository configuration):
 #   - A `gwr-bot` GitHub App installed on this repository with
-#     `contents: write` permission. Its App ID and private key must be stored as
-#     *Dependabot* secrets named `GWR_BOT_APP_ID` and `GWR_BOT_PRIVATE_KEY`
+#     `contents: write` permission. Its client ID and private key must be stored
+#     as *Dependabot* secrets named `GWR_BOT_CLIENT_ID` and
+#     `GWR_BOT_PRIVATE_KEY`
 #     under Settings -> Secrets and variables -> Dependabot.
 #
 # Regular Actions secrets are not accessible to Dependabot-triggered workflows,
@@ -45,7 +46,7 @@ jobs:
         id: gwr-bot-token
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.GWR_BOT_APP_ID }}
+          client-id: ${{ secrets.GWR_BOT_CLIENT_ID }}
           private-key: ${{ secrets.GWR_BOT_PRIVATE_KEY }}
 
       - uses: actions/checkout@v6

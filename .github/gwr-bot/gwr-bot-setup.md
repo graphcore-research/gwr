@@ -95,7 +95,7 @@ provided a repository admin approves the installation (see step 3).
 1. On the App's settings page, scroll to **Private keys** and click
    **Generate a private key**. A `.pem` file is downloaded — treat it as
    a secret.
-2. Note the **App ID** shown near the top of the settings page.
+2. Note the **Client ID** shown near the top of the settings page.
 
 ## 4. Install the App on the `gwr` repository
 
@@ -120,7 +120,7 @@ secret** and add:
 
 | Name                  | Value                                                 |
 | --------------------- | ----------------------------------------------------- |
-| `GWR_BOT_APP_ID`      | The App ID from step 3.                               |
+| `GWR_BOT_CLIENT_ID`   | The Client ID from step 3.                            |
 | `GWR_BOT_PRIVATE_KEY` | The full contents of the `.pem` file from step 3, including the `-----BEGIN…-----` / `-----END…-----` lines. |
 
 ## 6. Confirm the workflow is wired up
