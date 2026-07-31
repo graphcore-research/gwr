@@ -26,5 +26,5 @@ jobs:
     uses: >-
       graphcore-research/gwr/.github/workflows/trusted-amend-dependabot-github-actions-update.yaml@main
     secrets:
-      GWR_BOT_APP_ID: ${{ secrets.GWR_BOT_APP_ID }}
+      GWR_BOT_CLIENT_ID: ${{ secrets.GWR_BOT_CLIENT_ID }}
       GWR_BOT_PRIVATE_KEY: ${{ secrets.GWR_BOT_PRIVATE_KEY }}
