@@ -11,6 +11,7 @@ pub mod queue;
 pub mod router;
 pub mod sink;
 pub mod source;
+pub mod state_machine;
 pub mod store;
 pub mod test_helpers;
 pub mod types;

@@ -1,0 +1,20 @@
+error[E0599]: no method named `finish` found for struct `JobMachineTypestate<JobMachineQueued>` in the current scope
+  --> tests/fail/invalid_typestate_transition.rs:18:27
+   |
+ 3 | / gwr_components::create_state_machine!(
+ 4 | |     JobMachine {
+ 5 | |         states: [Queued, Running, Complete, Failed],
+ 6 | |         default: Queued,
+...  |
+14 | | );
+   | |_- method `finish` not found for this struct
+...
+18 |       let complete = queued.finish();
+   |                             ^^^^^^ method not found in `JobMachineTypestate<JobMachineQueued>`
+   |
+   = note: the method was found for `JobMachineTypestate<JobMachineRunning>`
+   = help: items from traits can only be used if the trait is implemented and in scope
+   = note: the following traits define an item `finish`, perhaps you need to implement one of them:
+           candidate #1: `Hasher`
+           candidate #2: `regex_syntax::ast::visitor::Visitor`
+           candidate #3: `regex_syntax::hir::visitor::Visitor`
