@@ -87,7 +87,9 @@ impl SearchState {
 
     pub fn search_matches(&self, line: &EventLine) -> bool {
         match line {
-            EventLine::Create { id, .. } => self.id_matches(id),
+            EventLine::Create { created_by, id, .. } => {
+                self.id_matches(created_by) || self.id_matches(id)
+            }
             EventLine::Connect { from_id, to_id, .. } => {
                 self.id_matches(from_id) || self.id_matches(to_id)
             }
@@ -381,7 +383,16 @@ mod tests {
     fn plain_text_search_matches_numeric_ids() {
         let search_state = build_search_state("41");
 
-        assert!(search_state.search_matches(&EventLine::Create { id: 41, time: 0.0 }));
+        assert!(search_state.search_matches(&EventLine::Create {
+            created_by: 40,
+            id: 41,
+            time: 0.0,
+        }));
+        assert!(search_state.search_matches(&EventLine::Create {
+            created_by: 41,
+            id: 99,
+            time: 0.0,
+        }));
         assert!(search_state.search_matches(&EventLine::Enter {
             id: 40,
             entered: 41,
@@ -391,6 +402,69 @@ mod tests {
         assert!(search_state.search_matches(&EventLine::Connect {
             from_id: 41,
             to_id: 99,
+            time: 0.0,
+        }));
+    }
+
+    #[test]
+    fn plain_text_search_matches_names_details_and_log_messages() {
+        let mut search_state = build_search_state("mailbox");
+        search_state.id_to_name.insert(7, "mailbox".to_string());
+        search_state
+            .id_to_details
+            .insert(8, "mailbox payload".to_string());
+
+        assert!(search_state.search_matches(&EventLine::Value {
+            id: 7,
+            value: 1.0,
+            time: 0.0,
+        }));
+        assert!(search_state.search_matches(&EventLine::ActivityEnd { id: 8, time: 0.0 }));
+        assert!(search_state.search_matches(&EventLine::Log {
+            level: log::Level::Info,
+            id: 99,
+            msg: "sent to mailbox".to_string(),
+            time: 0.0,
+        }));
+        assert!(!search_state.search_matches(&EventLine::Create {
+            created_by: 0,
+            id: 99,
+            time: 0.0,
+        }));
+    }
+
+    #[test]
+    fn explicit_id_filter_matches_only_that_id() {
+        let search_state = SearchState {
+            filter_id: Some(41),
+            ..build_search_state("")
+        };
+
+        assert!(search_state.search_matches(&EventLine::Create {
+            created_by: 0,
+            id: 41,
+            time: 0.0,
+        }));
+        assert!(search_state.search_matches(&EventLine::Create {
+            created_by: 41,
+            id: 99,
+            time: 0.0,
+        }));
+        assert!(search_state.search_matches(&EventLine::Enter {
+            id: 1,
+            entered: 41,
+            fullness: 1,
+            time: 0.0,
+        }));
+        assert!(!search_state.search_matches(&EventLine::Create {
+            created_by: 0,
+            id: 141,
+            time: 0.0,
+        }));
+        assert!(!search_state.search_matches(&EventLine::Log {
+            level: log::Level::Info,
+            id: 1,
+            msg: "mentions id 41".to_string(),
             time: 0.0,
         }));
     }
