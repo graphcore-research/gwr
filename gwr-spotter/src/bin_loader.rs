@@ -102,7 +102,7 @@ impl TraceVisitor for BinLoader {
         });
     }
 
-    fn create_entity(&mut self, _created_by: Id, id: Id, name: &str) {
+    fn create_entity(&mut self, created_by: Id, id: Id, name: &str) {
         SHARED_STATE
             .lock()
             .unwrap()
@@ -113,12 +113,13 @@ impl TraceVisitor for BinLoader {
             .unwrap()
             .insert(id.0, name.to_owned());
         self.add_event(EventLine::Create {
+            created_by: created_by.0,
             id: id.0,
             time: self.current_time_ns,
         });
     }
 
-    fn create_monitor(&mut self, _created_by: Id, id: Id, name: &str) {
+    fn create_monitor(&mut self, created_by: Id, id: Id, name: &str) {
         SHARED_STATE
             .lock()
             .unwrap()
@@ -129,12 +130,13 @@ impl TraceVisitor for BinLoader {
             .unwrap()
             .insert(id.0, name.to_owned());
         self.add_event(EventLine::Create {
+            created_by: created_by.0,
             id: id.0,
             time: self.current_time_ns,
         });
     }
 
-    fn create_lane(&mut self, _created_by: Id, id: Id, name: &str) {
+    fn create_lane(&mut self, created_by: Id, id: Id, name: &str) {
         SHARED_STATE
             .lock()
             .unwrap()
@@ -145,6 +147,7 @@ impl TraceVisitor for BinLoader {
             .unwrap()
             .insert(id.0, name.to_owned());
         self.add_event(EventLine::Create {
+            created_by: created_by.0,
             id: id.0,
             time: self.current_time_ns,
         });
@@ -154,7 +157,7 @@ impl TraceVisitor for BinLoader {
 
     fn create_object(
         &mut self,
-        _created_by: Id,
+        created_by: Id,
         id: Id,
         _size: usize,
         units: &str,
@@ -180,6 +183,7 @@ impl TraceVisitor for BinLoader {
         );
         self.id_to_req_type.as_mut().unwrap().insert(id.0, req_type);
         self.add_event(EventLine::Create {
+            created_by: created_by.0,
             id: id.0,
             time: self.current_time_ns,
         });

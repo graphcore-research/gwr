@@ -10,7 +10,7 @@ use std::thread;
 
 use itertools::Itertools;
 use log::Level;
-use regex::Regex;
+use regex::{Captures, Regex};
 
 use crate::app::{CHUNK_SIZE, EventLine};
 use crate::filter::Filter;
@@ -34,6 +34,11 @@ struct LogParser {
     activity_lanes: HashMap<u64, u64>,
 
     current_time: f64,
+}
+
+fn u64_value(e: &Captures, field_name: &str) -> u64 {
+    let value_str = e.name(field_name).unwrap().as_str();
+    value_str.parse().unwrap()
 }
 
 impl LogParser {
@@ -73,8 +78,7 @@ impl LogParser {
     ) -> EventLine {
         match self.log_line_re.captures(full_line) {
             Some(e) => {
-                let id_str = e.name("id").unwrap().as_str();
-                let id = id_str.parse().unwrap();
+                let id = u64_value(&e, "id");
                 let level_str = e.name("level").unwrap().as_str();
                 let msg = e.name("msg").unwrap().as_str();
                 EventLine::Log {
@@ -252,20 +256,22 @@ impl LogParser {
         id_to_details: &mut HashMap<u64, String>,
     ) -> Option<EventLine> {
         let e = self.create_re.captures(msg)?;
+        let by = u64_value(&e, "by");
         let kind = e.name("kind").unwrap().as_str();
         let rest = e.name("rest").unwrap().as_str();
 
         match kind {
             "entity" | "monitor" | "lane" | "group" | "activity" => {
-                self.parse_named_create(rest, id_to_name)
+                self.parse_named_create(by, rest, id_to_name)
             }
-            "object" => self.parse_object_create(rest, id_to_name, id_to_details),
+            "object" => self.parse_object_create(by, rest, id_to_name, id_to_details),
             _ => None,
         }
     }
 
     fn parse_named_create(
         &self,
+        by: u64,
         rest: &str,
         id_to_name: &mut HashMap<u64, String>,
     ) -> Option<EventLine> {
@@ -282,6 +288,7 @@ impl LogParser {
         id_to_name.insert(id, name);
 
         Some(EventLine::Create {
+            created_by: by,
             id,
             time: self.current_time,
         })
@@ -289,6 +296,7 @@ impl LogParser {
 
     fn parse_object_create(
         &self,
+        by: u64,
         rest: &str,
         id_to_name: &mut HashMap<u64, String>,
         id_to_details: &mut HashMap<u64, String>,
@@ -318,6 +326,7 @@ impl LogParser {
         );
 
         Some(EventLine::Create {
+            created_by: by,
             id,
             time: self.current_time,
         })
