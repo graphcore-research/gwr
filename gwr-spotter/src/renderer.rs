@@ -226,99 +226,127 @@ impl Renderer {
         }
 
         let event_line = event_line.unwrap();
-        let mut tmp0 = String::new();
-        let mut tmp1 = String::new();
-        let (mut line, time) = match event_line {
-            EventLine::Enter {
-                id,
-                entered,
-                fullness,
-                time,
-            } => {
-                let name = self.name_id(id, &mut tmp0);
-                let object = self.object_id(entered, &mut tmp1);
-                (format!("{name}: <= {object}({fullness})").to_owned(), time)
-            }
-
-            EventLine::Exit {
-                id,
-                exited,
-                fullness,
-                time,
-            } => {
-                let name = self.name_id(id, &mut tmp0);
-                let object = self.object_id(exited, &mut tmp1);
-                (format!("{name}: => {object}({fullness})").to_owned(), time)
-            }
-
-            EventLine::Value { id, value, time } => {
-                let name = self.name_id(id, &mut tmp0);
-                (format!("{name}: {value}").to_owned(), time)
-            }
-
-            EventLine::Log { id, msg, time, .. } => {
-                let name = self.name_id(id, &mut tmp0);
-                (format!("{name}: {msg}").to_owned(), time)
-            }
-
-            EventLine::ActivityBegin {
-                id,
-                name,
-                correlation_id,
-                time,
-            } => {
-                let track = self.name_id(id, &mut tmp0);
-                let suffix = correlation_id
-                    .map(|correlation_id| format!(" correlation {correlation_id}"))
-                    .unwrap_or_default();
-                (
-                    format!("{track}: activity begin {name}{suffix}").to_owned(),
-                    time,
-                )
-            }
-
-            EventLine::ActivityEnd { id, time } => {
-                let name = self.name_id(id, &mut tmp0);
-                (format!("{name}: activity end").to_owned(), time)
-            }
-
-            EventLine::Create { id, time } => {
-                let details = self.details(id, &mut tmp1);
-                if self.id_to_name.get(id).map(String::as_str) == Some("object") {
-                    if !self.print_details || details.is_empty() {
-                        (format!("{id}: created object").to_owned(), time)
-                    } else {
-                        (format!("{id}: created object ({details})").to_owned(), time)
-                    }
-                } else {
-                    let name = self.name_id(id, &mut tmp0);
-                    if !self.print_details || details.is_empty() {
-                        (format!("{name}: created").to_owned(), time)
-                    } else {
-                        (format!("{name}: created ({details})").to_owned(), time)
-                    }
-                }
-            }
-
-            EventLine::Connect {
-                from_id,
-                to_id,
-                time,
-            } => {
-                let from_name = self.name_id(from_id, &mut tmp0);
-                let to_name = self.name_id(to_id, &mut tmp1);
-                (
-                    format!("{from_name}: connect to {to_name}").to_owned(),
-                    time,
-                )
-            }
-        };
+        let (mut line, time) = self.render_event_line(event_line);
 
         if self.print_times {
             let _ = write!(line, " @{time:.1}ns");
         }
 
         line
+    }
+
+    fn render_event_line(&self, event_line: &EventLine) -> (String, f64) {
+        match event_line {
+            EventLine::Enter {
+                id,
+                entered,
+                fullness,
+                time,
+            } => (self.render_enter(id, entered, fullness), *time),
+
+            EventLine::Exit {
+                id,
+                exited,
+                fullness,
+                time,
+            } => (self.render_exit(id, exited, fullness), *time),
+
+            EventLine::Value { id, value, time } => (self.render_value(id, value), *time),
+
+            EventLine::Log { id, msg, time, .. } => (self.render_log(id, msg), *time),
+
+            EventLine::ActivityBegin {
+                id,
+                name,
+                correlation_id,
+                time,
+            } => (self.render_activity_begin(id, name, *correlation_id), *time),
+
+            EventLine::ActivityEnd { id, time } => (self.render_activity_end(id), *time),
+
+            EventLine::Create {
+                created_by,
+                id,
+                time,
+            } => (self.render_create(created_by, id), *time),
+
+            EventLine::Connect {
+                from_id,
+                to_id,
+                time,
+            } => (self.render_connect(from_id, to_id), *time),
+        }
+    }
+
+    fn render_enter(&self, id: &u64, entered: &u64, fullness: &u64) -> String {
+        let mut tmp0 = String::new();
+        let mut tmp1 = String::new();
+        let name = self.name_id(id, &mut tmp0);
+        let object = self.object_id(entered, &mut tmp1);
+        format!("{name}: <= {object}({fullness})")
+    }
+
+    fn render_exit(&self, id: &u64, exited: &u64, fullness: &u64) -> String {
+        let mut tmp0 = String::new();
+        let mut tmp1 = String::new();
+        let name = self.name_id(id, &mut tmp0);
+        let object = self.object_id(exited, &mut tmp1);
+        format!("{name}: => {object}({fullness})")
+    }
+
+    fn render_value(&self, id: &u64, value: &f64) -> String {
+        let mut tmp = String::new();
+        let name = self.name_id(id, &mut tmp);
+        format!("{name}: {value}")
+    }
+
+    fn render_log(&self, id: &u64, msg: &str) -> String {
+        let mut tmp = String::new();
+        let name = self.name_id(id, &mut tmp);
+        format!("{name}: {msg}")
+    }
+
+    fn render_activity_begin(&self, id: &u64, name: &str, correlation_id: Option<u64>) -> String {
+        let mut tmp = String::new();
+        let track = self.name_id(id, &mut tmp);
+        let suffix = correlation_id
+            .map(|correlation_id| format!(" correlation {correlation_id}"))
+            .unwrap_or_default();
+        format!("{track}: activity begin {name}{suffix}")
+    }
+
+    fn render_activity_end(&self, id: &u64) -> String {
+        let mut tmp = String::new();
+        let name = self.name_id(id, &mut tmp);
+        format!("{name}: activity end")
+    }
+
+    fn render_create(&self, created_by: &u64, id: &u64) -> String {
+        let mut tmp0 = String::new();
+        let mut tmp1 = String::new();
+        let details = self.details(id, &mut tmp1);
+        if self.id_to_name.get(id).map(String::as_str) == Some("object") {
+            if !self.print_details || details.is_empty() {
+                format!("{created_by}: created object {id}")
+            } else {
+                format!("{created_by}: created object {id} ({details})")
+            }
+        } else {
+            let name = self.name_id(id, &mut tmp0);
+            if !self.print_details || details.is_empty() {
+                format!("{created_by}: created {name}")
+            } else {
+                format!("{created_by}: created {name} ({details})")
+            }
+        }
+    }
+
+    fn render_connect(&self, from_id: &u64, to_id: &u64) -> String {
+        let mut tmp0 = String::new();
+        let mut tmp1 = String::new();
+        let from_name = self.name_id(from_id, &mut tmp0);
+        let to_name = self.name_id(to_id, &mut tmp1);
+        format!("{from_name}: connect to {to_name}")
     }
 
     pub fn add_chunk(&mut self, lines: Vec<EventLine>) {
@@ -499,5 +527,68 @@ mod tests {
             renderer.render_line(1),
             "7: pe0::lane::compute::0: activity end @15.0ns"
         );
+    }
+
+    #[test]
+    fn renders_create_events_with_creator_and_details() {
+        let mut renderer = Renderer::new();
+        renderer.extend_id_to_name(HashMap::from([
+            (1, "pe0::lane".to_string()),
+            (2, "object".to_string()),
+        ]));
+        renderer.extend_id_to_details(HashMap::from([
+            (1, "worker lane".to_string()),
+            (2, "packet<f32>".to_string()),
+        ]));
+        renderer.add_chunk(vec![
+            EventLine::Create {
+                created_by: 0,
+                id: 1,
+                time: 10.0,
+            },
+            EventLine::Create {
+                created_by: 1,
+                id: 2,
+                time: 20.0,
+            },
+        ]);
+
+        assert_eq!(
+            renderer.render_line(0),
+            "0: created 1: pe0::lane (worker lane) @10.0ns"
+        );
+        assert_eq!(
+            renderer.render_line(1),
+            "1: created object 2 (packet<f32>) @20.0ns"
+        );
+    }
+
+    #[test]
+    fn fullnesses_at_returns_latest_fullnesses_up_to_absolute_index() {
+        let mut renderer = Renderer::new();
+        renderer.add_chunk(vec![
+            EventLine::Enter {
+                id: 7,
+                entered: 100,
+                fullness: 1,
+                time: 10.0,
+            },
+            EventLine::Enter {
+                id: 8,
+                entered: 101,
+                fullness: 2,
+                time: 11.0,
+            },
+            EventLine::Exit {
+                id: 7,
+                exited: 100,
+                fullness: 0,
+                time: 12.0,
+            },
+        ]);
+
+        assert_eq!(renderer.fullnesses_at(0), HashMap::from([(7, 1)]));
+        assert_eq!(renderer.fullnesses_at(2), HashMap::from([(7, 0), (8, 2)]));
+        assert_eq!(renderer.fullnesses_at(99), HashMap::from([(7, 0), (8, 2)]));
     }
 }
