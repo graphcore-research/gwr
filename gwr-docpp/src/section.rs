@@ -26,36 +26,33 @@ impl Parse for SectionDescriptor {
     fn parse(input: ParseStream) -> parse::Result<Self> {
         let mut items = HashMap::new();
 
-        loop {
-            if !parse_kv(&input, &mut items) {
+        while !input.is_empty() {
+            parse_kv(input, &mut items)?;
+
+            if input.is_empty() {
                 break;
             }
+
+            input.parse::<Comma>()?;
         }
-        let title = items.get("title").expect("Missing required 'title'");
-        let text = items.get("text").expect("Missing required 'text'");
-        Ok(SectionDescriptor {
-            title: title.clone(),
-            text: text.clone(),
-        })
+        let title = items
+            .remove("title")
+            .ok_or_else(|| input.error("missing required `title` argument"))?;
+        let text = items
+            .remove("text")
+            .ok_or_else(|| input.error("missing required `text` argument"))?;
+        Ok(SectionDescriptor { title, text })
     }
 }
 
-fn parse_kv(input: &ParseStream, items: &mut HashMap<String, String>) -> bool {
-    let key = match input.parse::<Ident>() {
-        Ok(key) => key.to_string(),
-        Err(_) => return false,
-    };
-    if input.parse::<Eq>().is_err() {
-        return false;
-    }
-    let value = match input.parse::<LitStr>() {
-        Ok(value) => value.value().to_string(),
-        Err(_) => return false,
-    };
+fn parse_kv(input: ParseStream, items: &mut HashMap<String, String>) -> syn::Result<()> {
+    let key: Ident = input.parse()?;
+    input.parse::<Eq>()?;
+    let value: LitStr = input.parse()?;
 
-    items.insert(key, value);
+    items.insert(key.to_string(), value.value());
 
-    input.parse::<Comma>().is_ok()
+    Ok(())
 }
 
 pub fn process(input: proc_macro::TokenStream) -> proc_macro::TokenStream {

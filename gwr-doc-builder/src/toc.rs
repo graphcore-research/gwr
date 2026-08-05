@@ -185,7 +185,10 @@ pub fn parse(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
         return unprocessed(&input, "toc");
     }
 
-    let chapter = syn::parse2::<TocDocument>(input).unwrap();
+    let chapter = match syn::parse2::<TocDocument>(input) {
+        Ok(chapter) => chapter,
+        Err(error) => return error.to_compile_error(),
+    };
     handle_error(|| {
         let mut output = String::new();
         chapter.to_rust_doc(&mut output, 1);
