@@ -13,6 +13,7 @@ use syn::{LitStr, Result};
 #[derive(Debug)]
 pub struct CommandDescriptor {
     pub cmd: String,
+    pub span: Span,
 }
 
 /// Implementation to parse the token stream and convert it to a
@@ -22,6 +23,7 @@ impl Parse for CommandDescriptor {
         let command = input.parse::<LitStr>()?;
         Ok(CommandDescriptor {
             cmd: command.value(),
+            span: command.span(),
         })
     }
 }

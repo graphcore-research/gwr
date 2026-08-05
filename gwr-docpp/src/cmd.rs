@@ -7,23 +7,25 @@ use std::process::Command;
 use gwr_doc_builder::helpers::{CommandDescriptor, handle_error};
 use proc_macro2::Span;
 use quote::ToTokens;
-use syn::LitStr;
+use syn::{Error, LitStr};
 
 pub fn process(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let command_descriptor = syn::parse_macro_input!(input as CommandDescriptor);
     handle_error(|| {
         let mut output = String::new();
 
-        let commands = command_descriptor.cmd.trim().split(';');
-        for command in commands {
-            let args: Vec<_> = command.trim().split(' ').collect();
+        for command in command_descriptor.cmd.trim().split(';') {
+            let mut args = command.split_whitespace();
+            let cmd = args
+                .next()
+                .ok_or_else(|| Error::new(command_descriptor.span, "no command given"))?;
 
-            let cmd = args.first().expect("No command given");
-
-            let cmd_output = Command::new(cmd)
-                .args(args.into_iter().skip(1))
-                .output()
-                .expect("\n\n**failed to run command**");
+            let cmd_output = Command::new(cmd).args(args).output().map_err(|_| {
+                Error::new(
+                    command_descriptor.span,
+                    format!("failed to run command `{cmd}`"),
+                )
+            })?;
 
             output.push_str(
                 String::from_utf8_lossy(&cmd_output.stdout)
