@@ -23,14 +23,14 @@ jobs:
     # re-triggers CI here with `github.actor` no longer set to
     # `dependabot[bot]`.
     #
-    # Skip CI on the initial Dependabot-authored Cargo and GitHub Actions
-    # commits. CI runs once the corresponding workflow has amended and pushed
-    # the final commit through `gwr-bot`. Other Dependabot ecosystems (e.g.
-    # `rust-toolchain`) run CI normally.
+    # Skip CI on initial Dependabot-authored Cargo, GitHub Actions and Rust
+    # toolchain commits. CI runs once the corresponding workflow has amended
+    # and pushed the final commit through `gwr-bot`.
     if: >-
       ${{ !(github.actor == 'dependabot[bot]' &&
             (startsWith(github.head_ref, 'dependabot-cargo-') ||
-             startsWith(github.head_ref, 'dependabot-github_actions-'))) }}
+             startsWith(github.head_ref, 'dependabot-github_actions-') ||
+             startsWith(github.head_ref, 'dependabot-rust_toolchain-'))) }}
     runs-on: ubuntu-latest
     steps:
       - run: ":"
