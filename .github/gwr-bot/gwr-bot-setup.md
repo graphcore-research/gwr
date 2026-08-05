@@ -13,6 +13,11 @@ workflow regenerates `licenses.html`, makes `gwr-bot` the amended commit's
 author and committer, credits Dependabot as a co-author in the commit message,
 and force-pushes the result.
 The
+[`overwrite-trybuild-expected-on-dependabot`](../workflows/overwrite-trybuild-expected-on-dependabot.yaml)
+workflow overwrites compiler-diagnostic expected output after Rust toolchain
+updates and amends the Dependabot commit so CI runs under the `gwr-bot`
+identity.
+The
 [`amend-dependabot-github-actions-update`](../workflows/amend-dependabot-github-actions-update.yaml)
 workflow amends Dependabot's GitHub Actions commits so that grouped update
 commit summaries and PR titles include the dependency's old and new versions,
@@ -144,6 +149,11 @@ secrets you just created. No workflow edits are required.
    - CI has run against the amended commit (the `gate` job is not
      skipped, because `github.actor` is now `gwr-bot[bot]`, not
      `dependabot[bot]`).
+4. When a `dependabot-rust_toolchain-*` PR changes compiler diagnostics, confirm
+   that the `Overwrite trybuild expected output on Dependabot Rust toolchain
+   PRs` workflow updates the affected `.stderr` files and triggers CI for the
+   amended commit. When the expected output is unchanged, it should still amend
+   the commit so the actor-based CI gate permits the full run.
 
 ## Rotating or revoking the App
 

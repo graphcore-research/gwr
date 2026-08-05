@@ -1,5 +1,5 @@
 error[E0599]: no method named `finish` found for struct `JobMachineTypestate<JobMachineQueued>` in the current scope
-  --> tests/fail/invalid_typestate_transition.rs:18:27
+  --> tests/ui/create_state_machine_rejects_invalid_transition.rs:18:27
    |
  3 | / gwr_components::create_state_machine!(
  4 | |     JobMachine {

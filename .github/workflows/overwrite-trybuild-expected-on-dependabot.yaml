@@ -1,0 +1,89 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+# Compiler diagnostic formatting can change between Rust toolchain versions,
+# invalidating `trybuild` `.stderr` expected output. Overwrite every workspace
+# compile-fail target's expected output on Rust toolchain Dependabot PRs.
+#
+# Every update is amended and pushed with `gwr-bot` so CI runs against the final
+# commit, even when the expected output is unchanged.
+#
+# See `.github/gwr-bot/gwr-bot-setup.md` for step-by-step instructions on
+# provisioning the `gwr-bot` GitHub App and its Dependabot secrets.
+
+name: Overwrite trybuild expected output on Dependabot Rust toolchain PRs
+
+on:
+    pull_request:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: overwrite-trybuild-expected-${{ github.event.pull_request.number }}
+    cancel-in-progress: true
+
+jobs:
+    overwrite-expected:
+        if: >-
+            github.actor == 'dependabot[bot]' &&
+            startsWith(github.head_ref, 'dependabot-rust_toolchain-')
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Mint gwr-bot installation token
+              id: gwr-bot-token
+              uses: actions/create-github-app-token@v3
+              with:
+                  client-id: ${{ secrets.GWR_BOT_CLIENT_ID }}
+                  private-key: ${{ secrets.GWR_BOT_PRIVATE_KEY }}
+
+            - name: Check out the Dependabot branch
+              uses: actions/checkout@v6
+              with:
+                  # Amend the PR tip rather than the generated merge commit.
+                  ref: ${{ github.event.pull_request.head.ref }}
+                  submodules: true
+                  # Include the parent required by `git commit --amend`.
+                  fetch-depth: 2
+                  # Keep the push token out of .git/config until gh auth setup-git runs.
+                  persist-credentials: false
+
+            - uses: ./.github/actions/install-build-dependencies
+
+            - name: Overwrite trybuild expected output
+              env:
+                  TRYBUILD: overwrite
+              run: cargo test --workspace --test compile_fail
+
+            - name: Configure git identity from push token
+              env:
+                  GH_TOKEN: ${{ steps.gwr-bot-token.outputs.token }}
+                  APP_SLUG: ${{ steps.gwr-bot-token.outputs.app-slug }}
+              run: |
+                  set -euo pipefail
+                  user_login="${APP_SLUG}[bot]"
+                  user_id=$(gh api "/users/${user_login}" --jq .id)
+                  git config user.name "$user_login"
+                  git config user.email "${user_id}+${user_login}@users.noreply.github.com"
+
+            - name: Amend expected output and commit attribution
+              env:
+                  GH_TOKEN: ${{ steps.gwr-bot-token.outputs.token }}
+                  PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+              run: |
+                  # Always amend and force-push so a `gwr-bot` authored SHA
+                  # triggers the full CI run when the expected output is unchanged.
+                  set -euo pipefail
+
+                  trailer_args=()
+                  if [[ $(git log -1 --format=%an) != "$(git config user.name)" ]]; then
+                    trailer_args=(
+                      --trailer
+                      "Co-authored-by: $(git log -1 --format='%an <%ae>')"
+                    )
+                  fi
+
+                  gh auth setup-git
+                  git add -- ':(glob)**/*.stderr'
+                  git commit --amend --reset-author --no-edit "${trailer_args[@]}"
+                  git push --force-with-lease origin "HEAD:${PR_HEAD_REF}"

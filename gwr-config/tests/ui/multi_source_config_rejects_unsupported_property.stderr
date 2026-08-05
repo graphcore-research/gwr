@@ -1,0 +1,11 @@
+error: unsupported property
+ --> tests/ui/multi_source_config_rejects_unsupported_property.rs:5:23
+  |
+5 | #[multi_source_config(path = "foo.toml")]
+  |                       ^^^^
+
+error[E0601]: `main` function not found in crate `$CRATE`
+  --> tests/ui/multi_source_config_rejects_unsupported_property.rs:11:2
+   |
+11 | }
+   |  ^ consider adding a `main` function to `$DIR/tests/ui/multi_source_config_rejects_unsupported_property.rs`

@@ -1,5 +1,5 @@
 error: unexpected end of input, expected string literal
- --> tests/macro_properties/missing_path.rs:5:1
+ --> tests/ui/multi_source_config_rejects_missing_path.rs:5:1
   |
 5 | #[multi_source_config(conf_file =)]
   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -7,7 +7,7 @@ error: unexpected end of input, expected string literal
   = note: this error originates in the attribute macro `multi_source_config` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0601]: `main` function not found in crate `$CRATE`
-  --> tests/macro_properties/missing_path.rs:11:2
+  --> tests/ui/multi_source_config_rejects_missing_path.rs:11:2
    |
 11 | }
-   |  ^ consider adding a `main` function to `$DIR/tests/macro_properties/missing_path.rs`
+   |  ^ consider adding a `main` function to `$DIR/tests/ui/multi_source_config_rejects_missing_path.rs`
