@@ -84,9 +84,9 @@ impl<T> Route<T> for DefaultAlgorithm
 where
     T: Routable,
 {
-    /// Determine route by taking the object destination as an index.
+    /// Determine route by taking the object destination device as an index.
     fn route(&self, obj_to_route: &T) -> Result<usize, SimError> {
-        Ok(obj_to_route.destination() as usize)
+        Ok(obj_to_route.dst_device().0 as usize)
     }
 }
 

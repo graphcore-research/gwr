@@ -1,11 +1,13 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
 use gwr_components::connect_port;
-use gwr_components::router::{DefaultAlgorithm, Router};
+use gwr_components::router::{DefaultAlgorithm, Route, Router};
 use gwr_components::sink::Sink;
 use gwr_components::source::Source;
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
+use gwr_engine::traits::Routable;
+use gwr_engine::types::{AccessType, DeviceId};
 
 #[test]
 fn router() {
@@ -36,4 +38,40 @@ fn router() {
 
     assert_eq!(sink_a.num_sunk(), NUM_PUTS / 2);
     assert_eq!(sink_b.num_sunk(), NUM_PUTS / 2);
+}
+
+struct DeviceRoutable {
+    dst_addr: u64,
+    src_addr: u64,
+    dst_device: DeviceId,
+}
+
+impl Routable for DeviceRoutable {
+    fn dst_addr(&self) -> u64 {
+        self.dst_addr
+    }
+
+    fn src_addr(&self) -> u64 {
+        self.src_addr
+    }
+
+    fn dst_device(&self) -> DeviceId {
+        self.dst_device
+    }
+
+    fn access_type(&self) -> AccessType {
+        AccessType::ReadRequest
+    }
+}
+
+#[test]
+fn default_algorithm_routes_by_destination_device() {
+    let object = DeviceRoutable {
+        dst_addr: 0x1_0000_0000,
+        src_addr: 0,
+        dst_device: DeviceId(1),
+    };
+
+    assert_eq!(DefaultAlgorithm {}.route(&object).unwrap(), 1);
+    assert_eq!(DefaultAlgorithm {}.route(&7_usize).unwrap(), 7);
 }

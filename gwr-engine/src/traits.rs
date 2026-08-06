@@ -11,7 +11,7 @@ use std::rc::Rc;
 use async_trait::async_trait;
 use gwr_track::id::Unique;
 
-use crate::types::{AccessType, SimResult};
+use crate::types::{AccessType, DeviceId, SimResult};
 
 /// The `TotalBytes` trait is used to determine how many bytes an object
 /// represents
@@ -25,7 +25,14 @@ pub trait TotalBytes {
 /// The `Routable` trait provides an interface to an object to enable it to be
 /// routed
 pub trait Routable {
-    fn destination(&self) -> u64;
+    fn dst_addr(&self) -> u64;
+    fn src_addr(&self) -> u64;
+    fn dst_device(&self) -> DeviceId {
+        DeviceId(self.dst_addr())
+    }
+    fn src_device(&self) -> DeviceId {
+        DeviceId(self.src_addr())
+    }
     fn access_type(&self) -> AccessType;
 }
 
@@ -58,7 +65,10 @@ impl TotalBytes for i32 {
 }
 
 impl Routable for i32 {
-    fn destination(&self) -> u64 {
+    fn dst_addr(&self) -> u64 {
+        *self as u64
+    }
+    fn src_addr(&self) -> u64 {
         *self as u64
     }
     fn access_type(&self) -> AccessType {
@@ -83,7 +93,10 @@ impl TotalBytes for usize {
 }
 
 impl Routable for usize {
-    fn destination(&self) -> u64 {
+    fn dst_addr(&self) -> u64 {
+        *self as u64
+    }
+    fn src_addr(&self) -> u64 {
         *self as u64
     }
     fn access_type(&self) -> AccessType {
@@ -180,7 +193,10 @@ mod tests {
     #[test]
     fn integer_sim_object_defaults_are_available() {
         assert_eq!(0_i32.total_bytes(), size_of::<i32>());
-        assert_eq!(7_i32.destination(), 7);
+        assert_eq!(7_i32.dst_addr(), 7);
+        assert_eq!(7_i32.src_addr(), 7);
+        assert_eq!(7_i32.dst_device(), DeviceId(7));
+        assert_eq!(7_i32.src_device(), DeviceId(7));
         assert_eq!(0_i32.access_type(), AccessType::ReadRequest);
         assert_eq!(1_i32.access_type(), AccessType::WriteRequest);
         assert_eq!(2_i32.access_type(), AccessType::WriteNonPostedRequest);
@@ -189,7 +205,10 @@ mod tests {
         assert_eq!(5_i32.access_type(), AccessType::Control);
 
         assert_eq!(0_usize.total_bytes(), size_of::<usize>());
-        assert_eq!(7_usize.destination(), 7);
+        assert_eq!(7_usize.dst_addr(), 7);
+        assert_eq!(7_usize.src_addr(), 7);
+        assert_eq!(7_usize.dst_device(), DeviceId(7));
+        assert_eq!(7_usize.src_device(), DeviceId(7));
         assert_eq!(0_usize.access_type(), AccessType::ReadRequest);
         assert_eq!(1_usize.access_type(), AccessType::WriteRequest);
         assert_eq!(2_usize.access_type(), AccessType::WriteNonPostedRequest);

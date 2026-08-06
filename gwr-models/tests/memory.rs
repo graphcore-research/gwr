@@ -6,9 +6,9 @@ use std::rc::Rc;
 use gwr_engine::engine::Engine;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::SimObject;
-use gwr_engine::types::SimError;
+use gwr_engine::types::{DeviceId, SimError};
 use gwr_models::memory::memory_access::MemoryAccess;
-use gwr_models::memory::memory_map::{DeviceId, MemoryMap};
+use gwr_models::memory::memory_map::MemoryMap;
 use gwr_models::memory::traits::AccessMemory;
 use gwr_models::memory::{Memory, MemoryConfig};
 use gwr_models::test_helpers::{

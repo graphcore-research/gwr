@@ -9,13 +9,18 @@
 
 use std::cell::OnceCell;
 use std::cmp::min;
-use std::fmt::Display;
+use std::collections::{HashMap, HashSet};
+use std::fmt::{self, Display};
 
+use clap::ValueEnum;
 use gwr_engine::port::PortStateResult;
 use gwr_engine::sim_error;
 use gwr_engine::traits::{Routable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_track::entity::GetEntity;
+use rand::{Rng, SeedableRng};
+use rand_xoshiro::SplitMix64;
+use serde::{Deserialize, Serialize};
 
 pub trait Fabric<T>: GetEntity + Display
 where
@@ -24,6 +29,27 @@ where
     fn connect_port_egress_i(&self, i: usize, port_state: PortStateResult<T>) -> SimResult;
     fn port_ingress_i(&self, i: usize) -> PortStateResult<T>;
     fn col_row_port_to_fabric_port_index(&self, col: usize, row: usize, port: usize) -> usize;
+    fn fabric_port_index_to_col_row_port(&self, fabric_port_index: usize) -> (usize, usize, usize);
+    fn destination_port_map(&self) -> &HashMap<u64, Vec<usize>>;
+    fn port_selection(&self) -> FabricPortSelection;
+}
+
+#[derive(ValueEnum, Clone, Copy, Default, Debug, Serialize, PartialEq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FabricPortSelection {
+    #[default]
+    DestinationAddressHash,
+    SourceIdModulo,
+}
+
+impl fmt::Display for FabricPortSelection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            FabricPortSelection::DestinationAddressHash => "destination-address-hash",
+            FabricPortSelection::SourceIdModulo => "source-id-modulo",
+        };
+        f.write_str(s)
+    }
 }
 
 /// Configuration structure for a fabric
@@ -65,6 +91,13 @@ pub struct FabricConfig {
     fabric_port_indices: OnceCell<Vec<usize>>,
 
     max_num_ports: usize,
+
+    /// Mapping from protocol destinations, such as device IDs, to fabric
+    /// egress port indices.
+    destination_port_map: HashMap<u64, Vec<usize>>,
+
+    /// Policy used when a destination maps to multiple egress ports.
+    port_selection: FabricPortSelection,
 }
 
 /// Fabric dimensions and externally available ports.
@@ -95,8 +128,29 @@ pub struct FabricPortConfig {
     pub port_bits_per_tick: usize,
 }
 
+fn validate_destination_port_map(
+    destination_port_map: &HashMap<u64, Vec<usize>>,
+    fabric_port_indices: &[usize],
+) -> Result<(), SimError> {
+    let fabric_port_indices: HashSet<usize> = fabric_port_indices.iter().copied().collect();
+    for (destination, ports) in destination_port_map {
+        for port in ports {
+            if !fabric_port_indices.contains(port) {
+                return sim_error!(
+                    "Destination port map references unpopulated fabric port {port} for destination {destination}"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 impl FabricConfig {
-    pub fn new(geometry: FabricGeometry, ports: FabricPortConfig) -> Result<Self, SimError> {
+    pub fn new(
+        geometry: FabricGeometry,
+        ports: FabricPortConfig,
+        destination_port_map: HashMap<u64, Vec<usize>>,
+    ) -> Result<Self, SimError> {
         let FabricGeometry {
             num_columns,
             num_rows,
@@ -134,6 +188,15 @@ impl FabricConfig {
         if port_bits_per_tick == 0 {
             return sim_error!("link rate must be greater than zero");
         }
+        if !destination_port_map.is_empty() {
+            let fabric_port_indices = create_populated_indices(
+                num_columns,
+                num_rows,
+                num_ports_per_node,
+                ports_per_node_limit,
+            );
+            validate_destination_port_map(&destination_port_map, &fabric_port_indices)?;
+        }
 
         Ok(Self {
             num_columns,
@@ -148,7 +211,15 @@ impl FabricConfig {
             num_ports,
             fabric_port_indices: OnceCell::new(),
             max_num_ports,
+            destination_port_map,
+            port_selection: FabricPortSelection::default(),
         })
+    }
+
+    #[must_use]
+    pub fn with_port_selection(mut self, port_selection: FabricPortSelection) -> Self {
+        self.port_selection = port_selection;
+        self
     }
 
     /// Returns the maximum number of ports in the fabric
@@ -248,6 +319,48 @@ impl FabricConfig {
     pub fn port_bits_per_tick(&self) -> usize {
         self.port_bits_per_tick
     }
+
+    #[must_use]
+    pub fn destination_port_map(&self) -> &HashMap<u64, Vec<usize>> {
+        &self.destination_port_map
+    }
+
+    #[must_use]
+    pub fn port_selection(&self) -> FabricPortSelection {
+        self.port_selection
+    }
+
+    pub fn resolve_destination_port<T>(&self, object: &T) -> Result<usize, SimError>
+    where
+        T: Routable,
+    {
+        let destination = object.dst_device().0;
+        let ports = self.destination_port_map.get(&destination).ok_or_else(|| {
+            SimError(format!(
+                "No fabric egress port mapped for destination {destination}"
+            ))
+        })?;
+
+        match ports.as_slice() {
+            [] => Err(SimError(format!(
+                "No fabric egress port mapped for destination {destination}"
+            ))),
+            [port] => Ok(*port),
+            _ => {
+                let selector = match self.port_selection {
+                    FabricPortSelection::DestinationAddressHash => splitmix64(object.dst_addr()),
+                    FabricPortSelection::SourceIdModulo => object.src_device().0,
+                };
+                Ok(ports[(selector as usize) % ports.len()])
+            }
+        }
+    }
+}
+
+#[must_use]
+fn splitmix64(seed: u64) -> u64 {
+    let mut rng = SplitMix64::seed_from_u64(seed);
+    rng.next_u64()
 }
 
 fn populated_port_count(
@@ -386,6 +499,7 @@ fn port_index() {
             tx_buffer_bytes: 1,
             port_bits_per_tick: 1,
         },
+        HashMap::new(),
     )
     .unwrap();
 
@@ -427,6 +541,7 @@ fn counts_populated_ports_without_materialising_indices() {
             tx_buffer_bytes: 1,
             port_bits_per_tick: 1,
         },
+        HashMap::new(),
     )
     .unwrap();
 
@@ -454,6 +569,7 @@ fn populated_port_indices_match_count_and_bounds() {
                             tx_buffer_bytes: 1,
                             port_bits_per_tick: 1,
                         },
+                        HashMap::new(),
                     );
                     let Ok(config) = result else {
                         continue;
@@ -473,5 +589,226 @@ fn populated_port_indices_match_count_and_bounds() {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use gwr_engine::traits::Routable;
+    use gwr_engine::types::{AccessType, DeviceId};
+
+    use super::{FabricConfig, FabricGeometry, FabricPortConfig, FabricPortSelection, splitmix64};
+
+    const MULTI_ROUTE_PORTS: [usize; 3] = [10, 11, 12];
+
+    struct TestRoutable {
+        dst_device: DeviceId,
+        src_device: DeviceId,
+        dst_addr: u64,
+        src_addr: u64,
+    }
+
+    impl Routable for TestRoutable {
+        fn dst_addr(&self) -> u64 {
+            self.dst_addr
+        }
+
+        fn src_addr(&self) -> u64 {
+            self.src_addr
+        }
+
+        fn dst_device(&self) -> DeviceId {
+            self.dst_device
+        }
+
+        fn src_device(&self) -> DeviceId {
+            self.src_device
+        }
+
+        fn access_type(&self) -> AccessType {
+            AccessType::Control
+        }
+    }
+
+    fn config_with_map(selection: FabricPortSelection) -> FabricConfig {
+        FabricConfig::new(
+            FabricGeometry {
+                num_columns: 4,
+                num_rows: 1,
+                num_ports_per_node: 4,
+                ports_per_node_limit: None,
+            },
+            FabricPortConfig {
+                ticks_per_hop: 1,
+                ticks_overhead: 1,
+                rx_buffer_bytes: 1,
+                tx_buffer_bytes: 1,
+                port_bits_per_tick: 1,
+            },
+            HashMap::from([(7, MULTI_ROUTE_PORTS.to_vec())]),
+        )
+        .unwrap()
+        .with_port_selection(selection)
+    }
+
+    #[test]
+    fn resolves_single_destination_port() {
+        let config = FabricConfig::new(
+            FabricGeometry {
+                num_columns: 2,
+                num_rows: 2,
+                num_ports_per_node: 1,
+                ports_per_node_limit: None,
+            },
+            FabricPortConfig {
+                ticks_per_hop: 1,
+                ticks_overhead: 1,
+                rx_buffer_bytes: 1,
+                tx_buffer_bytes: 1,
+                port_bits_per_tick: 1,
+            },
+            HashMap::from([(7, vec![3])]),
+        )
+        .unwrap();
+        let packet = TestRoutable {
+            dst_device: DeviceId(7),
+            src_device: DeviceId(1),
+            dst_addr: 2,
+            src_addr: 1,
+        };
+
+        assert_eq!(config.resolve_destination_port(&packet).unwrap(), 3);
+    }
+
+    #[test]
+    fn errors_for_missing_destination_port() {
+        let config = config_with_map(FabricPortSelection::DestinationAddressHash);
+        let packet = TestRoutable {
+            dst_device: DeviceId(8),
+            src_device: DeviceId(1),
+            dst_addr: 2,
+            src_addr: 1,
+        };
+
+        assert!(
+            format!("{}", config.resolve_destination_port(&packet).unwrap_err())
+                .contains("No fabric egress port mapped for destination 8")
+        );
+    }
+
+    #[test]
+    fn errors_for_empty_destination_port_map() {
+        let config = FabricConfig::new(
+            FabricGeometry {
+                num_columns: 2,
+                num_rows: 1,
+                num_ports_per_node: 1,
+                ports_per_node_limit: None,
+            },
+            FabricPortConfig {
+                ticks_per_hop: 1,
+                ticks_overhead: 1,
+                rx_buffer_bytes: 1,
+                tx_buffer_bytes: 1,
+                port_bits_per_tick: 1,
+            },
+            HashMap::new(),
+        )
+        .unwrap();
+        let packet = TestRoutable {
+            dst_device: DeviceId(0),
+            src_device: DeviceId(1),
+            dst_addr: 2,
+            src_addr: 1,
+        };
+
+        assert!(
+            format!("{}", config.resolve_destination_port(&packet).unwrap_err())
+                .contains("No fabric egress port mapped for destination 0")
+        );
+    }
+
+    #[test]
+    fn rejects_destination_port_map_with_out_of_range_port() {
+        let error = match FabricConfig::new(
+            FabricGeometry {
+                num_columns: 2,
+                num_rows: 1,
+                num_ports_per_node: 1,
+                ports_per_node_limit: None,
+            },
+            FabricPortConfig {
+                ticks_per_hop: 1,
+                ticks_overhead: 1,
+                rx_buffer_bytes: 1,
+                tx_buffer_bytes: 1,
+                port_bits_per_tick: 1,
+            },
+            HashMap::from([(7, vec![2])]),
+        ) {
+            Ok(_) => panic!("expected invalid destination port map to return an error"),
+            Err(error) => error,
+        };
+
+        assert!(error.to_string().contains(
+            "Destination port map references unpopulated fabric port 2 for destination 7"
+        ));
+    }
+
+    #[test]
+    fn rejects_destination_port_map_with_unpopulated_port() {
+        let error = match FabricConfig::new(
+            FabricGeometry {
+                num_columns: 2,
+                num_rows: 2,
+                num_ports_per_node: 2,
+                ports_per_node_limit: Some(3),
+            },
+            FabricPortConfig {
+                ticks_per_hop: 1,
+                ticks_overhead: 1,
+                rx_buffer_bytes: 1,
+                tx_buffer_bytes: 1,
+                port_bits_per_tick: 1,
+            },
+            HashMap::from([(7, vec![1])]),
+        ) {
+            Ok(_) => panic!("expected invalid destination port map to return an error"),
+            Err(error) => error,
+        };
+
+        assert!(error.to_string().contains(
+            "Destination port map references unpopulated fabric port 1 for destination 7"
+        ));
+    }
+
+    #[test]
+    fn resolves_multi_route_by_destination_address_hash() {
+        let config = config_with_map(FabricPortSelection::DestinationAddressHash);
+        let packet = TestRoutable {
+            dst_device: DeviceId(7),
+            src_device: DeviceId(4),
+            dst_addr: 5,
+            src_addr: 4,
+        };
+        let expected = MULTI_ROUTE_PORTS[(splitmix64(5) as usize) % MULTI_ROUTE_PORTS.len()];
+
+        assert_eq!(config.resolve_destination_port(&packet).unwrap(), expected);
+    }
+
+    #[test]
+    fn resolves_multi_route_by_source_id_modulo() {
+        let config = config_with_map(FabricPortSelection::SourceIdModulo);
+        let packet = TestRoutable {
+            dst_device: DeviceId(7),
+            src_device: DeviceId(4),
+            dst_addr: 5,
+            src_addr: 4,
+        };
+        let expected = MULTI_ROUTE_PORTS[(packet.src_device.0 as usize) % MULTI_ROUTE_PORTS.len()];
+
+        assert_eq!(config.resolve_destination_port(&packet).unwrap(), expected);
     }
 }

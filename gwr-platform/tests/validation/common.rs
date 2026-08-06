@@ -88,6 +88,7 @@ pub(crate) fn fabric(name: &str) -> FabricSection {
             tx_buffer_bytes: None,
             port_bits_per_tick: None,
             routing: None,
+            port_selection: None,
         },
     }
 }
