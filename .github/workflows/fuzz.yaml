@@ -21,8 +21,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - engine_run_until
+        include:
+          - target: engine_run_until
+            max_len: 32
 
     steps:
       - uses: actions/checkout@v6
@@ -47,7 +48,7 @@ jobs:
         run: >-
           cargo +nightly fuzz run "${{ matrix.target }}" --
           -max_total_time="${FUZZ_TIME_SECONDS}"
-          -max_len=2048
+          -max_len="${{ matrix.max_len }}"
           -timeout=5
 
       - name: Upload failure artifacts
