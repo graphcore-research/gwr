@@ -2,9 +2,8 @@
 
 # GWR fuzz targets
 
-The fuzz targets are kept in an independent Cargo workspace so that their
-nightly compiler and sanitizer requirements do not affect the main GWR
-workspace.
+The fuzz targets are members of the GWR Cargo workspace. Running them requires
+the nightly compiler because `cargo-fuzz` uses sanitizer instrumentation.
 
 ## Prerequisites
 
