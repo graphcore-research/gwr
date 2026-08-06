@@ -2,9 +2,6 @@
 
 # GWR fuzz targets
 
-The fuzz targets are members of the GWR Cargo workspace. Running them requires
-the nightly compiler because `cargo-fuzz` uses sanitizer instrumentation.
-
 ## Prerequisites
 
 Install the pinned `cargo-fuzz` release:
@@ -21,11 +18,10 @@ List the available targets:
 cargo +nightly fuzz list
 ```
 
-Build and run one target from the repository root:
+Run one target from the repository root:
 
 ```console
 fuzz_target=engine_run_until
-cargo +nightly fuzz build "$fuzz_target"
 cargo +nightly fuzz run "$fuzz_target" -- \
   -max_total_time=300 \
   -max_len=2048 \
