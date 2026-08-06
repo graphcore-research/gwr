@@ -22,7 +22,3 @@ path = "fuzz_targets/engine_run_until.rs"
 test = false
 doc = false
 bench = false
-
-# Keep fuzzing separate from the normal GWR workspace.
-[workspace]
-members = ["."]
