@@ -1,0 +1,28 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+[package]
+name = "gwr-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
+
+gwr-engine = { path = "../gwr-engine", default-features = false }
+gwr-track = { path = "../gwr-track" }
+
+[[bin]]
+name = "engine_run_until"
+path = "fuzz_targets/engine_run_until.rs"
+test = false
+doc = false
+bench = false
+
+# Keep fuzzing separate from the normal GWR workspace.
+[workspace]
+members = ["."]
