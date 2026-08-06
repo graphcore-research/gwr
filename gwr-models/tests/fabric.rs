@@ -1,5 +1,6 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::rc::Rc;
 
@@ -10,7 +11,7 @@ use gwr_engine::engine::Engine;
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::TotalBytes;
-use gwr_engine::types::AccessType;
+use gwr_engine::types::{AccessType, DeviceId};
 use gwr_models::build_model_harness;
 use gwr_models::ethernet_frame::{EthernetFrame, SRC_MAC_BYTES, u64_to_mac};
 use gwr_models::fabric::functional::FunctionalFabric;
@@ -18,7 +19,6 @@ use gwr_models::fabric::node::FabricRoutingAlgorithm;
 use gwr_models::fabric::routed::RoutedFabric;
 use gwr_models::fabric::{Fabric, FabricConfig, FabricGeometry, FabricPortConfig};
 use gwr_models::memory::memory_access::MemoryAccess;
-use gwr_models::memory::memory_map::DeviceId;
 use gwr_models::test_helpers::MemoryTxn;
 
 trait ToDest {
@@ -142,9 +142,16 @@ fn default_config() -> Rc<FabricConfig> {
             tx_buffer_bytes,
             port_bits_per_tick,
         },
+        identity_destination_port_map(num_columns * num_rows * num_ports_per_node),
     )
     .unwrap();
     Rc::new(config)
+}
+
+fn identity_destination_port_map(num_ports: usize) -> HashMap<u64, Vec<usize>> {
+    (0..num_ports)
+        .map(|port_idx| (port_idx as u64, vec![port_idx]))
+        .collect()
 }
 
 #[test]
@@ -278,6 +285,7 @@ mod routed_fabric_harness {
                     tx_buffer_bytes: 1024,
                     port_bits_per_tick: 128,
                 },
+                identity_destination_port_map(4),
             )
             .unwrap(),
         );
@@ -335,7 +343,6 @@ mod routed_fabric_harness {
                 MemoryTxn::read_req(addr_a)
                     .with_src_addr(ingress_a_idx as u64)
                     .with_bytes(access_size_bytes)
-                    .with_destination(egress_a_idx as u64)
                     .with_dst_device(DeviceId(egress_a_idx as u64))
                     .with_src_device(DeviceId(ingress_a_idx as u64)),
             ),
@@ -344,7 +351,6 @@ mod routed_fabric_harness {
                 MemoryTxn::read_req(addr_b)
                     .with_src_addr(ingress_b_idx as u64)
                     .with_bytes(access_size_bytes)
-                    .with_destination(egress_b_idx as u64)
                     .with_dst_device(DeviceId(egress_b_idx as u64))
                     .with_src_device(DeviceId(ingress_b_idx as u64)),
             ),
@@ -356,19 +362,19 @@ mod routed_fabric_harness {
 fn fabric_config_rejects_invalid_transport_settings() {
     let cases = [
         (
-            FabricConfig::new(geometry(1, 1, 1), port_config(1, 1, 1)),
+            FabricConfig::new(geometry(1, 1, 1), port_config(1, 1, 1), HashMap::new()),
             "at least 2 are required",
         ),
         (
-            FabricConfig::new(geometry(1, 1, 2), port_config(0, 1, 1)),
+            FabricConfig::new(geometry(1, 1, 2), port_config(0, 1, 1), HashMap::new()),
             "receive buffer size",
         ),
         (
-            FabricConfig::new(geometry(1, 1, 2), port_config(1, 0, 1)),
+            FabricConfig::new(geometry(1, 1, 2), port_config(1, 0, 1), HashMap::new()),
             "transmit buffer size",
         ),
         (
-            FabricConfig::new(geometry(1, 1, 2), port_config(1, 1, 0)),
+            FabricConfig::new(geometry(1, 1, 2), port_config(1, 1, 0), HashMap::new()),
             "link rate",
         ),
     ];
@@ -381,7 +387,12 @@ fn fabric_config_rejects_invalid_transport_settings() {
 
 #[test]
 fn fabric_config_rejects_port_count_overflow() {
-    let error = FabricConfig::new(geometry(usize::MAX, 2, 2), port_config(1, 1, 1)).unwrap_err();
+    let error = FabricConfig::new(
+        geometry(usize::MAX, 2, 2),
+        port_config(1, 1, 1),
+        HashMap::new(),
+    )
+    .unwrap_err();
 
     assert_eq!(format!("{error}"), "maximum port count overflows");
 }

@@ -120,8 +120,12 @@ impl Unique for EthernetFrame {
 }
 
 impl Routable for EthernetFrame {
-    fn destination(&self) -> u64 {
+    fn dst_addr(&self) -> u64 {
         self.get_dst()
+    }
+
+    fn src_addr(&self) -> u64 {
+        self.get_src()
     }
 
     fn access_type(&self) -> AccessType {
@@ -146,10 +150,50 @@ impl Unique for Box<EthernetFrame> {
 }
 
 impl Routable for Box<EthernetFrame> {
-    fn destination(&self) -> u64 {
-        self.as_ref().destination()
+    fn dst_addr(&self) -> u64 {
+        self.as_ref().dst_addr()
+    }
+    fn src_addr(&self) -> u64 {
+        self.as_ref().src_addr()
     }
     fn access_type(&self) -> AccessType {
         self.as_ref().access_type()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gwr_engine::test_helpers::start_test;
+    use gwr_engine::traits::Routable;
+    use gwr_engine::types::DeviceId;
+
+    use super::{EthernetFrame, u64_to_mac};
+
+    #[test]
+    fn routable_source_uses_source_mac() {
+        let engine = start_test(file!());
+        let frame = EthernetFrame::new(engine.top(), 64)
+            .set_dest(u64_to_mac(7))
+            .set_src(u64_to_mac(4));
+
+        assert_eq!(frame.dst_addr(), 7);
+        assert_eq!(frame.src_addr(), 4);
+        assert_eq!(frame.dst_device(), DeviceId(7));
+        assert_eq!(frame.src_device(), DeviceId(4));
+    }
+
+    #[test]
+    fn boxed_routable_delegates_src_and_dst_addr() {
+        let engine = start_test(file!());
+        let frame = Box::new(
+            EthernetFrame::new(engine.top(), 64)
+                .set_dest(u64_to_mac(9))
+                .set_src(u64_to_mac(5)),
+        );
+
+        assert_eq!(frame.dst_addr(), 9);
+        assert_eq!(frame.src_addr(), 5);
+        assert_eq!(frame.dst_device(), DeviceId(9));
+        assert_eq!(frame.src_device(), DeviceId(5));
     }
 }

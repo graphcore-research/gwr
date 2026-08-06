@@ -3,6 +3,7 @@
 //! Simulate a device comprising a rectangular fabric.
 //!
 //! See `lib.rs` for details.
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use clap::Parser;
@@ -149,6 +150,7 @@ fn start_frame_dump(
 }
 
 fn create_config(engine: &Engine, args: &Cli) -> Result<(Rc<FabricConfig>, usize), SimError> {
+    let num_fabric_ports = max_fabric_port_count(args)?;
     let config = FabricConfig::new(
         FabricGeometry {
             num_columns: args.fabric_columns,
@@ -163,6 +165,7 @@ fn create_config(engine: &Engine, args: &Cli) -> Result<(Rc<FabricConfig>, usize
             tx_buffer_bytes: args.tx_buffer_bytes,
             port_bits_per_tick: args.port_bits_per_tick,
         },
+        identity_destination_port_map(num_fabric_ports),
     )?;
     let config = Rc::new(config);
 
@@ -185,6 +188,19 @@ fn create_config(engine: &Engine, args: &Cli) -> Result<(Rc<FabricConfig>, usize
     info!(top ; "Using traffic pattern {}. Random seed {}", args.traffic_pattern, args.seed);
 
     Ok((config, num_send_frames))
+}
+
+fn max_fabric_port_count(args: &Cli) -> Result<usize, SimError> {
+    args.fabric_columns
+        .checked_mul(args.fabric_rows)
+        .and_then(|nodes| nodes.checked_mul(args.fabric_ports_per_node))
+        .ok_or_else(|| SimError("maximum port count overflows".to_string()))
+}
+
+fn identity_destination_port_map(num_ports: usize) -> HashMap<u64, Vec<usize>> {
+    (0..num_ports)
+        .map(|port_idx| (port_idx as u64, vec![port_idx]))
+        .collect()
 }
 
 fn main() -> Result<(), SimError> {
@@ -300,4 +316,28 @@ fn print_summary(
 
     info!(top ; "Pass: Sent {total_sunk_frames} in {time_now_ns:.2}ns.");
     info!(top ; "Payload: {payload_value:.2} ({payload_per_second:.2}/s). Total: {total_value:.2} ({total_per_second:.2}/s).");
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, max_fabric_port_count};
+
+    #[test]
+    fn fabric_port_count_overflow_is_recoverable() {
+        let args = Cli::parse_from([
+            "sim-fabric",
+            "--fabric-columns",
+            &usize::MAX.to_string(),
+            "--fabric-rows",
+            "2",
+            "--fabric-ports-per-node",
+            "1",
+        ]);
+
+        let error = max_fabric_port_count(&args).expect_err("overflow should return an error");
+
+        assert_eq!(error.0, "maximum port count overflows");
+    }
 }

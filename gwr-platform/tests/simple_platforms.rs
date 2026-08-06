@@ -174,6 +174,74 @@ fn run_pe_mem(num_active_requests: usize) -> (Engine, Clock) {
     (engine, clock)
 }
 
+fn run_pe_fabric_mem(num_active_requests: usize) -> (Engine, Clock) {
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
+    let platform = Platform::from_string(
+        &engine,
+        &clock,
+        format!(
+            "
+memory_maps:
+  - name: mm0
+    devices:
+      - name: hbm0
+
+processing_elements:
+  - name: pe0
+    memory_map: mm0
+    config:
+      num_active_requests: {num_active_requests}
+      lsu_access_bytes: 32
+
+fabrics:
+  - name: fabric0
+    kind: functional
+    columns: 2
+    rows: 1
+    config:
+      fabric_ports_per_node: 1
+      ticks_per_hop: 1
+      ticks_overhead: 1
+      port_bits_per_tick: 4096
+
+memories:
+  - name: hbm0
+    kind: hbm
+    base_address: 0x1_0000_0000
+    config:
+      capacity_bytes: 16GiB
+      delay_ticks: 10
+
+connections:
+  - connect:
+    - pe.pe0
+    - fabric.fabric0@(0,0)
+  - connect:
+    - mem.hbm0
+    - fabric.fabric0@(1,0)
+"
+        )
+        .as_str(),
+    )
+    .unwrap();
+
+    assert_eq!(platform.num_pes(), 1);
+    assert_eq!(platform.num_memories(), 1);
+    assert_eq!(platform.num_fabrics(), 1);
+    assert_eq!(platform.num_caches(), 0);
+    let port_map_dump = platform.fabric_port_map_description();
+    assert!(port_map_dump.contains("Fabric fabric0 port_selection: destination-address-hash"));
+    assert!(port_map_dump.contains("device 0 (pe0) -> 0=fabric.fabric0@(0,0) (0,0).0"));
+    assert!(port_map_dump.contains("device 1 (hbm0) -> 1=fabric.fabric0@(1,0) (1,0).0"));
+
+    let dispatcher = build_dispatcher();
+    platform.attach_dispatcher(&dispatcher);
+
+    run_simulation!(engine);
+    (engine, clock)
+}
+
 #[test]
 fn simple_pe_mem_one_request() {
     let (_, clock) = run_pe_mem(1);
@@ -283,6 +351,13 @@ fn strided_partition_checks_the_complete_working_set() {
             .contains("maximum useful partition count requires 8 bytes")
     );
     assert_eq!(clock.time_now_ns(), 0.0);
+}
+
+#[test]
+fn simple_pe_fabric_mem_routes_by_device_id() {
+    let (_, clock) = run_pe_fabric_mem(1);
+
+    assert!(clock.time_now_ns() > 80.0);
 }
 
 #[test]

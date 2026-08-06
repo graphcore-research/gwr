@@ -191,6 +191,7 @@ fn emit_fabrics(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std
             && config.tx_buffer_bytes.is_none()
             && config.port_bits_per_tick.is_none()
             && config.routing.is_none()
+            && config.port_selection.is_none()
         {
             emit_line(&mut out, "config: {}", 2)?;
             continue;
@@ -211,6 +212,13 @@ fn emit_fabrics(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std
             emit_line(
                 &mut out,
                 format_args!("routing: {}", serializable_to_str(&routing)?),
+                3,
+            )?;
+        }
+        if let Some(port_selection) = fabric.config.port_selection {
+            emit_line(
+                &mut out,
+                format_args!("port_selection: {}", serializable_to_str(&port_selection)?),
                 3,
             )?;
         }
@@ -348,6 +356,8 @@ pub fn platform_to_yaml_str(
 
 #[cfg(test)]
 mod tests {
+    use gwr_models::fabric::FabricPortSelection;
+
     use super::platform_to_yaml_str;
     use crate::types::{
         CacheConfigSection, CacheSection, ConnectSection, FabricConfigSection, FabricKind,
@@ -506,6 +516,7 @@ mod tests {
             tx_buffer_bytes: Some(6),
             port_bits_per_tick: Some(7),
             routing: Some(gwr_models::fabric::node::FabricRoutingAlgorithm::RowFirst),
+            port_selection: None,
         };
         let memory_config = MemoryConfigSection {
             capacity_bytes: 0x2000,
@@ -544,5 +555,62 @@ mod tests {
         assert_eq!(fabric.config, fabric_config);
         assert_eq!(memory.base_address, 0x1000);
         assert_eq!(memory.config, memory_config);
+    }
+
+    #[test]
+    fn emits_fabric_port_selection_inside_config() {
+        let only_port_selection = FabricConfigSection {
+            fabric_ports_per_node: None,
+            ticks_per_hop: None,
+            ticks_overhead: None,
+            rx_buffer_bytes: None,
+            tx_buffer_bytes: None,
+            port_bits_per_tick: None,
+            routing: None,
+            port_selection: Some(FabricPortSelection::SourceIdModulo),
+        };
+        let mixed_config = FabricConfigSection {
+            routing: Some(gwr_models::fabric::node::FabricRoutingAlgorithm::RowFirst),
+            ..only_port_selection.clone()
+        };
+        let platform = PlatformConfig {
+            memory_maps: vec![test_memory_map()],
+            defaults: None,
+            processing_elements: None,
+            caches: None,
+            fabrics: Some(vec![
+                FabricSection {
+                    name: "fabric0".to_string(),
+                    kind: FabricKind::Functional,
+                    columns: 2,
+                    rows: 3,
+                    config: only_port_selection.clone(),
+                },
+                FabricSection {
+                    name: "fabric1".to_string(),
+                    kind: FabricKind::Functional,
+                    columns: 4,
+                    rows: 5,
+                    config: mixed_config.clone(),
+                },
+            ]),
+            memories: None,
+            connections: None,
+        };
+
+        let yaml = platform_to_yaml_str(&platform).expect("yaml generation should succeed");
+
+        assert!(yaml.contains(
+            "- name: fabric0\n    kind: functional\n    columns: 2\n    rows: 3\n    config:\n      port_selection: source-id-modulo"
+        ));
+        assert!(yaml.contains(
+            "- name: fabric1\n    kind: functional\n    columns: 4\n    rows: 5\n    config:\n      routing: row-first\n      port_selection: source-id-modulo"
+        ));
+
+        let round_trip: PlatformConfig =
+            serde_yaml::from_str(&yaml).expect("generated yaml should deserialize");
+        let fabrics = round_trip.fabrics.expect("fabrics should be present");
+        assert_eq!(fabrics[0].config, only_port_selection);
+        assert_eq!(fabrics[1].config, mixed_config);
     }
 }

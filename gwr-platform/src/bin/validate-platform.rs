@@ -18,6 +18,10 @@ struct Args {
     /// Print the constructed platform after validation.
     #[arg(long, default_value_t = false)]
     print_platform: bool,
+
+    /// Print derived fabric port maps after validation.
+    #[arg(long, default_value_t = false)]
+    print_fabric_port_maps: bool,
 }
 
 fn main() -> Result<()> {
@@ -38,6 +42,10 @@ fn main() -> Result<()> {
 
     if args.print_platform {
         println!("{platform}");
+    }
+
+    if args.print_fabric_port_maps {
+        print!("{}", platform.fabric_port_map_description());
     }
 
     Ok(())

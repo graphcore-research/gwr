@@ -21,7 +21,10 @@ impl TotalBytes for RateLimiterTest {
 }
 
 impl Routable for RateLimiterTest {
-    fn destination(&self) -> u64 {
+    fn dst_addr(&self) -> u64 {
+        0
+    }
+    fn src_addr(&self) -> u64 {
         0
     }
     fn access_type(&self) -> AccessType {

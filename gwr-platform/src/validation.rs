@@ -6,7 +6,7 @@ use gwr_engine::sim_error;
 use gwr_engine::types::{SimError, SimResult};
 
 use crate::builder::EffectiveConfigs;
-use crate::connect::{PortEndpoint, parse_port_endpoint, validate_port_endpoint_pair};
+use crate::connection_id::{CachePortId, ConnectionEndpointId, parse_connection_endpoint_id};
 use crate::types::{CacheSection, FabricSection, MemoryMapSection, MemorySection, PlatformConfig};
 
 impl PlatformConfig {
@@ -209,39 +209,39 @@ impl PlatformValidationLookup<'_> {
 
     fn validate_port_endpoint(
         &self,
-        endpoint: &PortEndpoint<'_>,
+        endpoint: &ConnectionEndpointId,
         source: &str,
         effective: &EffectiveConfigs,
     ) -> SimResult {
         match endpoint {
-            PortEndpoint::Pe { name } => {
+            ConnectionEndpointId::Pe { name } => {
                 if !self.processing_element_exists(name) {
                     return sim_error!("No PE '{name}'");
                 }
                 Ok(())
             }
-            PortEndpoint::Cache { name, .. } => {
-                if !self.caches.contains_key(name) {
+            ConnectionEndpointId::Cache { name, .. } => {
+                if !self.caches.contains_key(name.as_str()) {
                     return sim_error!("No Cache '{name}'");
                 }
                 Ok(())
             }
-            PortEndpoint::Mem { name } => {
+            ConnectionEndpointId::Mem { name } => {
                 if self.memory(name).is_none() {
                     return sim_error!("No Memory '{name}'");
                 }
                 Ok(())
             }
-            PortEndpoint::FabricTile {
-                name,
-                col,
+            ConnectionEndpointId::FabricPort {
+                fabric,
+                column,
                 row,
                 port,
             } => {
-                let Some(fabric) = self.fabrics.get(name) else {
-                    return sim_error!("No Fabric '{name}'");
+                let Some(fabric_ref) = self.fabrics.get(fabric.as_str()) else {
+                    return sim_error!("No Fabric '{fabric}'");
                 };
-                validate_fabric_port(source, fabric, effective, *col, *row, *port)
+                validate_fabric_port(source, fabric_ref, effective, *column, *row, *port)
             }
         }
     }
@@ -254,8 +254,8 @@ fn validate_connection(
     to_source: &str,
     connected_ports: &mut HashSet<String>,
 ) -> SimResult {
-    let from = parse_port_endpoint(from_source)?;
-    let to = parse_port_endpoint(to_source)?;
+    let from = parse_connection_endpoint_id(from_source)?;
+    let to = parse_connection_endpoint_id(to_source)?;
     lookup.validate_port_endpoint(&from, from_source, effective)?;
     lookup.validate_port_endpoint(&to, to_source, effective)?;
     validate_port_endpoint_pair(&from, &to)?;
@@ -289,8 +289,8 @@ fn collect_unique_sections<'a, T>(
 }
 
 fn validate_ports_available(
-    from: &PortEndpoint<'_>,
-    to: &PortEndpoint<'_>,
+    from: &ConnectionEndpointId,
+    to: &ConnectionEndpointId,
     connected_ports: &mut HashSet<String>,
 ) -> SimResult {
     for port in connection_ports(from, to) {
@@ -301,47 +301,114 @@ fn validate_ports_available(
     Ok(())
 }
 
-fn connection_ports(from: &PortEndpoint<'_>, to: &PortEndpoint<'_>) -> Vec<String> {
+fn connection_ports(from: &ConnectionEndpointId, to: &ConnectionEndpointId) -> Vec<String> {
     vec![
         endpoint_port(from, to, true),
         endpoint_port(to, from, false),
     ]
 }
 
-fn endpoint_port(endpoint: &PortEndpoint<'_>, other: &PortEndpoint<'_>, is_from: bool) -> String {
+fn endpoint_port(
+    endpoint: &ConnectionEndpointId,
+    other: &ConnectionEndpointId,
+    is_from: bool,
+) -> String {
     match endpoint {
-        PortEndpoint::Pe { name } => format!("pe.{name}"),
-        PortEndpoint::Mem { name } => format!("mem.{name}"),
-        PortEndpoint::FabricTile {
-            name,
-            col,
+        ConnectionEndpointId::Pe { name } => format!("pe.{name}"),
+        ConnectionEndpointId::Mem { name } => format!("mem.{name}"),
+        ConnectionEndpointId::FabricPort {
+            fabric,
+            column,
             row,
             port,
-        } => format!("fabric.{name}@({col},{row}).{port}"),
-        PortEndpoint::Cache { name, port } => {
-            let port = cache_connection_port(*port, other, is_from);
+        } => format!("fabric.{fabric}@({column},{row}).{port}"),
+        ConnectionEndpointId::Cache { name, port } => {
+            let port = cache_connection_port(port.as_ref(), other, is_from);
             format!("cache.{name}.{port}")
         }
     }
 }
 
 fn cache_connection_port(
-    port: Option<&str>,
-    other: &PortEndpoint<'_>,
+    port: Option<&CachePortId>,
+    other: &ConnectionEndpointId,
     is_from: bool,
 ) -> &'static str {
-    if let Some("dev") = port {
-        return "dev";
-    }
-    if let Some("mem") = port {
-        return "mem";
+    if let Some(port) = port {
+        return port.as_str();
     }
     match other {
-        PortEndpoint::Pe { .. } => "dev",
-        PortEndpoint::Cache { .. } if is_from => "mem",
-        PortEndpoint::Cache { .. } => "dev",
-        PortEndpoint::Mem { .. } | PortEndpoint::FabricTile { .. } => "mem",
+        ConnectionEndpointId::Pe { .. } => "dev",
+        ConnectionEndpointId::Cache { .. } if is_from => "mem",
+        ConnectionEndpointId::Cache { .. } => "dev",
+        ConnectionEndpointId::Mem { .. } | ConnectionEndpointId::FabricPort { .. } => "mem",
     }
+}
+
+fn validate_port_endpoint_pair(
+    from: &ConnectionEndpointId,
+    to: &ConnectionEndpointId,
+) -> SimResult {
+    match (from, to) {
+        (ConnectionEndpointId::Pe { .. }, ConnectionEndpointId::Pe { .. }) => {
+            sim_error!("Cannot connect a PE directly to a PE")
+        }
+        (ConnectionEndpointId::Mem { .. }, ConnectionEndpointId::Mem { .. }) => {
+            sim_error!("Cannot connect a Memory directly to a Memory")
+        }
+        (ConnectionEndpointId::Pe { .. }, ConnectionEndpointId::Cache { port, .. })
+        | (ConnectionEndpointId::Cache { port, .. }, ConnectionEndpointId::Pe { .. }) => {
+            validate_cache_dev_port(port.as_ref())
+        }
+        (ConnectionEndpointId::Cache { port, .. }, ConnectionEndpointId::FabricPort { .. })
+        | (ConnectionEndpointId::FabricPort { .. }, ConnectionEndpointId::Cache { port, .. }) => {
+            validate_cache_mem_port(
+                port.as_ref(),
+                "Cache should connect the 'mem' port to a Fabric",
+            )
+        }
+        (ConnectionEndpointId::Cache { port, .. }, ConnectionEndpointId::Mem { .. })
+        | (ConnectionEndpointId::Mem { .. }, ConnectionEndpointId::Cache { port, .. }) => {
+            validate_cache_mem_port(
+                port.as_ref(),
+                "Cache should connect the 'mem' port to a Memory",
+            )
+        }
+        (
+            ConnectionEndpointId::Cache {
+                port: from_port, ..
+            },
+            ConnectionEndpointId::Cache { port: to_port, .. },
+        ) => {
+            if from_port
+                .as_ref()
+                .is_some_and(|port| port != &CachePortId::Mem)
+                || to_port
+                    .as_ref()
+                    .is_some_and(|port| port != &CachePortId::Dev)
+            {
+                return sim_error!(
+                    "When connecting Cache to Cache, connect 'mem' to 'dev' (or simply don't specify ports)"
+                );
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn validate_cache_dev_port(port: Option<&CachePortId>) -> SimResult {
+    if port.is_some_and(|port| port != &CachePortId::Dev) {
+        return sim_error!("PEs can only connect to the 'dev' port on the Cache");
+    }
+    Ok(())
+}
+
+fn validate_cache_mem_port(port: Option<&CachePortId>, message: &str) -> SimResult {
+    if port.is_some_and(|port| port != &CachePortId::Mem) {
+        return sim_error!("{message}");
+    }
+    Ok(())
 }
 
 fn validate_fabric_port(

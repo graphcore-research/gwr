@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::BuildHasher;
 use std::rc::Rc;
 
@@ -10,7 +10,9 @@ use gwr_engine::types::SimError;
 use gwr_models::fabric::functional::FunctionalFabric;
 use gwr_models::fabric::node::FabricRoutingAlgorithm;
 use gwr_models::fabric::routed::RoutedFabric;
-use gwr_models::fabric::{Fabric, FabricConfig, FabricGeometry, FabricPortConfig};
+use gwr_models::fabric::{
+    Fabric, FabricConfig, FabricGeometry, FabricPortConfig, FabricPortSelection,
+};
 use gwr_models::memory::cache::{Cache, CacheConfig};
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::memory_map::MemoryMap;
@@ -18,6 +20,7 @@ use gwr_models::memory::{Memory, MemoryConfig};
 use gwr_models::processing_element::{ProcessingElement, ProcessingElementConfig};
 use gwr_track::entity::{Entity, GetEntity};
 
+use crate::connection_id::{CachePortId, ConnectionEndpointId, parse_connection_endpoint_id};
 use crate::types::{
     CacheConfigSection, CacheSection, FabricConfigSection, FabricKind, FabricSection,
     MemoryConfigSection, MemoryMapSection, MemorySection, PlatformConfig,
@@ -149,11 +152,24 @@ fn cache_configs(platform: &PlatformConfig) -> Result<Vec<CacheConfig>, SimError
 fn fabric_configs(
     platform: &PlatformConfig,
 ) -> Result<Vec<(Rc<FabricConfig>, FabricRoutingAlgorithm)>, SimError> {
+    fabric_configs_with_destination_port_maps(platform, &FabricDestinationPortMaps::new())
+}
+
+fn fabric_configs_with_destination_port_maps(
+    platform: &PlatformConfig,
+    destination_port_maps: &FabricDestinationPortMaps,
+) -> Result<Vec<(Rc<FabricConfig>, FabricRoutingAlgorithm)>, SimError> {
     platform
         .fabrics
         .iter()
         .flatten()
-        .map(FabricSection::effective_config)
+        .map(|fabric| {
+            let destination_port_map = destination_port_maps
+                .get(&fabric.name)
+                .cloned()
+                .unwrap_or_default();
+            fabric.effective_config(destination_port_map)
+        })
         .map(|result| result.map(|(config, routing)| (Rc::new(config), routing)))
         .collect()
 }
@@ -302,12 +318,63 @@ pub const DEFAULT_FABRIC_RX_BUFFER_BYTES: usize = 256;
 pub const DEFAULT_FABRIC_TX_BUFFER_BYTES: usize = 256;
 pub const DEFAULT_FABRIC_PORT_BITS_PER_TICK: usize = 32 * 8; // 32 bytes per tick
 pub const DEFAULT_FABRIC_ROUTING: FabricRoutingAlgorithm = FabricRoutingAlgorithm::ColumnFirst;
+pub const DEFAULT_FABRIC_PORT_SELECTION: FabricPortSelection =
+    FabricPortSelection::DestinationAddressHash;
+
+pub type FabricDestinationPortMap = HashMap<u64, Vec<usize>>;
+pub type FabricDestinationPortMaps = HashMap<String, FabricDestinationPortMap>;
+
+pub fn build_fabric_destination_port_maps(
+    cfg: &PlatformConfig,
+    device_ids: &DeviceIds,
+) -> Result<FabricDestinationPortMaps, SimError> {
+    let topology = FabricTopology::new(cfg)?;
+    let mut maps = FabricDestinationPortMaps::new();
+
+    if let Some(fabrics) = &cfg.fabrics {
+        for fabric in fabrics {
+            let mut destination_port_map: FabricDestinationPortMap = HashMap::new();
+            let Some(config) = topology.fabric_configs.get(&fabric.name) else {
+                continue;
+            };
+
+            let mut shortest_distance_by_device = HashMap::new();
+            for port_idx in config.port_indices() {
+                for (device_id, distance) in
+                    topology.device_distances_from_port(&fabric.name, *port_idx, device_ids)
+                {
+                    let shortest = shortest_distance_by_device
+                        .entry(device_id)
+                        .or_insert(distance);
+                    if distance < *shortest {
+                        *shortest = distance;
+                        destination_port_map.insert(device_id, vec![*port_idx]);
+                    } else if distance == *shortest {
+                        destination_port_map
+                            .entry(device_id)
+                            .or_default()
+                            .push(*port_idx);
+                    }
+                }
+            }
+
+            for ports in destination_port_map.values_mut() {
+                ports.sort_unstable();
+                ports.dedup();
+            }
+            maps.insert(fabric.name.clone(), destination_port_map);
+        }
+    }
+
+    Ok(maps)
+}
 
 impl FabricConfigSection {
     pub(crate) fn model_config(
         &self,
         num_columns: usize,
         num_rows: usize,
+        destination_port_map: FabricDestinationPortMap,
     ) -> Result<(FabricConfig, FabricRoutingAlgorithm), SimError> {
         let config = FabricConfig::new(
             FabricGeometry {
@@ -331,15 +398,20 @@ impl FabricConfigSection {
                     .port_bits_per_tick
                     .unwrap_or(DEFAULT_FABRIC_PORT_BITS_PER_TICK),
             },
-        )?;
+            destination_port_map,
+        )?
+        .with_port_selection(self.port_selection.unwrap_or(DEFAULT_FABRIC_PORT_SELECTION));
         Ok((config, self.routing.unwrap_or(DEFAULT_FABRIC_ROUTING)))
     }
 }
 
 impl FabricSection {
-    fn effective_config(&self) -> Result<(FabricConfig, FabricRoutingAlgorithm), SimError> {
+    fn effective_config(
+        &self,
+        destination_port_map: FabricDestinationPortMap,
+    ) -> Result<(FabricConfig, FabricRoutingAlgorithm), SimError> {
         self.config
-            .model_config(self.columns, self.rows)
+            .model_config(self.columns, self.rows, destination_port_map)
             .map_err(|error| SimError(format!("Fabric '{}': {error}", self.name)))
     }
 }
@@ -349,8 +421,9 @@ pub fn build_fabrics(
     clock: &Clock,
     parent: &Rc<Entity>,
     cfg: &PlatformConfig,
+    fabric_destination_port_maps: &FabricDestinationPortMaps,
 ) -> Result<(Fabrics, NameToIdxMap), SimError> {
-    let configs = fabric_configs(cfg)?;
+    let configs = fabric_configs_with_destination_port_maps(cfg, fabric_destination_port_maps)?;
     build_fabrics_from_configs(engine, clock, parent, cfg, &configs)
 }
 
@@ -462,12 +535,218 @@ pub(crate) fn build_memories_from_configs(
     Ok((memories, memories_idx_by_id))
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+enum ResolvedEndpoint {
+    Pe(String),
+    CacheDev(String),
+    CacheMem(String),
+    Mem(String),
+    FabricPort { fabric: String, port_idx: usize },
+}
+
+struct FabricTopology {
+    edges: HashMap<ResolvedEndpoint, HashSet<ResolvedEndpoint>>,
+    fabric_configs: HashMap<String, FabricConfig>,
+}
+
+impl FabricTopology {
+    fn new(cfg: &PlatformConfig) -> Result<Self, SimError> {
+        let mut topology = Self {
+            edges: HashMap::new(),
+            fabric_configs: build_empty_fabric_configs(cfg)?,
+        };
+        topology.add_cache_passthroughs(cfg);
+        topology.add_connection_edges(cfg)?;
+        Ok(topology)
+    }
+
+    fn add_edge(&mut self, a: ResolvedEndpoint, b: ResolvedEndpoint) {
+        self.edges.entry(a.clone()).or_default().insert(b.clone());
+        self.edges.entry(b).or_default().insert(a);
+    }
+
+    fn add_cache_passthroughs(&mut self, cfg: &PlatformConfig) {
+        if let Some(caches) = &cfg.caches {
+            for cache in caches {
+                self.add_edge(
+                    ResolvedEndpoint::CacheDev(cache.name.clone()),
+                    ResolvedEndpoint::CacheMem(cache.name.clone()),
+                );
+            }
+        }
+    }
+
+    fn add_connection_edges(&mut self, cfg: &PlatformConfig) -> Result<(), SimError> {
+        if let Some(connections) = &cfg.connections {
+            for c in connections {
+                if c.connect.len() != 2 {
+                    return Err(SimError(format!(
+                        "Invalid 'connect' with {} entries (only 2 expected)",
+                        c.connect.len()
+                    )));
+                }
+                let (a, b) = self.parse_topology_connection(&c.connect[0], &c.connect[1])?;
+                self.add_edge(a, b);
+            }
+        }
+        Ok(())
+    }
+
+    fn device_distances_from_port(
+        &self,
+        target_fabric: &str,
+        start_port_idx: usize,
+        device_ids: &DeviceIds,
+    ) -> HashMap<u64, usize> {
+        let mut found = HashMap::new();
+        let mut visited = HashSet::new();
+        let mut queue = VecDeque::new();
+        let start = ResolvedEndpoint::FabricPort {
+            fabric: target_fabric.to_string(),
+            port_idx: start_port_idx,
+        };
+        visited.insert(start.clone());
+        queue.push_back((start, 0));
+
+        while let Some((node, distance)) = queue.pop_front() {
+            match &node {
+                ResolvedEndpoint::Pe(name) | ResolvedEndpoint::Mem(name) => {
+                    if let Some(device_id) = device_ids.get(name) {
+                        found.entry(device_id.0).or_insert(distance);
+                    }
+                }
+                _ => {}
+            }
+
+            if let Some(neighbors) = self.edges.get(&node) {
+                for neighbor in neighbors {
+                    if visited.insert(neighbor.clone()) {
+                        queue.push_back((neighbor.clone(), distance + 1));
+                    }
+                }
+            }
+
+            if let ResolvedEndpoint::FabricPort { fabric, .. } = &node
+                && fabric != target_fabric
+                && let Some(config) = self.fabric_configs.get(fabric)
+            {
+                for port_idx in config.port_indices() {
+                    let neighbor = ResolvedEndpoint::FabricPort {
+                        fabric: fabric.clone(),
+                        port_idx: *port_idx,
+                    };
+                    if visited.insert(neighbor.clone()) {
+                        queue.push_back((neighbor, distance + 1));
+                    }
+                }
+            }
+        }
+
+        found
+    }
+
+    fn parse_topology_connection(
+        &self,
+        from: &str,
+        to: &str,
+    ) -> Result<(ResolvedEndpoint, ResolvedEndpoint), SimError> {
+        let from_raw = parse_connection_endpoint_id(from)?;
+        let to_raw = parse_connection_endpoint_id(to)?;
+        Ok((
+            self.resolve_topology_node(&from_raw, &to_raw, true)?,
+            self.resolve_topology_node(&to_raw, &from_raw, false)?,
+        ))
+    }
+
+    fn resolve_topology_node(
+        &self,
+        node: &ConnectionEndpointId,
+        other: &ConnectionEndpointId,
+        is_from: bool,
+    ) -> Result<ResolvedEndpoint, SimError> {
+        match node {
+            ConnectionEndpointId::Pe { name } => Ok(ResolvedEndpoint::Pe(name.clone())),
+            ConnectionEndpointId::Mem { name } => Ok(ResolvedEndpoint::Mem(name.clone())),
+            ConnectionEndpointId::FabricPort {
+                fabric,
+                column,
+                row,
+                port,
+            } => Ok(ResolvedEndpoint::FabricPort {
+                fabric: fabric.clone(),
+                port_idx: self.fabric_port_endpoint_to_index(fabric, *column, *row, *port)?,
+            }),
+            ConnectionEndpointId::Cache { name, port } => match port {
+                Some(CachePortId::Dev) => Ok(ResolvedEndpoint::CacheDev(name.clone())),
+                Some(CachePortId::Mem) => Ok(ResolvedEndpoint::CacheMem(name.clone())),
+                None => match other {
+                    ConnectionEndpointId::Pe { .. } => Ok(ResolvedEndpoint::CacheDev(name.clone())),
+                    ConnectionEndpointId::Cache { .. } if is_from => {
+                        Ok(ResolvedEndpoint::CacheMem(name.clone()))
+                    }
+                    ConnectionEndpointId::Cache { .. } => {
+                        Ok(ResolvedEndpoint::CacheDev(name.clone()))
+                    }
+                    ConnectionEndpointId::Mem { .. } | ConnectionEndpointId::FabricPort { .. } => {
+                        Ok(ResolvedEndpoint::CacheMem(name.clone()))
+                    }
+                },
+            },
+        }
+    }
+
+    fn fabric_port_endpoint_to_index(
+        &self,
+        fabric: &str,
+        column: usize,
+        row: usize,
+        port: usize,
+    ) -> Result<usize, SimError> {
+        let config = self
+            .fabric_configs
+            .get(fabric)
+            .ok_or_else(|| SimError(format!("Unknown fabric '{fabric}'")))?;
+        if column >= config.num_columns() {
+            return Err(SimError(format!(
+                "Fabric '{fabric}' column {column} is out of range"
+            )));
+        }
+        if row >= config.num_rows() {
+            return Err(SimError(format!(
+                "Fabric '{fabric}' row {row} is out of range"
+            )));
+        }
+
+        if port >= config.node_num_ingress_egress_ports(column, row) {
+            return Err(SimError(format!(
+                "Fabric '{fabric}' port ({column},{row},{port}) is not populated"
+            )));
+        }
+        Ok(config.col_row_port_to_fabric_port_index(column, row, port))
+    }
+}
+
+fn build_empty_fabric_configs(
+    cfg: &PlatformConfig,
+) -> Result<HashMap<String, FabricConfig>, SimError> {
+    // These configs are topology-only: the destination port maps have not been
+    // derived yet, so they are built empty and used only for fabric geometry.
+    let mut fabric_configs = HashMap::new();
+    if let Some(fabrics) = &cfg.fabrics {
+        for fabric in fabrics {
+            let (config, _) = fabric.effective_config(HashMap::new())?;
+            fabric_configs.insert(fabric.name.clone(), config);
+        }
+    }
+    Ok(fabric_configs)
+}
+
 #[cfg(test)]
 mod tests {
     use gwr_engine::test_helpers::start_test;
-    use gwr_models::memory::memory_map::DeviceId;
+    use gwr_engine::types::DeviceId;
 
-    use super::{build_memories, build_memory_maps};
+    use super::{build_fabric_destination_port_maps, build_memories, build_memory_maps};
     use crate::DeviceIds;
     use crate::types::{
         MemoryConfigSection, MemoryDeviceSection, MemoryKind, MemoryMapSection, MemorySection,
@@ -513,5 +792,312 @@ mod tests {
         assert_eq!(memory_map.lookup(0x4000), Some((DeviceId(7), 0)));
         assert_eq!(memory_map.lookup(0x5fff), Some((DeviceId(7), 0x1fff)));
         assert_eq!(memory_map.lookup(0x6000), None);
+    }
+
+    #[test]
+    fn derives_fabric_port_maps_from_direct_connections() {
+        let cfg: PlatformConfig = serde_yaml::from_str(
+            "
+memory_maps:
+  - name: mm0
+    devices:
+      - name: hbm0
+processing_elements:
+  - name: pe0
+    memory_map: mm0
+    config: {}
+fabrics:
+  - name: fabric0
+    kind: functional
+    columns: 2
+    rows: 1
+    config: {}
+memories:
+  - name: hbm0
+    kind: hbm
+    base_address: 0
+    config:
+      capacity_bytes: 1024
+connections:
+  - connect:
+    - pe.pe0
+    - fabric.fabric0@(0,0)
+  - connect:
+    - mem.hbm0
+    - fabric.fabric0@(1,0)
+",
+        )
+        .expect("platform yaml should parse");
+        let device_ids = DeviceIds::from([
+            ("pe0".to_string(), DeviceId(0)),
+            ("hbm0".to_string(), DeviceId(1)),
+        ]);
+
+        let maps = build_fabric_destination_port_maps(&cfg, &device_ids)
+            .expect("fabric maps should build");
+        let fabric_map = maps.get("fabric0").expect("fabric map should exist");
+
+        assert_eq!(fabric_map.get(&0), Some(&vec![0]));
+        assert_eq!(fabric_map.get(&1), Some(&vec![1]));
+    }
+
+    #[test]
+    fn derives_fabric_port_maps_through_cache() {
+        let cfg: PlatformConfig = serde_yaml::from_str(
+            "
+memory_maps:
+  - name: mm0
+    devices:
+      - name: hbm0
+processing_elements:
+  - name: pe0
+    memory_map: mm0
+    config: {}
+caches:
+  - name: l1
+    config: {}
+fabrics:
+  - name: fabric0
+    kind: functional
+    columns: 2
+    rows: 1
+    config: {}
+memories:
+  - name: hbm0
+    kind: hbm
+    base_address: 0
+    config:
+      capacity_bytes: 1024
+connections:
+  - connect:
+    - pe.pe0
+    - cache.l1
+  - connect:
+    - cache.l1
+    - fabric.fabric0@(0,0)
+  - connect:
+    - mem.hbm0
+    - fabric.fabric0@(1,0)
+",
+        )
+        .expect("platform yaml should parse");
+        let device_ids = DeviceIds::from([
+            ("pe0".to_string(), DeviceId(0)),
+            ("hbm0".to_string(), DeviceId(1)),
+        ]);
+
+        let maps = build_fabric_destination_port_maps(&cfg, &device_ids)
+            .expect("fabric maps should build");
+        let fabric_map = maps.get("fabric0").expect("fabric map should exist");
+
+        assert_eq!(fabric_map.get(&0), Some(&vec![0]));
+        assert_eq!(fabric_map.get(&1), Some(&vec![1]));
+    }
+
+    #[test]
+    fn derives_multiple_candidate_ports_for_same_device() {
+        let cfg: PlatformConfig = serde_yaml::from_str(
+            "
+memory_maps:
+  - name: mm0
+    devices:
+      - name: hbm0
+fabrics:
+  - name: fabric0
+    kind: functional
+    columns: 2
+    rows: 1
+    config:
+      fabric_ports_per_node: 2
+memories:
+  - name: hbm0
+    kind: hbm
+    base_address: 0
+    config:
+      capacity_bytes: 1024
+connections:
+  - connect:
+    - mem.hbm0
+    - fabric.fabric0@(1,0)
+  - connect:
+    - mem.hbm0
+    - fabric.fabric0@(1,0).1
+",
+        )
+        .expect("platform yaml should parse");
+        let device_ids = DeviceIds::from([("hbm0".to_string(), DeviceId(7))]);
+
+        let maps = build_fabric_destination_port_maps(&cfg, &device_ids)
+            .expect("fabric maps should build");
+        let fabric_map = maps.get("fabric0").expect("fabric map should exist");
+
+        assert_eq!(fabric_map.get(&7), Some(&vec![2, 3]));
+    }
+
+    #[test]
+    fn derives_fabric_port_maps_through_single_fabric_link() {
+        let cfg: PlatformConfig = serde_yaml::from_str(
+            "
+memory_maps:
+  - name: mm0
+    devices: []
+processing_elements:
+  - name: pe0
+    memory_map: mm0
+    config: {}
+  - name: pe1
+    memory_map: mm0
+    config: {}
+fabrics:
+  - name: fabric0
+    kind: functional
+    columns: 2
+    rows: 1
+    config: {}
+  - name: fabric1
+    kind: functional
+    columns: 2
+    rows: 1
+    config: {}
+connections:
+  - connect:
+    - pe.pe0
+    - fabric.fabric0@(0,0)
+  - connect:
+    - pe.pe1
+    - fabric.fabric1@(0,0)
+  - connect:
+    - fabric.fabric0@(1,0)
+    - fabric.fabric1@(1,0)
+",
+        )
+        .expect("platform yaml should parse");
+        let device_ids = DeviceIds::from([
+            ("pe0".to_string(), DeviceId(0)),
+            ("pe1".to_string(), DeviceId(1)),
+        ]);
+
+        let maps = build_fabric_destination_port_maps(&cfg, &device_ids)
+            .expect("fabric maps should build");
+        let fabric0_map = maps.get("fabric0").expect("fabric0 map should exist");
+        let fabric1_map = maps.get("fabric1").expect("fabric1 map should exist");
+
+        assert_eq!(fabric0_map.get(&0), Some(&vec![0]));
+        assert_eq!(fabric0_map.get(&1), Some(&vec![1]));
+        assert_eq!(fabric1_map.get(&0), Some(&vec![1]));
+        assert_eq!(fabric1_map.get(&1), Some(&vec![0]));
+    }
+
+    #[test]
+    fn derives_fabric_port_maps_through_two_fabric_links() {
+        let cfg: PlatformConfig = serde_yaml::from_str(
+            "
+memory_maps:
+  - name: mm0
+    devices: []
+processing_elements:
+  - name: pe0
+    memory_map: mm0
+    config: {}
+  - name: pe1
+    memory_map: mm0
+    config: {}
+fabrics:
+  - name: fabric0
+    kind: functional
+    columns: 3
+    rows: 1
+    config: {}
+  - name: fabric1
+    kind: functional
+    columns: 3
+    rows: 1
+    config: {}
+connections:
+  - connect:
+    - pe.pe0
+    - fabric.fabric0@(0,0)
+  - connect:
+    - fabric.fabric0@(1,0)
+    - fabric.fabric1@(1,0)
+  - connect:
+    - fabric.fabric0@(2,0)
+    - fabric.fabric1@(0,0)
+  - connect:
+    - pe.pe1
+    - fabric.fabric1@(2,0)
+",
+        )
+        .expect("platform yaml should parse");
+        let device_ids = DeviceIds::from([
+            ("pe0".to_string(), DeviceId(0)),
+            ("pe1".to_string(), DeviceId(1)),
+        ]);
+
+        let maps = build_fabric_destination_port_maps(&cfg, &device_ids)
+            .expect("fabric maps should build");
+        let fabric0_map = maps.get("fabric0").expect("fabric0 map should exist");
+        let fabric1_map = maps.get("fabric1").expect("fabric1 map should exist");
+
+        assert_eq!(fabric0_map.get(&0), Some(&vec![0]));
+        assert_eq!(fabric0_map.get(&1), Some(&vec![1, 2]));
+        assert_eq!(fabric1_map.get(&0), Some(&vec![0, 1]));
+        assert_eq!(fabric1_map.get(&1), Some(&vec![2]));
+    }
+
+    #[test]
+    fn derives_only_shortest_fabric_port_maps_through_cycle() {
+        let cfg: PlatformConfig = serde_yaml::from_str(
+            "
+memory_maps:
+  - name: mm0
+    devices: []
+processing_elements:
+  - name: pe1
+    memory_map: mm0
+    config: {}
+fabrics:
+  - name: fabric0
+    kind: functional
+    columns: 3
+    rows: 1
+    config: {}
+  - name: fabric1
+    kind: functional
+    columns: 3
+    rows: 1
+    config: {}
+  - name: fabric2
+    kind: functional
+    columns: 3
+    rows: 1
+    config: {}
+connections:
+  - connect:
+    - pe.pe1
+    - fabric.fabric1@(0,0)
+  - connect:
+    - fabric.fabric0@(1,0)
+    - fabric.fabric1@(1,0)
+  - connect:
+    - fabric.fabric1@(2,0)
+    - fabric.fabric2@(1,0)
+  - connect:
+    - fabric.fabric2@(2,0)
+    - fabric.fabric0@(2,0)
+",
+        )
+        .expect("platform yaml should parse");
+        let device_ids = DeviceIds::from([("pe1".to_string(), DeviceId(1))]);
+
+        let maps = build_fabric_destination_port_maps(&cfg, &device_ids)
+            .expect("fabric maps should build");
+        let fabric0_map = maps.get("fabric0").expect("fabric0 map should exist");
+        let fabric1_map = maps.get("fabric1").expect("fabric1 map should exist");
+        let fabric2_map = maps.get("fabric2").expect("fabric2 map should exist");
+
+        assert_eq!(fabric0_map.get(&1), Some(&vec![1]));
+        assert_eq!(fabric1_map.get(&1), Some(&vec![0]));
+        assert_eq!(fabric2_map.get(&1), Some(&vec![1]));
     }
 }

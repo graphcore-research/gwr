@@ -11,13 +11,12 @@ use std::rc::Rc;
 use gwr_engine::engine::Engine;
 use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
-use gwr_engine::types::{SimError, SimResult};
+use gwr_engine::types::{DeviceId, SimError, SimResult};
 use gwr_model_builder::EntityGet;
 use gwr_models::fabric::Fabric;
 use gwr_models::log_stats;
 use gwr_models::memory::cache::{Cache, CacheStatsDisplay};
 use gwr_models::memory::memory_access::MemoryAccess;
-use gwr_models::memory::memory_map::DeviceId;
 use gwr_models::memory::{Memory, MemoryStatsDisplay};
 use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::{
@@ -26,14 +25,16 @@ use gwr_models::processing_element::{
 use gwr_track::entity::{Entity, GetEntity};
 
 use crate::builder::{
-    build_caches_from_configs, build_fabrics_from_configs, build_memories_from_configs,
+    build_caches_from_configs, build_fabric_destination_port_maps, build_memories_from_configs,
     build_memory_maps, build_pes_from_configs,
 };
 use crate::connect::connect_ports;
+use crate::connection_id::fabric_port_endpoint_id;
 use crate::types::PlatformConfig;
 
 pub mod builder;
 mod connect;
+pub mod connection_id;
 pub mod types;
 mod validation;
 pub mod yaml;
@@ -56,6 +57,7 @@ pub struct Platform {
     fabrics_idx_by_id: NameToIdxMap,
     memories: Memories,
     memories_idx_by_id: NameToIdxMap,
+    device_names_by_id: HashMap<u64, String>,
 }
 
 impl fmt::Debug for Platform {
@@ -106,8 +108,13 @@ impl Platform {
         )?;
         let (caches, caches_idx_by_id) =
             build_caches_from_configs(engine, clock, top, cfg, &effective.caches)?;
+        let fabric_destination_port_maps = build_fabric_destination_port_maps(cfg, &device_ids)?;
         let (fabrics, fabrics_idx_by_id) =
-            build_fabrics_from_configs(engine, clock, top, cfg, &effective.fabrics)?;
+            crate::builder::build_fabrics(engine, clock, top, cfg, &fabric_destination_port_maps)?;
+        let device_names_by_id = device_ids
+            .iter()
+            .map(|(name, device_id)| (device_id.0, name.clone()))
+            .collect();
 
         let parent = engine.top();
         let entity = Rc::new(Entity::new(parent, "platform"));
@@ -121,6 +128,7 @@ impl Platform {
             fabrics_idx_by_id,
             memories,
             memories_idx_by_id,
+            device_names_by_id,
         };
         connect_ports(&platform, cfg)?;
         Ok(platform)
@@ -223,6 +231,44 @@ impl Platform {
             pe.dump_stats(time_now_ns);
         }
         Ok(())
+    }
+
+    #[must_use]
+    pub fn fabric_port_map_description(&self) -> String {
+        let mut out = String::new();
+        for fabric in &self.fabrics {
+            use std::fmt::Write as _;
+
+            let _ = writeln!(
+                out,
+                "Fabric {} port_selection: {}",
+                fabric.entity().name,
+                fabric.port_selection()
+            );
+            let mut entries: Vec<_> = fabric.destination_port_map().iter().collect();
+            entries.sort_by_key(|(device_id, _)| **device_id);
+            for (device_id, ports) in entries {
+                let device_name = self
+                    .device_names_by_id
+                    .get(device_id)
+                    .map_or("<unknown>", String::as_str);
+                let port_strings: Vec<String> = ports
+                    .iter()
+                    .map(|port_idx| {
+                        let (col, row, port) = fabric.fabric_port_index_to_col_row_port(*port_idx);
+                        let endpoint =
+                            fabric_port_endpoint_id(fabric.entity().name.as_str(), col, row, port);
+                        format!("{port_idx}={endpoint} ({col},{row}).{port}")
+                    })
+                    .collect();
+                let _ = writeln!(
+                    out,
+                    "  device {device_id} ({device_name}) -> {}",
+                    port_strings.join(", ")
+                );
+            }
+        }
+        out
     }
 
     fn dump_memory_totals(&self, time_now_ns: f64) {

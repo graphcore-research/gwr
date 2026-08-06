@@ -3,12 +3,9 @@
 use std::collections::BTreeMap;
 
 use gwr_engine::sim_error;
-use gwr_engine::types::SimError;
+use gwr_engine::types::{DeviceId, SimError};
 
 use crate::memory::checked_last_address;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct DeviceId(pub u64);
 
 #[derive(Clone, Debug)]
 pub struct MemoryRegion {
@@ -98,7 +95,9 @@ impl MemoryMap {
 
 #[cfg(test)]
 mod tests {
-    use crate::memory::memory_map::{DeviceId, MemoryMap};
+    use gwr_engine::types::DeviceId;
+
+    use crate::memory::memory_map::MemoryMap;
 
     fn setup_map() -> MemoryMap {
         let mut memory_map = MemoryMap::new();

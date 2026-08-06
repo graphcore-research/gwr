@@ -4,11 +4,10 @@ use std::fmt;
 use std::rc::Rc;
 
 use clap::ValueEnum;
-use gwr_engine::types::AccessType;
+use gwr_engine::types::{AccessType, DeviceId};
 use gwr_model_builder::EntityGet;
 use gwr_models::fabric::FabricConfig;
 use gwr_models::memory::memory_access::MemoryAccess;
-use gwr_models::memory::memory_map::DeviceId;
 use gwr_track::entity::Entity;
 use rand::SeedableRng;
 use rand::seq::{IteratorRandom, SliceRandom};

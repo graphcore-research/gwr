@@ -2,10 +2,9 @@
 
 use std::rc::Rc;
 
-use gwr_engine::types::AccessType;
+use gwr_engine::types::{AccessType, DeviceId};
 use gwr_model_builder::EntityGet;
 use gwr_models::memory::memory_access::MemoryAccess;
-use gwr_models::memory::memory_map::DeviceId;
 use gwr_track::entity::Entity;
 
 /// A frame Generator that can be used by the `Source` to produce frames on

@@ -5,12 +5,12 @@ use std::rc::Rc;
 
 #[doc(hidden)]
 pub use gwr_components::build_component_harness;
-use gwr_engine::types::AccessType;
+use gwr_engine::types::{AccessType, DeviceId};
 use gwr_track::entity::Entity;
 
 use crate::memory::CacheHintType;
 use crate::memory::memory_access::MemoryAccess;
-use crate::memory::memory_map::{DeviceId, MemoryMap};
+use crate::memory::memory_map::MemoryMap;
 use crate::memory::traits::AccessMemory;
 
 /// Builds a simulation test harness for models that implement `AccessMemory`.
@@ -298,7 +298,6 @@ pub struct MemoryTxn {
     src_addr: Option<u64>,
     bytes: Option<usize>,
     total_bytes: Option<usize>,
-    destination: Option<u64>,
     dst_device: Option<DeviceId>,
     src_device: Option<DeviceId>,
     cache_hint: Option<CacheHintType>,
@@ -313,7 +312,6 @@ impl MemoryTxn {
             src_addr: None,
             bytes: None,
             total_bytes: None,
-            destination: None,
             dst_device: None,
             src_device: None,
             cache_hint: None,
@@ -365,12 +363,6 @@ impl MemoryTxn {
     #[must_use]
     pub fn with_total_bytes(mut self, total_bytes: usize) -> Self {
         self.total_bytes = Some(total_bytes);
-        self
-    }
-
-    #[must_use]
-    pub fn with_destination(mut self, destination: u64) -> Self {
-        self.destination = Some(destination);
         self
     }
 
@@ -436,13 +428,6 @@ where
                 "{check_id}: total byte count mismatch for actual {actual:?}",
             );
         }
-        if let Some(destination) = self.destination {
-            assert_eq!(
-                actual.destination(),
-                destination,
-                "{check_id}: destination mismatch for actual {actual:?}",
-            );
-        }
         if let Some(dst_device) = self.dst_device {
             assert_eq!(
                 actual.dst_device(),
@@ -476,7 +461,6 @@ where
             .with_src_addr(self.src_addr())
             .with_bytes(self.access_size_bytes())
             .with_total_bytes(self.total_bytes())
-            .with_destination(self.destination())
             .with_dst_device(self.dst_device())
             .with_src_device(self.src_device())
             .with_cache_hint(self.cache_hint())
