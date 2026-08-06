@@ -137,7 +137,7 @@ where
     /// As a result it is necessary to remap indices from the computed egress
     /// port to the router port. This depends on the index of this router.
     fn route(&self, object: &T) -> Result<usize, SimError> {
-        let dest_fabric_port = object.destination() as usize;
+        let dest_fabric_port = self.config.resolve_destination_port(object.destination())?;
         let (dest_col, dest_row, dest_port) = self
             .config
             .fabric_port_index_to_col_row_port(dest_fabric_port);

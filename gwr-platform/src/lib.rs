@@ -12,9 +12,10 @@ use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::types::SimError;
 use gwr_model_builder::EntityGet;
+use gwr_models::cache::coherency_manager::CoherencyManager;
+use gwr_models::cache::{Cache, CacheStatsDisplay};
 use gwr_models::fabric::Fabric;
 use gwr_models::log_stats;
-use gwr_models::memory::cache::{Cache, CacheStatsDisplay};
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::memory_map::DeviceId;
 use gwr_models::memory::{Memory, MemoryStatsDisplay};
@@ -22,9 +23,13 @@ use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::{
     MachineOpCounts, ProcessingElement, ProcessingElementStatsDisplay,
 };
+use gwr_track::debug;
 use gwr_track::entity::{Entity, GetEntity};
 
-use crate::builder::{build_caches, build_fabrics, build_memories, build_memory_maps, build_pes};
+use crate::builder::{
+    build_caches, build_coherency_managers, build_fabrics, build_memories, build_memory_maps,
+    build_pes,
+};
 use crate::connect::connect_ports;
 use crate::types::PlatformConfig;
 
@@ -35,10 +40,22 @@ pub mod yaml;
 
 type ProcessingElements = Vec<Rc<ProcessingElement>>;
 type Caches = Vec<Rc<Cache<MemoryAccess>>>;
+type CoherencyManagers = Vec<Rc<CoherencyManager>>;
 type Fabrics = Vec<Rc<dyn Fabric<MemoryAccess>>>;
 type Memories = Vec<Rc<Memory<MemoryAccess>>>;
 type DeviceIds = HashMap<String, DeviceId>;
 type NameToIdxMap = HashMap<String, usize>;
+
+fn log_device_ids(engine: &Engine, device_ids: &DeviceIds) {
+    let mut entries = device_ids.iter().collect::<Vec<_>>();
+    entries.sort_by_key(|(_, device_id)| device_id.0);
+
+    let top = engine.top();
+    debug!(top ; "Assigned device IDs ({} total):", entries.len());
+    for (name, device_id) in entries {
+        debug!(top ; "  Device: {} -> {name}", device_id.0);
+    }
+}
 
 #[derive(EntityGet)]
 pub struct Platform {
@@ -47,6 +64,8 @@ pub struct Platform {
     pes_idx_by_id: NameToIdxMap,
     caches: Caches,
     caches_idx_by_id: NameToIdxMap,
+    coherency_managers: CoherencyManagers,
+    coherency_managers_idx_by_id: NameToIdxMap,
     fabrics: Fabrics,
     fabrics_idx_by_id: NameToIdxMap,
     memories: Memories,
@@ -83,15 +102,20 @@ impl Platform {
     }
 
     fn build(engine: &Engine, clock: &Clock, cfg: &PlatformConfig) -> Result<Self, SimError> {
+        validate_platform_config(cfg)?;
         let device_ids = assign_device_ids(cfg)?;
+        log_device_ids(engine, &device_ids);
 
         let top = engine.top();
         let (memories, memories_idx_by_id) = build_memories(engine, clock, top, cfg)?;
         let memory_maps = build_memory_maps(cfg, &memories, &memories_idx_by_id, &device_ids)?;
         let (processing_elements, pes_idx_by_id) =
             build_pes(engine, clock, top, cfg, &memory_maps, &device_ids)?;
-        let (caches, caches_idx_by_id) = build_caches(engine, clock, top, cfg)?;
-        let (fabrics, fabrics_idx_by_id) = build_fabrics(engine, clock, top, cfg)?;
+        let (coherency_managers, coherency_managers_idx_by_id) =
+            build_coherency_managers(engine, clock, top, cfg, &memory_maps, &device_ids)?;
+        let (caches, caches_idx_by_id) =
+            build_caches(engine, clock, top, cfg, &memory_maps, &device_ids)?;
+        let (fabrics, fabrics_idx_by_id) = build_fabrics(engine, clock, top, cfg, &device_ids)?;
 
         let parent = engine.top();
         let entity = Rc::new(Entity::new(parent, "platform"));
@@ -101,12 +125,14 @@ impl Platform {
             pes_idx_by_id,
             caches,
             caches_idx_by_id,
+            coherency_managers,
+            coherency_managers_idx_by_id,
             fabrics,
             fabrics_idx_by_id,
             memories,
             memories_idx_by_id,
         };
-        connect_ports(&platform, cfg)?;
+        connect_ports(&platform, cfg, engine, clock)?;
         Ok(platform)
     }
 
@@ -121,6 +147,19 @@ impl Platform {
         match self.fabrics_idx_by_id.get(fabric_name) {
             Some(idx) => Ok(*idx),
             None => sim_error!("No Fabric '{fabric_name}'"),
+        }
+    }
+
+    pub fn coherency_manager_idx_from_name(
+        &self,
+        coherency_manager_name: &str,
+    ) -> Result<usize, SimError> {
+        match self
+            .coherency_managers_idx_by_id
+            .get(coherency_manager_name)
+        {
+            Some(idx) => Ok(*idx),
+            None => sim_error!("No CoherencyManager '{coherency_manager_name}'"),
         }
     }
 
@@ -146,6 +185,11 @@ impl Platform {
     #[must_use]
     pub fn num_fabrics(&self) -> usize {
         self.fabrics_idx_by_id.keys().len()
+    }
+
+    #[must_use]
+    pub fn num_coherency_managers(&self) -> usize {
+        self.coherency_managers_idx_by_id.keys().len()
     }
 
     #[must_use]
@@ -181,6 +225,14 @@ impl Platform {
         Ok(&self.memories[idx])
     }
 
+    pub fn coherency_manager(
+        &self,
+        coherency_manager_name: &str,
+    ) -> Result<&Rc<CoherencyManager>, SimError> {
+        let idx = self.coherency_manager_idx_from_name(coherency_manager_name)?;
+        Ok(&self.coherency_managers[idx])
+    }
+
     pub fn pe(&self, pe_name: &str) -> Result<&Rc<ProcessingElement>, SimError> {
         let idx = self.pe_idx_from_name(pe_name)?;
         Ok(&self.processing_elements[idx])
@@ -201,6 +253,9 @@ impl Platform {
         }
         for cache in &self.caches {
             cache.dump_stats(time_now_ns);
+        }
+        for coherency_manager in &self.coherency_managers {
+            coherency_manager.dump_stats(time_now_ns);
         }
         for pe in &self.processing_elements {
             pe.dump_stats(time_now_ns);
@@ -289,6 +344,13 @@ impl Display for Platform {
             }
         }
 
+        if !self.coherency_managers.is_empty() {
+            writeln!(f, "\nCoherencyManagers:")?;
+            for (i, manager) in self.coherency_managers.iter().enumerate() {
+                writeln!(f, "  {i}: {}", manager.entity())?;
+            }
+        }
+
         if !self.fabrics.is_empty() {
             writeln!(f, "\nFabrics:")?;
             for (i, fabric) in self.fabrics.iter().enumerate() {
@@ -298,6 +360,25 @@ impl Display for Platform {
 
         Ok(())
     }
+}
+
+fn validate_cache_coherency_config(cache: &crate::types::CacheSection) -> Result<(), SimError> {
+    if cache.coherency_manager.is_some() && cache.coherency_managers.is_some() {
+        return sim_error!(
+            "Cache '{}' cannot set both coherency_manager and coherency_managers",
+            cache.name
+        );
+    }
+    Ok(())
+}
+
+fn validate_platform_config(cfg: &PlatformConfig) -> Result<(), SimError> {
+    if let Some(caches) = &cfg.caches {
+        for cache in caches {
+            validate_cache_coherency_config(cache)?;
+        }
+    }
+    Ok(())
 }
 
 fn assign_device_ids(cfg: &PlatformConfig) -> Result<DeviceIds, SimError> {
@@ -321,6 +402,28 @@ fn assign_device_ids(cfg: &PlatformConfig) -> Result<DeviceIds, SimError> {
                 .is_some()
             {
                 return sim_error!("Duplicate device name {}", mem.name);
+            }
+            device_id += 1;
+        }
+    }
+    if let Some(caches) = &cfg.caches {
+        for cache in caches {
+            if device_ids
+                .insert(cache.name.to_string(), DeviceId(device_id))
+                .is_some()
+            {
+                return sim_error!("Duplicate device name {}", cache.name);
+            }
+            device_id += 1;
+        }
+    }
+    if let Some(managers) = &cfg.coherency_managers {
+        for manager in managers {
+            if device_ids
+                .insert(manager.name.to_string(), DeviceId(device_id))
+                .is_some()
+            {
+                return sim_error!("Duplicate device name {}", manager.name);
             }
             device_id += 1;
         }

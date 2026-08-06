@@ -3,11 +3,17 @@
 use gwr_engine::traits::{Routable, TotalBytes};
 use gwr_engine::types::SimError;
 
-use crate::memory::CacheHintType;
+use crate::cache::CacheHintType;
 use crate::memory::memory_map::DeviceId;
 
 pub trait ReadMemory {
     fn read(&self) -> Vec<u8>;
+}
+
+impl ReadMemory for () {
+    fn read(&self) -> Vec<u8> {
+        Vec::new()
+    }
 }
 
 /// Trait implemented by all types that memory components support

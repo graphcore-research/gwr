@@ -381,7 +381,11 @@ mod tests {
     fn plain_text_search_matches_numeric_ids() {
         let search_state = build_search_state("41");
 
-        assert!(search_state.search_matches(&EventLine::Create { id: 41, time: 0.0 }));
+        assert!(search_state.search_matches(&EventLine::Create {
+            created_by: 40,
+            id: 41,
+            time: 0.0
+        }));
         assert!(search_state.search_matches(&EventLine::Enter {
             id: 40,
             entered: 41,

@@ -18,11 +18,12 @@ use async_trait::async_trait;
 use gwr_components::types::DataGenerator;
 use gwr_components::{connect_tx, port_rx, take_option};
 use gwr_engine::engine::Engine;
+use gwr_engine::events::repeated::Repeated;
 use gwr_engine::executor::Spawner;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
-use gwr_engine::traits::{Runnable, SimObject};
+use gwr_engine::traits::{Event, Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::Id;
@@ -45,6 +46,7 @@ where
     rx: RefCell<Option<InPort<T>>>,
     tx: RefCell<Option<OutPort<T>>>,
     payload_bytes_received: Rc<RefCell<usize>>,
+    max_outstanding_requests: RefCell<Option<usize>>,
 }
 
 impl<T> MemoryAccessGen<T>
@@ -69,6 +71,7 @@ where
             rx: RefCell::new(Some(rx)),
             tx: RefCell::new(Some(tx)),
             payload_bytes_received: Rc::new(RefCell::new(0)),
+            max_outstanding_requests: RefCell::new(None),
         });
         engine.register(rc_self.clone());
         Ok(rc_self)
@@ -99,6 +102,35 @@ where
     pub fn payload_bytes_received(&self) -> usize {
         *self.payload_bytes_received.borrow()
     }
+
+    pub fn set_max_outstanding_requests(
+        &self,
+        max_outstanding_requests: Option<usize>,
+    ) -> SimResult {
+        if let Some(outstanding_requests) = max_outstanding_requests
+            && outstanding_requests == 0
+        {
+            return sim_error!("Invalid max_outstanding_requests value of 0. It will deadlock");
+        }
+        *self.max_outstanding_requests.borrow_mut() = max_outstanding_requests;
+        Ok(())
+    }
+
+    async fn enforce_max_outstanding_limit(
+        &self,
+        expected: &Rc<RefCell<HashSet<Id>>>,
+        outstanding_available: &Rc<Repeated<()>>,
+    ) {
+        let Some(max_outstanding_requests) = *self.max_outstanding_requests.borrow() else {
+            return;
+        };
+        loop {
+            if expected.borrow().len() < max_outstanding_requests {
+                break;
+            }
+            outstanding_available.listen().await;
+        }
+    }
 }
 
 #[async_trait(?Send)]
@@ -114,19 +146,23 @@ where
 
         // Use a HashSet so that memory accesses are permitted in any order
         let expected = Rc::new(RefCell::new(HashSet::new()));
+        let outstanding_available = Rc::new(Repeated::new(()));
         let rx = take_option!(self.rx);
         let mut tx = take_option!(self.tx);
 
         {
             let expected = expected.clone();
             let payload_bytes_received = self.payload_bytes_received.clone();
+            let outstanding_available = outstanding_available.clone();
             self.spawner.spawn(async move {
-                run_input(rx, expected, payload_bytes_received).await?;
+                run_input(rx, expected, payload_bytes_received, outstanding_available).await?;
                 Ok(())
             });
         }
 
         for value in data_generator {
+            self.enforce_max_outstanding_limit(&expected, &outstanding_available)
+                .await;
             let id = value.id();
             if !expected.borrow_mut().insert(id) {
                 return sim_error!("Generator produced duplicate ID {id}");
@@ -142,6 +178,7 @@ async fn run_input<T>(
     mut rx: InPort<T>,
     expected: Rc<RefCell<HashSet<Id>>>,
     payload_bytes_received: Rc<RefCell<usize>>,
+    outstanding_available: Rc<Repeated<()>>,
 ) -> SimResult
 where
     T: SimObject + AccessMemory,
@@ -153,5 +190,6 @@ where
             return sim_error!("{received_id} received when not expected");
         }
         *payload_bytes_received.borrow_mut() += received.access_size_bytes();
+        outstanding_available.notify();
     }
 }

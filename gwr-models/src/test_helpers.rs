@@ -8,7 +8,9 @@ pub use gwr_components::build_component_harness;
 use gwr_engine::types::AccessType;
 use gwr_track::entity::Entity;
 
-use crate::memory::CacheHintType;
+use crate::cache::CacheHintType;
+use crate::cache::coherency_manager::CoherenceOp;
+use crate::cache::traits::CoherentAccess;
 use crate::memory::memory_access::MemoryAccess;
 use crate::memory::memory_map::{DeviceId, MemoryMap};
 use crate::memory::traits::AccessMemory;
@@ -260,7 +262,7 @@ macro_rules! build_model_harness {
             [$item]
 
             [$crate::test_helpers::MemoryTxn]
-            [$crate::memory::traits::AccessMemory]
+            [$crate::cache::traits::CoherentAccess]
             [$component_field: $component_ty]
             rx ports: {
                 $(
@@ -301,6 +303,10 @@ pub struct MemoryTxn {
     destination: Option<u64>,
     dst_device: Option<DeviceId>,
     src_device: Option<DeviceId>,
+
+    // We use one Option to indicate whether to check the Option value which could be None
+    #[expect(clippy::option_option)]
+    coherence_op: Option<Option<CoherenceOp>>,
     cache_hint: Option<CacheHintType>,
 }
 
@@ -316,6 +322,7 @@ impl MemoryTxn {
             destination: None,
             dst_device: None,
             src_device: None,
+            coherence_op: None,
             cache_hint: None,
         }
     }
@@ -348,6 +355,16 @@ impl MemoryTxn {
     #[must_use]
     pub fn write_np_rsp(dst_addr: u64) -> Self {
         Self::new(AccessType::WriteNonPostedResponse, dst_addr)
+    }
+
+    #[must_use]
+    pub fn barrier_req(dst_addr: u64) -> Self {
+        Self::new(AccessType::BarrierRequest, dst_addr)
+    }
+
+    #[must_use]
+    pub fn barrier_rsp(dst_addr: u64) -> Self {
+        Self::new(AccessType::BarrierResponse, dst_addr)
     }
 
     #[must_use]
@@ -387,6 +404,12 @@ impl MemoryTxn {
     }
 
     #[must_use]
+    pub fn with_coherence_op(mut self, coherence_op: Option<CoherenceOp>) -> Self {
+        self.coherence_op = Some(coherence_op);
+        self
+    }
+
+    #[must_use]
     pub fn with_cache_hint(mut self, cache_hint: CacheHintType) -> Self {
         self.cache_hint = Some(cache_hint);
         self
@@ -402,7 +425,7 @@ where
 
 impl<T> MemoryAccessMatcher<T> for MemoryTxn
 where
-    T: AccessMemory + Debug,
+    T: AccessMemory + Debug + CoherentAccess,
 {
     fn assert_matches(&self, check_id: &str, actual: &T) {
         assert_eq!(
@@ -457,6 +480,13 @@ where
                 "{check_id}: src device mismatch for actual {actual:?}",
             );
         }
+        if let Some(coherence_op) = self.coherence_op {
+            assert_eq!(
+                actual.coherence_op(),
+                coherence_op,
+                "{check_id}: coherence op mismatch for actual {actual:?}",
+            );
+        }
         if let Some(cache_hint) = self.cache_hint {
             assert_eq!(
                 actual.cache_hint(),
@@ -469,7 +499,7 @@ where
 
 impl<T> MemoryAccessMatcher<T> for T
 where
-    T: AccessMemory + Debug,
+    T: AccessMemory + Debug + CoherentAccess,
 {
     fn assert_matches(&self, check_id: &str, actual: &T) {
         MemoryTxn::new(self.access_type(), self.dst_addr())
@@ -479,6 +509,7 @@ where
             .with_destination(self.destination())
             .with_dst_device(self.dst_device())
             .with_src_device(self.src_device())
+            .with_coherence_op(self.coherence_op())
             .with_cache_hint(self.cache_hint())
             .assert_matches(check_id, actual);
     }
@@ -486,7 +517,7 @@ where
 
 impl<T> gwr_components::test_helpers::ValueCheck<T> for MemoryTxn
 where
-    T: AccessMemory + Debug,
+    T: AccessMemory + Debug + CoherentAccess,
 {
     fn assert_matches(&self, check_id: &str, actual: &T) {
         MemoryAccessMatcher::assert_matches(self, check_id, actual);
@@ -501,12 +532,8 @@ impl gwr_components::test_helpers::ValueCheck<MemoryAccess> for MemoryAccess {
 
 #[must_use]
 pub fn create_default_memory_map() -> MemoryMap {
-    let mut memory_map = MemoryMap::new();
-
     // Map all addresses to a single device ID.
-    memory_map.insert(0x0, u64::MAX, DeviceId(0)).unwrap();
-
-    memory_map
+    MemoryMap::from_regions(&[(0x0, u64::MAX, DeviceId(0))]).unwrap()
 }
 
 #[must_use]
