@@ -104,6 +104,7 @@ fn generator_emits_multi_output_maxpool() {
 
         match op {
             ComputeOp::Add | ComputeOp::Gemm => {}
+            ComputeOp::Custom(_) => panic!("gen-timetable should not generate custom ops"),
             ComputeOp::MaxPool(_) => {
                 saw_maxpool = true;
                 assert!((1..=2).contains(&output_views.len()));

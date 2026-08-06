@@ -556,5 +556,6 @@ pub fn apply_dim_partitions(
 }
 
 pub mod add;
+pub mod custom;
 pub mod gemm;
 pub mod maxpool;

@@ -7,6 +7,7 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 
 use crate::processing_element::operators::add::OperatorAdd;
+use crate::processing_element::operators::custom::OperatorCustom;
 use crate::processing_element::operators::gemm::OperatorGemm;
 use crate::processing_element::operators::maxpool::OperatorMaxPool;
 use crate::processing_element::operators::{Operator, TensorPartition, TensorView};
@@ -21,12 +22,23 @@ pub struct ComputeTaskConfig {
     pub outputs: Vec<Option<TensorView>>,
 }
 
+impl ComputeTaskConfig {
+    #[must_use]
+    pub fn activity_name(&self) -> &str {
+        match &self.op {
+            ComputeOp::Custom(operator) => operator.name.as_deref().unwrap_or(&self.id),
+            _ => &self.id,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ComputeOp {
     Add,
     Gemm,
     MaxPool(OperatorMaxPool),
+    Custom(OperatorCustom),
 }
 
 impl Serialize for ComputeOp {
@@ -42,17 +54,23 @@ impl Serialize for ComputeOp {
                 map.serialize_entry("maxpool", operator)?;
                 map.end()
             }
+            Self::Custom(operator) => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("custom", operator)?;
+                map.end()
+            }
         }
     }
 }
 
 impl ComputeOp {
     #[must_use]
-    pub fn trace_name(&self) -> &'static str {
+    pub fn trace_name(&self) -> &str {
         match self {
             ComputeOp::Add => "add",
             ComputeOp::Gemm => "gemm",
             ComputeOp::MaxPool(_) => "maxpool",
+            ComputeOp::Custom(operator) => operator.name.as_deref().unwrap_or("custom"),
         }
     }
 
@@ -72,6 +90,9 @@ impl ComputeOp {
             ComputeOp::MaxPool(operator) => {
                 operator.compute_delay_ticks(compute_capabilities, input_views, output_views)
             }
+            ComputeOp::Custom(operator) => {
+                operator.compute_delay_ticks(compute_capabilities, input_views, output_views)
+            }
         }
     }
 
@@ -84,6 +105,7 @@ impl ComputeOp {
             ComputeOp::Add => OperatorAdd {}.compute_flops(input_views, output_views),
             ComputeOp::Gemm => OperatorGemm {}.compute_flops(input_views, output_views),
             ComputeOp::MaxPool(operator) => operator.compute_flops(input_views, output_views),
+            ComputeOp::Custom(operator) => operator.compute_flops(input_views, output_views),
         }
     }
 
@@ -96,6 +118,7 @@ impl ComputeOp {
             ComputeOp::Add => OperatorAdd {}.compute_machine_ops(input_views, output_views),
             ComputeOp::Gemm => OperatorGemm {}.compute_machine_ops(input_views, output_views),
             ComputeOp::MaxPool(operator) => operator.compute_machine_ops(input_views, output_views),
+            ComputeOp::Custom(operator) => operator.compute_machine_ops(input_views, output_views),
         }
     }
 
@@ -113,6 +136,9 @@ impl ComputeOp {
                 OperatorGemm {}.partition_views(input_views, output_views, num_partitions)
             }
             ComputeOp::MaxPool(operator) => {
+                operator.partition_views(input_views, output_views, num_partitions)
+            }
+            ComputeOp::Custom(operator) => {
                 operator.partition_views(input_views, output_views, num_partitions)
             }
         }
