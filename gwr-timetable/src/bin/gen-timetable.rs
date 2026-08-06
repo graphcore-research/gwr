@@ -93,6 +93,7 @@ fn op_index(compute_op: &ComputeOp) -> usize {
         ComputeOp::Add => 0,
         ComputeOp::Gemm => 1,
         ComputeOp::MaxPool(_) => 2,
+        ComputeOp::Custom(_) => unreachable!("custom ops are not generated"),
     }
 }
 
@@ -101,6 +102,7 @@ fn op_name(compute_op: &ComputeOp) -> &'static str {
         ComputeOp::Add => "add",
         ComputeOp::Gemm => "gemm",
         ComputeOp::MaxPool(_) => "maxpool",
+        ComputeOp::Custom(_) => "custom",
     }
 }
 
@@ -122,6 +124,7 @@ fn create_op(
                 create_maxpool_op(tensor, direction, expand_ratio).map_err(boxed_error)?;
             Ok(ComputeOp::MaxPool(operator))
         }
+        ComputeOp::Custom(_) => Err(error_from_str("custom ops are not generated")),
     }
 }
 
@@ -471,6 +474,9 @@ fn validate_generated_node(
         ComputeOp::MaxPool(operator) => operator
             .validate_tensors(inputs, outputs)
             .map_err(boxed_error),
+        ComputeOp::Custom(operator) => operator
+            .validate_tensors(inputs, outputs)
+            .map_err(boxed_error),
     }
 }
 
@@ -496,6 +502,10 @@ fn create_partitions_for_op(
         )
         .map_err(boxed_error),
         ComputeOp::MaxPool(operator) => {
+            partition_tensors(operator, input_tensors, output_tensors, num_partitions)
+                .map_err(boxed_error)
+        }
+        ComputeOp::Custom(operator) => {
             partition_tensors(operator, input_tensors, output_tensors, num_partitions)
                 .map_err(boxed_error)
         }
@@ -707,6 +717,7 @@ impl Generator {
                 Ok(inputs)
             }
             ComputeOp::MaxPool(_) => Ok(vec![Some(input_tensor.clone())]),
+            ComputeOp::Custom(_) => Err(error_from_str("custom ops are not generated")),
         }
     }
 
@@ -885,6 +896,7 @@ impl Generator {
             ComputeOp::MaxPool(operator) => operator
                 .create_inputs(outputs, self.args.expand_ratio, &mut self.rng)
                 .map_err(boxed_error),
+            ComputeOp::Custom(_) => Err(error_from_str("custom ops are not generated")),
         }
     }
 
@@ -903,6 +915,7 @@ impl Generator {
             ComputeOp::MaxPool(operator) => operator
                 .create_outputs(inputs, self.args.expand_ratio, &mut self.rng)
                 .map_err(boxed_error),
+            ComputeOp::Custom(_) => Err(error_from_str("custom ops are not generated")),
         }
     }
 
@@ -1022,6 +1035,7 @@ impl Generator {
             ComputeOp::Add => true,
             ComputeOp::Gemm => point.tensor.shape().num_dims() >= 2,
             ComputeOp::MaxPool(_) => point.tensor.shape().num_dims() >= 3,
+            ComputeOp::Custom(_) => false,
         }
     }
 
@@ -1045,6 +1059,7 @@ impl Generator {
             ComputeOp::Add => self.args.weight_add,
             ComputeOp::Gemm => self.args.weight_gemm,
             ComputeOp::MaxPool(_) => self.args.weight_maxpool,
+            ComputeOp::Custom(_) => 0.0,
         }
     }
 

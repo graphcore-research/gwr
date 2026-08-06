@@ -36,6 +36,7 @@ use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::debug;
 use gwr_track::entity::{Entity, EntityGroup, EntityLane};
 use gwr_track::tracker::aka::Aka;
+use serde::{Deserialize, Serialize};
 
 use crate::log_stats;
 use crate::memory::memory_access::MemoryAccess;
@@ -59,10 +60,14 @@ pub enum MachineOp {
     Mul,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct MachineOpCounts {
+    #[serde(default)]
     pub adds: usize,
+    #[serde(default)]
     pub compares: usize,
+    #[serde(default)]
     pub muls: usize,
 }
 
@@ -166,6 +171,10 @@ impl ComputeCapabilities {
     }
 
     pub fn cycles_for_ops(&self, num_ops: usize, op: MachineOp) -> Result<usize, SimError> {
+        if num_ops == 0 {
+            return Ok(0);
+        }
+
         let ops_per_tick = self.ops_per_tick(op);
         if !ops_per_tick.is_finite() || ops_per_tick <= 0.0 {
             return Err(SimError(format!(
@@ -536,7 +545,8 @@ async fn handle_compute_task(
         config
             .op
             .create_partitions(&config.inputs, &config.outputs, num_partitions)?;
-    let group = activity_lanes.create_group(&format!("{} operation", config.id));
+    let activity_name = config.activity_name();
+    let group = activity_lanes.create_group(&format!("{activity_name} operation"));
 
     for partition in partitions {
         for (idx, view) in partition.inputs.iter().enumerate() {
@@ -548,7 +558,7 @@ async fn handle_compute_task(
                 tensor_view_num_bytes(view),
                 tensor_view_base_addr(view)?,
                 &activity_lanes.lsu_read,
-                &format!("{} tensor {idx} read", config.id),
+                &format!("{activity_name} tensor {idx} read"),
                 &group,
             )
             .await?;
@@ -575,7 +585,7 @@ async fn handle_compute_task(
 
             let _activity = ActivityLanes::begin_in_group(
                 &activity_lanes.compute,
-                &format!("{} compute", config.id),
+                &format!("{activity_name} compute"),
                 &group,
             );
             clock.wait_ticks(compute_ticks as u64).await;
@@ -591,7 +601,7 @@ async fn handle_compute_task(
                 tensor_view_num_bytes(view),
                 tensor_view_base_addr(view)?,
                 &activity_lanes.lsu_write,
-                &format!("{} tensor {idx} write", config.id),
+                &format!("{activity_name} tensor {idx} write"),
                 &group,
             )
             .await?;
