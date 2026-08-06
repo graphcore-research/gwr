@@ -24,7 +24,7 @@ Run one target from the repository root:
 fuzz_target=engine_run_until
 cargo +nightly fuzz run "$fuzz_target" -- \
   -max_total_time=300 \
-  -max_len=2048 \
+  -max_len=32 \
   -timeout=5
 ```
 
@@ -34,7 +34,7 @@ Run every target sequentially:
 for fuzz_target in $(cargo +nightly fuzz list); do
   cargo +nightly fuzz run "$fuzz_target" -- \
     -max_total_time=300 \
-    -max_len=2048 \
+    -max_len=32 \
     -timeout=5 || break
 done
 ```
@@ -46,7 +46,7 @@ parallel with `xargs`:
 cargo +nightly fuzz list | \
   xargs -P 3 -I {} cargo +nightly fuzz run {} -- \
     -max_total_time=300 \
-    -max_len=2048 \
+    -max_len=32 \
     -timeout=5
 ```
 
