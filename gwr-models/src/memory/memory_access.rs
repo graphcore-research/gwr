@@ -5,13 +5,12 @@ use std::rc::Rc;
 
 use gwr_engine::sim_error;
 use gwr_engine::traits::{Routable, SimObject, TotalBytes};
-use gwr_engine::types::{AccessType, SimError};
+use gwr_engine::types::{AccessType, DeviceId, SimError};
 use gwr_track::entity::Entity;
 use gwr_track::id::Unique;
 use gwr_track::{Id, create_id, track_create_object};
 
 use crate::memory::CacheHintType;
-use crate::memory::memory_map::DeviceId;
 use crate::memory::traits::{AccessMemory, ReadMemory};
 
 #[derive(Clone, Debug)]
@@ -60,22 +59,6 @@ impl Unique for MemoryAccess {
 }
 
 impl AccessMemory for MemoryAccess {
-    fn dst_addr(&self) -> u64 {
-        self.dst_addr
-    }
-
-    fn src_addr(&self) -> u64 {
-        self.src_addr
-    }
-
-    fn dst_device(&self) -> DeviceId {
-        self.dst_device
-    }
-
-    fn src_device(&self) -> DeviceId {
-        self.src_device
-    }
-
     fn cache_hint(&self) -> CacheHintType {
         CacheHintType::Allocate
     }
@@ -111,9 +94,17 @@ impl AccessMemory for MemoryAccess {
 }
 
 impl Routable for MemoryAccess {
-    fn destination(&self) -> u64 {
-        // The device ID is used for routing
-        self.dst_device.0
+    fn dst_addr(&self) -> u64 {
+        self.dst_addr
+    }
+    fn src_addr(&self) -> u64 {
+        self.src_addr
+    }
+    fn dst_device(&self) -> DeviceId {
+        self.dst_device
+    }
+    fn src_device(&self) -> DeviceId {
+        self.src_device
     }
     fn access_type(&self) -> AccessType {
         self.access_type

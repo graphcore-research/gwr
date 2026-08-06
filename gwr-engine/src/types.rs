@@ -42,6 +42,9 @@ impl Error for SimError {}
 /// The SimResult is the return type for most simulation functions
 pub type SimResult = Result<(), SimError>;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct DeviceId(pub u64);
+
 /// Generic access types
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub enum AccessType {

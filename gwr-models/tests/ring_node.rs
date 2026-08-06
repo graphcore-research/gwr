@@ -24,7 +24,7 @@ where
 {
     fn route(&self, obj: &T) -> Result<usize, SimError> {
         // If the dest matches then exit via IO port, otherwise use ring port
-        let dest = obj.destination();
+        let dest = obj.dst_addr();
         Ok(if self.0 == dest { IO_INDEX } else { RING_INDEX })
     }
 }

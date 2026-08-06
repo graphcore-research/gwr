@@ -96,34 +96,37 @@ impl Dispatch for TestDispatcher {
     }
 }
 
+fn build_dispatcher_for_pe_tasks(tasks_by_pe_addrs: &[(&str, &[u64])]) -> Rc<dyn Dispatch> {
+    let mut tasks = HashMap::new();
+    let mut tasks_by_pe = HashMap::new();
+    let mut next_task_idx = 0;
+
+    for (pe_name, addrs) in tasks_by_pe_addrs {
+        let mut queue = VecDeque::new();
+        for addr in *addrs {
+            let task_idx = next_task_idx;
+            next_task_idx += 1;
+            tasks.insert(
+                task_idx,
+                Task::MemoryTask {
+                    config: MemoryTaskConfig {
+                        id: format!("{pe_name}_task{task_idx}"),
+                        op: MemoryOp::Load,
+                        addr: *addr,
+                        num_bytes: 128,
+                    },
+                },
+            );
+            queue.push_back(task_idx);
+        }
+        tasks_by_pe.insert((*pe_name).to_string(), queue);
+    }
+
+    Rc::new(TestDispatcher::new(tasks, tasks_by_pe))
+}
+
 fn build_dispatcher() -> Rc<dyn Dispatch> {
-    Rc::new(TestDispatcher::new(
-        HashMap::from([
-            (
-                0,
-                Task::MemoryTask {
-                    config: MemoryTaskConfig {
-                        id: "task0".to_string(),
-                        op: MemoryOp::Load,
-                        addr: 0x1_0000_0000,
-                        num_bytes: 128,
-                    },
-                },
-            ),
-            (
-                1,
-                Task::MemoryTask {
-                    config: MemoryTaskConfig {
-                        id: "task1".to_string(),
-                        op: MemoryOp::Load,
-                        addr: 0x1_0000_0000,
-                        num_bytes: 128,
-                    },
-                },
-            ),
-        ]),
-        HashMap::from([("pe0".to_string(), VecDeque::from([0, 1]))]),
-    ))
+    build_dispatcher_for_pe_tasks(&[("pe0", &[0x1_0000_0000, 0x1_0000_0000])])
 }
 
 macro_rules! pe_mem_config {
@@ -178,6 +181,72 @@ fn run_pe_mem(num_active_requests: usize) -> (Engine, Clock) {
     (engine, clock)
 }
 
+fn run_pe_fabric_mem(num_active_requests: usize) -> (Engine, Clock) {
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
+    let platform = Platform::from_string(
+        &engine,
+        &clock,
+        format!(
+            "
+memory_maps:
+  - name: mm0
+    devices:
+      - name: hbm0
+
+processing_elements:
+  - name: pe0
+    memory_map: mm0
+    config:
+      num_active_requests: {num_active_requests}
+      lsu_access_bytes: 32
+
+fabrics:
+  - name: fabric0
+    kind: functional
+    columns: 2
+    rows: 1
+    fabric_ports_per_node: 1
+    ticks_per_hop: 1
+    ticks_overhead: 1
+    port_bits_per_tick: 4096
+
+memories:
+  - name: hbm0
+    kind: hbm
+    base_address: 0x1_0000_0000
+    capacity_bytes: 16GiB
+    delay_ticks: 10
+
+connections:
+  - connect:
+    - pe.pe0
+    - fabric.fabric0@(0,0)
+  - connect:
+    - mem.hbm0
+    - fabric.fabric0@(1,0)
+"
+        )
+        .as_str(),
+    )
+    .unwrap();
+
+    assert_eq!(platform.num_pes(), 1);
+    assert_eq!(platform.num_memories(), 1);
+    assert_eq!(platform.num_fabrics(), 1);
+    assert_eq!(platform.num_caches(), 0);
+    let port_map_dump = platform.fabric_port_map_description();
+    assert!(port_map_dump.contains("Fabric fabric0 port_selection: destination-address-hash"));
+    assert!(port_map_dump.contains("device 0 (pe0) -> 0=fabric.fabric0@(0,0) (0,0).0"));
+    assert!(port_map_dump.contains("device 1 (hbm0) -> 1=fabric.fabric0@(1,0) (1,0).0"));
+
+    let dispatcher = build_dispatcher();
+    platform.attach_dispatcher(&dispatcher);
+
+    run_simulation!(engine);
+    (engine, clock)
+}
+
 #[test]
 fn simple_pe_mem_one_request() {
     let (_, clock) = run_pe_mem(1);
@@ -195,6 +264,13 @@ fn simple_pe_mem_two_requests() {
     // the LSU supports two outstanding requests. So, the first two access take
     // 11ns, but the remainder take 10ns because they overlap.
     assert_eq!(clock.time_now_ns(), 41.0);
+}
+
+#[test]
+fn simple_pe_fabric_mem_routes_by_device_id() {
+    let (_, clock) = run_pe_fabric_mem(1);
+
+    assert!(clock.time_now_ns() > 80.0);
 }
 
 #[test]

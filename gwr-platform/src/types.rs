@@ -2,6 +2,7 @@
 
 use byte_unit::Byte;
 use clap::ValueEnum;
+use gwr_models::fabric::FabricPortSelection;
 use gwr_models::fabric::node::FabricRoutingAlgorithm;
 use serde::{Deserialize, Serialize, de};
 use serde_yaml::Value;
@@ -159,6 +160,7 @@ pub struct FabricSection {
     pub tx_buffer_bytes: Option<usize>,
     pub port_bits_per_tick: Option<usize>,
     pub routing: Option<FabricRoutingAlgorithm>,
+    pub port_selection: Option<FabricPortSelection>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

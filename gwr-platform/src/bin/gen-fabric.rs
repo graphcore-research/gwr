@@ -13,6 +13,9 @@ use gwr_platform::builder::{
     DEFAULT_PE_COMPARES_PER_TICK, DEFAULT_PE_LSU_ACCESS_BYTES, DEFAULT_PE_MULS_PER_TICK,
     DEFAULT_PE_NUM_ACTIVE_REQUESTS, DEFAULT_PE_OVERHEAD_SIZE_BYTES, DEFAULT_PE_SRAM_BYTES,
 };
+use gwr_platform::connection_id::{
+    cache_endpoint_id, fabric_port_endpoint_id, mem_endpoint_id, pe_endpoint_id,
+};
 use gwr_platform::types::{
     CacheConfigSection, CacheSection, ConnectSection, FabricKind, FabricSection,
     MemoryDeviceSection, MemoryKind, MemoryMapSection, MemorySection, PlatformConfig,
@@ -195,6 +198,7 @@ fn build_fabrics(args: &Args) -> Vec<FabricSection> {
         tx_buffer_bytes: Some(DEFAULT_FABRIC_TX_BUFFER_BYTES),
         port_bits_per_tick: Some(DEFAULT_FABRIC_PORT_BITS_PER_TICK),
         routing: Some(args.fabric_routing),
+        port_selection: None,
     }]
 }
 
@@ -273,16 +277,16 @@ fn build_connections(args: &Args) -> Result<Vec<ConnectSection>, String> {
     let mut connections = Vec::new();
 
     for (column, row) in PeIdGen::new(args)? {
-        let mut entities = vec![format!("pe.{}", create_name("pe", column, row))];
+        let mut entities = vec![pe_endpoint_id(create_name("pe", column, row))];
 
         if args.l1_kib != 0 {
-            entities.push(format!("cache.{}", create_name("l1", column, row)));
+            entities.push(cache_endpoint_id(create_name("l1", column, row)));
         }
         if args.l2_kib != 0 {
-            entities.push(format!("cache.{}", create_name("l2", column, row)));
+            entities.push(cache_endpoint_id(create_name("l2", column, row)));
         }
 
-        entities.push(format!("fabric.{FABRIC_NAME}@({column},{row})"));
+        entities.push(fabric_port_endpoint_id(FABRIC_NAME, column, row, 0));
 
         for pair in entities.windows(2) {
             connections.push(ConnectSection {
@@ -294,8 +298,8 @@ fn build_connections(args: &Args) -> Result<Vec<ConnectSection>, String> {
     for (i, (column, row)) in HbmIdGen::new(args)?.enumerate() {
         connections.push(ConnectSection {
             connect: vec![
-                format!("mem.hbm{i}"),
-                format!("fabric.{FABRIC_NAME}@({column},{row})"),
+                mem_endpoint_id(format!("hbm{i}")),
+                fabric_port_endpoint_id(FABRIC_NAME, column, row, 0),
             ],
         });
     }

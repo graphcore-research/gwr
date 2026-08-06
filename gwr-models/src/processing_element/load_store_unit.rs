@@ -26,8 +26,8 @@ use gwr_engine::executor::Spawner;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::sim_error;
 use gwr_engine::time::clock::{Clock, phase};
-use gwr_engine::traits::{Event, Runnable};
-use gwr_engine::types::{AccessType, SimError, SimResult};
+use gwr_engine::traits::{Event, Routable, Runnable};
+use gwr_engine::types::{AccessType, DeviceId, SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_resources::Resource;
 use gwr_resources::base::ResourceGuard;
@@ -36,8 +36,7 @@ use gwr_track::entity::{Entity, EntityGroup};
 use gwr_track::tracker::aka::Aka;
 
 use crate::memory::memory_access::MemoryAccess;
-use crate::memory::memory_map::{DeviceId, MemoryMap};
-use crate::memory::traits::AccessMemory;
+use crate::memory::memory_map::MemoryMap;
 use crate::processing_element::{ActivityLanes, ProcessingElementConfig};
 
 /// Each active request slot manages the request from the Processing Element

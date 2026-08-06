@@ -3,6 +3,7 @@
 //! Simulate a device comprising a rectangular fabric.
 //!
 //! See `lib.rs` for details.
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use clap::Parser;
@@ -148,7 +149,8 @@ fn start_frame_dump(
     });
 }
 
-fn create_config(engine: &Engine, args: &Cli) -> (Rc<FabricConfig>, usize) {
+fn create_config(engine: &Engine, args: &Cli) -> Result<(Rc<FabricConfig>, usize), SimError> {
+    let num_fabric_ports = args.fabric_columns * args.fabric_rows * args.fabric_ports_per_node;
     let config = FabricConfig::new(
         args.fabric_columns,
         args.fabric_rows,
@@ -159,7 +161,8 @@ fn create_config(engine: &Engine, args: &Cli) -> (Rc<FabricConfig>, usize) {
         args.rx_buffer_bytes,
         args.tx_buffer_bytes,
         args.port_bits_per_tick,
-    );
+        identity_destination_port_map(num_fabric_ports),
+    )?;
     let config = Rc::new(config);
 
     let num_payload_bytes_to_send = args.bytes_to_send;
@@ -180,7 +183,13 @@ fn create_config(engine: &Engine, args: &Cli) -> (Rc<FabricConfig>, usize) {
     );
     info!(top ; "Using traffic pattern {}. Random seed {}", args.traffic_pattern, args.seed);
 
-    (config, num_send_frames)
+    Ok((config, num_send_frames))
+}
+
+fn identity_destination_port_map(num_ports: usize) -> HashMap<u64, Vec<usize>> {
+    (0..num_ports)
+        .map(|port_idx| (port_idx as u64, vec![port_idx]))
+        .collect()
 }
 
 fn main() -> Result<(), SimError> {
@@ -191,7 +200,7 @@ fn main() -> Result<(), SimError> {
     let spawner = engine.spawner();
     let clock = engine.default_clock();
 
-    let (config, num_send_frames) = create_config(&engine, &args);
+    let (config, num_send_frames) = create_config(&engine, &args)?;
     let num_ports = config.num_ports();
     let top = engine.top().clone();
     let fabric: Rc<dyn Fabric<MemoryAccess>> = if args.routed {

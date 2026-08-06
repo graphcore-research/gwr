@@ -1,5 +1,6 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::rc::Rc;
 
@@ -10,7 +11,7 @@ use gwr_engine::engine::Engine;
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::TotalBytes;
-use gwr_engine::types::AccessType;
+use gwr_engine::types::{AccessType, DeviceId};
 use gwr_models::build_model_harness;
 use gwr_models::ethernet_frame::{EthernetFrame, SRC_MAC_BYTES, u64_to_mac};
 use gwr_models::fabric::functional::FunctionalFabric;
@@ -18,7 +19,6 @@ use gwr_models::fabric::node::FabricRoutingAlgorithm;
 use gwr_models::fabric::routed::RoutedFabric;
 use gwr_models::fabric::{Fabric, FabricConfig};
 use gwr_models::memory::memory_access::MemoryAccess;
-use gwr_models::memory::memory_map::DeviceId;
 use gwr_models::test_helpers::MemoryTxn;
 
 trait ToDest {
@@ -120,8 +120,16 @@ fn default_config() -> Rc<FabricConfig> {
         rx_buffer_bytes,
         tx_buffer_bytes,
         port_bits_per_tick,
-    );
+        identity_destination_port_map(num_columns * num_rows * num_ports_per_node),
+    )
+    .unwrap();
     Rc::new(config)
+}
+
+fn identity_destination_port_map(num_ports: usize) -> HashMap<u64, Vec<usize>> {
+    (0..num_ports)
+        .map(|port_idx| (port_idx as u64, vec![port_idx]))
+        .collect()
 }
 
 #[test]
@@ -245,7 +253,21 @@ mod routed_fabric_harness {
         let mut engine = start_test(file!());
         let clock = engine.clock_ghz(1.0);
         let top = engine.top();
-        let config = Rc::new(FabricConfig::new(2, 2, 1, None, 2, 1, 1024, 1024, 128));
+        let config = Rc::new(
+            FabricConfig::new(
+                2,
+                2,
+                1,
+                None,
+                2,
+                1,
+                1024,
+                1024,
+                128,
+                identity_destination_port_map(4),
+            )
+            .unwrap(),
+        );
         let fabric = RoutedFabric::new_and_register(
             &engine,
             &clock,
@@ -300,7 +322,6 @@ mod routed_fabric_harness {
                 MemoryTxn::read_req(addr_a)
                     .with_src_addr(ingress_a_idx as u64)
                     .with_bytes(access_size_bytes)
-                    .with_destination(egress_a_idx as u64)
                     .with_dst_device(DeviceId(egress_a_idx as u64))
                     .with_src_device(DeviceId(ingress_a_idx as u64)),
             ),
@@ -309,7 +330,6 @@ mod routed_fabric_harness {
                 MemoryTxn::read_req(addr_b)
                     .with_src_addr(ingress_b_idx as u64)
                     .with_bytes(access_size_bytes)
-                    .with_destination(egress_b_idx as u64)
                     .with_dst_device(DeviceId(egress_b_idx as u64))
                     .with_src_device(DeviceId(ingress_b_idx as u64)),
             ),
@@ -320,7 +340,7 @@ mod routed_fabric_harness {
 #[test]
 #[should_panic(expected = "Cannot create fabric with less than 2 ports")]
 fn invalid_functional_fabric() {
-    let config = Rc::new(FabricConfig::new(1, 1, 1, None, 1, 1, 1, 1, 1));
+    let config = Rc::new(FabricConfig::new(1, 1, 1, None, 1, 1, 1, 1, 1, HashMap::new()).unwrap());
     let mut engine = start_test(file!());
     let clock = engine.clock_ghz(1.0);
     let top = engine.top();
@@ -331,7 +351,7 @@ fn invalid_functional_fabric() {
 
 #[test]
 fn invalid_functional_fabric_rx_buffer_bytes() {
-    let config = Rc::new(FabricConfig::new(1, 1, 2, None, 1, 1, 0, 1, 1));
+    let config = Rc::new(FabricConfig::new(1, 1, 2, None, 1, 1, 0, 1, 1, HashMap::new()).unwrap());
     let mut engine = start_test(file!());
     let clock = engine.clock_ghz(1.0);
     let top = engine.top();
@@ -350,7 +370,7 @@ fn invalid_functional_fabric_rx_buffer_bytes() {
 
 #[test]
 fn invalid_functional_fabric_tx_buffer_bytes() {
-    let config = Rc::new(FabricConfig::new(1, 1, 2, None, 1, 1, 1, 0, 1));
+    let config = Rc::new(FabricConfig::new(1, 1, 2, None, 1, 1, 1, 0, 1, HashMap::new()).unwrap());
     let mut engine = start_test(file!());
     let clock = engine.clock_ghz(1.0);
     let top = engine.top();
@@ -370,7 +390,7 @@ fn invalid_functional_fabric_tx_buffer_bytes() {
 #[test]
 #[should_panic(expected = "Cannot create fabric with less than 2 ports")]
 fn invalid_routed_fabric() {
-    let config = Rc::new(FabricConfig::new(1, 1, 1, None, 1, 1, 1, 1, 1));
+    let config = Rc::new(FabricConfig::new(1, 1, 1, None, 1, 1, 1, 1, 1, HashMap::new()).unwrap());
     let mut engine = start_test(file!());
     let clock = engine.clock_ghz(1.0);
     let top = engine.top();
