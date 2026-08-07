@@ -204,9 +204,10 @@ required build dependencies can be installed by running:
 ## Developing GWR Packages
 
 For developers of the GWR packages both `stable` and `nightly` Rust toolchains
-are required, as well external tools such as [cargo-deny], [cargo-about]
-[cargo-semver-checks], [Cocogitto], [prek], [Prettier], and [Release-plz]. All
-of the required development dependencies can be installed by running:
+are required, as well external tools such as [cargo-deny], [cargo-about],
+[cargo-fuzz], [cargo-semver-checks], [Cocogitto], [prek], [Prettier], and
+[Release-plz]. All of the required development dependencies can be installed by
+running:
 
 ```bash
 ./.github/actions/install-dev-dependencies/install.sh
@@ -339,6 +340,7 @@ updated package, and automatically publishes the updated packages using
 [Cap'n Proto]: https://capnproto.org
 [cargo-about]: https://github.com/EmbarkStudios/cargo-about
 [cargo-deny]: https://github.com/EmbarkStudios/cargo-deny
+[cargo-fuzz]: https://github.com/rust-fuzz/cargo-fuzz
 [cargo-semver-checks]: https://github.com/obi1kenobi/cargo-semver-checks
 [CI system]: https://github.com/graphcore-research/gwr/actions/workflows/ci.yaml
 [clippy]: https://doc.rust-lang.org/clippy
