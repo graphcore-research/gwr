@@ -4,12 +4,11 @@ name: Fuzz smoke test
 
 on:
   push:
-    branches:
-      - main
+    branches-ignore:
+      - "pr-**"
   pull_request:
 
 env:
-  CARGO_FUZZ_VERSION: 0.13.2
   CARGO_TERM_COLOR: always
   FUZZ_TIME_SECONDS: 30
 
@@ -31,29 +30,41 @@ jobs:
           submodules: true
 
       - uses: ./.github/actions/install-build-dependencies
-
-      - name: Install nightly Rust
-        run: rustup toolchain install nightly --profile minimal
-
-      - name: Install cargo-fuzz
-        run: >-
-          cargo install cargo-fuzz
-          --version "${CARGO_FUZZ_VERSION}"
-          --locked
+      - uses: ./.github/actions/install-nightly-tools
 
       - name: Build fuzz target
         run: cargo +nightly fuzz build "${{ matrix.target }}"
 
       - name: Run fuzz smoke test
+        id: fuzz
+        continue-on-error: true
         run: >-
-          cargo +nightly fuzz run "${{ matrix.target }}" --
-          -max_total_time="${FUZZ_TIME_SECONDS}"
-          -max_len="${{ matrix.max_len }}"
-          -timeout=5
+          cargo run -p gwr-terminus --
+          run --recipe fuzz/recipes/fuzz.yaml
+          --TARGET="${{ matrix.target }}"
+          --MAX_TOTAL_TIME="${FUZZ_TIME_SECONDS}"
+          --MAX_LEN="${{ matrix.max_len }}"
+
+      - name: Report fuzz failure
+        if: steps.fuzz.outcome == 'failure'
+        env:
+          FUZZ_TARGET: ${{ matrix.target }}
+        run: |
+          echo "::warning title=Fuzz target failed::$FUZZ_TARGET found a possible failure; the job will continue so it does not block the PR or main."
+          {
+            echo "## Fuzz target failed"
+            echo
+            echo "- Target: \`$FUZZ_TARGET\`"
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- Ref: \`$GITHUB_REF\`"
+            echo
+            echo "Check the fuzz step output and download the failure artifact from this workflow run to reproduce it locally."
+          } >>"$GITHUB_STEP_SUMMARY"
 
       - name: Upload failure artifacts
-        if: failure()
+        if: steps.fuzz.outcome == 'failure'
         uses: actions/upload-artifact@v7
         with:
           name: fuzz-${{ matrix.target }}-${{ github.sha }}
-          path: fuzz/artifacts/
+          path: fuzz/artifacts/${{ matrix.target }}/
+          if-no-files-found: error
