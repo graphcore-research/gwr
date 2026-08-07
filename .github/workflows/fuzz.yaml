@@ -67,4 +67,4 @@ jobs:
         with:
           name: fuzz-${{ matrix.target }}-${{ github.sha }}
           path: fuzz/artifacts/${{ matrix.target }}/
-          if-no-files-found: error
+          if-no-files-found: warn
