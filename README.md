@@ -306,6 +306,7 @@ During the commit process a number of different hooks will be invoked by [prek]:
 - Links in Markdown source will be validated using [lychee].
 - Rust source will be linted using [clippy] (via the `cargo clippy-strict`
   alias).
+- JavaScript source will be linted using [ESLint].
 - Rust source will be compiled using `cargo check`.
 
 ### Making a Release
@@ -341,6 +342,7 @@ updated package, and automatically publishes the updated packages using
 [cargo-semver-checks]: https://github.com/obi1kenobi/cargo-semver-checks
 [CI system]: https://github.com/graphcore-research/gwr/actions/workflows/ci.yaml
 [clippy]: https://doc.rust-lang.org/clippy
+[ESLint]: https://eslint.org
 [Cocogitto]: https://docs.cocogitto.io
 [Conventional Commits]: https://www.conventionalcommits.org/en/v1.0.0
 [lychee]: https://lychee.cli.rs

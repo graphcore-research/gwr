@@ -11,41 +11,41 @@ repo = "builtin"
 
 [[repos.hooks]]
 id = "check-added-large-files"
-priority = 4
+priority = 5
 
 [[repos.hooks]]
 id = "check-case-conflict"
-priority = 4
+priority = 5
 
 [[repos.hooks]]
 id = "check-executables-have-shebangs"
-priority = 4
+priority = 5
 
 [[repos.hooks]]
 id = "check-merge-conflict"
-priority = 4
+priority = 5
 
 [[repos.hooks]]
 id = "check-toml"
-priority = 4
+priority = 5
 
 [[repos.hooks]]
 id = "check-yaml"
-priority = 4
+priority = 5
 
 [[repos.hooks]]
 id = "end-of-file-fixer"
-priority = 3
+priority = 4
 
 [[repos.hooks]]
 id = "mixed-line-ending"
 exclude = "licenses.html"
-priority = 2
+priority = 3
 
 [[repos.hooks]]
 id = "trailing-whitespace"
 exclude = "licenses.html"
-priority = 1
+priority = 2
 
 [[repos]]
 repo = "local"
@@ -68,7 +68,7 @@ exclude = '''
   .*\.json
 )
 '''
-priority = 4
+priority = 5
 
 [[repos.hooks]]
 id = "lychee-check-links"
@@ -78,7 +78,7 @@ language = "system"
 types_or = ["html", "markdown"]
 entry = "lychee ."
 pass_filenames = false
-priority = 4
+priority = 5
 
 [[repos.hooks]]
 id = "taplo-fmt"
@@ -108,6 +108,25 @@ entry = "npx prettier --write"
 priority = 0
 
 [[repos.hooks]]
+id = "prettier-javascript"
+name = "prettier JavaScript"
+description = "format JavaScript files"
+language = "system"
+types = ["javascript"]
+entry = "npx prettier --write"
+priority = 0
+
+[[repos.hooks]]
+id = "eslint"
+name = "eslint"
+description = "lint JavaScript files"
+language = "system"
+types = ["javascript"]
+entry = "npx eslint --max-warnings 0"
+pass_filenames = false
+priority = 1
+
+[[repos.hooks]]
 id = "cargo-deny"
 name = "cargo deny"
 description = "check Rust dependencies licenses and for vulnerabilities"
@@ -115,7 +134,7 @@ language = "system"
 types_or = ["rust", "toml"]
 entry = "cargo deny check"
 pass_filenames = false
-priority = 4
+priority = 5
 
 [[repos.hooks]]
 id = "cargo-about"
@@ -125,7 +144,7 @@ language = "system"
 types_or = ["rust", "toml"]
 entry = "cargo about generate --locked --workspace --all-features --fail --config about.toml --output-file licenses.html about.hbs"
 pass_filenames = false
-priority = 4
+priority = 5
 
 [[repos.hooks]]
 id = "cargo-nightly-fmt"
@@ -144,7 +163,7 @@ language = "system"
 types_or = ["rust", "toml"]
 entry = "cargo check --all-targets"
 pass_filenames = false
-priority = 4
+priority = 5
 
 [[repos.hooks]]
 id = "cargo-clippy-strict"
@@ -154,7 +173,7 @@ language = "system"
 types = ["rust"]
 entry = 'env RUSTFLAGS="-D warnings" cargo clippy-strict'
 pass_filenames = false
-priority = 4
+priority = 5
 
 [[repos.hooks]]
 id = "cargo-doc-gwr-dev"
@@ -164,7 +183,7 @@ language = "system"
 types = ["rust"]
 entry = 'env RUSTDOCFLAGS="-D warnings" cargo doc-gwr-dev'
 pass_filenames = false
-priority = 4
+priority = 5
 
 [[repos.hooks]]
 id = "cargo-semver-checks"
@@ -174,7 +193,7 @@ language = "script"
 types_or = ["rust", "toml"]
 entry = "semver-checks.sh"
 pass_filenames = false
-priority = 4
+priority = 5
 
 [[repos.hooks]]
 id = "cog-verify"
