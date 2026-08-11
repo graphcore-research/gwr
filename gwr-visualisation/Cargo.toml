@@ -1,14 +1,14 @@
 # Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
 [package]
-name = "gwr-timetable"
-version = "0.4.0"
+name = "gwr-visualisation"
+version = "0.1.0"
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Library for managing/checking execution timetables for processing elements"
+description = "Static web visualisations for GWR timetable and platform data"
 documentation.workspace = true
-readme.workspace = true
+readme = "README.md"
 homepage.workspace = true
 repository.workspace = true
 license.workspace = true
@@ -18,24 +18,17 @@ categories = [
   "development-tools::debugging",
   "parsing",
   "simulation",
+  "visualization",
 ]
 publish.workspace = true
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-async-trait.workspace = true
-byte-unit.workspace = true
 clap.workspace = true
-gwr-engine = { path = "../gwr-engine", version = "0.13.0" }
-gwr-model-builder = { path = "../gwr-model-builder", version = "0.2.0" }
 gwr-models = { path = "../gwr-models", version = "0.21.0" }
 gwr-platform = { path = "../gwr-platform", version = "0.6.0" }
-gwr-track = { path = "../gwr-track", features = ["perfetto"], version = "0.13.0" }
-indicatif.workspace = true
-log.workspace = true
-rand.workspace = true
+gwr-timetable = { path = "../gwr-timetable", version = "0.4.0" }
 serde.workspace = true
+serde_json.workspace = true
 serde_yaml.workspace = true
 
 [dev-dependencies]
