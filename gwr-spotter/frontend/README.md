@@ -32,8 +32,7 @@ cargo run --release --bin gwr-spotter -- --bin trace.bin
 This frontend can be started using Python:
 
 ```bash
-cd frontend/
-python3 -m http.server 9991
+python3 -m http.server 9991 -d gwr-spotter/frontend
 ```
 
 ### Start the frontend
@@ -44,5 +43,4 @@ Chrome and Safari.
 You should see a graphical representation of the design along with a menu that
 allows you to select a number of different visual representations.
 
-In the `force_tree` view you can select nodes and `gwr-spotter` will be updated
-to select that node.
+You can select nodes and `gwr-spotter` will be updated to filter to that node.

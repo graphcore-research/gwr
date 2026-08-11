@@ -107,16 +107,17 @@ $('.menu-btn').click(function() {
    * Constants
    */
   const serverUrl = "http://localhost:8000";
-  const chartElement = "chart"
+  const app = window.GWR_SPOTTER;
+  app.chartElement = "chart";
 
   // Remove some of the boundary so that it is fully visible when taking into account
   // the offset caused by the button
-  const buttonBarPadding = 100;
+  app.buttonBarPadding = 100;
 
   /***********************************************************************
    * Renderer
    */
-  const renderer = new Renderer(serverUrl);
+  const renderer = new app.Renderer(serverUrl);
   const controls = renderer.controls;
   const guiElements = renderer.guiElements;
   renderer.set_position_controls(
@@ -166,10 +167,10 @@ Promise.all([
   d3.text(serverUrl + "/connections"),
 ])
     .then(function([capacity_text, entity_text, connection_text]) {
-      const capacities = parse_capacities(capacity_text);
+      const capacities = app.parseCapacities(capacity_text);
       const root = [];
-      const max_depth = parse_entities(entity_text, root, capacities);
-      const connections = parse_connections(connection_text);
+      const max_depth = app.parseEntities(entity_text, root, capacities);
+      const connections = app.parseConnections(connection_text);
       renderer.set_entities(root[0], max_depth);
       renderer.set_connections(connections);
       renderer.render();

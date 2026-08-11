@@ -19,7 +19,11 @@ if [[ $GITHUB_ACTIONS != "true" ]]; then
   fi
 fi
 
-npm install --no-save prettier@3.8.1
+npm install --no-save \
+  @eslint/js@9.39.2 \
+  eslint@9.39.2     \
+  globals@14.0.0    \
+  prettier@3.8.1
 
 rustup toolchain install --profile minimal --component rustfmt nightly
 
