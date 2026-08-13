@@ -29,6 +29,7 @@ use async_trait::async_trait;
 use gwr_engine::engine::Engine;
 use gwr_engine::executor::Spawner;
 use gwr_engine::port::PortStateResult;
+use gwr_engine::sim_error;
 use gwr_engine::time::clock::{Clock, phase};
 use gwr_engine::traits::Runnable;
 use gwr_engine::types::{AccessType, SimError, SimResult};
@@ -177,9 +178,7 @@ impl ComputeCapabilities {
 
         let ops_per_tick = self.ops_per_tick(op);
         if !ops_per_tick.is_finite() || ops_per_tick <= 0.0 {
-            return Err(SimError(format!(
-                "invalid compute throughput {ops_per_tick} ops/tick"
-            )));
+            return sim_error!("invalid compute throughput {ops_per_tick} ops/tick");
         }
 
         Ok(((num_ops as f64) / ops_per_tick).ceil() as usize)

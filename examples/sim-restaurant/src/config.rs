@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
 use clap::{Args, Command};
+use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
 
 use crate::time_of_day::TimeOfDay;
@@ -146,17 +147,13 @@ impl RestaurantConfig {
         let closing_time = long_arg_name(&command, "closing_time");
 
         if !(0.0..=1.0).contains(&self.join_base_probability) {
-            return Err(SimError(format!(
-                "`{join_base_probability}` must be in the range 0..=1"
-            )));
+            return sim_error!("`{join_base_probability}` must be in the range 0..=1");
         }
         if self.opening_time >= self.closing_time {
-            return Err(SimError(format!(
-                "`{opening_time}` must be earlier than `{closing_time}`"
-            )));
+            return sim_error!("`{opening_time}` must be earlier than `{closing_time}`");
         }
         if self.day_ticks == 0 {
-            return Err(SimError("day length must be greater than zero".to_string()));
+            return sim_error!("day length must be greater than zero");
         }
         Ok(())
     }
