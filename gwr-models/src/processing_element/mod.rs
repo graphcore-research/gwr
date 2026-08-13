@@ -496,16 +496,16 @@ async fn handle_task(
     }
 }
 
-fn tensor_view_num_bytes(view: &TensorView) -> usize {
-    view.num_bytes()
-}
-
-fn tensor_view_base_addr(view: &TensorView) -> Result<u64, SimError> {
-    let base_addr = view.tensor().addr();
-    let element_offset = view.element_offset()?;
-    let dtype = view.tensor().dtype();
-    let byte_offset = (dtype.num_bits() * element_offset).div_ceil(8) as u64;
-    Ok(base_addr + byte_offset)
+fn tensor_view_access(view: &TensorView) -> Result<(u64, usize), SimError> {
+    let byte_range = view.byte_range()?;
+    let byte_offset = u64::try_from(byte_range.start)
+        .map_err(|error| SimError(format!("Tensor view byte offset: {error}")))?;
+    let address = view
+        .tensor()
+        .addr()
+        .checked_add(byte_offset)
+        .ok_or_else(|| SimError("Tensor view address overflows".to_string()))?;
+    Ok((address, byte_range.end - byte_range.start))
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -525,7 +525,7 @@ async fn handle_compute_task(
         .iter()
         .chain(config.outputs.iter())
         .filter_map(|view| view.as_ref())
-        .map(tensor_view_num_bytes)
+        .map(TensorView::num_bytes)
         .sum();
 
     let num_partitions = total_num_bytes
@@ -544,10 +544,11 @@ async fn handle_compute_task(
             let Some(view) = view else {
                 continue;
             };
+            let (address, num_bytes) = tensor_view_access(view)?;
             lsu.do_access(
                 AccessType::ReadRequest,
-                tensor_view_num_bytes(view),
-                tensor_view_base_addr(view)?,
+                num_bytes,
+                address,
                 &activity_lanes.lsu_read,
                 &format!("{activity_name} tensor {idx} read"),
                 &group,
@@ -587,10 +588,11 @@ async fn handle_compute_task(
             let Some(view) = view else {
                 continue;
             };
+            let (address, num_bytes) = tensor_view_access(view)?;
             lsu.do_access(
                 AccessType::WriteNonPostedRequest,
-                tensor_view_num_bytes(view),
-                tensor_view_base_addr(view)?,
+                num_bytes,
+                address,
                 &activity_lanes.lsu_write,
                 &format!("{activity_name} tensor {idx} write"),
                 &group,
@@ -606,6 +608,25 @@ async fn handle_compute_task(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::processing_element::operators::Tensor;
+    use crate::processing_element::operators::dtype::DataType;
+
+    #[test]
+    fn tensor_view_access_includes_each_partially_touched_byte() {
+        let tensor = Tensor::new(&[4], &DataType::Int4, 0x1000);
+        let view = TensorView::new(tensor, &[2], &[1]);
+
+        assert_eq!(tensor_view_access(&view).unwrap(), (0x1000, 2));
+    }
+
+    #[test]
+    fn tensor_view_access_is_empty_for_zero_element_view() {
+        let tensor = Tensor::new(&[4], &DataType::Int4, 0x1000);
+        let view = TensorView::new(tensor, &[0], &[1]);
+
+        assert_eq!(view.byte_range().unwrap(), 0..0);
+        assert_eq!(tensor_view_access(&view).unwrap(), (0x1000, 0));
+    }
 
     #[test]
     fn cycles_for_ops_uses_ceil_for_fractional_throughput() {
