@@ -1,0 +1,35 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+[package]
+name = "gwr-visualisation"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Static web visualisations for GWR timetable and platform data"
+documentation.workspace = true
+readme = "README.md"
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories = [
+  "command-line-utilities",
+  "development-tools::debugging",
+  "parsing",
+  "simulation",
+  "visualization",
+]
+publish.workspace = true
+
+[dependencies]
+clap.workspace = true
+gwr-models = { path = "../gwr-models", version = "0.21.0" }
+gwr-platform = { path = "../gwr-platform", version = "0.6.0" }
+gwr-timetable = { path = "../gwr-timetable", version = "0.4.0" }
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

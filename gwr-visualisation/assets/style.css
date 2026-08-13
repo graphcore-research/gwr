@@ -1,0 +1,1645 @@
+/* Copyright (c) 2026 Graphcore Ltd. All rights reserved. */
+
+:root {
+  color-scheme: light dark;
+  --bg: Canvas;
+  --fg: CanvasText;
+  --muted: color-mix(in srgb, CanvasText 62%, Canvas);
+  --panel: color-mix(in srgb, CanvasText 6%, Canvas);
+  --border: color-mix(in srgb, CanvasText 22%, Canvas);
+  --activity: color-mix(in srgb, Highlight 70%, Canvas);
+  --activity-strong: color-mix(in srgb, #245f9e 92%, Canvas);
+  --activity-soft: color-mix(in srgb, Highlight 18%, Canvas);
+  --read: color-mix(in srgb, #1f6feb 78%, Canvas);
+  --read-soft: color-mix(in srgb, #1f6feb 22%, Canvas);
+  --write: color-mix(in srgb, #d6a100 82%, Canvas);
+  --write-soft: color-mix(in srgb, #d6a100 28%, Canvas);
+  --metric: color-mix(in srgb, #7a4fb5 78%, Canvas);
+  --warn: color-mix(in srgb, Mark 35%, Canvas);
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+main {
+  width: min(1180px, calc(100vw - 32px));
+  margin: 0 auto;
+  padding: 24px 0 40px;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: end;
+  margin-bottom: 16px;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 1.45rem;
+  font-weight: 600;
+}
+
+h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 18px 0 8px;
+}
+
+p,
+span,
+label,
+button,
+select {
+  font-size: 0.9rem;
+}
+
+#source-path {
+  color: var(--muted);
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.stats article,
+.warnings {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.stats article {
+  padding: 10px;
+}
+
+.stats span {
+  color: var(--muted);
+  display: block;
+}
+
+.stats strong {
+  display: block;
+  font-size: 1.25rem;
+  margin-top: 4px;
+}
+
+.stats em {
+  color: var(--muted);
+  display: block;
+  font-size: 0.82rem;
+  font-style: normal;
+  margin-top: 2px;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.filter-controls {
+  align-items: start;
+  background: var(--bg);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0;
+  padding: 10px 0;
+  border-block: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.filter-controls h2 {
+  margin: 7px 10px 0 0;
+}
+
+.filter-picker {
+  border-bottom: 1px solid var(--border);
+  min-width: min(320px, 100%);
+  width: min(420px, 100%);
+}
+
+.filter-picker:not([open]) {
+  min-width: min(170px, 100%);
+  width: min(230px, 100%);
+}
+
+.filter-picker summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 7px 2px;
+}
+
+.filter-picker summary span {
+  color: var(--muted);
+}
+
+.filter-picker summary strong {
+  color: var(--fg);
+  font-weight: 600;
+  margin-left: auto;
+  max-width: 70%;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.filter-picker-actions {
+  display: flex;
+  gap: 6px;
+  padding: 6px 0;
+}
+
+.filter-picker-actions button,
+.filter-pattern button {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  padding: 4px 10px;
+}
+
+.filter-pattern {
+  display: grid;
+  gap: 4px;
+  padding: 2px 0 6px;
+}
+
+.filter-pattern > label {
+  min-width: 0;
+}
+
+.filter-pattern > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.filter-pattern input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  flex: 1 1 150px;
+  min-width: 0;
+  padding: 5px 7px;
+}
+
+.filter-pattern input[aria-invalid="true"] {
+  outline: 2px solid Mark;
+}
+
+.filter-pattern output {
+  color: var(--muted);
+  min-height: 1.1em;
+}
+
+.filter-options {
+  display: grid;
+  gap: 2px 12px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 4px 2px 8px;
+}
+
+.layer-filter-options {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.pe-filter-options {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.memory-filter-options {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.tensor-filter-options {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.filter-option {
+  align-items: center;
+  color: var(--fg);
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+  padding: 3px 0;
+}
+
+.filter-option input {
+  margin: 0;
+}
+
+.filter-option span {
+  overflow-wrap: anywhere;
+}
+
+.pe.filtered-out {
+  opacity: 0.24;
+}
+
+.view-controls {
+  display: grid;
+  grid-template-columns: minmax(170px, 220px) minmax(0, 1fr);
+  gap: 10px 14px;
+  align-items: end;
+  margin: 14px 0;
+}
+
+.view-controls > h2 {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.workspace-actions {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workspace-actions label {
+  flex: 1 1 220px;
+}
+
+.view-presets,
+.view-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.view-presets {
+  grid-column: 1 / -1;
+}
+
+.view-presets button,
+.workspace-actions button,
+.workspace-panel-tools button,
+.view-toggles label {
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.view-presets button[aria-pressed="true"] {
+  outline: 2px solid Highlight;
+  outline-offset: 1px;
+}
+
+.view-toggles {
+  grid-column: 1 / -1;
+}
+
+.view-toggles label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.view-toggles input {
+  margin: 0;
+}
+
+label {
+  display: grid;
+  gap: 4px;
+  min-width: 160px;
+  color: var(--muted);
+}
+
+select {
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 8px;
+}
+
+.views {
+  display: grid;
+  gap: 12px;
+  grid-auto-flow: row dense;
+  align-items: start;
+  margin-top: 14px;
+}
+
+.layout-auto {
+  grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
+}
+
+.layout-one {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.layout-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.layout-three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.layout-one > .view-panel {
+  grid-column: 1 / -1 !important;
+}
+
+.workspace-has-focus > .view-panel:not(.workspace-focused) {
+  display: none;
+}
+
+.workspace-has-focus > .workspace-focused {
+  grid-column: 1 / -1 !important;
+}
+
+.view-panel {
+  min-height: 120px;
+  max-height: 82vh;
+  overflow: auto;
+  resize: vertical;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.view-panel h2 {
+  margin-top: 0;
+}
+
+.workspace-panel-bar {
+  align-items: center;
+  background: var(--panel);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  justify-content: space-between;
+  margin: -10px -10px 8px;
+  padding: 10px;
+  position: sticky;
+  top: -10px;
+  z-index: 4;
+}
+
+.workspace-panel-bar h2 {
+  margin: 0;
+}
+
+.workspace-panel-tools {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.workspace-panel-tools button,
+.workspace-panel-tools select {
+  font-size: 0.78rem;
+  min-width: 0;
+  padding: 4px 6px;
+}
+
+.workspace-panel-tools .workspace-drag {
+  cursor: grab;
+}
+
+.workspace-panel-tools .workspace-drag:active {
+  cursor: grabbing;
+}
+
+.workspace-dragging {
+  opacity: 0.55;
+}
+
+.workspace-collapsed {
+  min-height: 0;
+  resize: none;
+}
+
+.workspace-collapsed > :not(.workspace-panel-bar) {
+  display: none;
+}
+
+.panel-title-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  justify-content: space-between;
+}
+
+.relationship-title-row {
+  align-items: start;
+}
+
+.relationship-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.relationship-controls label {
+  min-width: 130px;
+}
+
+.relationship-controls label:last-child {
+  min-width: 180px;
+}
+
+.relationship-controls output {
+  color: var(--fg);
+  float: right;
+}
+
+.relationship-controls input[type="range"] {
+  margin: 0;
+  width: 100%;
+}
+
+.relationship-bundle {
+  display: grid;
+  gap: 8px;
+}
+
+.relationship-plot {
+  aspect-ratio: 1000 / 620;
+  margin: 0 auto;
+  max-width: 1000px;
+  position: relative;
+  width: 100%;
+}
+
+.relationship-plot canvas,
+.relationship-plot svg {
+  height: 100%;
+  inset: 0;
+  position: absolute;
+  width: 100%;
+}
+
+.relationship-hierarchy line {
+  stroke: var(--border);
+  stroke-opacity: 0.2;
+  stroke-width: 1;
+}
+
+.relationship-nodes circle {
+  fill: var(--fg);
+  stroke: var(--bg);
+  stroke-width: 1;
+}
+
+.relationship-nodes circle.weighted {
+  fill: var(--activity-strong);
+  fill-opacity: 0.9;
+}
+
+.relationship-nodes circle.weighted.read {
+  fill: var(--read);
+}
+
+.relationship-nodes circle.weighted.write {
+  fill: var(--write);
+}
+
+.relationship-nodes circle.selected {
+  stroke: Highlight;
+  stroke-width: 3;
+}
+
+.relationship-nodes .interactive {
+  cursor: pointer;
+}
+
+.relationship-nodes circle.interactive:hover,
+.relationship-nodes circle.interactive:focus {
+  stroke: Highlight;
+  stroke-width: 2;
+}
+
+.relationship-nodes circle.selected,
+.relationship-nodes circle.selected:hover,
+.relationship-nodes circle.selected:focus {
+  stroke-width: 3;
+}
+
+.relationship-nodes text,
+.relationship-group-labels text {
+  fill: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+.relationship-nodes text.selected {
+  fill: var(--fg);
+  font-weight: 600;
+}
+
+.relationship-nodes text.interactive:hover {
+  fill: var(--fg);
+  text-decoration: underline;
+}
+
+.relationship-group-labels text {
+  font-weight: 600;
+}
+
+.relationship-status {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+
+.relationship-status span:first-child {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.relationship-status i {
+  background: var(--activity);
+  display: inline-block;
+  height: 3px;
+  width: 24px;
+}
+
+.relationship-status i.read {
+  background: var(--read);
+}
+
+.relationship-status i.write {
+  background: var(--write);
+}
+
+.relationship-status strong {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.panel-title-row h2 {
+  margin: 0;
+}
+
+.layer-detail-metrics {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  margin-bottom: 10px;
+}
+
+.layer-detail-metrics > div {
+  border-left: 3px solid var(--activity);
+  min-width: 0;
+  padding-left: 8px;
+}
+
+.layer-detail-metrics span,
+.layer-detail-metrics strong,
+.layer-detail-metrics em {
+  display: block;
+}
+
+.layer-detail-metrics span,
+.layer-detail-metrics em,
+.comparison-heading span {
+  color: var(--muted);
+  font-style: normal;
+}
+
+.layer-detail-metrics strong {
+  font-size: 1.05rem;
+  margin-top: 2px;
+}
+
+.layer-summary-list {
+  display: grid;
+  gap: 8px;
+}
+
+.comparison-row {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--fg);
+  display: grid;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 8px;
+  text-align: left;
+  width: 100%;
+}
+
+.layer-summary-row,
+.layer-pe-summary-row {
+  cursor: pointer;
+}
+
+.layer-summary-row:hover,
+.layer-pe-summary-row:hover {
+  background: var(--panel);
+}
+
+.layer-summary-row.selected,
+.layer-pe-summary-row.selected {
+  outline: 2px solid Highlight;
+  outline-offset: 1px;
+}
+
+.comparison-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  justify-content: space-between;
+}
+
+.comparison-metrics {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(5, minmax(96px, 1fr));
+  min-width: 560px;
+}
+
+.comparison-metric {
+  display: grid;
+  gap: 4px;
+}
+
+.comparison-metric > div:first-child {
+  align-items: baseline;
+  display: flex;
+  gap: 4px;
+  justify-content: space-between;
+}
+
+.comparison-metric span {
+  color: var(--muted);
+}
+
+.comparison-metric strong {
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.comparison-metric em {
+  color: var(--muted);
+  font-style: normal;
+  font-weight: 400;
+}
+
+.comparison-track {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  height: 10px;
+  overflow: hidden;
+  position: relative;
+}
+
+.comparison-track > div {
+  background: var(--activity);
+  height: 100%;
+}
+
+.comparison-track.read > div {
+  background: var(--read);
+}
+
+.comparison-track.write > div {
+  background: var(--write);
+}
+
+.comparison-track i {
+  background: var(--fg);
+  height: 14px;
+  position: absolute;
+  top: -2px;
+  width: 1px;
+}
+
+.layer-detail-heading {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.layer-detail-heading h3 {
+  margin: 0;
+}
+
+.layer-detail-heading span {
+  color: var(--muted);
+}
+
+.layer-pe-summary-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.compute-summary-context,
+.pe-overview-chart-legend {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
+.compute-summary-context span,
+.pe-overview-chart-legend {
+  color: var(--muted);
+}
+
+.compute-summary-metrics {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  margin: 10px 0;
+}
+
+.compute-summary-metrics > div {
+  border-left: 3px solid var(--activity);
+  padding-left: 8px;
+}
+
+.compute-summary-metrics span,
+.compute-summary-metrics strong {
+  display: block;
+}
+
+.compute-summary-metrics span {
+  color: var(--muted);
+}
+
+.compute-summary-metrics strong {
+  font-size: 1.05rem;
+  margin-top: 2px;
+}
+
+.metric-breakdown-summary {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  margin: 10px 0;
+}
+
+.metric-breakdown-summary > div {
+  border-left: 3px solid var(--border);
+  min-width: 0;
+  padding-left: 8px;
+}
+
+.metric-breakdown-summary > .total {
+  border-left-color: var(--activity);
+}
+
+.metric-breakdown-summary span,
+.metric-breakdown-summary strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.metric-breakdown-summary span {
+  color: var(--muted);
+}
+
+.metric-breakdown-summary strong {
+  color: var(--fg);
+  margin-top: 2px;
+}
+
+.pe-overview-chart-legend {
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.pe-overview-chart-list {
+  display: grid;
+  gap: 3px;
+}
+
+.pe-overview-chart-row {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--fg);
+  cursor: pointer;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(90px, 150px) minmax(80px, 1fr) minmax(60px, auto);
+  min-height: 28px;
+  padding: 3px 5px;
+  text-align: left;
+  width: 100%;
+}
+
+.pe-overview-chart-row:hover {
+  background: var(--activity-soft);
+}
+
+.pe-overview-chart-row.selected {
+  outline: 2px solid Highlight;
+  outline-offset: 0;
+}
+
+.pe-overview-chart-row > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pe-overview-chart-row > strong {
+  text-align: right;
+}
+
+.pe-overview-chart-track,
+.selected-compute-track {
+  background: var(--border);
+  height: 9px;
+  position: relative;
+}
+
+.pe-overview-chart-fill,
+.selected-compute-track > div {
+  height: 100%;
+}
+
+.pe-overview-chart-fill {
+  background: var(--overview-colour, var(--activity));
+  position: absolute;
+  top: 0;
+}
+
+.pe-overview-chart-fill.negative {
+  background: var(--write);
+}
+
+.selected-compute-track > div {
+  background: var(--activity);
+}
+
+.pe-overview-chart-track > i,
+.selected-compute-track > i {
+  background: var(--fg);
+  height: 15px;
+  position: absolute;
+  top: -3px;
+  width: 1px;
+}
+
+.selected-compute {
+  display: grid;
+  gap: 7px;
+  margin: 12px 0;
+}
+
+.selected-compute > div:first-child {
+  display: flex;
+  justify-content: space-between;
+}
+
+.selected-compute > p {
+  color: var(--muted);
+}
+
+.panel-title-row label {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  gap: 6px;
+}
+
+.tensor-memory-controls {
+  margin-left: auto;
+  min-width: 0;
+}
+
+.pe-overview-controls,
+.pe-overview-mode {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pe-overview-controls {
+  margin-bottom: 10px;
+}
+
+.view-panel[data-view="pe-grid"] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.view-panel[data-view="pe-grid"] > .workspace-panel-bar,
+.view-panel[data-view="pe-grid"] > .panel-title-row {
+  flex: 0 0 auto;
+}
+
+.view-panel[data-view="pe-grid"] > .workspace-panel-bar {
+  position: relative;
+  top: auto;
+}
+
+.pe-overview-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.pe-overview-mode button {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 5px 9px;
+}
+
+.pe-overview-mode button[aria-pressed="true"] {
+  outline: 2px solid Highlight;
+  outline-offset: 1px;
+}
+
+
+.matrix-shell {
+  display: grid;
+  grid-template-columns: auto max-content;
+  gap: 4px;
+  align-items: stretch;
+  justify-content: start;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.pe-overview-legend {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+  max-width: 420px;
+}
+
+.pe-overview-legend-title,
+.pe-overview-legend-stats,
+.pe-overview-legend-scale {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pe-overview-legend-title span,
+.pe-overview-legend-title em,
+.pe-overview-legend-stats span,
+.pe-overview-legend-scale span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.pe-overview-legend-title em {
+  font-style: normal;
+  overflow-wrap: anywhere;
+}
+
+.pe-overview-legend-title span {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 6px;
+}
+
+.pe-overview-legend-stats,
+.pe-overview-legend-scale {
+  justify-content: space-between;
+}
+
+.pe-overview-legend-scale i {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--grid-colour) 10%, Canvas), var(--grid-colour));
+  height: 8px;
+  min-width: 90px;
+  flex: 1;
+}
+
+.pe-overview-legend-scale i.signed {
+  background: linear-gradient(90deg, var(--write), Canvas var(--zero-position), var(--grid-colour));
+}
+
+.pe-overview-legend-scale i.negative {
+  background: linear-gradient(90deg, var(--write), Canvas);
+}
+
+.pe-grid,
+.col-axis {
+  display: grid;
+  gap: 3px;
+  justify-content: start;
+}
+
+.row-axis {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  padding-right: 4px;
+}
+
+.row-axis span,
+.col-axis span {
+  min-width: 0;
+  font-size: 0.75rem;
+}
+
+.col-axis {
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.pe-cell {
+  aspect-ratio: 1 / 1;
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  width: clamp(14px, 3.8vw, 34px);
+}
+
+.pe {
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--grid-colour, var(--activity)) var(--intensity), Canvas);
+  color: var(--fg);
+  position: relative;
+}
+
+.pe::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  background: color-mix(in srgb, CanvasText var(--platform), transparent);
+}
+
+.pe-cell.multiple .pe::after {
+  inset: 1px;
+}
+
+.pe.empty {
+  background: transparent;
+}
+
+.pe.unavailable {
+  border-style: dashed;
+}
+
+.pe.selected {
+  outline: 2px solid Highlight;
+  outline-offset: 1px;
+}
+
+.selected-pe {
+  padding: 12px;
+}
+
+.selected-pe h2,
+.selected-tensor h2 {
+  margin-top: 0;
+}
+
+.pe-traffic {
+  align-items: center;
+  display: grid;
+  gap: 6px 8px;
+  grid-template-columns: max-content minmax(90px, 1fr) max-content;
+  margin-top: 12px;
+}
+
+.pe-traffic span {
+  color: var(--muted);
+}
+
+.pe-traffic strong {
+  font-size: 0.9rem;
+}
+
+.pe-traffic em {
+  color: var(--muted);
+  font-style: normal;
+  margin-left: 4px;
+}
+
+.breakdown,
+.overlay-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.pill {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: var(--activity-soft);
+}
+
+.traffic-track {
+  height: 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+.traffic-track div {
+  height: 100%;
+}
+
+.traffic-track.write div {
+  background: var(--write);
+}
+
+.traffic-track.read div {
+  background: var(--read);
+}
+
+.tensor-memory {
+  display: grid;
+  gap: 8px;
+  max-height: 460px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.memory-regions {
+  display: grid;
+  gap: 8px;
+  min-width: 520px;
+}
+
+.memory-region {
+  display: grid;
+  gap: 5px;
+}
+
+.memory-region-header,
+.memory-legend {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.memory-region-header strong,
+.memory-legend strong {
+  color: var(--fg);
+  font-weight: 400;
+}
+
+.memory-region-tensors {
+  display: grid;
+  gap: 3px;
+}
+
+.memory-tensor-row {
+  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(150px, 1.15fr) minmax(180px, 3fr) 118px;
+  gap: 8px;
+}
+
+.memory-tensor-label {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  min-width: 0;
+  overflow: hidden;
+  padding: 4px 7px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-tensor-track {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  height: 18px;
+  min-width: 0;
+  position: relative;
+}
+
+.memory-tensor-block {
+  background: color-mix(in srgb, CanvasText 10%, Canvas);
+  border: 1px solid color-mix(in srgb, CanvasText 42%, Canvas);
+  bottom: 2px;
+  color: var(--fg);
+  min-width: 3px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  text-align: left;
+  text-overflow: ellipsis;
+  top: 2px;
+  white-space: nowrap;
+}
+
+.memory-tensor-fill {
+  left: 0;
+  position: absolute;
+  right: auto;
+}
+
+.memory-tensor-fill.read {
+  background: var(--read);
+  height: 50%;
+  top: 0;
+  width: var(--read-share);
+}
+
+.memory-tensor-fill.write {
+  background: var(--write);
+  bottom: 0;
+  height: 50%;
+  width: var(--write-share);
+}
+
+.memory-tensor-row.selected .memory-tensor-label,
+.memory-tensor-row.selected .memory-tensor-track,
+.memory-tensor-block.selected {
+  outline: 2px solid Highlight;
+  outline-offset: 1px;
+}
+
+.memory-tensor-size {
+  color: var(--muted);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-gap-row {
+  align-items: center;
+  color: var(--muted);
+  display: grid;
+  grid-template-columns: minmax(36px, 1fr) max-content minmax(36px, 1fr);
+  gap: 8px;
+}
+
+.memory-gap-row::before,
+.memory-gap-row::after {
+  background: var(--border);
+  content: "";
+  height: 1px;
+}
+
+.memory-legend span {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+}
+
+.memory-legend i {
+  border: 1px solid var(--border);
+  display: inline-block;
+  height: 10px;
+  width: 18px;
+}
+
+.memory-legend i.tensor {
+  background: linear-gradient(to bottom, var(--read) 0 50%, var(--write) 50% 100%);
+}
+
+.memory-legend i.write {
+  background: var(--write);
+}
+
+.memory-legend i.read {
+  background: var(--read);
+}
+
+.memory-legend i.gap {
+  background: var(--border);
+  height: 2px;
+}
+
+.memory-summary,
+.memories-overview,
+.memory-detail {
+  display: grid;
+  gap: 10px;
+}
+
+.memories-overview-row span,
+.memories-overview-row em,
+.memory-detail-header span,
+.memory-detail-header strong,
+.memory-empty {
+  color: var(--muted);
+  font-style: normal;
+  font-weight: 400;
+}
+
+.memories-overview-row strong {
+  font-weight: 400;
+  min-width: 0;
+}
+
+.memories-overview-list,
+.memory-detail-list {
+  display: grid;
+  gap: 8px;
+}
+
+.memories-overview-row {
+  cursor: pointer;
+}
+
+.memories-overview-row:hover {
+  background: var(--panel);
+}
+
+.memories-overview-row.selected {
+  outline: 2px solid Highlight;
+  outline-offset: 1px;
+}
+
+.memory-comparison-metrics {
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  min-width: 420px;
+}
+
+.memory-detail-traffic-track i {
+  background: var(--fg);
+  height: 18px;
+  position: absolute;
+  top: -3px;
+  width: 1px;
+}
+
+.memory-detail-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.memory-detail-header {
+  align-items: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  justify-content: space-between;
+}
+
+.memory-detail-header h3 {
+  font-size: 1rem;
+  font-weight: 400;
+  margin: 0 0 2px;
+}
+
+.memory-detail-meter {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  height: 12px;
+  overflow: hidden;
+}
+
+.memory-detail-meter div {
+  background: var(--activity);
+  height: 100%;
+}
+
+.memory-detail-traffic {
+  display: grid;
+  gap: 8px;
+}
+
+.memory-detail-traffic-row {
+  align-items: center;
+  display: grid;
+  gap: 3px 8px;
+  grid-template-columns: 66px minmax(110px, 1fr) 92px;
+}
+
+.memory-detail-traffic-row > strong {
+  font-weight: 400;
+  text-align: right;
+}
+
+.memory-detail-traffic-row > em {
+  color: var(--muted);
+  font-style: normal;
+  grid-column: 2 / -1;
+}
+
+.memory-detail-traffic-track {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  height: 12px;
+  overflow: hidden;
+  position: relative;
+}
+
+.memory-detail-traffic-track > div {
+  height: 100%;
+}
+
+.memory-detail-traffic-track.read > div {
+  background: var(--read);
+}
+
+.memory-detail-traffic-track.write > div {
+  background: var(--write);
+}
+
+.memory-detail-layout {
+  display: grid;
+  gap: 3px;
+  max-height: 260px;
+  min-width: 520px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.memory-empty {
+  margin: 0;
+}
+
+/* Retained for older generated bundles that may load newer CSS. */
+.tensor-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 7px;
+}
+
+.tensor-track {
+  position: relative;
+  height: 17px;
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+.tensor-mark {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  min-width: 4px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--activity) 75%, CanvasText);
+  background: var(--activity);
+}
+
+.tensor-size {
+  color: var(--muted);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.selected-tensor {
+  padding: 12px;
+}
+
+.tensor-byte-summary {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.tensor-byte-row {
+  display: grid;
+  grid-template-columns: 92px minmax(120px, 1fr) 86px 52px;
+  gap: 8px;
+  align-items: center;
+}
+
+.tensor-byte-row span,
+.tensor-byte-row em {
+  color: var(--muted);
+  font-style: normal;
+}
+
+.tensor-byte-row strong {
+  font-weight: 400;
+  text-align: right;
+}
+
+.tensor-byte-track {
+  height: 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+.tensor-byte-fill {
+  height: 100%;
+  background: var(--activity);
+}
+
+.tensor-byte-fill.write {
+  background: var(--write);
+}
+
+.tensor-byte-fill.read {
+  background: var(--read);
+}
+
+.warnings {
+  margin-top: 12px;
+  padding: 10px;
+  background: var(--warn);
+}
+
+.warnings:empty {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  main {
+    width: min(100vw - 18px, 1180px);
+  }
+
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .filter-picker {
+    width: 100%;
+  }
+
+  .pe-filter-options {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .tensor-filter-options {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .view-controls,
+  .layout-auto,
+  .layout-two,
+  .layout-three {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .views > .view-panel {
+    grid-column: 1 / -1 !important;
+  }
+
+  .memory-tensor-row {
+    grid-template-columns: minmax(120px, 1fr) minmax(120px, 1.3fr) 92px;
+  }
+
+  .memory-detail-layout {
+    min-width: 360px;
+  }
+
+  .tensor-byte-row {
+    grid-template-columns: 78px minmax(90px, 1fr) 74px 42px;
+  }
+
+  .pe-grid,
+  .col-axis,
+  .row-axis {
+    gap: 2px;
+  }
+}
