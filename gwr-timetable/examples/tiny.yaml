@@ -52,7 +52,7 @@ nodes:
   - id: tensor_E
     kind: tensor
     config:
-      addr: 0x1_3000_0000
+      addr: 0x1_4000_0000
       dtype: fp32
       shape: [3, 224, 224]
 

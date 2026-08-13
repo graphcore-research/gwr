@@ -2,7 +2,7 @@
 
 //! Types that map directly to the YAML file contents
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::rc::Rc;
 
@@ -32,41 +32,41 @@ impl TimetableFile {
             .map_err(|e| SimError(format!("serde_yaml::from_str failed: {e}")))
     }
 
-    pub fn validate(&self, platform: &Rc<Platform>) -> SimResult {
+    pub(crate) fn validate_structure(&self) -> SimResult {
         let mut errors = Vec::new();
-
-        // Iterate over nodes and build up set of all Node IDs whilst
-        // also checking that any defined PE IDs are valid
-        let mut node_ids = HashSet::new();
+        let mut nodes_by_id = HashMap::new();
         for node in &self.nodes {
-            let (id, pe) = node.id_pe();
-
-            if !node_ids.insert(id.to_string()) {
+            let id = node.id();
+            if nodes_by_id.insert(id.to_string(), node).is_some() {
                 errors.push(format!("Duplicate Node ID '{id}'"));
-            }
-
-            if let Some(node_pe_id) = &pe
-                && platform.pe_idx_from_name(node_pe_id).is_err()
-            {
-                errors.push(format!("Node '{id}' contains invalid PE ID '{node_pe_id}'"));
             }
         }
 
-        // Ensure that all node IDs on edges are valid
+        let mut connected_inputs = HashMap::new();
+        let mut connected_outputs = HashMap::new();
+        let endpoint_counts = data_endpoint_counts(&self.edges);
         for edge in &self.edges {
-            let from_id = edge.from_node_id();
-            let to_id = edge.to_node_id();
-
-            if !node_ids.contains(from_id) {
-                errors.push(format!(
-                    "Edge contains invalid from Node ID '{}'",
-                    edge.from
-                ));
-            }
-
-            if !node_ids.contains(to_id) {
-                errors.push(format!("Edge contains invalid to Node ID '{}'", edge.to));
-            }
+            let track_port = matches!(&edge.kind, EdgeKind::Data);
+            validate_edge_end(
+                &edge.from,
+                "from",
+                "output",
+                track_port,
+                &nodes_by_id,
+                &endpoint_counts,
+                &mut connected_outputs,
+                &mut errors,
+            );
+            validate_edge_end(
+                &edge.to,
+                "to",
+                "input",
+                track_port,
+                &nodes_by_id,
+                &endpoint_counts,
+                &mut connected_inputs,
+                &mut errors,
+            );
         }
 
         // TODO:
@@ -76,6 +76,122 @@ impl TimetableFile {
             return sim_error!("Failed to validate graph:\n{}", errors.join("\n"));
         }
         Ok(())
+    }
+
+    /// Validate graph structure, node connections, and tensor views.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when node IDs, edge endpoints, connections, or tensor
+    /// views are invalid.
+    pub fn validate(&self) -> SimResult {
+        crate::validation::validate_file(self)
+    }
+
+    pub(crate) fn validate_platform_references(&self, platform: &Rc<Platform>) -> SimResult {
+        let errors = self
+            .nodes
+            .iter()
+            .filter_map(|node| {
+                let (id, pe) = node.id_pe();
+                let pe = pe.as_ref()?;
+                platform
+                    .pe_idx_from_name(pe)
+                    .is_err()
+                    .then(|| format!("Node '{id}' contains invalid PE ID '{pe}'"))
+            })
+            .collect::<Vec<_>>();
+        if !errors.is_empty() {
+            return sim_error!("Failed to validate graph:\n{}", errors.join("\n"));
+        }
+        Ok(())
+    }
+}
+
+#[expect(clippy::too_many_arguments)]
+fn validate_edge_end(
+    endpoint: &str,
+    direction: &str,
+    port_kind: &str,
+    track_port: bool,
+    nodes_by_id: &HashMap<String, &NodeSection>,
+    endpoint_counts: &HashMap<(String, &'static str), usize>,
+    connected_ports: &mut HashMap<String, HashSet<usize>>,
+    errors: &mut Vec<String>,
+) {
+    let Ok((node_id, port)) = parse_edge_end(endpoint).inspect_err(|error| {
+        errors.push(error.to_string());
+    }) else {
+        return;
+    };
+    let Some(node) = nodes_by_id.get(node_id) else {
+        errors.push(format!(
+            "Edge contains invalid {direction} Node ID '{endpoint}'"
+        ));
+        return;
+    };
+    if !track_port {
+        return;
+    }
+    let port_count = node_port_count(node, node_id, port_kind, endpoint_counts);
+    let ports = connected_ports.entry(node_id.to_string()).or_default();
+    let port = match port {
+        Some(port) => port,
+        None => next_implicit_port(ports, port_count),
+    };
+    if let Some(limit) = port_count
+        && port >= limit
+    {
+        errors.push(format!(
+            "Node '{node_id}' {port_kind} edge index {port} is out of range for {limit} declared {port_kind} ports"
+        ));
+        return;
+    }
+    if ports.contains(&port) {
+        errors.push(format!(
+            "Node '{node_id}' {port_kind} edge index {port} is connected more than once"
+        ));
+    } else {
+        ports.insert(port);
+    }
+}
+
+fn next_implicit_port(ports: &HashSet<usize>, port_count: Option<usize>) -> usize {
+    let limit = port_count.unwrap_or_else(|| ports.len().saturating_add(1));
+    (0..limit)
+        .find(|candidate| !ports.contains(candidate))
+        .unwrap_or(limit)
+}
+
+fn data_endpoint_counts(edges: &[EdgeSection]) -> HashMap<(String, &'static str), usize> {
+    let mut counts = HashMap::new();
+    for edge in edges {
+        if !matches!(&edge.kind, EdgeKind::Data) {
+            continue;
+        }
+        if let Ok((node_id, _)) = edge.from_node_and_edge() {
+            *counts.entry((node_id.to_string(), "output")).or_default() += 1;
+        }
+        if let Ok((node_id, _)) = edge.to_node_and_edge() {
+            *counts.entry((node_id.to_string(), "input")).or_default() += 1;
+        }
+    }
+    counts
+}
+
+fn node_port_count(
+    node: &NodeSection,
+    node_id: &str,
+    port_kind: &str,
+    endpoint_counts: &HashMap<(String, &'static str), usize>,
+) -> Option<usize> {
+    match (node, port_kind) {
+        (NodeSection::Compute { input_views, .. }, "input") => Some(input_views.len()),
+        (NodeSection::Compute { output_views, .. }, "output") => Some(output_views.len()),
+        (NodeSection::Tensor { .. }, _) => None,
+        _ => endpoint_counts
+            .get(&(node_id.to_string(), port_kind))
+            .copied(),
     }
 }
 
@@ -273,15 +389,14 @@ impl EdgeSection {
 /// Some(1) as the edge index into that node.
 fn parse_edge_end(id: &str) -> Result<(&str, Option<usize>), SimError> {
     let parts: Vec<&str> = id.split('.').collect();
-    if parts.len() == 2 {
-        let index = match parts[1].parse::<usize>() {
-            Ok(index) => Some(index),
-            Err(e) => {
-                return sim_error!("Unable to parse edge id '{id}'\n{e}");
-            }
-        };
-        Ok((parts[0], index))
-    } else {
-        Ok((parts[0], None))
+    match parts.as_slice() {
+        [node_id] => Ok((node_id, None)),
+        [node_id, edge_id] => {
+            let index = edge_id
+                .parse::<usize>()
+                .map_err(|error| SimError(format!("Unable to parse edge id '{id}'\n{error}")))?;
+            Ok((node_id, Some(index)))
+        }
+        _ => sim_error!("Unable to parse edge id '{id}'"),
     }
 }
