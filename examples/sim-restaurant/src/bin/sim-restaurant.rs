@@ -5,6 +5,7 @@
 //! See `lib.rs` for details.
 
 use clap::{CommandFactory, Parser};
+use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
 use gwr_track::builder::{TrackerArgs, setup_trackers};
 use gwr_track::tracker::dev_null_tracker;
@@ -50,22 +51,18 @@ impl CliArgs {
         let max_kitchen_staff = long_arg_name(&command, "max_kitchen_staff");
 
         if self.min_till_staff > self.max_till_staff {
-            return Err(SimError(format!(
-                "`{min_till_staff}` must be <= `{max_till_staff}`"
-            )));
+            return sim_error!("`{min_till_staff}` must be <= `{max_till_staff}`");
         }
         if self.min_kitchen_staff > self.max_kitchen_staff {
-            return Err(SimError(format!(
-                "`{min_kitchen_staff}` must be <= `{max_kitchen_staff}`"
-            )));
+            return sim_error!("`{min_kitchen_staff}` must be <= `{max_kitchen_staff}`");
         }
         if self.tracking_requested()
             && (self.min_till_staff != self.max_till_staff
                 || self.min_kitchen_staff != self.max_kitchen_staff)
         {
-            return Err(SimError(format!(
+            return sim_error!(
                 "tracking output requires exactly one staffing configuration; set `{min_till_staff}` equal to `{max_till_staff}` and `{min_kitchen_staff}` equal to `{max_kitchen_staff}`"
-            )));
+            );
         }
         RestaurantConfig::from(self.sim.clone()).validate()
     }
