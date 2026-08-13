@@ -318,6 +318,28 @@ impl TensorView {
         (num_bits * num_elements).div_ceil(8)
     }
 
+    /// Return the physical byte range touched by this view, relative to the
+    /// tensor's base address.
+    pub fn byte_range(&self) -> Result<std::ops::Range<usize>, SimError> {
+        let bits_per_element = self.tensor.dtype().num_bits();
+        let start_bit = self
+            .element_offset()?
+            .checked_mul(bits_per_element)
+            .ok_or_else(|| SimError("Tensor view start offset overflows".to_string()))?;
+        let num_bits = self
+            .num_elements()
+            .checked_mul(bits_per_element)
+            .ok_or_else(|| SimError("Tensor view size overflows".to_string()))?;
+        let start_byte = start_bit / 8;
+        if num_bits == 0 {
+            return Ok(start_byte..start_byte);
+        }
+        let end_bit = start_bit
+            .checked_add(num_bits)
+            .ok_or_else(|| SimError("Tensor view end offset overflows".to_string()))?;
+        Ok(start_byte..end_bit.div_ceil(8))
+    }
+
     /// Return the offset of the first element (in number of elements)
     pub fn element_offset(&self) -> Result<usize, SimError> {
         let shape = &self.tensor.shape.0;
