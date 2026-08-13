@@ -31,6 +31,7 @@ use crate::types::PlatformConfig;
 pub mod builder;
 mod connect;
 pub mod types;
+mod validation;
 pub mod yaml;
 
 type ProcessingElements = Vec<Rc<ProcessingElement>>;
@@ -83,6 +84,7 @@ impl Platform {
     }
 
     fn build(engine: &Engine, clock: &Clock, cfg: &PlatformConfig) -> Result<Self, SimError> {
+        cfg.validate()?;
         let device_ids = assign_device_ids(cfg)?;
 
         let top = engine.top();
