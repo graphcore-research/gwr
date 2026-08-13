@@ -37,7 +37,8 @@ use types::Node;
 
 use crate::mermaid::{MermaidNodeStatus, render_mermaid_from_parts};
 use crate::timetable_file::{
-    EdgeSection, MemoryConfigSection, TensorConfigSection, TensorViewSection, dtype_num_bytes,
+    EdgeSection, MemoryConfigSection, TensorConfigSection, TensorViewSection,
+    checked_dtype_byte_range,
 };
 
 fn validate_access_in_range(
@@ -546,16 +547,29 @@ impl Timetable {
         &self,
         memory_node: &Node,
         config: &MemoryConfigSection,
-    ) -> (u64, usize) {
-        // Note we assume that the graph has been validated so that we can simply unwrap
-        // the result
-        let tensor_config = self.get_tensor_node_config(memory_node).unwrap();
-        let offset_num_elements = tensor_view_offset(tensor_config, config.view.as_ref());
-        let view_num_elements = tensor_view_num_elements(tensor_config, config.view.as_ref());
-        let address =
-            tensor_config.addr + dtype_num_bytes(&tensor_config.dtype, offset_num_elements) as u64;
-        let num_bytes = dtype_num_bytes(&tensor_config.dtype, view_num_elements);
-        (address, num_bytes)
+    ) -> Result<(u64, usize), SimError> {
+        let node_id = memory_node.node_section.id();
+        let Some(tensor_config) = self.get_tensor_node_config(memory_node) else {
+            return sim_error!("Memory node '{node_id}' is not connected to a Tensor node");
+        };
+        let offset = u64::try_from(tensor_view_offset(tensor_config, config.view.as_ref()))
+            .map_err(|error| SimError(format!("Memory node '{node_id}' view offset: {error}")))?;
+        let num_elements = u64::try_from(tensor_view_num_elements(
+            tensor_config,
+            config.view.as_ref(),
+        ))
+        .map_err(|error| SimError(format!("Memory node '{node_id}' view size: {error}")))?;
+        let byte_range = checked_dtype_byte_range(&tensor_config.dtype, offset, num_elements)
+            .ok_or_else(|| {
+                SimError(format!("Memory node '{node_id}' view byte range overflows"))
+            })?;
+        let address = tensor_config
+            .addr
+            .checked_add(byte_range.start)
+            .ok_or_else(|| SimError(format!("Memory node '{node_id}' address overflows")))?;
+        let num_bytes = usize::try_from(byte_range.end - byte_range.start)
+            .map_err(|error| SimError(format!("Memory node '{node_id}' byte size: {error}")))?;
+        Ok((address, num_bytes))
     }
 
     pub fn get_input_output_tensors(&self, node_idx: usize) -> Result<InOutTensorViews, SimError> {
@@ -640,7 +654,7 @@ impl Timetable {
         for (idx, node) in self.nodes.iter().enumerate() {
             match &node.node_section {
                 NodeSection::Memory { op, config, .. } => {
-                    let (_, num_bytes) = self.memory_access_address_num_bytes(node, config);
+                    let (_, num_bytes) = self.memory_access_address_num_bytes(node, config)?;
                     match op {
                         MemoryOp::Load => total_load_bytes += num_bytes,
                         MemoryOp::Store => total_store_bytes += num_bytes,
@@ -754,7 +768,7 @@ impl Dispatch for Timetable {
                 Ok(build_compute_task(id, op.clone(), inputs, outputs))
             }
             NodeSection::Memory { id, op, config, .. } => {
-                let (address, num_bytes) = self.memory_access_address_num_bytes(node, config);
+                let (address, num_bytes) = self.memory_access_address_num_bytes(node, config)?;
                 Ok(build_memory_task(id, *op, address, num_bytes))
             }
             NodeSection::Tensor { .. } => {

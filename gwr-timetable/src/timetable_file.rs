@@ -132,6 +132,35 @@ pub fn dtype_num_bytes(dtype: &DataType, num_elements: usize) -> usize {
     (dtype.num_bits() * num_elements).div_ceil(8)
 }
 
+/// Return the physical byte range touched by a contiguous view of
+/// `num_elements` elements starting at `element_offset`.
+#[must_use]
+pub fn checked_dtype_byte_range(
+    dtype: &DataType,
+    element_offset: u64,
+    num_elements: u64,
+) -> Option<std::ops::Range<u64>> {
+    let bits_per_element = u64::try_from(dtype.num_bits()).ok()?;
+    let start_bit = element_offset.checked_mul(bits_per_element)?;
+    let num_bits = num_elements.checked_mul(bits_per_element)?;
+    let start_byte = start_bit / 8;
+    if num_bits == 0 {
+        return Some(start_byte..start_byte);
+    }
+    let end_bit = start_bit.checked_add(num_bits)?;
+    Some(start_byte..end_bit.div_ceil(8))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_element_byte_range_is_empty_at_starting_byte() {
+        assert_eq!(checked_dtype_byte_range(&DataType::Int4, 1, 0), Some(0..0));
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TensorConfigSection {

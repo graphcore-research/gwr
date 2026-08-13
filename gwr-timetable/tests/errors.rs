@@ -6,7 +6,7 @@ use std::vec;
 use gwr_engine::test_helpers::start_test;
 use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::operators::dtype::DataType;
-use gwr_models::processing_element::task::MemoryOp;
+use gwr_models::processing_element::task::{MemoryOp, Task};
 use gwr_platform::Platform;
 use gwr_timetable::Timetable;
 use gwr_timetable::timetable_file::{
@@ -288,6 +288,37 @@ fn invalid_to_edge_pe() {
 
     let err = Timetable::new(&top, timetable_file, &platform).unwrap_err();
     assert!(format!("{err}").contains("Edge contains invalid to Node ID 'node2'"));
+}
+
+#[test]
+fn sub_byte_memory_views_use_physical_byte_range() {
+    let (top, platform, _) = create_default_timetable_file();
+    let timetable_file = TimetableFile::from_string(
+        r"
+nodes:
+  - id: tensor0
+    kind: tensor
+    config: { addr: 0x1000, dtype: int4, shape: [4] }
+  - id: load0
+    kind: memory
+    op: load
+    pe: pe0
+    config:
+      view:
+        offsets: [1]
+        shape: [2]
+edges:
+  - { from: tensor0, to: load0, kind: data }
+",
+    )
+    .unwrap();
+
+    let timetable = Timetable::new(&top, timetable_file, &platform).unwrap();
+    let Task::MemoryTask { config } = timetable.task_by_id(1).unwrap() else {
+        panic!("load0 should produce a memory task");
+    };
+    assert_eq!(config.addr, 0x1000);
+    assert_eq!(config.num_bytes, 2);
 }
 
 #[test]
