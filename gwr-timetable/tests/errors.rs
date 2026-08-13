@@ -93,6 +93,65 @@ fn timetable_file() {
 }
 
 #[test]
+fn control_edges_are_ignored_by_scheduler() {
+    let (top, platform, mut timetable_file) = create_default_timetable_file();
+    timetable_file.edges.push(EdgeSection {
+        from: "load0".to_string(),
+        to: "load1".to_string(),
+        kind: EdgeKind::Control,
+    });
+
+    let timetable = Timetable::new(&top, timetable_file, &platform).unwrap();
+    assert_eq!(timetable.ready_task_indices("pe0").unwrap().1, vec![1, 2]);
+
+    timetable.set_task_completed(1).unwrap();
+    assert_eq!(timetable.ready_task_indices("pe0").unwrap().1, vec![2]);
+}
+
+#[test]
+fn control_edges_ignore_data_port_suffixes() {
+    let (top, platform, mut timetable_file) = create_default_timetable_file();
+    timetable_file.edges.push(EdgeSection {
+        from: "load0.99".to_string(),
+        to: "load1.99".to_string(),
+        kind: EdgeKind::Control,
+    });
+
+    Timetable::new(&top, timetable_file, &platform).unwrap();
+}
+
+#[test]
+fn control_edges_through_tensors_are_ignored_by_scheduler() {
+    let (top, platform, mut timetable_file) = create_default_timetable_file();
+    timetable_file.nodes.push(NodeSection::Tensor {
+        id: "gate".to_string(),
+        config: TensorConfigSection {
+            addr: 0,
+            dtype: DataType::Fp32,
+            shape: vec![1],
+        },
+    });
+    timetable_file.edges.extend([
+        EdgeSection {
+            from: "load0".to_string(),
+            to: "gate".to_string(),
+            kind: EdgeKind::Control,
+        },
+        EdgeSection {
+            from: "gate".to_string(),
+            to: "load1".to_string(),
+            kind: EdgeKind::Control,
+        },
+    ]);
+
+    let timetable = Timetable::new(&top, timetable_file, &platform).unwrap();
+    assert_eq!(timetable.ready_task_indices("pe0").unwrap().1, vec![1, 2]);
+
+    timetable.set_task_completed(1).unwrap();
+    assert_eq!(timetable.ready_task_indices("pe0").unwrap().1, vec![2]);
+}
+
+#[test]
 fn timetable_rejects_unknown_top_level_field() {
     let err = TimetableFile::from_string(
         "
@@ -188,6 +247,33 @@ fn load_not_connected_to_tensor() {
 }
 
 #[test]
+fn load_with_data_output_is_rejected() {
+    let (top, platform, _) = create_default_timetable_file();
+    let timetable_file = TimetableFile::from_string(
+        r"
+nodes:
+  - id: input
+    kind: tensor
+    config: { addr: 0, dtype: fp32, shape: [1] }
+  - id: load
+    kind: memory
+    op: load
+    config: {}
+  - id: output
+    kind: tensor
+    config: { addr: 4, dtype: fp32, shape: [1] }
+edges:
+  - { from: input, to: load, kind: data }
+  - { from: load, to: output, kind: data }
+",
+    )
+    .unwrap();
+
+    let err = Timetable::new(&top, timetable_file, &platform).unwrap_err();
+    assert!(format!("{err}").contains("1 data edges connect from Load node 'load'"));
+}
+
+#[test]
 fn store_not_connected_to_tensor() {
     let (top, platform, mut timetable_file) = create_default_timetable_file();
     timetable_file.nodes.push(NodeSection::Memory {
@@ -250,7 +336,7 @@ fn store_outside_tensor() {
     timetable_file.edges.push(EdgeSection {
         from: "load0".to_string(),
         to: "store0".to_string(),
-        kind: EdgeKind::Data,
+        kind: EdgeKind::Control,
     });
     timetable_file.edges.push(EdgeSection {
         from: "store0".to_string(),
