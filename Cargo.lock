@@ -1437,6 +1437,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "gwr-visualisation"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "gwr-models",
+ "gwr-platform",
+ "gwr-timetable",
+ "same-file",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+]
+
+[[package]]
 name = "h2"
 version = "0.4.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
