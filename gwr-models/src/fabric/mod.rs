@@ -24,7 +24,7 @@ where
     fn col_row_port_to_fabric_port_index(&self, col: usize, row: usize, port: usize) -> usize;
 }
 
-pub enum RoutingAlgoritm {
+pub enum RoutingAlgorithm {
     ColumnFirst,
     RowFirst,
 }
