@@ -1,0 +1,23 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+description: Run a fuzz target with sensible defaults
+arguments:
+  - name: TARGET
+    default: engine_run_until
+    comment: Fuzz target to run.
+  - name: MAX_TOTAL_TIME
+    default: "300"
+    comment: Maximum run time in seconds.
+  - name: MAX_LEN
+    default: "32"
+    comment: Maximum fuzz input length in bytes.
+  - name: TIMEOUT
+    default: "5"
+    comment: Per-input timeout in seconds.
+ingredients:
+  - comment: Run the fuzz target.
+    command: |-
+      cargo +nightly fuzz run "$TARGET" -- \
+        -max_total_time="$MAX_TOTAL_TIME" \
+        -max_len="$MAX_LEN" \
+        -timeout="$TIMEOUT"

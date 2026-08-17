@@ -1,0 +1,27 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+name: Install nightly tools
+description: Install the nightly Rust toolchain and tools that require it
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v5
+      with:
+        path: |
+          ~/.cargo/.crates.toml
+          ~/.cargo/.crates2.json
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+        key: ${{ runner.os }}-cargo-nightly-tools-${{ hashFiles('./.github/actions/install-nightly-tools/**') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-nightly-tools-
+          ${{ runner.os }}-cargo-dev-deps-
+          ${{ runner.os }}-cargo-build-deps-
+
+    - name: Run install.sh
+      id: run-install
+      run: ./.github/actions/install-nightly-tools/install.sh
+      shell: bash
