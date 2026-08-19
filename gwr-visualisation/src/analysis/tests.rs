@@ -4,11 +4,11 @@ use std::fs;
 
 use super::*;
 use crate::analysis::memory::summarize_memory;
-use crate::analysis::model::{
+use crate::analysis::tensors::summarize_tensor_traffic;
+use crate::model::{
     OverlayMetricMetadata, TensorPeConsumption, TensorSummary, TensorTrafficAccess,
     TensorTrafficRange,
 };
-use crate::analysis::tensors::summarize_tensor_traffic;
 
 fn small_timetable() -> TimetableFile {
     TimetableFile::from_file(Path::new("../gwr-timetable/examples/small.yaml")).unwrap()
@@ -36,7 +36,7 @@ fn tensor_traffic_summary_saturates_connection_totals() {
             addr: 0,
             num_bytes: u64::MAX,
             dtype: "int8".to_string(),
-            shape: vec![usize::MAX],
+            shape: vec![u64::MAX],
             production_by_pe: vec![
                 tensor_traffic("pe0", 0, u64::MAX - 1),
                 tensor_traffic("pe1", 0, 2),
@@ -70,7 +70,7 @@ fn memory_summary_saturates_connection_and_memory_totals() {
             addr: 0,
             num_bytes: u64::MAX,
             dtype: "int8".to_string(),
-            shape: vec![usize::MAX],
+            shape: vec![u64::MAX],
             production_by_pe: vec![
                 tensor_traffic("pe0", 0, u64::MAX - 1),
                 tensor_traffic("pe1", 0, 2),
@@ -632,7 +632,7 @@ processing_elements:
     let summary = summarize_platform(&platform);
 
     assert_eq!(summary.rows, 1);
-    assert_eq!(summary.cols, usize::MAX);
+    assert_eq!(summary.cols, u64::MAX);
 }
 
 #[test]

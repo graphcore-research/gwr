@@ -11,6 +11,7 @@ repo = "builtin"
 
 [[repos.hooks]]
 id = "check-added-large-files"
+exclude = "^gwr-visualisation/assets/generated/gwr_visualisation_bg\\.wasm$"
 priority = 5
 
 [[repos.hooks]]
@@ -65,7 +66,8 @@ exclude = '''
   d3.*.js|
   jquery.*.js|
   .*\.png|
-  .*\.json
+  .*\.json|
+  ^gwr-visualisation/assets/generated/.*
 )
 '''
 priority = 5
@@ -114,6 +116,7 @@ description = "format JavaScript files"
 language = "system"
 types = ["javascript"]
 entry = "npx prettier --write"
+exclude = "^gwr-visualisation/assets/generated/"
 priority = 0
 
 [[repos.hooks]]
@@ -124,6 +127,7 @@ language = "system"
 types = ["javascript"]
 entry = "npx eslint --max-warnings 0"
 pass_filenames = false
+exclude = "^gwr-visualisation/assets/generated/"
 priority = 1
 
 [[repos.hooks]]

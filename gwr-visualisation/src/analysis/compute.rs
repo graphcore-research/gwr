@@ -10,16 +10,18 @@ use gwr_timetable::timetable_file::{
 };
 
 use super::graph::{is_data_edge, layer_name};
-use super::model::{LayerPeSummary, LayerSummary, MachineOpSummary, PeSummary, TensorSummary};
 use super::{TensorViewSlots, TimetableIndex, tensor_view_bytes};
+use crate::model::{
+    LayerPeSummary, LayerSummary, MachineOpSummary, PeSummary, TensorSummary, u64_from_usize,
+};
 
 #[derive(Default)]
 struct LayerBuilder {
-    compute_nodes: usize,
+    compute_nodes: u64,
     machine_ops: MachineOpSummary,
     tensor_read_bytes: u64,
     tensor_write_bytes: u64,
-    by_op: BTreeMap<String, usize>,
+    by_op: BTreeMap<String, u64>,
     pes: BTreeMap<String, LayerPeSummary>,
     tensors: BTreeSet<String>,
     pe_tensors: BTreeMap<String, BTreeSet<String>>,
@@ -244,13 +246,16 @@ fn build_layer_summaries(builders: BTreeMap<usize, LayerBuilder>) -> Vec<LayerSu
         .map(|(layer, builder)| {
             let mut pes = builder.pes;
             for pe in pes.values_mut() {
-                pe.tensor_count = builder.pe_tensors.get(&pe.name).map_or(0, BTreeSet::len);
+                pe.tensor_count = builder
+                    .pe_tensors
+                    .get(&pe.name)
+                    .map_or(0, |tensors| u64_from_usize(tensors.len()));
             }
             LayerSummary {
                 name: layer_name(layer),
                 compute_nodes: builder.compute_nodes,
                 machine_ops: builder.machine_ops,
-                tensor_count: builder.tensors.len(),
+                tensor_count: u64_from_usize(builder.tensors.len()),
                 tensor_read_bytes: builder.tensor_read_bytes,
                 tensor_write_bytes: builder.tensor_write_bytes,
                 by_op: builder.by_op,

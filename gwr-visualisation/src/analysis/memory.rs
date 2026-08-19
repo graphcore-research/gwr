@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 
 use gwr_platform::types::{MemorySection, PlatformConfig};
 
-use super::model::{MemoryDeviceSummary, MemorySummary, TensorPeConsumption, TensorSummary};
+use crate::model::{
+    MemoryDeviceSummary, MemorySummary, TensorPeConsumption, TensorSummary, u64_from_usize,
+};
 
 pub(super) fn summarize_memory(
     tensors_by_id: &BTreeMap<String, TensorSummary>,
@@ -88,7 +90,7 @@ fn summarize_memory_device(
         allocated_bytes: union_bytes(allocation_ranges),
         read_bytes,
         write_bytes,
-        tensor_count: tensor_ids.len(),
+        tensor_count: u64_from_usize(tensor_ids.len()),
         tensors: tensor_ids,
     }
 }

@@ -1,6 +1,11 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+use std::io::Read;
 use std::process::Command;
+
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use flate2::read::GzDecoder;
 
 struct GeneratedReport {
     temp: tempfile::TempDir,
@@ -56,7 +61,7 @@ fn cli_writes_static_bundle() {
 }
 
 #[test]
-fn data_script_preserves_a_proto_overlay_key_as_an_own_property() {
+fn compressed_payload_preserves_a_proto_overlay_key() {
     let temp = tempfile::tempdir().unwrap();
     let overlay = temp.path().join("overlay.json");
     std::fs::write(
@@ -83,25 +88,14 @@ fn data_script_preserves_a_proto_overlay_key_as_an_own_property() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let data_script = temp.path().join("data.js");
-    let output = Command::new("node")
-        .arg("-e")
-        .arg(
-            r#"const fs = require("node:fs");
-const vm = require("node:vm");
-const context = { window: {} };
-vm.runInNewContext(fs.readFileSync(process.argv[1], "utf8"), context);
-if (!Object.hasOwn(context.window.GWR_VISUALISATION_DATA.overlay_metrics, "__proto__")) {
-  process.exit(1);
-}"#,
-        )
-        .arg(&data_script)
-        .output()
-        .unwrap();
+    let payload = std::fs::read_to_string(temp.path().join("payload.js")).unwrap();
+    let compressed_data = BASE64.decode(payload_value(&payload, "data")).unwrap();
+    let data = decompress_json(&compressed_data);
     assert!(
-        output.status.success(),
-        "data script did not preserve __proto__ as an own property: {}",
-        String::from_utf8_lossy(&output.stderr)
+        data["overlay_metrics"]
+            .as_object()
+            .unwrap()
+            .contains_key("__proto__")
     );
 }
 
@@ -152,7 +146,7 @@ fn cli_rejects_hard_links_between_output_files() {
     let output_dir = temp.path().join("report");
     std::fs::create_dir(&output_dir).unwrap();
     let first_output = output_dir.join("index.html");
-    let second_output = output_dir.join("data.js");
+    let second_output = output_dir.join("payload.js");
     let contents = "existing report";
     std::fs::write(&first_output, contents).unwrap();
     std::fs::hard_link(&first_output, &second_output).unwrap();
@@ -167,7 +161,7 @@ fn cli_rejects_symlinks_between_output_files() {
     let output_dir = temp.path().join("report");
     std::fs::create_dir(&output_dir).unwrap();
     let first_output = output_dir.join("index.html");
-    let second_output = output_dir.join("data.js");
+    let second_output = output_dir.join("payload.js");
     let contents = "existing report";
     std::fs::write(&first_output, contents).unwrap();
     std::os::unix::fs::symlink(&first_output, &second_output).unwrap();
@@ -182,8 +176,8 @@ fn cli_rejects_dangling_symlinks_between_output_files() {
     let output_dir = temp.path().join("report");
     std::fs::create_dir(&output_dir).unwrap();
     let first_output = output_dir.join("index.html");
-    let second_output = output_dir.join("data.js");
-    std::os::unix::fs::symlink("data.js", &first_output).unwrap();
+    let second_output = output_dir.join("payload.js");
+    std::os::unix::fs::symlink("payload.js", &first_output).unwrap();
     let existing_output = output_dir.join("style.css");
     let existing_contents = "existing report";
     std::fs::write(&existing_output, existing_contents).unwrap();
@@ -199,7 +193,7 @@ fn cli_rejects_dangling_symlinks_between_output_files() {
     assert!(!output.status.success());
     assert_eq!(
         std::fs::read_link(&first_output).unwrap(),
-        std::path::Path::new("data.js")
+        std::path::Path::new("payload.js")
     );
     assert!(!second_output.exists());
     assert_eq!(
@@ -488,7 +482,32 @@ edges:
 }
 
 fn assert_script_bundle(report: &GeneratedReport) {
-    let scripts = [
+    let scripts = ["payload.js", "gwr_visualisation.js", "bootstrap.js"];
+    let mut previous_position = 0;
+    for script in scripts {
+        let contents = report.asset(script);
+        assert!(!contents.is_empty());
+        let position = report
+            .index_html
+            .find(script)
+            .unwrap_or_else(|| panic!("{script} missing from index.html"));
+        assert!(
+            position >= previous_position,
+            "{script} is loaded out of dependency order"
+        );
+        previous_position = position;
+    }
+    assert!(
+        report
+            .asset("gwr_visualisation.js")
+            .contains("wasm_bindgen")
+    );
+    let bootstrap = report.asset("bootstrap.js");
+    assert!(bootstrap.contains("Unable to start visualisation"));
+    assert!(bootstrap.contains("decodeBase64"));
+    assert_compressed_payload(report);
+
+    for legacy in [
         "data.js",
         "view-model.js",
         "core.js",
@@ -500,22 +519,43 @@ fn assert_script_bundle(report: &GeneratedReport) {
         "relationships.js",
         "workspace.js",
         "app.js",
-        "benchmark-hooks.js",
-    ];
-    let mut previous_position = 0;
-    for script in scripts {
-        let contents = report.asset(script);
-        assert!(!contents.contains("Tensor data"));
-        let position = report
-            .index_html
-            .find(script)
-            .unwrap_or_else(|| panic!("{script} missing from index.html"));
+    ] {
         assert!(
-            position >= previous_position,
-            "{script} is loaded out of dependency order"
+            !report.temp.path().join(legacy).exists(),
+            "legacy production script {legacy} was generated"
         );
-        previous_position = position;
+        assert!(
+            !report.index_html.contains(legacy),
+            "legacy production script {legacy} was referenced"
+        );
     }
+}
+
+fn assert_compressed_payload(report: &GeneratedReport) {
+    let payload = report.asset("payload.js");
+    let wasm = BASE64.decode(payload_value(&payload, "wasm")).unwrap();
+    assert_eq!(&wasm[..4], b"\0asm");
+
+    let compressed_data = BASE64.decode(payload_value(&payload, "data")).unwrap();
+    let compressed_tensors = BASE64.decode(payload_value(&payload, "tensors")).unwrap();
+    let mut browser_data = decompress_json(&compressed_data);
+    browser_data["tensors"] = decompress_json(&compressed_tensors);
+    assert_eq!(browser_data, report.data);
+    assert!(compressed_data.len() + compressed_tensors.len() < report.data_json.len());
+}
+
+fn decompress_json(compressed: &[u8]) -> serde_json::Value {
+    let mut decoder = GzDecoder::new(compressed);
+    let mut json = String::new();
+    decoder.read_to_string(&mut json).unwrap();
+    serde_json::from_str(&json).unwrap()
+}
+
+fn payload_value<'a>(payload: &'a str, name: &str) -> &'a str {
+    let prefix = format!("{name}:\"");
+    let start = payload.find(&prefix).unwrap() + prefix.len();
+    let end = payload[start..].find('"').unwrap() + start;
+    &payload[start..end]
 }
 
 fn assert_report_controls(index_html: &str) {
@@ -546,15 +586,6 @@ fn assert_report_controls(index_html: &str) {
 }
 
 fn assert_report_data(report: &GeneratedReport) {
-    let data_js = report.asset("data.js");
-    assert_eq!(
-        data_js.lines().count(),
-        1,
-        "data.js should use compact JSON"
-    );
-    assert!(data_js.len() < report.data_json.len());
-    assert!(data_js.starts_with("window.GWR_VISUALISATION_DATA=JSON.parse("));
-
     assert_eq!(report.data["summary"]["compute_nodes"], 3);
     assert_eq!(report.data["summary"]["total_machine_ops"], "22579200");
     assert_eq!(report.data["summary"]["total_tensor_read_bytes"], "1204224");

@@ -6,10 +6,13 @@
     "node": ">=22"
   },
   "scripts": {
-    "benchmark": "node benchmark.mjs"
+    "benchmark": "node benchmark.mjs",
+    "parity": "node parity.mjs"
   },
   "dependencies": {
+    "pixelmatch": "7.2.0",
     "playwright-core": "1.62.1",
+    "pngjs": "7.0.0",
     "selenium-webdriver": "4.47.0"
   }
 }

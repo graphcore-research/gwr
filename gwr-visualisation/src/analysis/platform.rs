@@ -9,7 +9,7 @@ use gwr_platform::builder::{
 };
 use gwr_platform::types::{PlatformConfig, ProcessingElementConfigSection};
 
-use super::model::{FabricSummary, PePlatformConfig, PeSummary, PlatformSummary};
+use crate::model::{FabricSummary, PePlatformConfig, PeSummary, PlatformSummary, u64_from_usize};
 
 pub(super) fn apply_platform(
     platform: &PlatformConfig,
@@ -28,8 +28,8 @@ pub(super) fn apply_platform(
                 .entry(pe.name.clone())
                 .or_insert_with(|| PeSummary::new(pe.name.clone(), col, row));
             entry.present_in_platform = true;
-            entry.row = row;
-            entry.col = col;
+            entry.row = u64_from_usize(row);
+            entry.col = u64_from_usize(col);
             entry.platform_config = Some(config);
         }
     }
@@ -175,16 +175,16 @@ pub(super) fn summarize_platform(platform: &PlatformConfig) -> PlatformSummary {
         .flatten()
         .map(|fabric| FabricSummary {
             name: fabric.name.clone(),
-            rows: fabric.rows,
-            cols: fabric.columns,
+            rows: u64_from_usize(fabric.rows),
+            cols: u64_from_usize(fabric.columns),
             kind: format!("{:?}", fabric.kind).to_lowercase(),
         })
         .collect();
 
     PlatformSummary {
-        processing_elements,
-        rows,
-        cols,
+        processing_elements: u64_from_usize(processing_elements),
+        rows: u64_from_usize(rows),
+        cols: u64_from_usize(cols),
         fabrics,
     }
 }
@@ -199,21 +199,21 @@ impl PePlatformConfig {
     fn from_config(memory_map: &str, config: &ProcessingElementConfigSection) -> Self {
         Self {
             memory_map: memory_map.to_string(),
-            num_active_requests: Some(
+            num_active_requests: Some(u64_from_usize(
                 config
                     .num_active_requests
                     .unwrap_or(DEFAULT_PE_NUM_ACTIVE_REQUESTS),
-            ),
-            lsu_access_bytes: Some(
+            )),
+            lsu_access_bytes: Some(u64_from_usize(
                 config
                     .lsu_access_bytes
                     .unwrap_or(DEFAULT_PE_LSU_ACCESS_BYTES),
-            ),
-            overhead_size_bytes: Some(
+            )),
+            overhead_size_bytes: Some(u64_from_usize(
                 config
                     .overhead_size_bytes
                     .unwrap_or(DEFAULT_PE_OVERHEAD_SIZE_BYTES),
-            ),
+            )),
             sram_bytes: Some(config.sram_bytes.unwrap_or(DEFAULT_PE_SRAM_BYTES)),
             adds_per_tick: Some(config.adds_per_tick.unwrap_or(DEFAULT_PE_ADDS_PER_TICK)),
             muls_per_tick: Some(config.muls_per_tick.unwrap_or(DEFAULT_PE_MULS_PER_TICK)),

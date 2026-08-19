@@ -5,7 +5,6 @@
 mod compute;
 mod graph;
 mod memory;
-mod model;
 mod platform;
 mod tensors;
 
@@ -20,12 +19,15 @@ use gwr_timetable::timetable_file::{
     NodeSection, TensorConfigSection, TensorViewSection, TimetableFile,
 };
 use memory::summarize_memory;
-pub(crate) use model::OverlayInput;
-use model::{PeSummary, Summary, TensorSummary, VisualisationData, machine_op_metadata};
 use platform::{apply_platform, pe_coords, summarize_platform};
 use tensors::{
     TensorViewSlots, apply_pe_tensor_traffic, apply_tensor_edges, summarize_tensor_traffic,
     tensor_view_bytes,
+};
+
+pub(crate) use crate::model::OverlayInput;
+use crate::model::{
+    PeSummary, Summary, TensorSummary, VisualisationData, machine_op_metadata, u64_from_usize,
 };
 
 struct TimetableIndex {
@@ -60,8 +62,8 @@ impl TimetableIndex {
 
 #[derive(Default)]
 struct TimetableCounts {
-    compute_nodes: usize,
-    tensor_nodes: usize,
+    compute_nodes: u64,
+    tensor_nodes: u64,
 }
 
 struct IndexedTimetable {
@@ -144,9 +146,9 @@ impl IndexedTimetable {
             TensorSummary {
                 id: id.to_string(),
                 addr: config.addr,
-                num_bytes: config.num_bytes() as u64,
+                num_bytes: u64_from_usize(config.num_bytes()),
                 dtype: format!("{:?}", config.dtype).to_lowercase(),
-                shape: config.shape.clone(),
+                shape: config.shape.iter().copied().map(u64_from_usize).collect(),
                 production_by_pe: Vec::new(),
                 consumption_by_pe: Vec::new(),
             },
@@ -242,7 +244,7 @@ pub(crate) fn summarize(
 
     let mut pes: Vec<_> = pes_by_name.into_values().collect();
     pes.sort_by_key(|pe| (pe.row, pe.col, pe.name.clone()));
-    let active_pes = pes.iter().filter(|pe| pe.total_nodes > 0).count();
+    let active_pes = u64_from_usize(pes.iter().filter(|pe| pe.total_nodes > 0).count());
     let total_machine_ops = pes.iter().fold(0_u64, |total, pe| {
         total.saturating_add(pe.machine_ops.total)
     });
@@ -252,17 +254,19 @@ pub(crate) fn summarize(
             timetable: timetable_path.display().to_string(),
             platform: platform.map(|(_, path)| path.display().to_string()),
             overlay: overlay.map(|(_, path)| path.display().to_string()),
-            nodes: timetable.nodes.len(),
+            nodes: u64_from_usize(timetable.nodes.len()),
             compute_nodes: counts.compute_nodes,
             total_machine_ops,
             tensor_nodes: counts.tensor_nodes,
             total_tensor_read_bytes,
             total_tensor_write_bytes,
-            data_edges: timetable
-                .edges
-                .iter()
-                .filter(|edge| graph::is_data_edge(edge))
-                .count(),
+            data_edges: u64_from_usize(
+                timetable
+                    .edges
+                    .iter()
+                    .filter(|edge| graph::is_data_edge(edge))
+                    .count(),
+            ),
             active_pes,
         },
         layers: layer_summaries,
