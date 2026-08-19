@@ -11,8 +11,8 @@ use serial_test::serial;
 
 use crate::app::{App, InputState};
 use crate::filter::Filter;
+use crate::http_server::SHARED_STATE;
 use crate::renderer::Renderer;
-use crate::rocket::SHARED_STATE;
 
 const FRAME_HEIGHT: usize = 30;
 const NUM_RENDER_LINES: usize = 200;

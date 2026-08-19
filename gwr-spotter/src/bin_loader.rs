@@ -13,8 +13,8 @@ use gwr_track::trace_visitor::{TraceVisitor, process_capnp};
 
 use crate::app::{CHUNK_SIZE, EventLine};
 use crate::filter::Filter;
+use crate::http_server::SHARED_STATE;
 use crate::renderer::Renderer;
-use crate::rocket::SHARED_STATE;
 
 struct BinLoader {
     renderer: Arc<Mutex<Renderer>>,

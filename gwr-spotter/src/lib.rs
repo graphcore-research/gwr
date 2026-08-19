@@ -20,14 +20,14 @@ pub mod tui;
 /// Event handler.
 pub mod handler;
 
-pub mod rocket;
+pub mod http_server;
 
 #[cfg(test)]
 #[path = "../tests/common/server_contract.rs"]
 mod server_contract;
 
 #[cfg(test)]
-pub(crate) use rocket::SHARED_STATE as TEST_SERVER_STATE;
+pub(crate) use http_server::SHARED_STATE as TEST_SERVER_STATE;
 
 /// Perfetto output generator.
 #[cfg(feature = "perfetto")]

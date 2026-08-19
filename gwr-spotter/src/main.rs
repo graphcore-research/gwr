@@ -1,21 +1,20 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
+use std::io;
 use std::path::PathBuf;
 #[cfg(feature = "perfetto")]
 use std::process::exit;
-use std::{io, thread};
 
 use clap::{Args, Parser};
 use gwr_spotter::app::{App, AppResult};
 use gwr_spotter::event::{Event, EventHandler};
 use gwr_spotter::handler::handle_key_events;
+use gwr_spotter::http_server::spawn;
 #[cfg(feature = "perfetto")]
 use gwr_spotter::perfetto;
-use gwr_spotter::rocket::rocket;
 use gwr_spotter::tui::Tui;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use tokio::runtime::Runtime;
 
 /// Input subcommand arguments.
 #[derive(Args)]
@@ -45,20 +44,7 @@ struct Cli {
     perfetto: Option<PathBuf>,
 }
 
-fn spawn_rocket() {
-    // Create new thread
-    thread::spawn(|| {
-        // Create new Tokio runtime
-        let rt = Runtime::new().unwrap();
-
-        // Create async function
-        rt.block_on(async {
-            let _start = rocket().launch().await;
-        });
-    });
-}
-
-#[rocket::main]
+#[tokio::main]
 async fn main() -> AppResult<()> {
     let args = Cli::parse();
 
@@ -71,7 +57,7 @@ async fn main() -> AppResult<()> {
         exit(0);
     }
 
-    spawn_rocket();
+    let _http_server = spawn().await?;
 
     // Create an application.
     let mut app = App::new(args.input.log, args.input.bin);
