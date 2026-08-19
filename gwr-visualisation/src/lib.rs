@@ -17,19 +17,47 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 const INDEX_TEMPLATE: &str = include_str!("../assets/index.html");
 const STATIC_ASSETS: &[(&str, &str)] = &[
-    ("view-model.js", include_str!("../assets/view-model.js")),
-    ("core.js", include_str!("../assets/core.js")),
-    ("filters.js", include_str!("../assets/filters.js")),
-    ("pe-grid.js", include_str!("../assets/pe-grid.js")),
-    ("timetable.js", include_str!("../assets/timetable.js")),
-    ("tensors.js", include_str!("../assets/tensors.js")),
-    ("memory.js", include_str!("../assets/memory.js")),
+    (
+        "view-model.js",
+        include_str!("../benchmarks/legacy/assets/view-model.js"),
+    ),
+    (
+        "core.js",
+        include_str!("../benchmarks/legacy/assets/core.js"),
+    ),
+    (
+        "filters.js",
+        include_str!("../benchmarks/legacy/assets/filters.js"),
+    ),
+    (
+        "pe-grid.js",
+        include_str!("../benchmarks/legacy/assets/pe-grid.js"),
+    ),
+    (
+        "timetable.js",
+        include_str!("../benchmarks/legacy/assets/timetable.js"),
+    ),
+    (
+        "tensors.js",
+        include_str!("../benchmarks/legacy/assets/tensors.js"),
+    ),
+    (
+        "memory.js",
+        include_str!("../benchmarks/legacy/assets/memory.js"),
+    ),
     (
         "relationships.js",
-        include_str!("../assets/relationships.js"),
+        include_str!("../benchmarks/legacy/assets/relationships.js"),
     ),
-    ("workspace.js", include_str!("../assets/workspace.js")),
-    ("app.js", include_str!("../assets/app.js")),
+    (
+        "workspace.js",
+        include_str!("../benchmarks/legacy/assets/workspace.js"),
+    ),
+    ("app.js", include_str!("../benchmarks/legacy/assets/app.js")),
+    (
+        "benchmark-hooks.js",
+        include_str!("../benchmarks/legacy/assets/benchmark-hooks.js"),
+    ),
     ("style.css", include_str!("../assets/style.css")),
 ];
 

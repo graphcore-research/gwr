@@ -117,6 +117,58 @@ jobs:
           command: cargo test --all-features ${{ case(runner.debug == '1', '--verbose', '') }}
           cache-name: ${{ github.job }}
 
+  visualisation-browser-benchmark:
+    needs: warm-build-deps-cache
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-latest
+            browser: chromium
+            browser-arguments: --chromium /usr/bin/google-chrome
+          - os: macos-latest
+            browser: safari
+            browser-arguments: ""
+    runs-on: ${{ matrix.os }}
+    env:
+      RUSTFLAGS: -D warnings
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: gwr-visualisation/benchmarks/package-lock.json
+      - uses: ./.github/actions/install-build-dependencies
+
+      - name: Install browser benchmark dependencies
+        run: npm ci --prefix gwr-visualisation/benchmarks
+
+      - name: Enable Safari automation
+        if: matrix.browser == 'safari'
+        run: sudo safaridriver --enable
+
+      - name: Exercise the JavaScript report
+        run: >-
+          npm --prefix gwr-visualisation/benchmarks run benchmark --
+          --timetable ${{ github.workspace }}/gwr-timetable/examples/tiny.yaml
+          --browsers ${{ matrix.browser }}
+          --warmups 1
+          --runs 1
+          --output ${{ runner.temp }}/gwr-visualisation-benchmark
+          ${{ matrix.browser-arguments }}
+
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: visualisation-benchmark-${{ matrix.browser }}
+          path: ${{ runner.temp }}/gwr-visualisation-benchmark
+          if-no-files-found: ignore
+
   benchmark:
     strategy:
       fail-fast: true
