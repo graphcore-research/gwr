@@ -29,14 +29,20 @@ cargo run -p gwr-visualisation -- \
 The output directory will contain:
 
 - `index.html`: the static report entry point
-- `data.json`: the exported visualisation data model
-- `data.js`: a compact copy of the data embedded for direct file opening
-- `view-model.js`, `core.js`, `filters.js`, `pe-grid.js`, `timetable.js`,
-  `tensors.js`, `memory.js`, `relationships.js`, and `workspace.js`: focused UI
-  modules loaded in dependency order
-- `app.js`: render orchestration, event wiring, and startup
-- `benchmark-hooks.js`: deterministic timing hooks used by the browser benchmark
+- `data.json`: the unchanged, human-readable visualisation data model
+- `payload.js`: separately gzip-compressed core report and tensor-detail JSON,
+  plus the WASM module, encoded for direct `file://` loading
+- `gwr_visualisation.js`: generated `wasm-bindgen` loading glue
+- `bootstrap.js`: a small decoder and startup-error boundary
 - `style.css`: local report styling
+
+The production bundle contains no handwritten application JavaScript. Filtering,
+aggregation, formatting, rendering, relationships, interaction handling, and
+workspace persistence run in Rust/WASM. `payload.js` deliberately uses a classic
+script instead of `fetch`, so an output directory remains portable and its
+`index.html` can be opened directly without a web server. The bootstrap renders
+the initial Summary from the smaller core payload, yields for layout, then
+attaches tensor details before declaring the full application ready.
 
 ## What The Report Shows
 
@@ -203,21 +209,98 @@ Measure controls remain visible while the chart or grid content scrolls.
 
 ## Development
 
-The JavaScript report is retained under `benchmarks/legacy` as a measured
-baseline for browser performance work. The generator temporarily emits that
-baseline unchanged so this revision remains a usable tool while its replacement
-is developed.
+The crate has two targets. The default `generator` feature builds the native
+library and CLI. The `web` feature builds the browser runtime for
+`wasm32-unknown-unknown`; it is separate from native timetable dependencies.
+`src/model.rs` is the typed report contract shared by both.
 
-The browser code uses classic scripts and a shared
-`window.GWR_VISUALISATION_APP` namespace so generated reports continue to work
-when opened directly from disk. `view-model.js` provides browser-independent
-range, traffic, and focus helpers; `core.js` owns shared state and utilities;
-`filters.js` owns filter state and aggregation; `pe-grid.js` owns PE-overview
-measure and layout selection; the timetable, tensor, memory, and relationship
-files own their respective renderers; `workspace.js` owns panel layout,
-ordering, visibility, sizing, focus, and persistence; and `app.js` connects the
-modules without adding a bundler or runtime dependency. Each module exposes only
-the functions required by modules loaded later in that dependency order.
+The browser implementation is split into focused modules:
+
+- `web/state.rs` owns filters and serializable interaction state.
+- `web/logic.rs` owns indexed lookup, cached aggregation, exact tensor traffic,
+  and memory geometry.
+- `web/render.rs` and its `render/` children own panel markup and relationship
+  drawing.
+- `web/workspace.rs` owns version-1 local-storage restoration and panel layout.
+- `web/app.rs` owns event delegation and coordinates state with visible panels.
+- `payload.rs` owns deterministic gzip encoding and decoding.
+
+High-cardinality filter lists are constructed only when opened and display a
+500-item window when more than 1,000 values match. Layer comparisons display a
+deterministic 500-layer window, and relationship plots cap drawing at 500 layer
+sources and 5,000 strongest links; both retain the selected entity and explain
+when filters should be narrowed. Filtered contexts and summaries are cached by
+state generation. Hidden panels are not rendered, and selection or mode changes
+only rerender panels that depend on the changed state.
+
+### Generated WASM assets
+
+Install the pinned target and generator, then rebuild the committed runtime:
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo install --locked wasm-bindgen-cli --version 0.2.126
+./gwr-visualisation/scripts/build-wasm.sh
+```
+
+The Rust dependency and CLI are both pinned to `wasm-bindgen` 0.2.126. CI checks
+that committed files in `assets/generated/` match a clean release build:
+
+```bash
+./gwr-visualisation/scripts/build-wasm.sh --check
+```
+
+Current Safari, Chromium, and browsers with equivalent WebAssembly, gzip stream,
+DOM, canvas, and local-storage support can open reports. Startup failures are
+rendered into the document instead of leaving a blank page.
+
+### Browser parity and performance
+
+The benchmark-only `benchmarks/legacy/assets/` fixture retains PR #343's
+JavaScript implementation, including its browser-independent view-model helpers;
+those scripts are never written to production reports. Install the pinned
+browser harness dependencies with Node.js 22 or newer:
+
+```bash
+npm ci --prefix gwr-visualisation/benchmarks
+```
+
+Run semantic and screenshot parity against Chromium and installed macOS Safari:
+
+```bash
+npm --prefix gwr-visualisation/benchmarks run parity -- \
+  --timetable /absolute/path/to/timetable.yaml \
+  --browsers chromium,safari \
+  --output /tmp/gwr-visualisation-parity
+```
+
+Run the full benchmark with two warm-ups and ten measurements per implementation
+and browser:
+
+```bash
+npm --prefix gwr-visualisation/benchmarks run benchmark -- \
+  --timetable /absolute/path/to/partitioned-izi-gpt-oss20b.yaml \
+  --browsers chromium,safari \
+  --warmups 2 \
+  --runs 10 \
+  --session-attempts 3 \
+  --output /tmp/gwr-visualisation-benchmark
+```
+
+The harness alternates JavaScript/WASM order, creates a fresh automation session
+and unique report path for every sample, and runs Safari serially. It records
+raw JSON, a Markdown median/speedup table, browser and OS versions, hardware,
+and the configuration. Cold startup ends when the initial Summary has rendered.
+To keep the JavaScript renderer measurable on reports with tens of thousands of
+layers, interactions use a deterministic 64-layer slice; override it with
+`--interaction-layer-pattern REGEX`. The gates require at least a 2× WASM
+cold-start speedup and reject any representative WASM interaction median more
+than 10% slower.
+
+Chromium uses Playwright with installed Google Chrome. Safari uses Selenium with
+the real `/usr/bin/safaridriver`, not Playwright WebKit. Safari requires macOS
+and Safari's Develop > Allow Remote Automation option. The harness does not
+clear or modify the user's normal Safari profile.
 
 Useful checks for this crate:
 
@@ -225,37 +308,13 @@ Useful checks for this crate:
 cargo +nightly fmt
 cargo check -p gwr-visualisation
 cargo test -p gwr-visualisation
-node --test gwr-visualisation/tests/view-model.test.mjs
-npx prettier --check gwr-visualisation/benchmarks
-npx eslint gwr-visualisation/benchmarks
+cargo clippy-strict
+./gwr-visualisation/scripts/build-wasm.sh --check
+prek run --all-files
 ```
 
-Install the benchmark dependencies and run a short Chromium sample with:
-
-```bash
-npm ci --prefix gwr-visualisation/benchmarks
-npm --prefix gwr-visualisation/benchmarks run benchmark -- \
-  --timetable "$PWD/gwr-timetable/examples/small.yaml" \
-  --platform "$PWD/gwr-platform/examples/platform_4x4.yaml" \
-  --browsers chromium \
-  --warmups 1 \
-  --runs 1
-```
-
-Use `--browsers chromium,safari` on macOS to include the installed Safari via
-`safaridriver`. Safari requires Develop > Allow Remote Automation. Each sample
-uses a fresh browser session and report path. Results include raw samples,
-medians, browser and operating-system versions, and hardware details in JSON and
-Markdown files.
-
-The repository's `prek` configuration runs the browser-independent tests,
-Prettier, and ESLint for changed visualisation JavaScript before commits and
-merge commits. The development dependency installer pins both tools so local and
-CI checks use the same versions.
-
-The Rust implementation follows the same focused-module structure. `lib.rs` owns
-input loading and static bundle generation. `analysis/mod.rs` indexes the
-timetable and orchestrates report construction, while its `compute`, `graph`,
-`memory`, and `tensors` modules contain the corresponding domain logic.
-`model.rs` contains the serialized report model, and `tests.rs` keeps the
-analysis tests alongside those private implementation modules.
+`generator.rs` owns input loading and static bundle generation.
+`analysis/mod.rs` indexes the timetable and orchestrates report construction,
+while its focused domain modules contain the native analysis logic. Run nightly
+formatting because the repository CI and contributor guidance use the nightly
+formatter.

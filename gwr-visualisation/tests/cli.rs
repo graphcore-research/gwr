@@ -1,6 +1,11 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+use std::io::Read;
 use std::process::Command;
+
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use flate2::read::GzDecoder;
 
 struct GeneratedReport {
     temp: tempfile::TempDir,
@@ -272,7 +277,32 @@ edges:
 }
 
 fn assert_script_bundle(report: &GeneratedReport) {
-    let scripts = [
+    let scripts = ["payload.js", "gwr_visualisation.js", "bootstrap.js"];
+    let mut previous_position = 0;
+    for script in scripts {
+        let contents = report.asset(script);
+        assert!(!contents.is_empty());
+        let position = report
+            .index_html
+            .find(script)
+            .unwrap_or_else(|| panic!("{script} missing from index.html"));
+        assert!(
+            position >= previous_position,
+            "{script} is loaded out of dependency order"
+        );
+        previous_position = position;
+    }
+    assert!(
+        report
+            .asset("gwr_visualisation.js")
+            .contains("wasm_bindgen")
+    );
+    let bootstrap = report.asset("bootstrap.js");
+    assert!(bootstrap.contains("Unable to start visualisation"));
+    assert!(bootstrap.contains("decodeBase64"));
+    assert_compressed_payload(report);
+
+    for legacy in [
         "data.js",
         "view-model.js",
         "core.js",
@@ -284,22 +314,43 @@ fn assert_script_bundle(report: &GeneratedReport) {
         "relationships.js",
         "workspace.js",
         "app.js",
-        "benchmark-hooks.js",
-    ];
-    let mut previous_position = 0;
-    for script in scripts {
-        let contents = report.asset(script);
-        assert!(!contents.contains("Tensor data"));
-        let position = report
-            .index_html
-            .find(script)
-            .unwrap_or_else(|| panic!("{script} missing from index.html"));
+    ] {
         assert!(
-            position >= previous_position,
-            "{script} is loaded out of dependency order"
+            !report.temp.path().join(legacy).exists(),
+            "legacy production script {legacy} was generated"
         );
-        previous_position = position;
+        assert!(
+            !report.index_html.contains(legacy),
+            "legacy production script {legacy} was referenced"
+        );
     }
+}
+
+fn assert_compressed_payload(report: &GeneratedReport) {
+    let payload = report.asset("payload.js");
+    let wasm = BASE64.decode(payload_value(&payload, "wasm")).unwrap();
+    assert_eq!(&wasm[..4], b"\0asm");
+
+    let compressed_data = BASE64.decode(payload_value(&payload, "data")).unwrap();
+    let compressed_tensors = BASE64.decode(payload_value(&payload, "tensors")).unwrap();
+    let mut browser_data = decompress_json(&compressed_data);
+    browser_data["tensors"] = decompress_json(&compressed_tensors);
+    assert_eq!(browser_data, report.data);
+    assert!(compressed_data.len() + compressed_tensors.len() < report.data_json.len());
+}
+
+fn decompress_json(compressed: &[u8]) -> serde_json::Value {
+    let mut decoder = GzDecoder::new(compressed);
+    let mut json = String::new();
+    decoder.read_to_string(&mut json).unwrap();
+    serde_json::from_str(&json).unwrap()
+}
+
+fn payload_value<'a>(payload: &'a str, name: &str) -> &'a str {
+    let prefix = format!("{name}:\"");
+    let start = payload.find(&prefix).unwrap() + prefix.len();
+    let end = payload[start..].find('"').unwrap() + start;
+    &payload[start..end]
 }
 
 fn assert_report_controls(index_html: &str) {
@@ -330,14 +381,6 @@ fn assert_report_controls(index_html: &str) {
 }
 
 fn assert_report_data(report: &GeneratedReport) {
-    let data_js = report.asset("data.js");
-    assert_eq!(
-        data_js.lines().count(),
-        1,
-        "data.js should use compact JSON"
-    );
-    assert!(data_js.len() < report.data_json.len());
-
     assert_eq!(report.data["summary"]["compute_nodes"], 3);
     assert_eq!(report.data["summary"]["total_machine_ops"], "22579200");
     assert_eq!(report.data["summary"]["total_tensor_read_bytes"], "1204224");

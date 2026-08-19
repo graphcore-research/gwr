@@ -10,8 +10,8 @@ use gwr_timetable::timetable_file::{
 };
 
 use super::graph::{is_data_edge, layer_name};
-use super::model::{LayerPeSummary, LayerSummary, MachineOpSummary, PeSummary, TensorSummary};
 use super::{TensorViewSlots, TimetableIndex, tensor_view_bytes};
+use crate::model::{LayerPeSummary, LayerSummary, MachineOpSummary, PeSummary, TensorSummary};
 
 #[derive(Default)]
 struct LayerBuilder {

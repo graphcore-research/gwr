@@ -9,7 +9,7 @@ use gwr_timetable::timetable_file::{
 
 use super::TimetableIndex;
 use super::graph::{is_data_edge, layer_name};
-use super::model::{
+use crate::model::{
     PeSummary, TensorLayerTraffic, TensorPeConsumption, TensorSummary, TensorTrafficAccess,
 };
 

@@ -5,7 +5,6 @@
 mod compute;
 mod graph;
 mod memory;
-mod model;
 mod platform;
 mod tensors;
 
@@ -20,13 +19,14 @@ use gwr_timetable::timetable_file::{
     MemoryConfigSection, NodeSection, TensorConfigSection, TensorViewSection, TimetableFile,
 };
 use memory::summarize_memory;
-pub(crate) use model::OverlayInput;
-use model::{PeSummary, Summary, TensorSummary, VisualisationData, machine_op_metadata};
 use platform::{apply_platform, pe_coords, summarize_platform};
 use tensors::{
     TensorViewSlots, apply_pe_tensor_traffic, apply_tensor_edges, summarize_tensor_traffic,
     tensor_view_bytes,
 };
+
+pub(crate) use crate::model::OverlayInput;
+use crate::model::{PeSummary, Summary, TensorSummary, VisualisationData, machine_op_metadata};
 
 #[derive(Default)]
 struct TimetableIndex {

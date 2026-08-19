@@ -77,6 +77,9 @@ jobs:
       - name: Lint with prek
         run: prek run --all-files --show-diff-on-failure
 
+      - name: Verify generated WebAssembly assets
+        run: gwr-visualisation/scripts/build-wasm.sh --check
+
   build:
     strategy:
       fail-fast: true
@@ -117,7 +120,7 @@ jobs:
           command: cargo test --all-features ${{ case(runner.debug == '1', '--verbose', '') }}
           cache-name: ${{ github.job }}
 
-  visualisation-browser-benchmark:
+  visualisation-browser-parity:
     needs: warm-build-deps-cache
     strategy:
       fail-fast: true
@@ -144,29 +147,27 @@ jobs:
           cache-dependency-path: gwr-visualisation/benchmarks/package-lock.json
       - uses: ./.github/actions/install-build-dependencies
 
-      - name: Install browser benchmark dependencies
+      - name: Install browser test dependencies
         run: npm ci --prefix gwr-visualisation/benchmarks
 
       - name: Enable Safari automation
         if: matrix.browser == 'safari'
         run: sudo safaridriver --enable
 
-      - name: Exercise the JavaScript report
+      - name: Compare JavaScript and WebAssembly reports
         run: >-
-          npm --prefix gwr-visualisation/benchmarks run benchmark --
+          npm --prefix gwr-visualisation/benchmarks run parity --
           --timetable ${{ github.workspace }}/gwr-timetable/examples/tiny.yaml
           --browsers ${{ matrix.browser }}
-          --warmups 1
-          --runs 1
-          --output ${{ runner.temp }}/gwr-visualisation-benchmark
+          --output ${{ runner.temp }}/gwr-visualisation-parity
           ${{ matrix.browser-arguments }}
 
-      - name: Upload benchmark evidence
+      - name: Upload parity evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: visualisation-benchmark-${{ matrix.browser }}
-          path: ${{ runner.temp }}/gwr-visualisation-benchmark
+          name: visualisation-parity-${{ matrix.browser }}
+          path: ${{ runner.temp }}/gwr-visualisation-parity
           if-no-files-found: ignore
 
   benchmark:

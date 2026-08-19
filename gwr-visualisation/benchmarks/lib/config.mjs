@@ -1,6 +1,5 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-import os from "node:os";
 import path from "node:path";
 
 export function readConfig(argv) {
@@ -21,19 +20,12 @@ export function readConfig(argv) {
     interactionLayerPattern:
       values["interaction-layer-pattern"] ||
       "^layer ([1-9]|[1-5][0-9]|6[0-4])$",
+    enforceGates: values["no-gate"] !== true,
     keepReports: values["keep-reports"] === true,
     chromiumExecutable:
-      values.chromium || defaultChromiumExecutable(),
+      values.chromium ||
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   };
-}
-
-function defaultChromiumExecutable() {
-  if (process.env.CHROME_PATH) {
-    return process.env.CHROME_PATH;
-  }
-  return os.platform() === "darwin"
-    ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-    : "/usr/bin/google-chrome";
 }
 
 function parseArguments(argv) {
@@ -44,7 +36,7 @@ function parseArguments(argv) {
       throw new Error(`Unexpected argument: ${argument}`);
     }
     const name = argument.slice(2);
-    if (name === "keep-reports") {
+    if (["no-gate", "keep-reports"].includes(name)) {
       values[name] = true;
       continue;
     }

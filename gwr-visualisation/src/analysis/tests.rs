@@ -4,10 +4,10 @@ use std::fs;
 
 use super::*;
 use crate::analysis::memory::summarize_memory;
-use crate::analysis::model::{
+use crate::analysis::tensors::summarize_tensor_traffic;
+use crate::model::{
     OverlayMetricMetadata, TensorPeConsumption, TensorSummary, TensorTrafficAccess,
 };
-use crate::analysis::tensors::summarize_tensor_traffic;
 
 fn small_timetable() -> TimetableFile {
     TimetableFile::from_file(Path::new("../gwr-timetable/examples/small.yaml")).unwrap()

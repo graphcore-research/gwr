@@ -1,5 +1,7 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+/* global wasm_bindgen */
+
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
 
@@ -99,10 +101,7 @@ class ChromiumSession {
   async measureKernel(name, iterations) {
     return this.page.evaluate(
       ({ name, iterations }) => {
-        const run = window.GWR_BENCHMARK_KERNELS?.run;
-        if (!run) {
-          throw new Error("The report did not expose benchmark kernels");
-        }
+        const run = window.GWR_BENCHMARK_KERNELS?.run || wasm_bindgen.benchmark_kernel;
         const start = performance.now();
         const checksum = run(name, iterations);
         return { milliseconds: performance.now() - start, checksum };
@@ -215,8 +214,7 @@ class SafariSession {
 
   async measureKernel(name, iterations) {
     return this.driver.executeScript(
-      `const run = window.GWR_BENCHMARK_KERNELS?.run;
-       if (!run) throw new Error('The report did not expose benchmark kernels');
+      `const run = window.GWR_BENCHMARK_KERNELS?.run || wasm_bindgen.benchmark_kernel;
        const start = performance.now();
        const checksum = run(arguments[0], arguments[1]);
        return { milliseconds: performance.now() - start, checksum };`,

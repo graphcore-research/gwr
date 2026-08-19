@@ -3,3 +3,4 @@
 [toolchain]
 channel = "1.97.1"
 profile = "default"
+targets = ["wasm32-unknown-unknown"]

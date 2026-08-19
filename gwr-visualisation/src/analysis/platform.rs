@@ -9,7 +9,7 @@ use gwr_platform::builder::{
 };
 use gwr_platform::types::{PlatformConfig, ProcessingElementConfigSection};
 
-use super::model::{FabricSummary, PePlatformConfig, PeSummary, PlatformSummary};
+use crate::model::{FabricSummary, PePlatformConfig, PeSummary, PlatformSummary};
 
 pub(super) fn apply_platform(
     platform: &PlatformConfig,
