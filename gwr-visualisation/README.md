@@ -254,28 +254,32 @@ Current Safari, Chromium, and browsers with equivalent WebAssembly, gzip stream,
 DOM, canvas, and local-storage support can open reports. Startup failures are
 rendered into the document instead of leaving a blank page.
 
-### Browser parity and performance
+### Browser tests and performance
 
-The benchmark-only `benchmarks/legacy/assets/` fixture retains PR #343's
-JavaScript implementation, including its browser-independent view-model helpers;
-those scripts are never written to production reports. Install the pinned
-browser harness dependencies with Node.js 22 or newer:
+Install the pinned browser harness dependencies with Node.js 22 or newer:
 
 ```bash
 npm ci --prefix gwr-visualisation/benchmarks
 ```
 
-Run semantic and screenshot parity against Chromium and installed macOS Safari:
+Exercise a report directly from a `file://` URL in Chromium and installed macOS
+Safari:
 
 ```bash
-npm --prefix gwr-visualisation/benchmarks run parity -- \
+npm --prefix gwr-visualisation/benchmarks run browser-test -- \
   --timetable /absolute/path/to/timetable.yaml \
+  --platform /absolute/path/to/platform.yaml \
   --browsers chromium,safari \
-  --output /tmp/gwr-visualisation-parity
+  --output /tmp/gwr-visualisation-browser-test
 ```
 
-Run the full benchmark with two warm-ups and ten measurements per implementation
-and browser:
+The deterministic checks cover presets, filters, single- and double-click
+selection, PE chart and grid modes, relationships, tensor and memory views,
+panel controls, workspace restoration, and startup failures. Screenshots and a
+JSON record are retained as diagnostic artifacts without a pixel-difference
+gate.
+
+Run the performance harness with two warm-ups and ten measurements per browser:
 
 ```bash
 npm --prefix gwr-visualisation/benchmarks run benchmark -- \
@@ -287,15 +291,28 @@ npm --prefix gwr-visualisation/benchmarks run benchmark -- \
   --output /tmp/gwr-visualisation-benchmark
 ```
 
-The harness alternates JavaScript/WASM order, creates a fresh automation session
-and unique report path for every sample, and runs Safari serially. It records
-raw JSON, a Markdown median/speedup table, browser and OS versions, hardware,
-and the configuration. Cold startup ends when the initial Summary has rendered.
-To keep the JavaScript renderer measurable on reports with tens of thousands of
-layers, interactions use a deterministic 64-layer slice; override it with
-`--interaction-layer-pattern REGEX`. The gates require at least a 2× WASM
-cold-start speedup and reject any representative WASM interaction median more
-than 10% slower.
+The harness creates a fresh automation session and unique report path for every
+sample, and runs Safari serially. It records raw JSON, a Markdown median table,
+browser and OS versions, hardware, and the configuration. Cold startup ends when
+the initial Summary has rendered. Interactions use a deterministic 64-layer
+slice by default; override it with `--interaction-layer-pattern REGEX`.
+
+Without a baseline, the harness records timings and validates deterministic
+kernel checksums but does not apply a performance gate. To reject regressions,
+pass a previous `benchmark.json`; the default limit is 10% for every metric:
+
+```bash
+npm --prefix gwr-visualisation/benchmarks run benchmark -- \
+  --timetable /absolute/path/to/partitioned-izi-gpt-oss20b.yaml \
+  --browsers chromium,safari \
+  --baseline /absolute/path/to/benchmark.json \
+  --max-regression-percent 10 \
+  --output /tmp/gwr-visualisation-benchmark
+```
+
+The baseline must contain every requested browser and metric. Browser, operating
+system, and hardware differences are reported as warnings because they can make
+timing comparisons unreliable.
 
 Chromium uses Playwright with installed Google Chrome. Safari uses Selenium with
 the real `/usr/bin/safaridriver`, not Playwright WebKit. Safari requires macOS

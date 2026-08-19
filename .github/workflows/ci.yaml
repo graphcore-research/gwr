@@ -120,7 +120,7 @@ jobs:
           command: cargo test --all-features ${{ case(runner.debug == '1', '--verbose', '') }}
           cache-name: ${{ github.job }}
 
-  visualisation-browser-parity:
+  visualisation-browser-tests:
     needs: warm-build-deps-cache
     strategy:
       fail-fast: true
@@ -154,20 +154,21 @@ jobs:
         if: matrix.browser == 'safari'
         run: sudo safaridriver --enable
 
-      - name: Compare JavaScript and WebAssembly reports
+      - name: Exercise WebAssembly report
         run: >-
-          npm --prefix gwr-visualisation/benchmarks run parity --
+          npm --prefix gwr-visualisation/benchmarks run browser-test --
           --timetable ${{ github.workspace }}/gwr-timetable/examples/tiny.yaml
+          --platform ${{ github.workspace }}/gwr-platform/examples/platform.yaml
           --browsers ${{ matrix.browser }}
-          --output ${{ runner.temp }}/gwr-visualisation-parity
+          --output ${{ runner.temp }}/gwr-visualisation-browser-test
           ${{ matrix.browser-arguments }}
 
-      - name: Upload parity evidence
+      - name: Upload browser test evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: visualisation-parity-${{ matrix.browser }}
-          path: ${{ runner.temp }}/gwr-visualisation-parity
+          name: visualisation-browser-test-${{ matrix.browser }}
+          path: ${{ runner.temp }}/gwr-visualisation-browser-test
           if-no-files-found: ignore
 
   benchmark:

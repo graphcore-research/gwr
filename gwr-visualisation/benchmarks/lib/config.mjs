@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+import os from "node:os";
 import path from "node:path";
 
 export function readConfig(argv) {
@@ -20,12 +21,23 @@ export function readConfig(argv) {
     interactionLayerPattern:
       values["interaction-layer-pattern"] ||
       "^layer ([1-9]|[1-5][0-9]|6[0-4])$",
-    enforceGates: values["no-gate"] !== true,
+    baseline: values.baseline ? path.resolve(values.baseline) : null,
+    maxRegressionPercent: nonNegativeNumber(
+      values["max-regression-percent"],
+      10,
+    ),
     keepReports: values["keep-reports"] === true,
-    chromiumExecutable:
-      values.chromium ||
-      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    chromiumExecutable: values.chromium || defaultChromiumExecutable(),
   };
+}
+
+function defaultChromiumExecutable() {
+  if (process.env.CHROME_PATH) {
+    return process.env.CHROME_PATH;
+  }
+  return os.platform() === "darwin"
+    ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    : "/usr/bin/google-chrome";
 }
 
 function parseArguments(argv) {
@@ -36,7 +48,7 @@ function parseArguments(argv) {
       throw new Error(`Unexpected argument: ${argument}`);
     }
     const name = argument.slice(2);
-    if (["no-gate", "keep-reports"].includes(name)) {
+    if (name === "keep-reports") {
       values[name] = true;
       continue;
     }
@@ -49,8 +61,16 @@ function parseArguments(argv) {
   return values;
 }
 
+function nonNegativeNumber(value, fallback) {
+  const parsed = value === undefined ? fallback : Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`Expected a non-negative number, found '${value}'`);
+  }
+  return parsed;
+}
+
 function positiveInteger(value, fallback) {
-  const parsed = value === undefined ? fallback : Number.parseInt(value, 10);
+  const parsed = value === undefined ? fallback : Number(value);
   if (!Number.isInteger(parsed) || parsed < 1) {
     throw new Error(`Expected a positive integer, found '${value}'`);
   }
