@@ -2,7 +2,7 @@
 
 [package]
 name = "gwr-spotter"
-version = "0.9.0"
+version = "0.10.0"
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -24,6 +24,7 @@ publish.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+axum = { version = "0.8.9", default-features = false, features = ["http1", "http2", "tokio"] }
 capnp.workspace = true
 clap.workspace = true
 crossterm.workspace = true
@@ -32,11 +33,11 @@ itertools.workspace = true
 log.workspace = true
 ratatui.workspace = true
 regex.workspace = true
-rocket = "0.5.1"
-tokio = "1.45.1"
+tokio = { version = "1.45.1", features = ["macros", "net", "rt-multi-thread"] }
 
 [dev-dependencies]
 serial_test.workspace = true
+tower = { version = "0.5.2", features = ["util"] }
 
 [features]
 default = ["perfetto"]

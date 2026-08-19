@@ -26,7 +26,7 @@ fn assert_cors(response: &HttpResponse) {
     assert_eq!(response.header("access-control-allow-origin"), Some("*"));
     assert_eq!(
         response.header("access-control-allow-methods"),
-        Some("POST, GET, PATCH, OPTIONS")
+        Some("GET, HEAD")
     );
     assert_eq!(response.header("access-control-allow-headers"), Some("*"));
     assert_eq!(

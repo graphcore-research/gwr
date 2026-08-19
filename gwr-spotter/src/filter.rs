@@ -8,8 +8,8 @@ use std::thread;
 use regex::Regex;
 
 use crate::app::{CHUNK_SIZE, EventLine, INITIAL_SIZE};
+use crate::http_server::SHARED_STATE;
 use crate::renderer::Renderer;
-use crate::rocket::SHARED_STATE;
 
 pub struct Filter {
     id_re: Regex,

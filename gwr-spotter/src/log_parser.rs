@@ -14,8 +14,8 @@ use regex::Regex;
 
 use crate::app::{CHUNK_SIZE, EventLine};
 use crate::filter::Filter;
+use crate::http_server::SHARED_STATE;
 use crate::renderer::Renderer;
-use crate::rocket::SHARED_STATE;
 
 struct LogParser {
     log_line_re: Regex,

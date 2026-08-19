@@ -7,8 +7,8 @@ use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 
 use crate::filter::{Filter, start_background_filter};
+use crate::http_server::SHARED_STATE;
 use crate::renderer::Renderer;
-use crate::rocket::SHARED_STATE;
 use crate::{bin_loader, log_parser};
 
 #[cfg(test)]
