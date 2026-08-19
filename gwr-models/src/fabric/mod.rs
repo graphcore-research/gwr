@@ -24,11 +24,6 @@ where
     fn col_row_port_to_fabric_port_index(&self, col: usize, row: usize, port: usize) -> usize;
 }
 
-pub enum RoutingAlgoritm {
-    ColumnFirst,
-    RowFirst,
-}
-
 /// Configuration structure for a fabric
 pub struct FabricConfig {
     /// Number of columns in the fabric
