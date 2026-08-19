@@ -11,13 +11,6 @@ export const metricLabels = {
   kernel_geometry_ms: "Geometry kernel",
 };
 
-export const interactionMetrics = [
-  "layers_preset_ms",
-  "compute_preset_ms",
-  "regex_filter_ms",
-  "relationships_ms",
-];
-
 export async function runBenchmarkScenario(
   session,
   kernelIterations,
@@ -26,7 +19,9 @@ export async function runBenchmarkScenario(
 ) {
   const cold = await session.coldStartup();
   if (!Number.isFinite(cold)) {
-    throw new Error("The report did not publish its initial Summary render mark");
+    throw new Error(
+      "The report did not publish its initial Summary render mark",
+    );
   }
   progress("cold startup", cold);
   await selectRepresentativeLayers(session, interactionLayerPattern);

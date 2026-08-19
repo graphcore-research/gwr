@@ -18,7 +18,9 @@ export function browserAdapters(config) {
     }
     if (name === "safari") {
       if (os.platform() !== "darwin") {
-        throw new Error("Safari benchmarks require macOS and the system safaridriver");
+        throw new Error(
+          "Safari browser tests require macOS and the system safaridriver",
+        );
       }
       return new SafariAdapter();
     }
@@ -33,7 +35,7 @@ class ChromiumAdapter {
     this.version = null;
   }
 
-  async withSession(url, action) {
+  async withSession(url, action, { allowStartupError = false } = {}) {
     const browser = await chromium.launch({
       executablePath: this.executable,
       headless: true,
@@ -41,9 +43,11 @@ class ChromiumAdapter {
     });
     this.version ||= browser.version();
     try {
-      const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+      const page = await browser.newPage({
+        viewport: { width: 1440, height: 1000 },
+      });
       const session = new ChromiumSession(page);
-      await session.navigate(url);
+      await session.navigate(url, allowStartupError);
       return await action(session);
     } finally {
       await browser.close();
@@ -56,7 +60,7 @@ class ChromiumSession {
     this.page = page;
   }
 
-  async navigate(url) {
+  async navigate(url, allowStartupError = false) {
     await this.page.goto(url, { waitUntil: "load" });
     await this.page.waitForFunction(
       () =>
@@ -65,7 +69,9 @@ class ChromiumSession {
       null,
       { timeout: 120_000 },
     );
-    await this.throwStartupError();
+    if (!allowStartupError) {
+      await this.throwStartupError();
+    }
   }
 
   async reload() {
@@ -78,8 +84,10 @@ class ChromiumSession {
   }
 
   async coldStartup() {
-    return this.page.evaluate(() =>
-      performance.getEntriesByName("gwr-initial-summary-ready").at(-1)?.startTime,
+    return this.page.evaluate(
+      () =>
+        performance.getEntriesByName("gwr-initial-summary-ready").at(-1)
+          ?.startTime,
     );
   }
 
@@ -101,7 +109,7 @@ class ChromiumSession {
   async measureKernel(name, iterations) {
     return this.page.evaluate(
       ({ name, iterations }) => {
-        const run = window.GWR_BENCHMARK_KERNELS?.run || wasm_bindgen.benchmark_kernel;
+        const run = wasm_bindgen.benchmark_kernel;
         const start = performance.now();
         const checksum = run(name, iterations);
         return { milliseconds: performance.now() - start, checksum };
@@ -111,7 +119,10 @@ class ChromiumSession {
   }
 
   async evaluate(source) {
-    return this.page.evaluate((script) => Function(`return (${script})`)(), source);
+    return this.page.evaluate(
+      (script) => Function(`return (${script})`)(),
+      source,
+    );
   }
 
   async wait(milliseconds) {
@@ -138,7 +149,7 @@ class SafariAdapter {
     this.version = null;
   }
 
-  async withSession(url, action) {
+  async withSession(url, action, { allowStartupError = false } = {}) {
     let driver;
     try {
       driver = await new Builder()
@@ -156,7 +167,7 @@ class SafariAdapter {
       const capabilities = await driver.getCapabilities();
       this.version ||= capabilities.get("browserVersion") || "unknown";
       const session = new SafariSession(driver);
-      await session.navigate(url);
+      await session.navigate(url, allowStartupError);
       return await action(session);
     } finally {
       await driver.quit();
@@ -169,16 +180,18 @@ class SafariSession {
     this.driver = driver;
   }
 
-  async navigate(url) {
+  async navigate(url, allowStartupError = false) {
     await this.driver.get(url);
     await this.driver.wait(
-      until.elementLocated(By.css("html[data-gwr-ready='complete'], html[data-gwr-error]")),
+      until.elementLocated(
+        By.css("html[data-gwr-ready='complete'], html[data-gwr-error]"),
+      ),
       120_000,
     );
     const error = await this.driver.executeScript(
       "return document.documentElement.dataset.gwrError || null",
     );
-    if (error) {
+    if (error && !allowStartupError) {
       throw new Error(`Safari report startup failed: ${error}`);
     }
   }
@@ -214,7 +227,7 @@ class SafariSession {
 
   async measureKernel(name, iterations) {
     return this.driver.executeScript(
-      `const run = window.GWR_BENCHMARK_KERNELS?.run || wasm_bindgen.benchmark_kernel;
+      `const run = wasm_bindgen.benchmark_kernel;
        const start = performance.now();
        const checksum = run(arguments[0], arguments[1]);
        return { milliseconds: performance.now() - start, checksum };`,

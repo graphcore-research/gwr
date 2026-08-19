@@ -7,12 +7,11 @@
   },
   "scripts": {
     "benchmark": "node benchmark.mjs",
-    "parity": "node parity.mjs"
+    "browser-test": "node browser-test.mjs",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
-    "pixelmatch": "7.2.0",
     "playwright-core": "1.62.1",
-    "pngjs": "7.0.0",
     "selenium-webdriver": "4.47.0"
   }
 }

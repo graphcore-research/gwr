@@ -131,12 +131,12 @@ exclude = "^gwr-visualisation/assets/generated/"
 priority = 1
 
 [[repos.hooks]]
-id = "gwr-visualisation-view-model-tests"
-name = "gwr visualisation view-model tests"
-description = "test browser-independent visualisation view model"
+id = "gwr-visualisation-browser-harness-tests"
+name = "gwr visualisation browser harness tests"
+description = "test visualisation browser benchmark results"
 language = "system"
-files = '^gwr-visualisation/(benchmarks/legacy/assets/.*\.js|tests/.*\.test\.mjs)$'
-entry = "node --test gwr-visualisation/tests/view-model.test.mjs"
+files = '^gwr-visualisation/benchmarks/.*\.mjs$'
+entry = "npm --prefix gwr-visualisation/benchmarks test"
 pass_filenames = false
 priority = 5
 
