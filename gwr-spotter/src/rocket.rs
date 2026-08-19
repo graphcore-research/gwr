@@ -165,3 +165,62 @@ pub fn rocket() -> _ {
         ],
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use rocket::local::asynchronous::Client;
+    use serial_test::serial;
+
+    use super::rocket;
+    use crate::server_contract::{
+        HttpClient, HttpResponse, assert_command_routes, assert_error_routes, assert_read_routes,
+    };
+
+    struct RocketClient(Client);
+
+    impl HttpClient for RocketClient {
+        async fn get(&self, path: &str) -> HttpResponse {
+            let response = self.0.get(path).dispatch().await;
+            let status = response.status().code;
+            let headers = response
+                .headers()
+                .iter()
+                .map(|header| {
+                    (
+                        header.name().to_string().to_ascii_lowercase(),
+                        header.value().to_string(),
+                    )
+                })
+                .collect();
+            let body = response.into_string().await.unwrap_or_default();
+
+            HttpResponse {
+                status,
+                headers,
+                body,
+            }
+        }
+    }
+
+    async fn client() -> RocketClient {
+        RocketClient(Client::untracked(rocket()).await.unwrap())
+    }
+
+    #[rocket::async_test]
+    #[serial]
+    async fn read_routes_follow_server_contract() {
+        assert_read_routes(&client().await).await;
+    }
+
+    #[rocket::async_test]
+    #[serial]
+    async fn command_routes_follow_server_contract() {
+        assert_command_routes(&client().await).await;
+    }
+
+    #[rocket::async_test]
+    #[serial]
+    async fn error_routes_follow_server_contract() {
+        assert_error_routes(&client().await).await;
+    }
+}

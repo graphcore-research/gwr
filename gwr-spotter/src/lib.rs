@@ -22,6 +22,13 @@ pub mod handler;
 
 pub mod rocket;
 
+#[cfg(test)]
+#[path = "../tests/common/server_contract.rs"]
+mod server_contract;
+
+#[cfg(test)]
+pub(crate) use rocket::SHARED_STATE as TEST_SERVER_STATE;
+
 /// Perfetto output generator.
 #[cfg(feature = "perfetto")]
 pub mod perfetto;
