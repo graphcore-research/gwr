@@ -7,7 +7,10 @@ import vm from "node:vm";
 
 const context = { window: {} };
 vm.runInNewContext(
-  readFileSync(new URL("../assets/view-model.js", import.meta.url), "utf8"),
+  readFileSync(
+    new URL("../benchmarks/legacy/assets/view-model.js", import.meta.url),
+    "utf8",
+  ),
   context,
 );
 const {

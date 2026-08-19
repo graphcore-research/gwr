@@ -2,10 +2,9 @@
 
 # GWR Visualisation
 
-`gwr-visualisation` generates a static web report for exploring gwr-timetable
-YAML files. The timetable, optional platform, and optional metric overlay files
-are parsen, then writes a browser-based visualisation bundle that can be opened
-is written to disk.
+`gwr-visualisation` generates a static web report for exploring `gwr-timetable`
+YAML files. It parses the timetable, optional platform, and optional metric
+overlay files, then writes a browser-based visualisation bundle to disk.
 
 ## Usage
 
@@ -36,6 +35,7 @@ The output directory will contain:
   `tensors.js`, `memory.js`, `relationships.js`, and `workspace.js`: focused UI
   modules loaded in dependency order
 - `app.js`: render orchestration, event wiring, and startup
+- `benchmark-hooks.js`: deterministic timing hooks used by the browser benchmark
 - `style.css`: local report styling
 
 ## What The Report Shows
@@ -203,6 +203,11 @@ Measure controls remain visible while the chart or grid content scrolls.
 
 ## Development
 
+The JavaScript report is retained under `benchmarks/legacy` as a measured
+baseline for browser performance work. The generator temporarily emits that
+baseline unchanged so this revision remains a usable tool while its replacement
+is developed.
+
 The browser code uses classic scripts and a shared
 `window.GWR_VISUALISATION_APP` namespace so generated reports continue to work
 when opened directly from disk. `view-model.js` provides browser-independent
@@ -221,9 +226,27 @@ cargo +nightly fmt
 cargo check -p gwr-visualisation
 cargo test -p gwr-visualisation
 node --test gwr-visualisation/tests/view-model.test.mjs
-npx prettier --check gwr-visualisation/assets/*.js
-npx eslint gwr-visualisation/assets
+npx prettier --check gwr-visualisation/benchmarks
+npx eslint gwr-visualisation/benchmarks
 ```
+
+Install the benchmark dependencies and run a short Chromium sample with:
+
+```bash
+npm ci --prefix gwr-visualisation/benchmarks
+npm --prefix gwr-visualisation/benchmarks run benchmark -- \
+  --timetable "$PWD/gwr-timetable/examples/small.yaml" \
+  --platform "$PWD/gwr-platform/examples/platform_4x4.yaml" \
+  --browsers chromium \
+  --warmups 1 \
+  --runs 1
+```
+
+Use `--browsers chromium,safari` on macOS to include the installed Safari via
+`safaridriver`. Safari requires Develop > Allow Remote Automation. Each sample
+uses a fresh browser session and report path. Results include raw samples,
+medians, browser and operating-system versions, and hardware details in JSON and
+Markdown files.
 
 The repository's `prek` configuration runs the browser-independent tests,
 Prettier, and ESLint for changed visualisation JavaScript before commits and

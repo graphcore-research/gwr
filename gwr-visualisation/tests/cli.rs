@@ -500,6 +500,7 @@ fn assert_script_bundle(report: &GeneratedReport) {
         "relationships.js",
         "workspace.js",
         "app.js",
+        "benchmark-hooks.js",
     ];
     let mut previous_position = 0;
     for script in scripts {
