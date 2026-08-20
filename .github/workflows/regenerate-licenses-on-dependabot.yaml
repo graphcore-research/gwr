@@ -37,7 +37,7 @@ jobs:
           private-key: ${{ secrets.GWR_BOT_PRIVATE_KEY }}
 
       - name: Check out the Dependabot branch
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Amend the PR tip rather than the generated merge commit.
           ref: ${{ github.event.pull_request.head.ref }}

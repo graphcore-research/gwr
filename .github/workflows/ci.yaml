@@ -43,7 +43,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/install-build-dependencies
 
   warm-dev-deps-cache:
@@ -54,7 +54,7 @@ jobs:
     needs: warm-build-deps-cache
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/install-dev-dependencies
 
   lint:
@@ -64,7 +64,7 @@ jobs:
       RUSTFLAGS: -D warnings
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - uses: actions/cache@v5
@@ -88,7 +88,7 @@ jobs:
       RUSTFLAGS: -D warnings
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - uses: ./.github/actions/install-build-dependencies
@@ -108,7 +108,7 @@ jobs:
       RUSTFLAGS: -D warnings
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - uses: ./.github/actions/install-build-dependencies
@@ -130,7 +130,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - uses: ./.github/actions/install-build-dependencies
