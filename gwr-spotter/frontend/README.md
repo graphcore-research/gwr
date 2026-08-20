@@ -2,14 +2,19 @@
 
 # Visualisation Frontend
 
-This frontend is a prototype for visualisation and interaction between a [D3].js
-frontend and gwr-spotter having loaded a binary trace file.
+This directory contains a static [D3.js] frontend for visualising and
+interacting with a model loaded into `gwr-spotter` from a binary trace.
 
-[D3]: https://d3js.org
+[D3.js]: https://d3js.org
+
+<!-- ANCHOR: frontend_usage -->
 
 ## Usage
 
-### Create a trace
+Run all commands below from the workspace root. The frontend and `gwr-spotter`
+run as separate processes on the same machine.
+
+### 1. Create a trace
 
 The first step is to create a binary trace by running a GWR-based simulation.
 For example:
@@ -18,29 +23,46 @@ For example:
 cargo run --release --bin sim-ring -- --binary --binary-file trace.bin
 ```
 
-### Load binary in gwr-spotter
+### 2. Start gwr-spotter
 
-`gwr-spotter` is a utility for reading trace files but will also open a port for
-this frontend to interact with:
+Start `gwr-spotter` with the binary trace:
 
 ```bash
 cargo run --release --bin gwr-spotter -- --bin trace.bin
 ```
 
-### Start the frontend
+Keep `gwr-spotter` running. It starts a loopback data API at
+`http://127.0.0.1:8000` for the frontend; this API is not itself a web page.
+Serve the frontend separately in the next step.
 
-This frontend can be started using Python:
+### 3. Serve the frontend
+
+Serve the static frontend files on a second loopback port using Python:
 
 ```bash
-python3 -m http.server 9991 -d gwr-spotter/frontend
+python3 -m http.server 9991 --bind 127.0.0.1 --directory gwr-spotter/frontend
 ```
 
-### Start the frontend
+### 4. Open the frontend
 
-Open http://localhost:9991 in a web browser. This has only been tested with
-Chrome and Safari.
+Open <http://localhost:9991> in a web browser on the same machine.
 
-You should see a graphical representation of the design along with a menu that
-allows you to select a number of different visual representations.
+## Features
 
-You can select nodes and `gwr-spotter` will be updated to filter to that node.
+- Sunburst, force-tree, treemap, and radial tidy-tree visualisations. Sunburst
+  is the default.
+- Node selection that applies an ID filter in the `gwr-spotter` TUI.
+- A trace-position slider showing the current line, total line count, and
+  simulation time. Moving the slider seeks the TUI to that trace position.
+- Capacity and fullness information in the force-tree and treemap views when
+  that data is available in the trace.
+
+## Troubleshooting
+
+If the page is blank or cannot load the model:
+
+- Confirm that `gwr-spotter` is still running with the binary trace loaded.
+- Confirm that ports 8000 and 9991 are not being used by another process.
+- Check the browser console for failed requests to `http://localhost:8000`.
+
+<!-- ANCHOR_END: frontend_usage -->

@@ -4,4 +4,7 @@
 
 {{#include ../../../gwr-spotter/README.md:overview}}
 
-[`gwr_track`]: ../gwr_track/chapter.md
+{{#include ../../../gwr-spotter/frontend/README.md:frontend_usage}}
+
+[frontend documentation]: #usage
+[gwr-track]: ../gwr_track/chapter.md
