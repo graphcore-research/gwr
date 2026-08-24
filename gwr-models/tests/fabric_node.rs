@@ -1,5 +1,6 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use gwr_components::{connect_dummy_rx, connect_dummy_tx};
@@ -11,6 +12,8 @@ use gwr_models::fabric::FabricConfig;
 use gwr_models::fabric::node::{FabricNode, FabricRoutingAlgorithm};
 use gwr_track::entity::Entity;
 
+// Create a fabric config. Note that it does not support any routing because
+// no port map is constructed.
 fn default_config() -> Rc<FabricConfig> {
     let num_columns = 3;
     let num_rows = 4;
@@ -31,7 +34,9 @@ fn default_config() -> Rc<FabricConfig> {
         rx_buffer_bytes,
         tx_buffer_bytes,
         port_bits_per_tick,
-    );
+        HashMap::new(),
+    )
+    .unwrap();
     Rc::new(config)
 }
 

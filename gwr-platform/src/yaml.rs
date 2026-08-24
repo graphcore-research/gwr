@@ -201,6 +201,13 @@ fn emit_fabrics(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std
                 2,
             )?;
         }
+        if let Some(port_selection) = fabric.port_selection {
+            emit_line(
+                &mut out,
+                format_args!("port_selection: {}", serializable_to_str(&port_selection)?),
+                2,
+            )?;
+        }
     }
     Ok(Some(out))
 }

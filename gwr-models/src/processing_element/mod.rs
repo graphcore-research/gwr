@@ -31,7 +31,7 @@ use gwr_engine::executor::Spawner;
 use gwr_engine::port::PortStateResult;
 use gwr_engine::time::clock::{Clock, phase};
 use gwr_engine::traits::Runnable;
-use gwr_engine::types::{AccessType, SimError, SimResult};
+use gwr_engine::types::{AccessType, DeviceId, SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::debug;
 use gwr_track::entity::{Entity, EntityGroup, EntityLane};
@@ -40,7 +40,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::log_stats;
 use crate::memory::memory_access::MemoryAccess;
-use crate::memory::memory_map::{DeviceId, MemoryMap};
+use crate::memory::memory_map::MemoryMap;
 use crate::processing_element::dispatch::Dispatch;
 use crate::processing_element::flop_monitor::FlopMonitor;
 use crate::processing_element::load_store_unit::LoadStoreUnit;

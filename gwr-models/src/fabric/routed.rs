@@ -19,6 +19,7 @@
 //! `col_row_port_to_fabric_port_index()` function in the configuration
 //! structure to get the index of the port you want to connect to.
 
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use async_trait::async_trait;
@@ -35,7 +36,7 @@ use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::{Aka, populate_aka_from_string};
 
 use crate::fabric::node::{FabricNode, FabricRoutingAlgorithm};
-use crate::fabric::{Fabric, FabricConfig};
+use crate::fabric::{Fabric, FabricConfig, FabricPortSelection};
 
 #[derive(EntityGet, EntityDisplay, Runnable)]
 pub struct RoutedFabric<T>
@@ -324,5 +325,18 @@ where
     fn col_row_port_to_fabric_port_index(&self, col: usize, row: usize, port: usize) -> usize {
         self.config
             .col_row_port_to_fabric_port_index(col, row, port)
+    }
+
+    fn fabric_port_index_to_col_row_port(&self, fabric_port_index: usize) -> (usize, usize, usize) {
+        self.config
+            .fabric_port_index_to_col_row_port(fabric_port_index)
+    }
+
+    fn destination_port_map(&self) -> &HashMap<u64, Vec<usize>> {
+        self.config.destination_port_map()
+    }
+
+    fn port_selection(&self) -> FabricPortSelection {
+        self.config.port_selection()
     }
 }
