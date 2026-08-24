@@ -42,6 +42,12 @@ struct Cli {
     #[cfg(feature = "perfetto")]
     #[arg(long, requires = "perfetto_compat")]
     perfetto: Option<PathBuf>,
+
+    /// Run without spawning the loopback HTTP API
+    ///
+    /// The web frontend will be unavailable.
+    #[arg(long)]
+    no_server: bool,
 }
 
 #[tokio::main]
@@ -57,7 +63,11 @@ async fn main() -> AppResult<()> {
         exit(0);
     }
 
-    let _http_server = spawn().await?;
+    let _http_server = if args.no_server {
+        None
+    } else {
+        Some(spawn().await?)
+    };
 
     // Create an application.
     let mut app = App::new(args.input.log, args.input.bin);

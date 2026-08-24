@@ -44,6 +44,9 @@ While running interactively, `gwr-spotter` automatically starts a loopback HTTP
 API at `127.0.0.1:8000`. The web frontend is served separately; see the
 [frontend documentation] for setup instructions.
 
+This feature can be disabled by passing the `--no-server` argument. This
+prevents `gwr-spotter` from attempting to bind to port 8000.
+
 <!-- ANCHOR_END: overview -->
 
 ### Views
