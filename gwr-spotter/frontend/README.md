@@ -62,6 +62,7 @@ Open <http://localhost:9991> in a web browser on the same machine.
 If the page is blank or cannot load the model:
 
 - Confirm that `gwr-spotter` is still running with the binary trace loaded.
+- Confirm that the `--no-server` flag has not been passed to `gwr-spotter`.
 - Confirm that ports 8000 and 9991 are not being used by another process.
 - Check the browser console for failed requests to `http://localhost:8000`.
 
