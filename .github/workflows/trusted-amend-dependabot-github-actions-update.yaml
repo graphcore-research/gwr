@@ -157,30 +157,89 @@ jobs:
           new_version = os.environ["NEW_VERSION"]
           summary = os.environ["SUMMARY"]
           header = f"Updates `{dependency}` from {previous_version} to {new_version}"
+          dependabot_truncation = (
+              "...\n\n_Description has been truncated_"
+          )
+          header_pattern = re.compile(
+              rf"(?m)^{re.escape(header)}$"
+          )
+
+
+          def collapse_candidate(
+              generated: str,
+              tail: str,
+              footer: str,
+              truncated: bool,
+          ) -> str | None:
+              matches = header_pattern.finditer(generated)
+              first = next(matches, None)
+              if first is None:
+                  return None
+
+              for second in matches:
+                  first_copy = generated[first.start() : second.start()]
+                  block = first_copy.rstrip()
+                  separator = first_copy[len(block) :]
+                  if not separator:
+                      continue
+
+                  next_section = separator + block
+                  remaining = generated[first.start() + len(block) :]
+                  has_complete_repeat = False
+                  while remaining.startswith(next_section):
+                      remaining = remaining[len(next_section) :]
+                      has_complete_repeat = True
+
+                  if not has_complete_repeat:
+                      continue
+
+                  if remaining and not (
+                      truncated
+                      and (
+                          next_section.startswith(remaining)
+                          or footer.startswith(remaining)
+                      )
+                  ):
+                      continue
+
+                  return generated[: first.start()] + block + tail
+
+              return None
 
 
           def collapse_repeated_sections(text: str, footer: str) -> str:
-              prefix, *sections = re.split(
-                  rf"(?m)^{re.escape(header)}$", text
-              )
-              if len(sections) < 2:
-                  return text
+              # A valid complete footer is stronger evidence than a truncation
+              # marker, since either string can occur inside release notes.
+              for terminal, truncated in (
+                  (footer, False),
+                  (dependabot_truncation, True),
+              ):
+                  candidates = set()
+                  ambiguous = False
+                  end = len(text)
+                  while (start := text.rfind(terminal, 0, end)) != -1:
+                      tail_start = start + len(terminal)
+                      tail = text[start:] if not truncated else text[tail_start:]
+                      # A footer in the alleged suffix makes the complete and
+                      # truncated interpretations indistinguishable.
+                      if truncated and footer in tail:
+                          ambiguous = True
+                          end = start
+                          continue
+                      collapsed = collapse_candidate(
+                          text[:start], tail, footer, truncated
+                      )
+                      if collapsed is not None:
+                          candidates.add(collapsed)
+                      end = start
 
-              sections[-1], marker, suffix = sections[-1].partition(footer)
-              if not marker:
-                  raise ValueError(
-                      f"could not find the footer after repeated {header!r} sections"
-                  )
+                  if ambiguous or len(candidates) > 1:
+                      return text
+                  if candidates:
+                      return candidates.pop()
 
-              sections = [
-                  (header + section).strip() for section in sections
-              ]
-              if len(set(sections)) != 1:
-                  raise ValueError(
-                      f"repeated {header!r} sections are not identical"
-                  )
-
-              return prefix + sections[0] + marker + suffix
+              # If the structure is uncertain, preserve it byte-for-byte.
+              return text
 
 
           old_message, new_message, old_pr_body, new_pr_body = map(
