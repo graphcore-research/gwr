@@ -1,6 +1,12 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
-//! Helper connection macros
+//! Helper connection macros.
+//!
+//! Use these macros for component topology wiring instead of manually passing
+//! [`PortStateResult`](gwr_engine::port::PortStateResult) values around. They
+//! encode the repository's port naming convention, support indexed port arrays,
+//! and fail early when the expected `port_*` or `connect_port_*` method does
+//! not exist.
 
 #[doc(hidden)]
 pub use paste::paste;
@@ -51,7 +57,14 @@ macro_rules! connect_port {
     };
 }
 
-/// Create and connect a dummy RX port
+/// Create and connect a dummy RX port.
+///
+/// Use this when an output port is deliberately left unconnected in a
+/// particular topology. The dummy endpoint records that choice and marks the
+/// output as connected, preventing a runtime "not connected" error. It does not
+/// consume data: the output must never call `put` or `try_put`, because no
+/// receiver will call `get` and the simulation may stall or terminate with
+/// unfinished work.
 #[macro_export]
 macro_rules! connect_dummy_rx {
     ($from:expr, $from_port_name:ident => $engine:expr, $clock:expr, $entity:expr) => {
@@ -79,7 +92,13 @@ macro_rules! connect_dummy_rx {
     };
 }
 
-/// Create and connect a dummy TX port
+/// Create and connect a dummy TX port.
+///
+/// Use this when an input port is deliberately left unconnected in a particular
+/// topology. The dummy endpoint records that choice and marks the input as
+/// connected, preventing a runtime "not connected" error. It does not produce
+/// data: the input must never call `get`, because no transmitter will provide a
+/// value and the simulation may stall or terminate with unfinished work.
 #[macro_export]
 macro_rules! connect_dummy_tx {
     ($entity:expr => $to:expr, $to_port_name:ident) => {

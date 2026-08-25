@@ -32,6 +32,12 @@ pub use graph::{
 use crate::mermaid::{MermaidNodeStatus, render_mermaid};
 
 #[derive(EntityGet)]
+/// A validated workload graph that can dispatch tasks onto a [`Platform`].
+///
+/// `Timetable` owns workload structure, task dependencies, tensor views, and PE
+/// placement. It accepts a graph whose file sections have already been
+/// validated and checks PE placement before tasks are dispatched, so topology
+/// and reference errors are reported before the simulation relies on them.
 pub struct Timetable {
     entity: Rc<Entity>,
     platform: Rc<Platform>,

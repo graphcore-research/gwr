@@ -15,6 +15,12 @@ use crate::types::{Component, Eventable, SimResult};
 /// Use a default clock frequency of 1GHz.
 const DEFAULT_CLOCK_MHZ: f64 = 1000.0;
 
+/// Components registered to be spawned when the simulation starts.
+///
+/// Constructors for active components usually call [`Engine::register`] before
+/// returning their `Rc<Self>`. The registry is drained by [`Engine::run`] or
+/// [`Engine::run_until`], so all construction and required port connections
+/// should be complete before either method is called.
 pub struct Registry {
     entity: Rc<Entity>,
     components: RefCell<Vec<Component>>,
@@ -44,6 +50,18 @@ impl Registry {
     }
 }
 
+/// Single-threaded asynchronous simulation runtime.
+///
+/// An application normally creates an `Engine`, obtains one or more clocks,
+/// constructs components or models with `new_and_register` constructors,
+/// connects their ports, and then calls [`run`](Self::run) or
+/// [`run_until`](Self::run_until). Connections are intentionally part of setup:
+/// a port that is still unconnected when a task tries to use it represents a
+/// model-topology error.
+///
+/// The engine owns the executor, a spawner for additional tasks, the top-level
+/// trace [`Entity`], the shared [`Tracker`], and the registry of components
+/// that should begin running when simulation starts.
 pub struct Engine {
     pub executor: Executor,
     spawner: Spawner,
@@ -67,7 +85,11 @@ impl Engine {
         }
     }
 
-    /// Register a component that will be run as the simulation starts
+    /// Register a component that will be run as the simulation starts.
+    ///
+    /// Registration should happen during construction, before the engine run
+    /// begins. Passive helper objects that do not have independent async
+    /// behavior do not need to be registered.
     pub fn register(&self, component: Component) {
         self.registry.register(component);
     }

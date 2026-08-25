@@ -27,7 +27,16 @@ macro_rules! sim_error {
     };
 }
 
-/// The `SimError` is what should be returned in the case of an error
+/// Error returned while parsing, constructing, connecting, or running a
+/// simulation.
+///
+/// Prefer catching static mistakes early. Use parse-time validation when
+/// reading files, and construction-time and connect-time validation where
+/// possible.
+///
+/// Include enough detail to identify the entity, config item, port, node, or
+/// edge that caused the failure clearly enough to fix the model topology or
+/// input.
 #[derive(Debug)]
 pub struct SimError(pub String);
 

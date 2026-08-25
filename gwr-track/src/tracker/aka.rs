@@ -1,6 +1,23 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
 //! Also Known As (AKA) - an alternative name manager.
+//!
+//! `Aka` lets a composite model expose stable public names while delegating the
+//! actual entity or port implementation to child components. Constructors named
+//! `new_and_register_with_renames` accept an `Option<&Aka>` and pass it to
+//! [`Entity::new_with_renames`](crate::entity::Entity::new_with_renames), port
+//! constructors such as `InPort::new_with_renames` and
+//! `OutPort::new_with_renames`, or child constructors so the tracking layer can
+//! record both the local implementation name and the parent-visible name.
+//!
+//! The usual public constructor should remain `new_and_register`; it normally
+//! calls the rename-aware constructor with `None` so users do not need to know
+//! about `Aka`. Add a rename-aware constructor when a component delegates
+//! public ports to internal subcomponents, composes other rename-aware
+//! children, or needs alternate names for tracking, filtering, or monitor
+//! configuration. Leaf components whose local ports are already their public
+//! API can stay with `new_and_register` until a real composition use case
+//! appears.
 
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -64,7 +81,12 @@ pub fn populate_aka_from_string(
     populate_aka(aka, new_aka, entity, &ref_names);
 }
 
-/// Build up a new set of alternative names with a new set of renames
+/// Build up a new set of alternative names with a new set of renames.
+///
+/// Each tuple maps a name visible on `entity` to the child-local name that
+/// should inherit the alternative names. For example, a composite can map a
+/// public `rx_a` port to an internal limiter's `rx` port so traces and monitor
+/// configuration can refer to either level of the model.
 pub fn populate_aka(
     aka: Option<&Aka>,
     new_aka: Option<&mut Aka>,

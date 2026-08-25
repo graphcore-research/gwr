@@ -77,6 +77,12 @@ All components should contain an [Entity] which is used to configure the logging
 and also to give a unique location within the model hierarchy. The [Entity] will
 be wrapped in `std::rc::Rc` so that it can be shared.
 
+GWR components run on the engine's single-threaded async executor, so shared
+component state is normally built from `Rc`, `RefCell`, and `Cell` rather than
+`Arc` and locks. This is intentional: it lets setup code, spawned tasks, and
+small helper objects share local mutable state without adding the overhead of
+thread synchronisation to the simulation model.
+
 ```rust,no_run
 # use std::marker::PhantomData;
 # use std::rc::Rc;
@@ -123,12 +129,21 @@ either be connected directly to a component or to a subcomponent. It is
 therefore up to the component writer to provide the relevant functions and
 connect the ports as required.
 
-Port connection functions take two forms - those that take arrays indices and
-those that don't. Each function will have a unique name depending on the port
-name and the direction of data flow.
+Ports are commonly stored as `RefCell<Option<InPort<T>>>` or
+`RefCell<Option<OutPort<T>>>`. During setup, connection methods borrow the
+component through `&self` and connect the port state. When the component's
+`run()` task starts, it takes the port out of the `Option` and owns it for the
+life of that task. Connectivity is checked separately when the task first uses
+the port. If the `Option` is already empty, the port has previously been taken,
+usually because `run()` was invoked more than once or ownership was transferred
+too early.
 
-Input port funnctions are of the form `port_<NAME>` or `port_<NAME>_i` for ports
-that expose an array of connections. Output port funcions are of the form
+There are two forms of port connections: those that name a single port and those
+that take an index into a port array. Each function has a unique name based on
+the port name and the direction of data flow.
+
+Input port functions are of the form `port_<NAME>` or `port_<NAME>_i` for ports
+that expose an array of connections. Output port functions are of the form
 `connect_port_<NAME>` and `connect_port_<NAME>_i`.
 
 Some examples are provided below.

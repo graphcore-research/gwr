@@ -39,19 +39,22 @@ pub trait Routable {
 /// A super-trait that objects that are passed around the simulation have to
 /// implement
 ///
-///  - Clone:       It would be nice to use `Copy` instead, but given that
-///    things like `Vec` are not `Copy` we have to use `Clone` instead to allow
-///    the application to keep copies of objects sent around.
-///  - Debug:       In order to print "{:?}" objects have to at least implement
-///    Debug. We could require Display, but that requires explicit
-///    implementation.
-///  - Routable:    Allows routing.
-///  - Unique:      Allows for unique identification of `Entities`.
-///  - TotalBytes:  Allows rate limiting.
-///  - Unpin:       Required in order to be able to Unpin in port futures.
-///  - 'static:     Due to the way that futures are implemented, the lifetimes
-///    need to be `static. This means that objects may have to be placed in
-///    `Box` to make the static.
+/// This is the minimum object contract required by ports, flow controls,
+/// tracking, and most test harnesses. The trait intentionally combines data
+/// movement concerns (`Clone`, `Unpin`, `'static`), diagnostics (`Debug`,
+/// `Display`), observability (`Unique`), and bandwidth modelling
+/// (`TotalBytes`). Components that route objects require [`Routable`]
+/// separately.
+///
+///  - `Clone`: Allows applications and components to retain copies of values
+///    sent through the simulation, including values such as `Vec` that are not
+///    `Copy`.
+///  - `Debug` and `Display`: Support diagnostic and trace output.
+///  - `Unique`: Supplies the value's tracking ID.
+///  - `TotalBytes`: Supplies the size used by bandwidth and rate models.
+///  - `Unpin`: Allows values to be moved out of port futures safely.
+///  - `'static`: Allows port futures containing values to be owned by spawned
+///    simulation tasks.
 pub trait SimObject: Clone + Debug + Display + Unique + TotalBytes + Unpin + 'static {}
 
 // Implementations for basic types that can be sent around the simulation for
@@ -158,9 +161,17 @@ pub type BoxFuture<'a, T> = Pin<std::boxed::Box<dyn Future<Output = T> + 'a>>;
 /// The `Runnable` trait defines any active functionality that is spawned by a
 /// component.
 ///
-/// This is a trait that defines an `async` function and therefore currently
-/// needs to use the `#[async_trait(?Send)]` decorator that converts it to a
-/// pinned boxed result. A basic implementation of the trait looks like:
+/// Components with no independent async behavior can use the default
+/// implementation. Active components need to override [`run`](Runnable::run).
+/// Because the executor is single-threaded, active components normally share
+/// state through `Rc`, `RefCell`, and `Cell` instead of `Arc` or locks. Ports
+/// are often stored as `RefCell<Option<...>>`: setup code connects them through
+/// `&self`, and `run` takes ownership of them for the lifetime of the spawned
+/// task.
+///
+/// The `#[async_trait(?Send)]` decorator keeps the trait usable through
+/// `dyn Runnable` and produces futures suitable for the single-threaded
+/// executor. A basic implementation of the trait looks like:
 ///
 /// ```rust
 /// # use gwr_engine::types::SimResult;
@@ -173,7 +184,7 @@ pub type BoxFuture<'a, T> = Pin<std::boxed::Box<dyn Future<Output = T> + 'a>>;
 /// }
 /// ```
 ///
-/// A default implementation is provided for any compoment that doesn't have any
+/// A default implementation is provided for any component that doesn't have any
 /// active behaviour.
 #[async_trait(?Send)]
 pub trait Runnable {
