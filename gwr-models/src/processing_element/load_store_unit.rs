@@ -332,7 +332,8 @@ impl LoadStoreUnit {
 
         let mut completed_requests = Vec::new();
 
-        // Ensure only one load/store Task uses the LSU request issue path at a time.
+        // Ensure only one compute tensor transfer uses the LSU request issue path at a
+        // time.
         let serialiser_guard = ResourceGuard::new(self.state.serialiser.clone()).await;
         let mut activity_guard = None;
 

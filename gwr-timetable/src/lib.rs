@@ -22,9 +22,7 @@ use gwr_model_builder::EntityGet;
 use gwr_models::processing_element::MachineOpCounts;
 use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::operators::{Tensor, TensorView};
-use gwr_models::processing_element::task::{
-    ComputeOp, ComputeTaskConfig, MemoryOp, MemoryTaskConfig, Task,
-};
+use gwr_models::processing_element::task::{ComputeOp, ComputeTaskConfig, Task};
 use gwr_platform::Platform;
 use gwr_track::entity::Entity;
 use gwr_track::{debug, info, trace};
@@ -36,18 +34,7 @@ use timetable_file::{NodeSection, TimetableFile};
 use types::Node;
 
 use crate::mermaid::{MermaidNodeStatus, render_mermaid_from_parts};
-use crate::timetable_file::{
-    EdgeSection, MemoryConfigSection, TensorConfigSection, TensorViewSection, dtype_num_bytes,
-};
-
-fn validate_access_in_range(
-    node_id: &str,
-    direction: &str,
-    mem_config: &MemoryConfigSection,
-    tensor_config: &TensorConfigSection,
-) -> SimResult {
-    validate_view_in_range(node_id, direction, mem_config.view.as_ref(), tensor_config)
-}
+use crate::timetable_file::{EdgeSection, TensorConfigSection, TensorViewSection};
 
 fn validate_view_in_range(
     node_id: &str,
@@ -95,34 +82,6 @@ fn validate_view_in_range(
     }
 
     Ok(())
-}
-
-fn tensor_view_offset(
-    tensor_config: &TensorConfigSection,
-    view: Option<&TensorViewSection>,
-) -> usize {
-    match view {
-        Some(view) => view
-            .offsets
-            .iter()
-            .enumerate()
-            .map(|(i, offset)| {
-                let stride: usize = tensor_config.shape[(i + 1)..].iter().product();
-                offset * stride
-            })
-            .sum(),
-        None => 0,
-    }
-}
-
-fn tensor_view_num_elements(
-    tensor_config: &TensorConfigSection,
-    view: Option<&TensorViewSection>,
-) -> usize {
-    match view {
-        Some(view) => view.num_elements(),
-        None => tensor_config.num_elements(),
-    }
 }
 
 #[derive(EntityGet)]
@@ -299,14 +258,6 @@ impl Timetable {
     fn validate(&self) -> SimResult {
         for node in &self.nodes {
             match &node.node_section {
-                NodeSection::Memory { id, op, config, .. } => match op {
-                    MemoryOp::Load => {
-                        self.validate_load_node(id, node, config)?;
-                    }
-                    MemoryOp::Store => {
-                        self.validate_store_node(id, node, config)?;
-                    }
-                },
                 NodeSection::Compute {
                     id,
                     input_views,
@@ -322,20 +273,6 @@ impl Timetable {
         }
 
         Ok(())
-    }
-
-    /// Given a Node, return the input Tensor config for a Memory Load and the
-    /// output Tensor config for a Memory Store. In all other cases returns
-    /// None.
-    fn get_tensor_node_config(&self, node: &Node) -> Option<&TensorConfigSection> {
-        node.get_memory_tensor_node_idx().map(|node_idx| {
-            let node = &self.nodes[node_idx];
-            if let NodeSection::Tensor { config, .. } = &node.node_section {
-                Some(config)
-            } else {
-                None
-            }
-        })?
     }
 
     fn validate_compute_node(
@@ -394,44 +331,6 @@ impl Timetable {
         }
 
         Ok(())
-    }
-
-    fn validate_load_node(
-        &self,
-        id: &str,
-        load_node: &Node,
-        load_config: &MemoryConfigSection,
-    ) -> SimResult {
-        if load_node.inputs.len() != 1 {
-            return sim_error!(
-                "{} edges connect into Load node '{id}'",
-                load_node.inputs.len(),
-            );
-        }
-
-        let Some(config) = self.get_tensor_node_config(load_node) else {
-            return sim_error!("Load node '{id}' not connected from Tensor node",);
-        };
-        validate_access_in_range(id, "Load", load_config, config)
-    }
-
-    fn validate_store_node(
-        &self,
-        id: &str,
-        store_node: &Node,
-        store_config: &MemoryConfigSection,
-    ) -> SimResult {
-        if store_node.outputs.len() != 1 {
-            return sim_error!(
-                "{} edges connect from Store node '{id}'",
-                store_node.outputs.len(),
-            );
-        }
-
-        let Some(config) = self.get_tensor_node_config(store_node) else {
-            return sim_error!("Store node '{id}' not connected to Tensor node");
-        };
-        validate_access_in_range(id, "Store", store_config, config)
     }
 
     /// Check a given tensor index and move it if it is now complete.
@@ -542,22 +441,6 @@ impl Timetable {
         self.completed_node_indices.borrow().len()
     }
 
-    fn memory_access_address_num_bytes(
-        &self,
-        memory_node: &Node,
-        config: &MemoryConfigSection,
-    ) -> (u64, usize) {
-        // Note we assume that the graph has been validated so that we can simply unwrap
-        // the result
-        let tensor_config = self.get_tensor_node_config(memory_node).unwrap();
-        let offset_num_elements = tensor_view_offset(tensor_config, config.view.as_ref());
-        let view_num_elements = tensor_view_num_elements(tensor_config, config.view.as_ref());
-        let address =
-            tensor_config.addr + dtype_num_bytes(&tensor_config.dtype, offset_num_elements) as u64;
-        let num_bytes = dtype_num_bytes(&tensor_config.dtype, view_num_elements);
-        (address, num_bytes)
-    }
-
     pub fn get_input_output_tensors(&self, node_idx: usize) -> Result<InOutTensorViews, SimError> {
         let node = &self.nodes[node_idx];
         let NodeSection::Compute {
@@ -636,17 +519,8 @@ impl Timetable {
         let mut machine_ops = MachineOpCounts::default();
         let mut num_compute_nodes = 0;
         let mut num_tensor_nodes = 0;
-        let mut num_memory_nodes = 0;
         for (idx, node) in self.nodes.iter().enumerate() {
             match &node.node_section {
-                NodeSection::Memory { op, config, .. } => {
-                    let (_, num_bytes) = self.memory_access_address_num_bytes(node, config);
-                    match op {
-                        MemoryOp::Load => total_load_bytes += num_bytes,
-                        MemoryOp::Store => total_store_bytes += num_bytes,
-                    }
-                    num_memory_nodes += 1;
-                }
                 NodeSection::Compute { op, .. } => {
                     let (inputs, outputs) = self.get_input_output_tensors(idx)?;
                     machine_ops.add_assign(op.compute_machine_ops(&inputs, &outputs)?);
@@ -664,7 +538,7 @@ impl Timetable {
 
         info!(self.entity ; "Timetable:");
         info!(self.entity ;
-            "  {num_compute_nodes} compute nodes, {num_tensor_nodes} tensor nodes, {num_memory_nodes} memory nodes"
+            "  {num_compute_nodes} compute nodes, {num_tensor_nodes} tensor nodes"
         );
         info!(self.entity ; "  loads {total_load_bytes} bytes, stores {total_store_bytes} bytes");
         info!(self.entity ;
@@ -687,7 +561,7 @@ impl Timetable {
         self.nodes
             .iter()
             .enumerate()
-            .filter_map(|(idx, node)| match &node.node_section {
+            .map(|(idx, node)| match &node.node_section {
                 NodeSection::Compute { id, .. } | NodeSection::Tensor { id, .. } => {
                     let status = if completed.contains(&idx) {
                         MermaidNodeStatus::Complete
@@ -696,9 +570,8 @@ impl Timetable {
                     } else {
                         MermaidNodeStatus::Pending
                     };
-                    Some((id.clone(), status))
+                    (id.clone(), status)
                 }
-                NodeSection::Memory { .. } => None,
             })
             .collect()
     }
@@ -733,17 +606,6 @@ fn build_compute_task(
     }
 }
 
-fn build_memory_task(id: &str, op: MemoryOp, addr: u64, num_bytes: usize) -> Task {
-    Task::MemoryTask {
-        config: MemoryTaskConfig {
-            id: id.to_string(),
-            op,
-            addr,
-            num_bytes,
-        },
-    }
-}
-
 #[async_trait(?Send)]
 impl Dispatch for Timetable {
     fn task_by_id(&self, task_idx: usize) -> Result<Task, SimError> {
@@ -752,10 +614,6 @@ impl Dispatch for Timetable {
             NodeSection::Compute { id, op, .. } => {
                 let (inputs, outputs) = self.get_input_output_tensors(task_idx)?;
                 Ok(build_compute_task(id, op.clone(), inputs, outputs))
-            }
-            NodeSection::Memory { id, op, config, .. } => {
-                let (address, num_bytes) = self.memory_access_address_num_bytes(node, config);
-                Ok(build_memory_task(id, *op, address, num_bytes))
             }
             NodeSection::Tensor { .. } => {
                 sim_error!("Task Index {task_idx} refers to a Tensor node")
@@ -813,15 +671,6 @@ impl Dispatch for Timetable {
                     }
                 }
             }
-            NodeSection::Memory { op, .. } => {
-                if let MemoryOp::Store = op {
-                    // Only stores are completing their output tensors
-                    let tensor_node_idx = node.get_output_tensor_node_idx().unwrap();
-                    if self.update_complete_tensor(tensor_node_idx) {
-                        self.mark_successors_updated(tensor_node_idx);
-                    }
-                }
-            }
             NodeSection::Tensor { .. } => {}
         }
 
@@ -862,57 +711,5 @@ impl Dispatch for Timetable {
             .get(&pe_idx)
             .map(BTreeSet::len)
             .unwrap_or_default()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use gwr_models::processing_element::operators::dtype::DataType;
-
-    use super::tensor_view_offset;
-    use crate::timetable_file::{TensorConfigSection, TensorViewSection};
-
-    fn tensor_config(shape: Vec<usize>) -> TensorConfigSection {
-        TensorConfigSection {
-            addr: 0,
-            dtype: DataType::Fp16,
-            shape,
-        }
-    }
-
-    #[test]
-    fn tensor_view_offset_none_view_is_zero() {
-        let config = tensor_config(vec![3, 4, 5]);
-        assert_eq!(tensor_view_offset(&config, None.as_ref()), 0);
-    }
-
-    #[test]
-    fn tensor_view_offset_1d() {
-        let config = tensor_config(vec![10]);
-        let view = Some(TensorViewSection {
-            offsets: vec![7],
-            shape: vec![2],
-        });
-        assert_eq!(tensor_view_offset(&config, view.as_ref()), 7);
-    }
-
-    #[test]
-    fn tensor_view_offset_2d_row_major() {
-        let config = tensor_config(vec![4, 5]);
-        let view = Some(TensorViewSection {
-            offsets: vec![2, 3],
-            shape: vec![1, 1],
-        });
-        assert_eq!(tensor_view_offset(&config, view.as_ref()), 13);
-    }
-
-    #[test]
-    fn tensor_view_offset_3d_row_major() {
-        let config = tensor_config(vec![3, 4, 5]);
-        let view = Some(TensorViewSection {
-            offsets: vec![1, 2, 3],
-            shape: vec![1, 1, 1],
-        });
-        assert_eq!(tensor_view_offset(&config, view.as_ref()), 33);
     }
 }

@@ -2,15 +2,14 @@
 
 //! A Processing Element (PE) for a simulation.
 //!
-//! The PE can model data load/stores as well as performing computations
-//! as defined by a timetable.
+//! The PE performs computations defined by a timetable.
 //!
 //! The PE comprises:
 //!  - Load/Store
 //!  - Internal Buffers
 //!  - Compute
 //!
-//! Identifies all operation nodes (load/store/compute) that can execute
+//! Identifies all compute nodes that can execute
 //! because their dependencies are satisfied (or they have no dependencies).
 
 //! # Ports
@@ -45,7 +44,7 @@ use crate::processing_element::dispatch::Dispatch;
 use crate::processing_element::flop_monitor::FlopMonitor;
 use crate::processing_element::load_store_unit::LoadStoreUnit;
 use crate::processing_element::operators::TensorView;
-use crate::processing_element::task::{ComputeTaskConfig, MemoryOp, MemoryTaskConfig, Task};
+use crate::processing_element::task::{ComputeTaskConfig, Task};
 
 pub mod dispatch;
 mod flop_monitor;
@@ -492,13 +491,6 @@ async fn handle_task(
         )
         .await
         .map_err(|err| SimError(format!("{entity} had error on task {}:\n{err}", config.id))),
-        Task::MemoryTask { config } => {
-            handle_memory_task(dispatcher, lsu, activity_lanes, task_idx, &config)
-                .await
-                .map_err(|err| {
-                    SimError(format!("{entity} had error on task {}:\n{err}", config.id))
-                })
-        }
         Task::SyncTask { .. } => {
             todo!();
         }
@@ -608,43 +600,6 @@ async fn handle_compute_task(
         }
     }
 
-    dispatcher.set_task_completed(task_idx)?;
-    Ok(())
-}
-
-// Spawn the handling of memory nodes so that thye can run in parallel.
-async fn handle_memory_task(
-    dispatcher: Dispatcher,
-    lsu: Rc<LoadStoreUnit>,
-    activity_lanes: Rc<ProcessingElementActivityLanes>,
-    task_idx: usize,
-    config: &MemoryTaskConfig,
-) -> SimResult {
-    let dst_addr = config.addr;
-    let (access_type, lanes, activity_name) = match config.op {
-        MemoryOp::Load => (
-            AccessType::ReadRequest,
-            &activity_lanes.lsu_read,
-            format!("{} tensor read", config.id),
-        ),
-        MemoryOp::Store => (
-            AccessType::WriteNonPostedRequest,
-            &activity_lanes.lsu_write,
-            format!("{} tensor write", config.id),
-        ),
-    };
-
-    let access_size_bytes = config.num_bytes;
-    let group = activity_lanes.create_group(&format!("{} operation", config.id));
-    lsu.do_access(
-        access_type,
-        access_size_bytes,
-        dst_addr,
-        lanes,
-        &activity_name,
-        &group,
-    )
-    .await?;
     dispatcher.set_task_completed(task_idx)?;
     Ok(())
 }

@@ -4,14 +4,12 @@ use std::rc::Rc;
 use std::vec;
 
 use gwr_engine::test_helpers::start_test;
-use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::operators::dtype::DataType;
-use gwr_models::processing_element::task::MemoryOp;
+use gwr_models::processing_element::task::ComputeOp;
 use gwr_platform::Platform;
 use gwr_timetable::Timetable;
 use gwr_timetable::timetable_file::{
-    EdgeKind, EdgeSection, MemoryConfigSection, NodeSection, TensorConfigSection,
-    TensorViewSection, TimetableFile,
+    EdgeKind, EdgeSection, NodeSection, TensorConfigSection, TensorViewSection, TimetableFile,
 };
 use gwr_track::entity::Entity;
 
@@ -54,31 +52,41 @@ nodes:
       dtype: fp32
       shape: [3, 10, 10]
 
-  - id: load0
-    kind: memory
-    op: load
-    pe: pe0
+  - id: tensor1
+    kind: tensor
     config:
-      view:
-        shape: [1, 10, 10]
-        offsets: [0, 0, 0]
+      addr: 0x1000
+      dtype: fp32
+      shape: [3, 10, 10]
 
-  - id: load1
-    kind: memory
-    op: load
+  - id: add0
+    kind: compute
+    op: add
     pe: pe0
+    input_views:
+      -
+      -
+    output_views:
+      -
+
+  - id: tensor2
+    kind: tensor
     config:
-      view:
-        shape: [1, 10, 10]
-        offsets: [1, 0, 0]
+      addr: 0x2000
+      dtype: fp32
+      shape: [3, 10, 10]
 
 edges:
   - from: tensor0
-    to: load0
+    to: add0.0
     kind: data
 
-  - from: tensor0
-    to: load1
+  - from: tensor1
+    to: add0.1
+    kind: data
+
+  - from: add0
+    to: tensor2
     kind: data
 ",
         )
@@ -106,19 +114,21 @@ edegs: []
 }
 
 #[test]
-fn memory_node_rejects_unknown_view_field() {
+fn compute_node_rejects_unknown_view_field() {
     let err = TimetableFile::from_string(
         "
 nodes:
-  - id: load0
-    kind: memory
-    op: load
+  - id: add0
+    kind: compute
+    op: add
     pe: pe0
-    config:
-      view:
+    input_views:
+      - offsets: [0]
         shape: [4]
-        offsets: [0]
         stride: [1]
+      -
+    output_views:
+      -
 
 edges:
 ",
@@ -143,16 +153,15 @@ edges:
     assert!(format!("{err}").contains("unknown field `label`"));
 }
 
-// Node errors
-
 #[test]
 fn invalid_node_pe() {
     let (top, platform, mut timetable_file) = create_default_timetable_file();
-    timetable_file.nodes.push(NodeSection::Memory {
+    timetable_file.nodes.push(NodeSection::Compute {
         id: "node2".to_string(),
-        op: MemoryOp::Store,
+        op: ComputeOp::Add,
         pe: Some("pe1".to_string()),
-        config: MemoryConfigSection { view: None },
+        input_views: vec![None, None],
+        output_views: vec![None],
     });
 
     let err = Timetable::new(&top, timetable_file, &platform).unwrap_err();
@@ -162,83 +171,6 @@ fn invalid_node_pe() {
 #[test]
 fn duplicate_node_id() {
     let (top, platform, mut timetable_file) = create_default_timetable_file();
-    timetable_file.nodes.push(NodeSection::Memory {
-        id: "load1".to_string(),
-        op: MemoryOp::Store,
-        pe: Some("pe0".to_string()),
-        config: MemoryConfigSection { view: None },
-    });
-
-    let err = Timetable::new(&top, timetable_file, &platform).unwrap_err();
-    assert!(format!("{err}").contains("Duplicate Node ID 'load1'"));
-}
-
-#[test]
-fn load_not_connected_to_tensor() {
-    let (top, platform, mut timetable_file) = create_default_timetable_file();
-    timetable_file.nodes.push(NodeSection::Memory {
-        id: "node2".to_string(),
-        op: MemoryOp::Load,
-        pe: Some("pe0".to_string()),
-        config: MemoryConfigSection { view: None },
-    });
-
-    let err = Timetable::new(&top, timetable_file, &platform).unwrap_err();
-    assert!(format!("{err}").contains("0 edges connect into Load node"));
-}
-
-#[test]
-fn store_not_connected_to_tensor() {
-    let (top, platform, mut timetable_file) = create_default_timetable_file();
-    timetable_file.nodes.push(NodeSection::Memory {
-        id: "node2".to_string(),
-        op: MemoryOp::Store,
-        pe: Some("pe0".to_string()),
-        config: MemoryConfigSection { view: None },
-    });
-
-    let err = Timetable::new(&top, timetable_file, &platform).unwrap_err();
-    assert!(format!("{err}").contains("0 edges connect from Store node"));
-}
-
-#[test]
-fn load_outside_tensor() {
-    let (top, platform, mut timetable_file) = create_default_timetable_file();
-    timetable_file.nodes.push(NodeSection::Memory {
-        id: "node2".to_string(),
-        op: MemoryOp::Load,
-        pe: Some("pe0".to_string()),
-        config: MemoryConfigSection {
-            view: Some(TensorViewSection {
-                shape: vec![3, 10, 10],
-                offsets: vec![1, 1, 1],
-            }),
-        },
-    });
-    timetable_file.edges.push(EdgeSection {
-        from: "tensor0".to_string(),
-        to: "node2".to_string(),
-        kind: EdgeKind::Data,
-    });
-
-    let err = Timetable::new(&top, timetable_file, &platform).unwrap_err();
-    assert!(format!("{err}").contains("Load view on node 'node2' is out of range in dim 0"));
-}
-
-#[test]
-fn store_outside_tensor() {
-    let (top, platform, mut timetable_file) = create_default_timetable_file();
-    timetable_file.nodes.push(NodeSection::Memory {
-        id: "store0".to_string(),
-        op: MemoryOp::Store,
-        pe: Some("pe0".to_string()),
-        config: MemoryConfigSection {
-            view: Some(TensorViewSection {
-                shape: vec![3, 10, 100],
-                offsets: vec![0, 0, 0],
-            }),
-        },
-    });
     timetable_file.nodes.push(NodeSection::Tensor {
         id: "tensor1".to_string(),
         config: TensorConfigSection {
@@ -247,29 +179,47 @@ fn store_outside_tensor() {
             shape: vec![3, 2, 4],
         },
     });
-    timetable_file.edges.push(EdgeSection {
-        from: "load0".to_string(),
-        to: "store0".to_string(),
-        kind: EdgeKind::Data,
-    });
-    timetable_file.edges.push(EdgeSection {
-        from: "store0".to_string(),
-        to: "tensor1".to_string(),
-        kind: EdgeKind::Data,
+
+    let err = Timetable::new(&top, timetable_file, &platform).unwrap_err();
+    assert!(format!("{err}").contains("Duplicate Node ID 'tensor1'"));
+}
+
+#[test]
+fn compute_input_view_outside_tensor() {
+    let (top, platform, mut timetable_file) = create_default_timetable_file();
+    let NodeSection::Compute { input_views, .. } = &mut timetable_file.nodes[2] else {
+        panic!("expected compute node");
+    };
+    input_views[0] = Some(TensorViewSection {
+        shape: vec![3, 10, 10],
+        offsets: vec![1, 1, 1],
     });
 
     let err = Timetable::new(&top, timetable_file, &platform).unwrap_err();
-    assert!(format!("{err}").contains("Store view on node 'store0' is out of range in dim 1"));
+    assert!(format!("{err}").contains("input view on node 'add0' is out of range in dim 0"));
 }
 
-// Edge errors
+#[test]
+fn compute_output_view_outside_tensor() {
+    let (top, platform, mut timetable_file) = create_default_timetable_file();
+    let NodeSection::Compute { output_views, .. } = &mut timetable_file.nodes[2] else {
+        panic!("expected compute node");
+    };
+    output_views[0] = Some(TensorViewSection {
+        shape: vec![3, 10, 100],
+        offsets: vec![0, 0, 0],
+    });
+
+    let err = Timetable::new(&top, timetable_file, &platform).unwrap_err();
+    assert!(format!("{err}").contains("output view on node 'add0' is out of range in dim 2"));
+}
 
 #[test]
 fn invalid_from_edge_pe() {
     let (top, platform, mut timetable_file) = create_default_timetable_file();
     timetable_file.edges.push(EdgeSection {
         from: "node2".to_string(),
-        to: "load0".to_string(),
+        to: "add0".to_string(),
         kind: EdgeKind::Data,
     });
 
@@ -281,95 +231,11 @@ fn invalid_from_edge_pe() {
 fn invalid_to_edge_pe() {
     let (top, platform, mut timetable_file) = create_default_timetable_file();
     timetable_file.edges.push(EdgeSection {
-        from: "load0".to_string(),
+        from: "add0".to_string(),
         to: "node2".to_string(),
         kind: EdgeKind::Data,
     });
 
     let err = Timetable::new(&top, timetable_file, &platform).unwrap_err();
     assert!(format!("{err}").contains("Edge contains invalid to Node ID 'node2'"));
-}
-
-#[test]
-fn memory_op_too_big() {
-    let mut engine = start_test(file!());
-    let clock = engine.default_clock();
-    let platform = Rc::new(
-        Platform::from_string(
-            &engine,
-            &clock,
-            "
-memory_maps:
-  - name: default
-    devices:
-      - name: hbm0
-
-processing_elements:
-  - name: pe0
-    memory_map: default
-    config:
-      sram_bytes: 128
-
-memories:
-  - name: hbm0
-    kind: hbm
-    base_address: 0
-    capacity_bytes: 0x1000_0000
-
-connections:
-  - connect:
-    - pe.pe0
-    - mem.hbm0
-",
-        )
-        .unwrap(),
-    );
-    let timetable_file = TimetableFile::from_string(
-        "
-nodes:
-  - id: tensor0
-    kind: tensor
-    config:
-      addr: 0
-      dtype: fp32
-      shape: [2, 16, 16]
-
-  - id: load0
-    kind: memory
-    op: load
-    pe: pe0
-    config:
-      view:
-        shape: [1, 16, 16]
-        offsets: [0, 0, 0]
-
-  - id: load1
-    kind: memory
-    op: load
-    pe: pe0
-    config:
-      view:
-        shape: [1, 16, 16]
-        offsets: [1, 0, 0]
-
-edges:
-  - from: tensor0
-    to: load0
-    kind: data
-
-  - from: tensor0
-    to: load1
-    kind: data
-",
-    )
-    .unwrap();
-
-    let timetable: Rc<dyn Dispatch> =
-        Rc::new(Timetable::new(engine.top(), timetable_file, &platform).unwrap());
-    platform.attach_dispatcher(&timetable);
-    let err = engine.run().unwrap_err();
-    assert!(
-        format!("{err}")
-            .contains("PE cannot do memory access of 1024 as it only has SRAM with 128 bytes.")
-    );
 }
