@@ -42,6 +42,10 @@ updates:
     pull-request-branch-name:
       separator: "-"
     groups:
+      capnp:
+        patterns:
+          - "capnp"
+          - "capnpc"
       # Group multiple updates together into a single PR
       non-major:
         update-types: ["minor", "patch"]
