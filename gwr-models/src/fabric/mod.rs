@@ -6,6 +6,10 @@
 //! collections of nodes with each node allocated P ingress/egress port IDs.
 //! However, if the user limits the number of ports per node then not all
 //! ingress/egress ports will be populated.
+//!
+//! The [`Fabric`] trait gives the functional and routed implementations a
+//! common interface. Platform code stores configured fabrics behind this trait
+//! when connecting ingress and egress ports.
 
 use std::cell::OnceCell;
 use std::cmp::min;

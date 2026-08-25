@@ -1,6 +1,26 @@
 // Copyright (c) 2024 Graphcore Ltd. All rights reserved.
 
-//! Port
+//! Typed, back-pressure-aware ports used to compose components and models.
+//!
+//! Ports are the main runtime boundary between simulation blocks. An
+//! [`OutPort<T>`] connects to an [`InPort<T>`] through shared [`PortState<T>`],
+//! and the type parameter is part of the contract: only ports carrying the same
+//! simulation object type can be connected.
+//!
+//! Construct components and models, connect every required port, and then
+//! start the engine. An unconnected port is reported
+//! when the active task calls [`get`](InPort::get),
+//! [`start_get`](InPort::start_get), [`put`](OutPort::put), or
+//! [`try_put`](OutPort::try_put), so a "not connected" error should be
+//! treated as a topology construction bug rather than as ordinary simulation
+//! behavior.
+//!
+//! Data transfer is flow controlled. `put` waits until the receiver accepts the
+//! value, `get` waits until a value is available, and `try_put` asynchronously
+//! waits until a receiver is waiting in `get` or `start_get` without
+//! transferring a value.
+//! [`start_get`](InPort::start_get) / [`finish_get`](InPort::finish_get)
+//! support protocols that need to observe a value before releasing the sender.
 
 use std::cell::RefCell;
 use std::fmt;
@@ -229,6 +249,13 @@ where
         })
     }
 
+    /// Waits until the connected receiver is waiting in [`InPort::get`] or
+    /// [`InPort::start_get`].
+    ///
+    /// This does not transfer a value or return an immediate availability
+    /// result. The returned future remains pending until the receiver starts a
+    /// receive operation, and may therefore wait indefinitely if the receiver
+    /// never does.
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
     pub fn try_put(&mut self) -> PortTryPutResult<T> {
         let state = match self.state.as_ref() {

@@ -8,10 +8,24 @@ Modules that model time within the simulations.
 Clocks are used to control time within a GWR simulation. The [engine] supports any
 number of clocks running at different frequencies.
 
+Each clock represents a clock domain. This lets one simulation contain blocks
+that operate at different frequencies without converting everything into one
+global tick rate. For example, a platform can model a 1GHz block and a 2GHz
+block with separate clocks; one tick on the 1GHz clock and two ticks on the 2GHz
+clock both represent `1.0ns`, but each clock domain keeps its own local tick
+count.
+
+The engine schedules clock waits by absolute simulation time and then by clock
+phase. Tasks remain event-driven: they only wake when their awaited event, port,
+or clock wait is ready.
+
+If two clock ticks resolve to exactly the same time and phase the [engine] does
+not provide any guarantees about which events will be evaluated first.
+
 ## Default Clock
 
-[engine] is responsible for managing clocks. Use the default clock when the
-frequency does not matter (the default is currently 1Ghz, but that may change):
+The [engine] is responsible for managing clocks. Use the default clock when the
+frequency does not matter (the default is currently 1GHz, but that may change):
 
 ```rust,no_run
 # use gwr_engine::engine::Engine;
@@ -55,6 +69,42 @@ clock.wait_ticks(1).await;
 println!("Time now {:.2}", clock.time_now_ns());
 # Ok(())
 #  });
+# }
+```
+
+## Clock Phases
+
+Clock time is represented using the `ClockTick` type, made up of a tick count and a phase
+within that tick. Phases provide deterministic ordering inside a tick.
+
+The two standard phases are:
+
+- `phase::BEGIN`: the start of a tick. `wait_ticks(...)` waits resume in this
+  phase.
+- `phase::END`: the end of a tick. Components can wait for this phase when they
+  need all same-tick releases or bookkeeping to happen before starting new
+  activity.
+
+Custom `u32` phase values can be used between `phase::BEGIN` and `phase::END`
+when a model needs additional deterministic ordering points. A task can use
+`wait_phase(phase)` to move later within the current tick, or
+`next_tick_and_phase(phase)` to wait until a specific phase in the next tick.
+
+For example, certain models use `phase::END` before starting new activities
+in order to guarantee that any completing activities have been processed first:
+
+```rust,no_run
+# use gwr_engine::engine::Engine;
+# use gwr_engine::time::clock::phase;
+# fn main() {
+# let mut engine = Engine::default();
+let clock = engine.clock_ghz(1.0);
+# let spawner = engine.spawner();
+# spawner.spawn(async move {
+clock.wait_phase(phase::END).await;
+// Begin activity that should be ordered after same-tick completions.
+# Ok(())
+# });
 # }
 ```
 

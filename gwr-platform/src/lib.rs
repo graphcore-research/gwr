@@ -47,6 +47,12 @@ type DeviceIds = HashMap<String, DeviceId>;
 type NameToIdxMap = HashMap<String, usize>;
 
 #[derive(EntityGet)]
+/// A validated machine topology built from platform configuration.
+///
+/// `Platform` owns the processing elements, memories, caches, fabrics and
+/// port connections that make up the machine. `gwr-platform` is the owner
+/// of machine configuration and topology; workload graph structure and
+/// execution ordering belong in `gwr-timetable`.
 pub struct Platform {
     entity: Rc<Entity>,
     processing_elements: ProcessingElements,

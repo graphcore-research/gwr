@@ -11,6 +11,22 @@
 //! to be triggered. The `listen()` method is used to wait for the event to be
 //! triggered.
 //!
+//! The engine provides a small set of event types that cover the common
+//! coordination patterns used by components and models:
+//!
+//! - [`Once`](crate::events::once::Once): fires exactly once and wakes every
+//!   listener with a fixed result value. This is useful for completion,
+//!   timeout, and one-off handshakes.
+//! - [`Repeated`](crate::events::repeated::Repeated): can fire many times and
+//!   wakes listeners waiting for the next generation. This is useful for state
+//!   changes, monitor updates, and reusable notifications.
+//! - [`AnyOf`](crate::events::any_of::AnyOf): combines several events and wakes
+//!   when the first one fires, returning that event's result. This is useful
+//!   for races such as response-or-timeout waits.
+//! - [`AllOf`](crate::events::all_of::AllOf): combines several events and wakes
+//!   once they have all fired. This is useful for joining setup, drain, or
+//!   completion conditions.
+//!
 //! # Example:
 //!
 //! An event being created to co-ordinate between two tasks.
