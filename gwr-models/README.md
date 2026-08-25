@@ -85,8 +85,8 @@ off model accuracy vs run-time performance.
 [components]: ../gwr-components/README.md
 [resources]: ../gwr-resources/README.md
 [`gwr_engine`]: ../gwr-engine/README.md
-[input port]: ../gwr-developer-guide/md_src/components/ports.md#input-ports
-[output port]: ../gwr-developer-guide/md_src/components/ports.md#output-ports
+[input port]: ../gwr-engine/src/port/mod.rs
+[output port]: ../gwr-engine/src/port/mod.rs
 
 <!-- ANCHOR: testing -->
 

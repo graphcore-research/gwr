@@ -16,8 +16,8 @@ An example of this is the [flow controlled pipeline] where a `Resource` is used
 to model the credit within the pipeline. Credit is acquired with a `request()`
 call and granted with the `release()` call:
 
-```rust,no_run
-use gwr_engine::engine::Engine;
+```rust
+use gwr_engine::{engine::Engine, run_simulation};
 use gwr_resources::Resource;
 
 fn main() {
@@ -42,10 +42,12 @@ fn main() {
   spawner.spawn(async move {
     for _ in 0..10 {
         clock.wait_ticks(1).await;
-        grant.release();
+        grant.release().await?;
     }
     Ok(())
   });
+
+  run_simulation!(engine);
 }
 ```
 

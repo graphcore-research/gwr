@@ -16,4 +16,5 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
-[dependencies]
+[build-dependencies]
+gwr-build = { path = "../gwr-build", version = "0.2.0" }

@@ -2,7 +2,7 @@
 
 [package]
 name = "gwr-build"
-version = "0.1.0"
+version = "0.2.0"
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -17,3 +17,4 @@ categories = ["development-tools::build-utils"]
 publish.workspace = true
 
 [dependencies]
+pulldown-cmark = { version = "0.13.4", default-features = false }

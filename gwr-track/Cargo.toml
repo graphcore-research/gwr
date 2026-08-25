@@ -36,6 +36,7 @@ gwr-perfetto = { path = "../gwr-perfetto", optional = true, version = "0.3.0" }
 
 [build-dependencies]
 capnpc.workspace = true
+gwr-build = { path = "../gwr-build", version = "0.2.0" }
 walkdir = "2.4.0"
 
 [dev-dependencies]

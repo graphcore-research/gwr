@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-#![doc = include_str!(gwr_build::generated_crate_docs_path!())]
+#![doc(test(attr(deny(unused_must_use))))]
+#![doc = std::include_str!(concat!(env!("OUT_DIR"), "/crate-docs.md"))]
 
 use std::collections::HashMap;
 use std::fmt::{self, Display};
