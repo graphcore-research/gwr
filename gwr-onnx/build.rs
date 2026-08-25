@@ -6,6 +6,8 @@ use std::path::Path;
 use gwr_onnx_sys::ONNX_SOURCE;
 
 fn main() {
+    gwr_build::write_expanded_readme_docs();
+
     let onnx_src = fs::canonicalize(Path::new(ONNX_SOURCE)).unwrap();
 
     let mut prost_build = prost_build::Config::new();

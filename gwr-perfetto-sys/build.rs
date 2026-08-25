@@ -9,6 +9,8 @@ mod submodule_path;
 const SEMVER_ENV_VAR_KEY: &str = "CARGO_SEMVER_CHECKS";
 
 fn main() {
+    gwr_build::write_expanded_readme_docs();
+
     println!(
         "cargo::rerun-if-changed={}",
         submodule_path::PERFETTO_SOURCE

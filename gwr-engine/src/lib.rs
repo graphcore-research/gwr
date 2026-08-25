@@ -4,85 +4,8 @@
 // Enable warnings for missing documentation
 // #![warn(missing_docs)]
 
-#![doc(test(attr(warn(unused))))]
-
-//! `GWR` - The Great Western Runtime
-//!
-//! This library provides the core of the [GWR Engine](crate::engine) which
-//! executes event driven asynchronous simulation
-//! [components].
-//!
-//! # Features
-//!
-//! - `global_allocator`: When enabled this feature causes applications
-//!   dependendant on `gwr-engine` to use a global allocator selected to
-//!   deliver optimal runtime performace of the GWR engine. Currently this is
-//!   the [mimalloc](https://github.com/microsoft/mimalloc) allocator.
-//!
-//!   This feature is enabled by default. Should an application wish to use a
-//!   alternative global allocator the feature must be explicitly disabled.
-//!
-//! # Developer Guide
-//!
-//! The Developer Guide provides a document that goes through the GWR engine
-//! and related libraries in a more directed approach than the API guide can.
-//! See the `gwr-developer-guide/` folder.
-//!
-//! # Examples
-//!
-//! Make sure you look at the **examples/** folder which includes
-//! worked/documented examples. The current examples are:
-//!  - [examples/flaky-component]: a worked example of a simple two-port
-//!    component.
-//!  - [examples/flaky-with-delay]: a worked example of a simple two-port
-//!    component that has some subcomponents.
-//!  - [examples/scrambler]: a worked example of a component that registers a a
-//!    vector of subcomponents.
-//!  - [examples/sim-pipe]: simulate a flow-controlled pipeline.
-//!  - [examples/sim-restaurant]: simulate a fast food restaurant and explore
-//!    staffing profitability.
-//!  - [examples/sim-ring]: simulate a device comprising a ring of nodes.
-//!  - [examples/sim-fabric]: simulate a device comprising a rectangular fabric.
-//!
-//! [components]: ../gwr_components/index.html
-//! [examples/flaky-component]: ../flaky_component/index.html
-//! [examples/flaky-with-delay]: ../flaky_with_delay/index.html
-//! [examples/scrambler]: ../scrambler/index.html
-//! [examples/sim-pipe]: ../sim_pipe/index.html
-//! [examples/sim-restaurant]: ../sim_restaurant/index.html
-//! [examples/sim-ring]: ../sim_ring/index.html
-//! [examples/sim-fabric]: ../sim_fabric/index.html
-
-//! # Simple Application
-//!
-//! A very simple application would look like:
-//!
-//! ```rust
-//! use gwr_components::sink::Sink;
-//! use gwr_components::source::Source;
-//! use gwr_components::{connect_port, option_box_repeat};
-//! use gwr_engine::engine::Engine;
-//! use gwr_engine::run_simulation;
-//!
-//! let mut engine = Engine::default();
-//! let clock = engine.default_clock();
-//! let mut source = Source::new_and_register(&engine, engine.top(), "source", option_box_repeat!(0x123 ; 10));
-//! let sink = Sink::new_and_register(&engine, &clock, engine.top(), "sink");
-//! connect_port!(source, tx => sink, rx)
-//!     .expect("should be able to connect `Source` to `Sink`");
-//! run_simulation!(engine);
-//! assert_eq!(sink.num_sunk(), 10);
-//! ```
-
-//! Simulations can be run as purely event driven (where one event triggers one
-//! or more others) or the use of clocks can be introduced to model time. The
-//! combination of both is the most common.
-//!
-//! The [engine](crate::engine::Engine) manages the
-//! [clocks](crate::time::clock). A simple example of a component that uses the
-//! clock is the
-//! [rate limiter](../gwr_components/flow_controls/rate_limiter/index.html)
-//! which models the amount of time it takes for objects to pass through it.
+#![doc(test(attr(deny(unused_must_use))))]
+#![doc = std::include_str!(concat!(env!("OUT_DIR"), "/crate-docs.md"))]
 
 pub mod engine;
 pub mod events;

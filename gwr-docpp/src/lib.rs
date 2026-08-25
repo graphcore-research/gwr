@@ -1,9 +1,7 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
-//! A documentation pre-processor
-//!
-//! Supports a number of helper macros that allow the user to embded content
-//! into documentation.
+#![doc(test(attr(deny(unused_must_use))))]
+#![doc = std::include_str!(concat!(env!("OUT_DIR"), "/crate-docs.md"))]
 
 use gwr_doc_builder::{helpers, toc};
 

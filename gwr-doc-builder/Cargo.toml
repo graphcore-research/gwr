@@ -25,5 +25,8 @@ quote.workspace = true
 regex.workspace = true
 syn.workspace = true
 
+[build-dependencies]
+gwr-build = { path = "../gwr-build", version = "0.2.0" }
+
 [dev-dependencies]
 tempfile.workspace = true

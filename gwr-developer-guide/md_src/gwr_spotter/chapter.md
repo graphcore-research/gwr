@@ -4,7 +4,8 @@
 
 {{#include ../../../gwr-spotter/README.md:overview}}
 
-{{#include ../../../gwr-spotter/frontend/README.md:frontend_usage}}
+{{#include ../../../gwr-spotter/README.md:frontend_usage}}
 
-[frontend documentation]: #usage
+[frontend documentation]: #frontend-usage
+[D3.js]: https://d3js.org
 [gwr-track]: ../gwr_track/chapter.md
