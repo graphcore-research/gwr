@@ -83,23 +83,6 @@ fn render_node_label(node: &NodeSection) -> String {
                 ))
             )
         }
-        NodeSection::Memory { op, config, .. } => {
-            let extra = match &config.view {
-                Some(view) => {
-                    let num_elements: usize = view.shape.iter().product();
-                    format!(
-                        "shape: {}\noffsets: {}\nelements: {num_elements}",
-                        shape_string(&view.shape),
-                        shape_string(&view.offsets)
-                    )
-                }
-                None => "Full view".to_string(),
-            };
-            format!(
-                "[\"{}\"]",
-                escape_mermaid_label(&format!("{:?}\n{}\n{}", op, node.id(), extra))
-            )
-        }
     }
 }
 
@@ -135,7 +118,6 @@ pub fn render_mermaid_from_parts<T: BuildHasher>(
     out.push_str("\n  %% Styling\n");
     out.push_str("  classDef tensor fill:#eef7ff,stroke:#1f6feb,stroke-width:1px;\n");
     out.push_str("  classDef compute fill:#fff4e5,stroke:#9a6700,stroke-width:1px;\n");
-    out.push_str("  classDef memory fill:#f6f8fa,stroke:#57606a,stroke-dasharray: 4 2;\n");
     out.push_str("  classDef tensorPending fill:#ffa0a0,stroke:#9a6700,stroke-width:2px;\n");
     out.push_str("  classDef tensorActive fill:#a0a0ff,stroke:#9a6700,stroke-width:4px;\n");
     out.push_str("  classDef tensorComplete fill:#a0ffa0,stroke:#9a6700,stroke-width:1px;\n");
@@ -152,7 +134,6 @@ pub fn render_mermaid_from_parts<T: BuildHasher>(
                 Some(MermaidNodeStatus::Pending) => "tensorPending",
                 None => "tensor",
             },
-            NodeSection::Memory { .. } => "memory",
             NodeSection::Compute { id, .. } => match statuses.get(id) {
                 Some(MermaidNodeStatus::Active) => "computeActive",
                 Some(MermaidNodeStatus::Complete) => "computeComplete",

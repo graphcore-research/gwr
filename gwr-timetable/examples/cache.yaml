@@ -8,23 +8,32 @@ nodes:
       dtype: fp32
       shape: [8]
 
-  - id: load0
-    kind: memory
-    op: load
+  - id: add
+    kind: compute
     pe: pe0
-    config: {}
+    op: add
+    input_views:
+      -
+      -
+    output_views:
+      -
 
-  - id: load1
-    kind: memory
-    op: load
-    pe: pe0
-    config: {}
+  - id: tensor_C
+    kind: tensor
+    config:
+      addr: 0x1_0000_0200
+      dtype: fp32
+      shape: [8]
 
 edges:
   - from: tensor_A
-    to: load0
+    to: add.0
     kind: data
 
   - from: tensor_A
-    to: load1
+    to: add.1
+    kind: data
+
+  - from: add
+    to: tensor_C
     kind: data

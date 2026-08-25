@@ -9,7 +9,7 @@ use std::rc::Rc;
 use gwr_engine::sim_error;
 use gwr_engine::types::{SimError, SimResult};
 use gwr_models::processing_element::operators::dtype::DataType;
-use gwr_models::processing_element::task::{ComputeOp, MemoryOp};
+use gwr_models::processing_element::task::ComputeOp;
 use gwr_platform::Platform;
 use serde::{Deserialize, Serialize};
 
@@ -91,13 +91,6 @@ pub enum NodeSection {
         input_views: Vec<Option<TensorViewSection>>,
         output_views: Vec<Option<TensorViewSection>>,
     },
-    #[serde(rename = "memory")]
-    Memory {
-        id: String,
-        op: MemoryOp,
-        pe: Option<String>,
-        config: MemoryConfigSection,
-    },
     #[serde(rename = "tensor")]
     Tensor {
         id: String,
@@ -117,12 +110,6 @@ impl TensorViewSection {
     pub fn num_elements(&self) -> usize {
         self.shape.iter().product()
     }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct MemoryConfigSection {
-    pub view: Option<TensorViewSection>,
 }
 
 /// Assuming best-case packing, how many bytes would num_elements of the given
@@ -166,7 +153,6 @@ impl NodeSection {
     pub fn id(&self) -> &String {
         match self {
             NodeSection::Compute { id, .. } => id,
-            NodeSection::Memory { id, .. } => id,
             NodeSection::Tensor { id, .. } => id,
         }
     }
@@ -175,7 +161,6 @@ impl NodeSection {
     pub fn id_pe(&self) -> (&String, &Option<String>) {
         match self {
             NodeSection::Compute { id, pe, .. } => (id, pe),
-            NodeSection::Memory { id, pe, .. } => (id, pe),
             NodeSection::Tensor { id, .. } => (id, &None),
         }
     }
@@ -184,7 +169,6 @@ impl NodeSection {
     pub fn pe(&self) -> &Option<String> {
         match self {
             NodeSection::Compute { pe, .. } => pe,
-            NodeSection::Memory { pe, .. } => pe,
             NodeSection::Tensor { .. } => &None,
         }
     }

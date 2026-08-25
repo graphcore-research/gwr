@@ -145,22 +145,6 @@ impl ComputeOp {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct MemoryTaskConfig {
-    /// Only needed as a debug aid
-    pub id: String,
-    pub op: MemoryOp,
-    pub addr: u64,
-    pub num_bytes: usize,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum MemoryOp {
-    Load,
-    Store,
-}
-
 #[derive(Debug, Clone, Copy)]
 pub enum SyncRegion {
     Local,
@@ -170,6 +154,5 @@ pub enum SyncRegion {
 #[derive(Debug, Clone)]
 pub enum Task {
     ComputeTask { config: ComputeTaskConfig },
-    MemoryTask { config: MemoryTaskConfig },
     SyncTask { region: SyncRegion },
 }

@@ -13,7 +13,9 @@ use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::Event;
 use gwr_engine::types::SimError;
 use gwr_models::processing_element::dispatch::Dispatch;
-use gwr_models::processing_element::task::{MemoryOp, MemoryTaskConfig, Task};
+use gwr_models::processing_element::operators::dtype::DataType;
+use gwr_models::processing_element::operators::{Tensor, TensorView};
+use gwr_models::processing_element::task::{ComputeOp, ComputeTaskConfig, Task};
 use gwr_platform::Platform;
 
 /// A struct that implements `Dispatch`
@@ -97,31 +99,23 @@ impl Dispatch for TestDispatcher {
 }
 
 fn build_dispatcher() -> Rc<dyn Dispatch> {
+    let input_a = Tensor::new(&[8], &DataType::Fp32, 0x1_0000_0000);
+    let input_b = Tensor::new(&[8], &DataType::Fp32, 0x1_0000_0100);
+    let output = Tensor::new(&[8], &DataType::Fp32, 0x1_0000_0200);
+    let task = |id: &str| Task::ComputeTask {
+        config: ComputeTaskConfig {
+            id: id.to_string(),
+            op: ComputeOp::Add,
+            inputs: vec![
+                Some(TensorView::new_full(input_a.clone())),
+                Some(TensorView::new_full(input_b.clone())),
+            ],
+            outputs: vec![Some(TensorView::new_full(output.clone()))],
+        },
+    };
+
     Rc::new(TestDispatcher::new(
-        HashMap::from([
-            (
-                0,
-                Task::MemoryTask {
-                    config: MemoryTaskConfig {
-                        id: "task0".to_string(),
-                        op: MemoryOp::Load,
-                        addr: 0x1_0000_0000,
-                        num_bytes: 128,
-                    },
-                },
-            ),
-            (
-                1,
-                Task::MemoryTask {
-                    config: MemoryTaskConfig {
-                        id: "task1".to_string(),
-                        op: MemoryOp::Load,
-                        addr: 0x1_0000_0000,
-                        num_bytes: 128,
-                    },
-                },
-            ),
-        ]),
+        HashMap::from([(0, task("task0")), (1, task("task1"))]),
         HashMap::from([("pe0".to_string(), VecDeque::from([0, 1]))]),
     ))
 }
@@ -182,19 +176,18 @@ fn run_pe_mem(num_active_requests: usize) -> (Engine, Clock) {
 fn simple_pe_mem_one_request() {
     let (_, clock) = run_pe_mem(1);
 
-    // There are two 128 bytes requested over a 32-byte interface. Each request has
-    // a 10ns delay.
-    assert_eq!(clock.time_now_ns(), 80.0);
+    // There are two compute tasks, each issuing two 32-byte reads and one
+    // 32-byte write. Each memory access has a 10ns delay.
+    assert_eq!(clock.time_now_ns(), 60.0);
 }
 
 #[test]
 fn simple_pe_mem_two_requests() {
     let (_, clock) = run_pe_mem(2);
 
-    // There are 128 bytes requested over a 32-byte interface with a 10ns delay, but
-    // the LSU supports two outstanding requests. So, the first two access take
-    // 11ns, but the remainder take 10ns because they overlap.
-    assert_eq!(clock.time_now_ns(), 41.0);
+    // Two compute tasks can overlap their LSU requests when the LSU has two
+    // outstanding request slots.
+    assert_eq!(clock.time_now_ns(), 32.0);
 }
 
 #[test]
@@ -250,7 +243,7 @@ connections:
 
     run_simulation!(engine);
 
-    // Expect 4 cache misses which need to go to memory (30ns each)
-    // and 4 cache hits (5ns each)
-    assert_eq!(clock.time_now_ns(), 140.0);
+    // Expect cache hits for repeated tensor reads plus memory traffic for
+    // first reads and writes.
+    assert_eq!(clock.time_now_ns(), 130.0);
 }
