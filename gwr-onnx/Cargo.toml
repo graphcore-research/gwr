@@ -21,5 +21,6 @@ prost.workspace = true
 clap.workspace = true
 
 [build-dependencies]
+gwr-build = { path = "../gwr-build", version = "0.2.0" }
 gwr-onnx-sys = { path = "../gwr-onnx-sys", version = "0.1.0" }
 prost-build.workspace = true

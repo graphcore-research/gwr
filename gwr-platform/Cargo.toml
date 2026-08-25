@@ -22,7 +22,6 @@ publish.workspace = true
 async-trait.workspace = true
 byte-unit.workspace = true
 clap.workspace = true
-gwr-build = { path = "../gwr-build", version = "0.1.0" }
 gwr-engine = { path = "../gwr-engine", version = "0.13.0" }
 gwr-model-builder = { path = "../gwr-model-builder", version = "0.2.0" }
 gwr-models = { path = "../gwr-models", version = "0.23.0" }
@@ -33,4 +32,4 @@ serde.workspace = true
 serde_yaml.workspace = true
 
 [build-dependencies]
-gwr-build = { path = "../gwr-build", version = "0.1.0" }
+gwr-build = { path = "../gwr-build", version = "0.2.0" }

@@ -31,3 +31,6 @@ ratatui.workspace = true
 regex.workspace = true
 serde_yaml_ng = "0.10.0"
 serde.workspace = true
+
+[build-dependencies]
+gwr-build = { path = "../gwr-build", version = "0.2.0" }

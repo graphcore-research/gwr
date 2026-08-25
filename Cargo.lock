@@ -1169,13 +1169,14 @@ dependencies = [
 
 [[package]]
 name = "gwr-build"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "gwr-code-coverage"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "gwr-build",
  "serde",
  "serde_json",
  "tempfile",
@@ -1209,6 +1210,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "figment",
+ "gwr-build",
  "proc-macro2",
  "quote",
  "regex",
@@ -1222,6 +1224,7 @@ dependencies = [
 name = "gwr-developer-guide"
 version = "0.2.0"
 dependencies = [
+ "gwr-build",
  "strip-ansi-escapes",
 ]
 
@@ -1230,6 +1233,7 @@ name = "gwr-doc-builder"
 version = "0.2.0"
 dependencies = [
  "clap",
+ "gwr-build",
  "proc-macro2",
  "quote",
  "regex",
@@ -1241,6 +1245,7 @@ dependencies = [
 name = "gwr-docpp"
 version = "0.1.0"
 dependencies = [
+ "gwr-build",
  "gwr-doc-builder",
  "proc-macro2",
  "quote",
@@ -1258,6 +1263,7 @@ dependencies = [
  "byte-unit",
  "clap",
  "futures",
+ "gwr-build",
  "gwr-components",
  "gwr-track",
  "log",
@@ -1270,6 +1276,7 @@ name = "gwr-model-builder"
 version = "0.2.0"
 dependencies = [
  "clap",
+ "gwr-build",
  "proc-macro2",
  "quote",
  "regex",
@@ -1303,6 +1310,7 @@ name = "gwr-onnx"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "gwr-build",
  "gwr-onnx-sys",
  "prost",
  "prost-build",
@@ -1311,11 +1319,15 @@ dependencies = [
 [[package]]
 name = "gwr-onnx-sys"
 version = "0.1.0"
+dependencies = [
+ "gwr-build",
+]
 
 [[package]]
 name = "gwr-perfetto"
 version = "0.3.0"
 dependencies = [
+ "gwr-build",
  "gwr-perfetto-sys",
  "prost",
  "prost-build",
@@ -1324,6 +1336,9 @@ dependencies = [
 [[package]]
 name = "gwr-perfetto-sys"
 version = "2.0.0"
+dependencies = [
+ "gwr-build",
+]
 
 [[package]]
 name = "gwr-platform"
@@ -1347,6 +1362,7 @@ dependencies = [
 name = "gwr-protocols"
 version = "0.1.0"
 dependencies = [
+ "gwr-build",
  "gwr-components",
  "gwr-engine",
  "gwr-track",
@@ -1357,6 +1373,7 @@ dependencies = [
 name = "gwr-resources"
 version = "0.1.0"
 dependencies = [
+ "gwr-build",
  "gwr-engine",
  "gwr-track",
 ]
@@ -1369,6 +1386,7 @@ dependencies = [
  "capnp",
  "clap",
  "crossterm",
+ "gwr-build",
  "gwr-track",
  "itertools 0.15.0",
  "log",
@@ -1386,6 +1404,7 @@ dependencies = [
  "clap",
  "crossterm",
  "env_logger",
+ "gwr-build",
  "log",
  "ratatui",
  "regex",
@@ -1400,6 +1419,7 @@ dependencies = [
  "async-trait",
  "byte-unit",
  "clap",
+ "gwr-build",
  "gwr-engine",
  "gwr-model-builder",
  "gwr-models",
@@ -1421,6 +1441,7 @@ dependencies = [
  "capnpc",
  "clap",
  "figment",
+ "gwr-build",
  "gwr-config",
  "gwr-perfetto",
  "lazy_static",

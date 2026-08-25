@@ -20,5 +20,6 @@ publish.workspace = true
 prost.workspace = true
 
 [build-dependencies]
+gwr-build = { path = "../gwr-build", version = "0.2.0" }
 gwr-perfetto-sys = { path = "../gwr-perfetto-sys", version = "2.0.0" }
 prost-build.workspace = true

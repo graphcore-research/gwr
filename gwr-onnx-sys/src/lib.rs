@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-//! This crate provides access to the ONNX source code.
+#![doc(test(attr(deny(unused_must_use))))]
+#![doc = std::include_str!(concat!(env!("OUT_DIR"), "/crate-docs.md"))]
 
 mod submodule_path;
 

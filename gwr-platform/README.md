@@ -104,8 +104,3 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 <!-- ANCHOR_END: overview -->
-
-[`Platform`]: ./src/lib.rs
-[`gwr_engine`]: ../gwr-engine/README.md
-[`gwr_models`]: ../gwr-models/README.md
-[`gwr_timetable`]: ../gwr-timetable/src/lib.rs

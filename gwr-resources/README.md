@@ -42,7 +42,7 @@ fn main() {
   spawner.spawn(async move {
     for _ in 0..10 {
         clock.wait_ticks(1).await;
-        grant.release();
+        grant.release().await?;
     }
     Ok(())
   });

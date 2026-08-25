@@ -129,6 +129,8 @@ fn compile_capnp_schemas(schemas: &[PathBuf]) {
 }
 
 fn main() {
+    gwr_build::write_expanded_readme_docs();
+
     add_file_build_triggers();
     add_env_build_triggers();
 

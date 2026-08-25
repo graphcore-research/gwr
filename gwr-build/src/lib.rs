@@ -1,29 +1,12 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-//! Shared helper functions for GWR `build.rs` scripts.
-//!
-//! Other libraries need to add this line to their top-level `lib.rs`
-//! to include the full contents of the `README.md`:
-//!
-//! #!\[doc = include_str!(gwr_build::generated_crate_docs_path!())\]
-//!
-//! And then add the following to the \[dependencies\] and
-//! \[build-dependencies\] in ther `Cargo.toml`:
-//! gwr-build = { path = "../gwr-build", version = "X.Y.Z" }
+#![doc = std::include_str!("../README.md")]
 
 use std::path::{Path, PathBuf};
 use std::{env, fs};
 
-/// File name for generated pre-processed crate markdown file. Must match name
-/// used by generated_crate_docs_path!().
+/// File name for generated pre-processed crate markdown file.
 const CRATE_DOCS_MD: &str = "crate-docs.md";
-
-#[macro_export]
-macro_rules! generated_crate_docs_path {
-    () => {
-        concat!(env!("OUT_DIR"), "/crate-docs.md")
-    };
-}
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct IncludeDirective<'a> {
@@ -34,11 +17,19 @@ pub struct IncludeDirective<'a> {
 pub fn write_expanded_readme_docs() {
     let manifest_dir = manifest_dir();
     let readme_path = manifest_dir.join("README.md");
-    let expanded = expand_mdbook_includes(&readme_path);
+    let expanded = prepare_crate_docs(&readme_path);
 
     let output_path = out_dir().join(CRATE_DOCS_MD);
     fs::write(&output_path, expanded)
         .unwrap_or_else(|err| panic!("failed to write {}: {err}", output_path.display()));
+}
+
+#[must_use]
+fn prepare_crate_docs(markdown_path: &Path) -> String {
+    let markdown = read_markdown_file(markdown_path);
+    let base_dir = markdown_path.parent().unwrap_or_else(|| Path::new("."));
+    let markdown = expand_mdbook_includes(&markdown, base_dir);
+    rewrite_rustdoc_links(&markdown)
 }
 
 #[must_use]
@@ -53,24 +44,20 @@ pub fn manifest_dir() -> PathBuf {
     )
 }
 
-#[must_use]
-pub fn expand_mdbook_includes(markdown_path: &Path) -> String {
+fn read_markdown_file(markdown_path: &Path) -> String {
     println!("cargo:rerun-if-changed={}", markdown_path.display());
 
-    let markdown = fs::read_to_string(markdown_path)
-        .unwrap_or_else(|err| panic!("failed to read {}: {err}", markdown_path.display()));
-    let base_dir = markdown_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .to_path_buf();
+    fs::read_to_string(markdown_path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", markdown_path.display()))
+}
 
+#[must_use]
+pub fn expand_mdbook_includes(markdown: &str, base_dir: &Path) -> String {
     let mut expanded = String::new();
     for line in markdown.lines() {
         if let Some(include) = parse_mdbook_include_directive(line) {
             let include_path = base_dir.join(include.path);
-            println!("cargo:rerun-if-changed={}", include_path.display());
-            let include_contents = fs::read_to_string(&include_path)
-                .unwrap_or_else(|err| panic!("failed to read {}: {err}", include_path.display()));
+            let include_contents = read_markdown_file(&include_path);
             let include_contents = match include.anchor {
                 Some(anchor) => extract_anchor_contents(&include_contents, anchor)
                     .unwrap_or_else(|err| panic!("{}: {err}", include_path.display())),
@@ -87,6 +74,166 @@ pub fn expand_mdbook_includes(markdown_path: &Path) -> String {
     }
 
     expanded
+}
+
+#[must_use]
+pub fn rewrite_rustdoc_links(markdown: &str) -> String {
+    let mut rewritten = String::new();
+    let mut previous_line_was_empty_reference_definition = false;
+
+    for line in markdown.lines() {
+        if previous_line_was_empty_reference_definition && is_indented_line(line) {
+            rewritten.push_str(&rewrite_indented_reference_definition_target(line));
+            rewritten.push('\n');
+            previous_line_was_empty_reference_definition = false;
+            continue;
+        }
+
+        let rewritten_line = rewrite_rustdoc_links_in_line(line);
+        previous_line_was_empty_reference_definition =
+            is_empty_reference_definition(&rewritten_line);
+        rewritten.push_str(&rewritten_line);
+        rewritten.push('\n');
+    }
+
+    rewritten
+}
+
+fn rewrite_rustdoc_links_in_line(line: &str) -> String {
+    let line = rewrite_reference_definition_link(line);
+
+    let mut rewritten = String::new();
+    let mut rest = line.as_str();
+    while let Some(start) = rest.find("](") {
+        let link_start = start + 2;
+        rewritten.push_str(&rest[..link_start]);
+        rest = &rest[link_start..];
+
+        let Some(end) = rest.find(')') else {
+            rewritten.push_str(rest);
+            return rewritten;
+        };
+
+        let target = &rest[..end];
+        rewritten.push_str(&rewrite_link_destination(target));
+        rewritten.push(')');
+        rest = &rest[end + 1..];
+    }
+    rewritten.push_str(rest);
+
+    rewritten
+}
+
+fn rewrite_reference_definition_link(line: &str) -> String {
+    let Some((label, target)) = line.split_once("]:") else {
+        return line.to_string();
+    };
+
+    if !label.starts_with('[') {
+        return line.to_string();
+    }
+
+    let leading_whitespace = target.len() - target.trim_start().len();
+    let (whitespace, target) = target.split_at(leading_whitespace);
+    let target_end = target.find(char::is_whitespace).unwrap_or(target.len());
+    let (target, suffix) = target.split_at(target_end);
+
+    format!(
+        "{label}]:{whitespace}{}{}",
+        rewrite_link_destination(target),
+        suffix
+    )
+}
+
+fn is_empty_reference_definition(line: &str) -> bool {
+    let Some((label, target)) = line.split_once("]:") else {
+        return false;
+    };
+
+    label.starts_with('[') && target.trim().is_empty()
+}
+
+fn is_indented_line(line: &str) -> bool {
+    line.starts_with(' ') || line.starts_with('\t')
+}
+
+fn rewrite_indented_reference_definition_target(line: &str) -> String {
+    let leading_whitespace = line.len() - line.trim_start().len();
+    let (whitespace, target) = line.split_at(leading_whitespace);
+    let target_end = target.find(char::is_whitespace).unwrap_or(target.len());
+    let (target, suffix) = target.split_at(target_end);
+
+    format!("{whitespace}{}{}", rewrite_link_destination(target), suffix)
+}
+
+fn rewrite_link_destination(target: &str) -> String {
+    let (target, fragment) = target
+        .split_once('#')
+        .map_or((target, ""), |(target, fragment)| (target, fragment));
+    let fragment = if fragment.is_empty() {
+        String::new()
+    } else {
+        format!("#{fragment}")
+    };
+
+    if let Some(source_link) = rewrite_rust_source_link_destination(target, &fragment) {
+        return source_link;
+    }
+
+    if let Some(page) = target
+        .strip_prefix("../gwr-developer-guide/md_src/")
+        .and_then(|path| path.strip_suffix(".md"))
+    {
+        return format!("../../html/{page}.html{fragment}");
+    }
+
+    if let Some(crate_name) = target
+        .strip_prefix("../")
+        .and_then(|path| path.strip_suffix("/README.md"))
+        .filter(|path| path.starts_with("gwr-"))
+    {
+        return format!("../{}/index.html{fragment}", crate_name.replace('-', "_"));
+    }
+
+    format!("{target}{fragment}")
+}
+
+fn rewrite_rust_source_link_destination(target: &str, fragment: &str) -> Option<String> {
+    if let Some(module_path) = target
+        .strip_prefix("src/")
+        .and_then(rust_source_module_path)
+    {
+        return Some(format!("{}{}", rustdoc_index_path(&module_path), fragment));
+    }
+
+    let (crate_name, source_path) = target.strip_prefix("../")?.split_once("/src/")?;
+    if !crate_name.starts_with("gwr-") {
+        return None;
+    }
+
+    let module_path = rust_source_module_path(source_path)?;
+    Some(format!(
+        "../{}/{}{}",
+        crate_name.replace('-', "_"),
+        rustdoc_index_path(&module_path),
+        fragment
+    ))
+}
+
+fn rust_source_module_path(path: &str) -> Option<String> {
+    let path = path.strip_suffix(".rs")?;
+    Some(match path {
+        "lib" | "main" => String::new(),
+        path => path.strip_suffix("/mod").unwrap_or(path).to_string(),
+    })
+}
+
+fn rustdoc_index_path(module_path: &str) -> String {
+    if module_path.is_empty() {
+        "index.html".to_string()
+    } else {
+        format!("{module_path}/index.html")
+    }
 }
 
 #[must_use]
@@ -148,7 +295,12 @@ pub fn extract_anchor_contents(contents: &str, anchor: &str) -> Result<String, S
 
 #[cfg(test)]
 mod tests {
-    use super::{IncludeDirective, extract_anchor_contents, parse_mdbook_include_directive};
+    use std::{env, fs};
+
+    use super::{
+        IncludeDirective, expand_mdbook_includes, extract_anchor_contents,
+        parse_mdbook_include_directive, prepare_crate_docs, rewrite_rustdoc_links,
+    };
 
     #[test]
     fn parses_basic_include_directive() {
@@ -251,5 +403,134 @@ line one
                 anchor: Some("overview"),
             })
         );
+    }
+
+    #[test]
+    fn expands_mdbook_include_directives_relative_to_base_dir() {
+        let base_dir = env::temp_dir().join(format!(
+            "gwr-build-expand-mdbook-includes-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&base_dir).unwrap();
+        fs::write(
+            base_dir.join("include.md"),
+            "\
+before
+<!-- ANCHOR: wanted -->
+included
+<!-- ANCHOR_END: wanted -->
+after
+",
+        )
+        .unwrap();
+
+        assert_eq!(
+            expand_mdbook_includes("start\n{{#include include.md:wanted}}\nend\n", &base_dir,),
+            "start\nincluded\nend\n",
+        );
+
+        fs::remove_dir_all(base_dir).unwrap();
+    }
+
+    #[test]
+    fn rewrites_repository_readme_links_to_rustdoc_crate_indexes() {
+        assert_eq!(
+            rewrite_rustdoc_links("[components]: ../gwr-components/README.md\n"),
+            "[components]: ../gwr_components/index.html\n"
+        );
+    }
+
+    #[test]
+    fn rewrites_repository_readme_links_with_fragments_to_rustdoc_crate_indexes() {
+        assert_eq!(
+            rewrite_rustdoc_links(
+                "See the [flow controlled pipeline](../gwr-models/README.md#flow-controlled-pipeline).\n",
+            ),
+            "See the [flow controlled pipeline](../gwr_models/index.html#flow-controlled-pipeline).\n",
+        );
+    }
+
+    #[test]
+    fn rewrites_developer_guide_source_links_to_rendered_book_pages() {
+        assert_eq!(
+            rewrite_rustdoc_links(
+                "[input port]: ../gwr-developer-guide/md_src/components/ports.md#input-ports\n",
+            ),
+            "[input port]: ../../html/components/ports.html#input-ports\n",
+        );
+    }
+
+    #[test]
+    fn rewrites_multiline_developer_guide_source_links_to_rendered_book_pages() {
+        assert_eq!(
+            rewrite_rustdoc_links(
+                "[components]:\n  ../gwr-developer-guide/md_src/components/chapter.md#creating-new-components\n",
+            ),
+            "[components]:\n  ../../html/components/chapter.html#creating-new-components\n",
+        );
+    }
+
+    #[test]
+    fn rewrites_local_rust_source_links_to_rustdoc_module_pages() {
+        assert_eq!(
+            rewrite_rustdoc_links("[clock]: src/time/clock.rs\n"),
+            "[clock]: time/clock/index.html\n",
+        );
+        assert_eq!(
+            rewrite_rustdoc_links("[`time`]: src/time/mod.rs\n"),
+            "[`time`]: time/index.html\n",
+        );
+    }
+
+    #[test]
+    fn rewrites_local_rust_root_source_links_to_rustdoc_crate_index() {
+        assert_eq!(
+            rewrite_rustdoc_links("[crate root]: src/lib.rs#overview\n"),
+            "[crate root]: index.html#overview\n",
+        );
+        assert_eq!(
+            rewrite_rustdoc_links("[binary root]: src/main.rs\n"),
+            "[binary root]: index.html\n",
+        );
+    }
+
+    #[test]
+    fn rewrites_sibling_crate_rust_source_links_to_rustdoc_module_pages() {
+        assert_eq!(
+            rewrite_rustdoc_links("[clock]: ../gwr-engine/src/time/clock.rs#module-docs\n"),
+            "[clock]: ../gwr_engine/time/clock/index.html#module-docs\n",
+        );
+    }
+
+    #[test]
+    fn rewrites_sibling_crate_rust_root_source_links_to_rustdoc_crate_index() {
+        assert_eq!(
+            rewrite_rustdoc_links("[engine]: ../gwr-engine/src/lib.rs#overview\n"),
+            "[engine]: ../gwr_engine/index.html#overview\n",
+        );
+        assert_eq!(
+            rewrite_rustdoc_links("[example]: ../gwr-engine/src/main.rs\n"),
+            "[example]: ../gwr_engine/index.html\n",
+        );
+    }
+
+    #[test]
+    fn prepares_crate_docs_by_expanding_includes_and_rewriting_links() {
+        let markdown_path = env::temp_dir().join(format!(
+            "gwr-build-prepare-crate-docs-{}.md",
+            std::process::id()
+        ));
+        fs::write(
+            &markdown_path,
+            "[clock]: src/time/clock.rs\n\n```rust\nfoo();\n```\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            prepare_crate_docs(&markdown_path),
+            "[clock]: time/clock/index.html\n\n```rust\nfoo();\n```\n",
+        );
+
+        fs::remove_file(markdown_path).unwrap();
     }
 }

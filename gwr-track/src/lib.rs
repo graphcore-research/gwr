@@ -1,22 +1,7 @@
 // Copyright (c) 2020 Graphcore Ltd. All rights reserved.
 
-//! This module provides combined _track_ capabilities for the GWR project.
-//!
-//! _Track_ means the combination of _log_ and _trace_ where:
-//!
-//!   - _log_ are text-based human-readable messages emitted at various levels
-//!     of verbosity (from `Trace` through to `Error`).
-//!   - _trace_ provides a standard set of modelling events that can be emitted.
-//!     For example, object creation/destruction or objects entering/exitting
-//!     simulation [`Entities`](crate::entity::Entity).
-//!
-//! The _track_ events can be emitted using:
-//!
-//!   - a textual output based on the [log](https://docs.rs/log) crate.
-//!   - a packed binary output based on [Cap'n Proto](https://capnproto.org/).
-//!   - a packed binary output based output based on [Perfetto TrackEvents](https://perfetto.dev/docs/instrumentation/track-events)
-//!     Protobufs (only avaliable with the `perfetto` feature enabled).
-
+#![doc(test(attr(deny(unused_must_use))))]
+#![doc = std::include_str!(concat!(env!("OUT_DIR"), "/crate-docs.md"))]
 // Enable warnings for missing documentation
 #![warn(missing_docs)]
 
