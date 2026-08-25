@@ -30,6 +30,13 @@ export CARGO_SEMVER_CHECKS=1
 # toolchain set in rust-toolchain.toml.
 export RUSTC_BOOTSTRAP=1
 
+# Rustdoc JSON is versioned with the Rust toolchain. Pin this script to the
+# current checkout's active toolchain so the current and baseline rustdoc builds
+# produce the same JSON format.
+RUSTUP_TOOLCHAIN=$(rustup show active-toolchain)
+RUSTUP_TOOLCHAIN=${RUSTUP_TOOLCHAIN%% *}
+export RUSTUP_TOOLCHAIN
+
 # Kill any background children (e.g. the parallel `cargo doc` invocations)
 # if the script is interrupted, e.g. with Ctrl-C. POSIX sh sets SIGINT to ignore
 # backgrounded children, so without this trap they would keep running as
