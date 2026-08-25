@@ -65,17 +65,17 @@ fi
 
 rustup show  # Cause toolchain specified in rust-toolchain.toml to be installed
 
-export BINSTALL_VERSION=1.17.3
+export BINSTALL_VERSION=1.22.0
 curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 
 cargo binstall --disable-telemetry --no-confirm --locked   \
-  cargo-expand@1.0.119                                     \
+  cargo-expand@1.0.126                                     \
   mdbook@0.4.52                                            \
   mdbook-alerts@0.8.0                                      \
   mdbook-cmdrun@0.7.3                                      \
   mdbook-keeper@0.5.0                                      \
   mdbook-linkcheck@0.7.7                                   \
-  typst-cli@0.14.2
+  typst-cli@0.15.1
 
 if [[ $OSTYPE == "linux"* ]]; then
   cargo binstall --disable-telemetry --no-confirm --locked   \

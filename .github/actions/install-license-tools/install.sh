@@ -8,4 +8,4 @@ set -e
 echo "Installing license tools"
 
 cargo binstall --disable-telemetry --no-confirm --locked   \
-  cargo-about@0.8.4
+  cargo-about@0.9.2

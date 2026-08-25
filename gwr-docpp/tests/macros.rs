@@ -73,7 +73,7 @@ fn renders_asciidoc_as_html() {
 #[cfg(feature = "typst")]
 #[test]
 fn renders_typst_as_svg() {
-    assert!(TYPST.contains("<svg class=\"typst-doc\""));
-    assert!(TYPST.contains("class=\"typst-text\""));
+    assert!(TYPST.starts_with("<svg "));
+    assert!(TYPST.ends_with("</svg>"));
     assert!(TYPST.contains("href=\"https://example.com/api\""));
 }

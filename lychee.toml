@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
 # Check not only the link but also the validity of any anchor suffixes present
-include_fragments = true
+include_fragments = "full"
 
 # Do not check the validity of links in these files
 exclude_path = [
