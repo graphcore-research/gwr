@@ -285,7 +285,7 @@ where
             .iter()
             .any(|(tag, index, _x)| *tag == response_tag && *index == response_index)
         {
-            let all: Vec<(Tag, Index, T)> = self.waiting_for_response.drain(..).collect();
+            let all: Vec<(Tag, Index, T)> = std::mem::take(&mut self.waiting_for_response);
             let (matching, not_matching) = all
                 .into_iter()
                 .partition(|(tag, index, _x)| *tag == response_tag && *index == response_index);
