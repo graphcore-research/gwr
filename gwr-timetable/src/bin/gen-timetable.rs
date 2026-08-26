@@ -41,7 +41,6 @@ use gwr_models::processing_element::task::ComputeOp;
 use gwr_platform::types::PlatformConfig;
 use gwr_timetable::timetable_file::{
     EdgeKind, EdgeSection, NodeSection, TensorConfigSection, TensorViewSection, TimetableFile,
-    dtype_num_bytes,
 };
 use log::{Level, LevelFilter, Metadata, Record, debug, info};
 use rand::prelude::*;
@@ -571,7 +570,7 @@ impl Generator {
         })
     }
 
-    fn print_summary(&self) {
+    fn print_summary(&self) -> Result<()> {
         info!(
             "Created {} tensors / {} nodes / {} edges",
             self.tensors.len(),
@@ -585,15 +584,17 @@ impl Generator {
             self.op_counts[op_index(&gemm_op)],
             self.op_counts[op_index(&maxpool_op)]
         );
-        let total_bytes = self
-            .tensors
-            .iter()
-            .map(|tensor| dtype_num_bytes(tensor.dtype(), tensor.shape().num_elements()) as u64)
-            .sum();
+        let total_bytes = self.tensors.iter().try_fold(0u64, |total, tensor| {
+            let num_bytes = u64::try_from(tensor.num_bytes())?;
+            total
+                .checked_add(num_bytes)
+                .ok_or_else(|| error_from_str("total tensor storage size overflows"))
+        })?;
         info!(
             "Tensors use {total_bytes} bytes ({:.2})",
             Byte::from_u64(total_bytes).get_appropriate_unit(UnitType::Binary)
         );
+        Ok(())
     }
 
     fn expand_point(&mut self, point: &ExpansionPoint, compute_op: &ComputeOp) -> Result<()> {
@@ -790,7 +791,7 @@ impl Generator {
         input_tensors: &[Option<Tensor>],
         output_tensors: &[Option<Tensor>],
     ) -> Result<()> {
-        let mut total_input_num_bytes = 0;
+        let mut total_input_num_bytes = 0usize;
         for (partition_idx, partition) in partitions.iter().enumerate() {
             let pe_idx = self.next_pe_idx(partition_idx);
             let pe = self.pe_names[pe_idx].clone();
@@ -804,7 +805,7 @@ impl Generator {
 
             let mut input_views = vec![None; partition.inputs.len()];
 
-            let mut partition_input_num_bytes = 0;
+            let mut partition_input_num_bytes = 0usize;
             for (input_idx, input_view) in partition.inputs.iter().enumerate() {
                 let Some(view) = input_view else {
                     continue;
@@ -816,10 +817,10 @@ impl Generator {
 
                 if log::log_enabled!(Level::Debug) {
                     let shape = view.shape();
-                    let dtype = view.tensor().dtype();
-                    let num_elements = shape.num_elements();
-                    let num_bytes = dtype_num_bytes(dtype, num_elements);
-                    partition_input_num_bytes += num_bytes;
+                    let num_bytes = view.num_bytes();
+                    partition_input_num_bytes = partition_input_num_bytes
+                        .checked_add(num_bytes)
+                        .ok_or_else(|| error_from_str("partition input byte total overflows"))?;
                     debug!("  Partitioned input {input_idx}: shape: {shape}, bytes: {num_bytes}");
                 }
 
@@ -839,7 +840,9 @@ impl Generator {
             }
 
             if log::log_enabled!(Level::Debug) {
-                total_input_num_bytes += partition_input_num_bytes;
+                total_input_num_bytes = total_input_num_bytes
+                    .checked_add(partition_input_num_bytes)
+                    .ok_or_else(|| error_from_str("total partition input bytes overflows"))?;
                 debug!("  Partition input bytes: {partition_input_num_bytes}");
             }
 
@@ -1109,7 +1112,7 @@ fn generate(mut generator: Generator) -> Result<TimetableFile> {
         generator.expand_point(&point, &compute_op)?;
     }
 
-    generator.print_summary();
+    generator.print_summary()?;
 
     Ok(TimetableFile {
         nodes: generator.nodes,

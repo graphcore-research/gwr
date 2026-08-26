@@ -508,6 +508,24 @@ fn tensor_view_access(view: &TensorView) -> Result<(u64, usize), SimError> {
     Ok((address, byte_range.len()))
 }
 
+fn compute_task_num_partitions(
+    config: &ComputeTaskConfig,
+    sram_bytes: usize,
+) -> Result<usize, SimError> {
+    let total_num_bytes = config
+        .inputs
+        .iter()
+        .chain(config.outputs.iter())
+        .filter_map(|view| view.as_ref())
+        .try_fold(0usize, |total, view| {
+            total
+                .checked_add(view.num_bytes())
+                .ok_or_else(|| SimError("Compute task byte total overflows".to_string()))
+        })?;
+
+    Ok(total_num_bytes.div_ceil(sram_bytes.max(1)).max(1))
+}
+
 #[expect(clippy::too_many_arguments)]
 async fn handle_compute_task(
     clock: Clock,
@@ -520,17 +538,7 @@ async fn handle_compute_task(
     flop_monitor: Option<Rc<FlopMonitor>>,
     config: &ComputeTaskConfig,
 ) -> SimResult {
-    let total_num_bytes: usize = config
-        .inputs
-        .iter()
-        .chain(config.outputs.iter())
-        .filter_map(|view| view.as_ref())
-        .map(TensorView::num_bytes)
-        .sum();
-
-    let num_partitions = total_num_bytes
-        .div_ceil(compute_capabilities.sram_bytes.max(1))
-        .max(1);
+    let num_partitions = compute_task_num_partitions(config, compute_capabilities.sram_bytes)?;
 
     let partitions =
         config
@@ -610,6 +618,7 @@ mod tests {
     use super::*;
     use crate::processing_element::operators::Tensor;
     use crate::processing_element::operators::dtype::DataType;
+    use crate::processing_element::task::ComputeOp;
 
     #[test]
     fn tensor_view_access_includes_each_partially_touched_byte() {
@@ -617,6 +626,20 @@ mod tests {
         let view = TensorView::new(tensor, &[2], &[1]).unwrap();
 
         assert_eq!(tensor_view_access(&view).unwrap(), (0x1000, 2));
+    }
+
+    #[test]
+    fn compute_task_byte_total_overflow_returns_error() {
+        let tensor = Tensor::new(&[usize::MAX / 4], &DataType::Int4, 0).unwrap();
+        let view = TensorView::new_full(tensor);
+        let config = ComputeTaskConfig {
+            id: "overflow".to_string(),
+            op: ComputeOp::Add,
+            inputs: vec![Some(view); 8],
+            outputs: vec![],
+        };
+
+        assert!(compute_task_num_partitions(&config, 1).is_err());
     }
 
     #[test]

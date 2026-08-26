@@ -36,6 +36,13 @@ use types::Node;
 use crate::mermaid::{MermaidNodeStatus, render_mermaid_from_parts};
 use crate::timetable_file::{EdgeSection, TensorConfigSection, TensorViewSection};
 
+fn add_to_byte_total(total: &mut usize, num_bytes: usize, kind: &str) -> SimResult {
+    *total = total
+        .checked_add(num_bytes)
+        .ok_or_else(|| SimError(format!("Timetable {kind} byte total overflows")))?;
+    Ok(())
+}
+
 fn validate_view_in_range(
     node_id: &str,
     direction: &str,
@@ -519,8 +526,8 @@ impl Timetable {
     }
 
     pub fn dump_stats(&self) -> SimResult {
-        let mut total_load_bytes = 0;
-        let mut total_store_bytes = 0;
+        let mut total_load_bytes = 0usize;
+        let mut total_store_bytes = 0usize;
         let mut machine_ops = MachineOpCounts::default();
         let mut num_compute_nodes = 0;
         let mut num_tensor_nodes = 0;
@@ -530,10 +537,14 @@ impl Timetable {
                     let (inputs, outputs) = self.get_input_output_tensors(idx)?;
                     machine_ops.add_assign(op.compute_machine_ops(&inputs, &outputs)?);
                     for input_view in inputs.iter().flatten() {
-                        total_load_bytes += input_view.num_bytes();
+                        add_to_byte_total(&mut total_load_bytes, input_view.num_bytes(), "load")?;
                     }
                     for output_view in outputs.iter().flatten() {
-                        total_store_bytes += output_view.num_bytes();
+                        add_to_byte_total(
+                            &mut total_store_bytes,
+                            output_view.num_bytes(),
+                            "store",
+                        )?;
                     }
                     num_compute_nodes += 1;
                 }
