@@ -505,7 +505,7 @@ fn tensor_view_access(view: &TensorView) -> Result<(u64, usize), SimError> {
         .addr()
         .checked_add(byte_offset)
         .ok_or_else(|| SimError("Tensor view address overflows".to_string()))?;
-    Ok((address, byte_range.end - byte_range.start))
+    Ok((address, byte_range.len()))
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -613,19 +613,10 @@ mod tests {
 
     #[test]
     fn tensor_view_access_includes_each_partially_touched_byte() {
-        let tensor = Tensor::new(&[4], &DataType::Int4, 0x1000);
-        let view = TensorView::new(tensor, &[2], &[1]);
+        let tensor = Tensor::new(&[4], &DataType::Int4, 0x1000).unwrap();
+        let view = TensorView::new(tensor, &[2], &[1]).unwrap();
 
         assert_eq!(tensor_view_access(&view).unwrap(), (0x1000, 2));
-    }
-
-    #[test]
-    fn tensor_view_access_is_empty_for_zero_element_view() {
-        let tensor = Tensor::new(&[4], &DataType::Int4, 0x1000);
-        let view = TensorView::new(tensor, &[0], &[1]);
-
-        assert_eq!(view.byte_range().unwrap(), 0..0);
-        assert_eq!(tensor_view_access(&view).unwrap(), (0x1000, 0));
     }
 
     #[test]

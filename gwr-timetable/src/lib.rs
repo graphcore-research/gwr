@@ -73,7 +73,12 @@ fn validate_view_in_range(
         .zip(tensor_config.shape.iter())
         .enumerate()
     {
-        if (offset + size) > *tensor_dim {
+        let end = offset.checked_add(*size).ok_or_else(|| {
+            SimError(format!(
+                "{direction} view on node '{node_id}' overflows in dim {i}: offset {offset} + size {size}"
+            ))
+        })?;
+        if end > *tensor_dim {
             return sim_error!(
                 "{direction} view on node '{}' is out of range in dim {i}: offset {offset} + size {size} > {tensor_dim}",
                 node_id,
@@ -248,9 +253,9 @@ impl Timetable {
             &tensor_config.shape,
             &tensor_config.dtype,
             tensor_config.addr,
-        );
+        )?;
         match view {
-            Some(view) => Ok(TensorView::new(tensor, &view.shape, &view.offsets)),
+            Some(view) => TensorView::new(tensor, &view.shape, &view.offsets),
             None => Ok(TensorView::new_full(tensor)),
         }
     }

@@ -99,9 +99,9 @@ impl Dispatch for TestDispatcher {
 }
 
 fn build_dispatcher() -> Rc<dyn Dispatch> {
-    let input_a = Tensor::new(&[8], &DataType::Fp32, 0x1_0000_0000);
-    let input_b = Tensor::new(&[8], &DataType::Fp32, 0x1_0000_0100);
-    let output = Tensor::new(&[8], &DataType::Fp32, 0x1_0000_0200);
+    let input_a = Tensor::new(&[8], &DataType::Fp32, 0x1_0000_0000).unwrap();
+    let input_b = Tensor::new(&[8], &DataType::Fp32, 0x1_0000_0100).unwrap();
+    let output = Tensor::new(&[8], &DataType::Fp32, 0x1_0000_0200).unwrap();
     let task = |id: &str| Task::ComputeTask {
         config: ComputeTaskConfig {
             id: id.to_string(),
