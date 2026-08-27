@@ -446,11 +446,11 @@ mod tests {
     use crate::processing_element::operators::dtype::DataType;
     use crate::processing_element::operators::{Operator, Shape, Tensor, partition_tensors};
 
-    fn tensor(shape: &[usize]) -> Option<Tensor> {
+    fn test_tensor(shape: &[usize]) -> Option<Tensor> {
         Some(Tensor::new(shape, &DataType::Bf16, 0).unwrap())
     }
 
-    fn tensor_view(shape: &[usize]) -> Option<TensorView> {
+    fn test_tensor_view(shape: &[usize]) -> Option<TensorView> {
         let tensor = Tensor::new(shape, &DataType::Bf16, 0).unwrap();
         Some(TensorView::new_full(tensor))
     }
@@ -479,7 +479,7 @@ mod tests {
 
         let outputs = operator
             .create_outputs(
-                &[tensor(&[1, 48, 1, 25]), tensor(&[1, 48, 25, 1])],
+                &[test_tensor(&[1, 48, 1, 25]), test_tensor(&[1, 48, 25, 1])],
                 1.0,
                 &mut rng,
             )
@@ -497,15 +497,15 @@ mod tests {
 
         operator
             .validate_tensors(
-                &[tensor(&[1, 4, 5]), tensor(&[1, 5, 8])],
-                &[tensor(&[1, 4, 8])],
+                &[test_tensor(&[1, 4, 5]), test_tensor(&[1, 5, 8])],
+                &[test_tensor(&[1, 4, 8])],
             )
             .unwrap();
 
         operator
             .validate_tensors(
-                &[tensor(&[3, 2, 10, 5]), tensor(&[5, 12])],
-                &[tensor(&[3, 2, 10, 12])],
+                &[test_tensor(&[3, 2, 10, 5]), test_tensor(&[5, 12])],
+                &[test_tensor(&[3, 2, 10, 12])],
             )
             .unwrap();
     }
@@ -516,8 +516,8 @@ mod tests {
 
         let err = operator
             .validate_tensors(
-                &[tensor(&[2, 4, 5]), tensor(&[3, 5, 8])],
-                &[tensor(&[1, 4, 8])],
+                &[test_tensor(&[2, 4, 5]), test_tensor(&[3, 5, 8])],
+                &[test_tensor(&[1, 4, 8])],
             )
             .unwrap_err();
         assert!(format!("{err}").contains("cannot broadcast shapes"));
@@ -529,8 +529,8 @@ mod tests {
 
         let err = operator
             .validate_tensors(
-                &[tensor(&[4, 1, 4, 5]), tensor(&[3, 1, 5, 8])],
-                &[tensor(&[1, 1, 4, 8])],
+                &[test_tensor(&[4, 1, 4, 5]), test_tensor(&[3, 1, 5, 8])],
+                &[test_tensor(&[1, 1, 4, 8])],
             )
             .unwrap_err();
         assert!(format!("{err}").contains("cannot broadcast shapes"));
@@ -542,8 +542,8 @@ mod tests {
 
         let err = operator
             .validate_tensors(
-                &[tensor(&[9, 2, 4, 5]), tensor(&[9, 2, 4, 8])],
-                &[tensor(&[9, 2, 4, 8])],
+                &[test_tensor(&[9, 2, 4, 5]), test_tensor(&[9, 2, 4, 8])],
+                &[test_tensor(&[9, 2, 4, 8])],
             )
             .unwrap_err();
         assert!(format!("{err}").contains("incompatible K"));
@@ -582,8 +582,11 @@ mod tests {
 
         OperatorGemm {}
             .validate_tensors(
-                &[tensor(input_a.get_dims()), tensor(input_b.get_dims())],
-                &[tensor(&[19, 23, 29, 29])],
+                &[
+                    test_tensor(input_a.get_dims()),
+                    test_tensor(input_b.get_dims()),
+                ],
+                &[test_tensor(&[19, 23, 29, 29])],
             )
             .unwrap();
     }
@@ -607,8 +610,11 @@ mod tests {
         let delay_ticks = operator
             .compute_delay_ticks(
                 &compute_capabilities,
-                &[tensor_view(&[2, 3, 4, 5]), tensor_view(&[2, 3, 5, 7])],
-                &[tensor_view(&[2, 3, 4, 7])],
+                &[
+                    test_tensor_view(&[2, 3, 4, 5]),
+                    test_tensor_view(&[2, 3, 5, 7]),
+                ],
+                &[test_tensor_view(&[2, 3, 4, 7])],
             )
             .unwrap();
 
@@ -628,8 +634,8 @@ mod tests {
         let delay_ticks = operator
             .compute_delay_ticks(
                 &compute_capabilities,
-                &[tensor_view(&[4, 5]), tensor_view(&[5, 8])],
-                &[tensor_view(&[4, 8])],
+                &[test_tensor_view(&[4, 5]), test_tensor_view(&[5, 8])],
+                &[test_tensor_view(&[4, 8])],
             )
             .unwrap();
         assert_eq!(delay_ticks, 160 + 128);
@@ -637,8 +643,8 @@ mod tests {
         let delay_ticks = operator
             .compute_delay_ticks(
                 &compute_capabilities,
-                &[tensor_view(&[10, 11, 4, 5]), tensor_view(&[5, 8])],
-                &[tensor_view(&[10, 11, 4, 8])],
+                &[test_tensor_view(&[10, 11, 4, 5]), test_tensor_view(&[5, 8])],
+                &[test_tensor_view(&[10, 11, 4, 8])],
             )
             .unwrap();
         assert_eq!(delay_ticks, 17600 + 14080);
@@ -650,8 +656,8 @@ mod tests {
         assert_eq!(
             operator
                 .compute_flops(
-                    &[tensor_view(&[4, 5]), tensor_view(&[5, 8])],
-                    &[tensor_view(&[4, 8])],
+                    &[test_tensor_view(&[4, 5]), test_tensor_view(&[5, 8])],
+                    &[test_tensor_view(&[4, 8])],
                 )
                 .unwrap(),
             (4 * 5 * 8) + (4 * (5 - 1) * 8)
@@ -665,11 +671,11 @@ mod tests {
             operator
                 .compute_flops(
                     &[
-                        tensor_view(&[4, 5]),
-                        tensor_view(&[5, 8]),
-                        tensor_view(&[4, 8]),
+                        test_tensor_view(&[4, 5]),
+                        test_tensor_view(&[5, 8]),
+                        test_tensor_view(&[4, 8]),
                     ],
-                    &[tensor_view(&[4, 8])],
+                    &[test_tensor_view(&[4, 8])],
                 )
                 .unwrap(),
             (4 * 5 * 8) + (4 * (5 - 1) * 8) + (4 * 8)
@@ -682,12 +688,12 @@ mod tests {
         let mut rng = rand::rng();
 
         let inputs = operator
-            .create_inputs(&[tensor(&[4, 8])], 0.0, &mut rng)
+            .create_inputs(&[test_tensor(&[4, 8])], 0.0, &mut rng)
             .unwrap();
 
         assert_eq!(inputs.len(), 2);
         operator
-            .validate_tensors(&inputs, &[tensor(&[4, 8])])
+            .validate_tensors(&inputs, &[test_tensor(&[4, 8])])
             .unwrap();
     }
 
@@ -697,13 +703,13 @@ mod tests {
         let mut rng = rand::rng();
 
         let inputs = operator
-            .create_inputs(&[tensor(&[4, 8])], 1.0, &mut rng)
+            .create_inputs(&[test_tensor(&[4, 8])], 1.0, &mut rng)
             .unwrap();
 
         assert_eq!(inputs.len(), 3);
         assert_eq!(inputs[2].as_ref().unwrap().shape(), &test_shape(&[4, 8]));
         operator
-            .validate_tensors(&inputs, &[tensor(&[4, 8])])
+            .validate_tensors(&inputs, &[test_tensor(&[4, 8])])
             .unwrap();
     }
 
@@ -737,8 +743,8 @@ mod tests {
     #[test]
     fn partitions_prefer_outer_dims_before_m_or_n() {
         let operator = OperatorGemm {};
-        let input_tensors = vec![tensor(&[3, 20, 10, 5]), tensor(&[3, 20, 5, 12])];
-        let output_tensors = vec![tensor(&[3, 20, 10, 12])];
+        let input_tensors = vec![test_tensor(&[3, 20, 10, 5]), test_tensor(&[3, 20, 5, 12])];
+        let output_tensors = vec![test_tensor(&[3, 20, 10, 12])];
 
         let partitions = partition_tensors(&operator, &input_tensors, &output_tensors, 4).unwrap();
         assert_eq!(partitions.len(), 6);
@@ -781,8 +787,8 @@ mod tests {
     #[test]
     fn partitions_fall_back_to_m_when_no_outer_dims_are_available() {
         let operator = OperatorGemm {};
-        let inputs = vec![tensor(&[10, 5]), tensor(&[5, 12])];
-        let outputs = vec![tensor(&[10, 12])];
+        let inputs = vec![test_tensor(&[10, 5]), test_tensor(&[5, 12])];
+        let outputs = vec![test_tensor(&[10, 12])];
 
         let partitions = partition_tensors(&operator, &inputs, &outputs, 4).unwrap();
         assert_eq!(partitions.len(), 4);
@@ -821,8 +827,8 @@ mod tests {
     #[test]
     fn can_partition_m_and_n_when_needed() {
         let operator = OperatorGemm {};
-        let inputs = vec![tensor(&[4, 5]), tensor(&[5, 6])];
-        let outputs = vec![tensor(&[4, 6])];
+        let inputs = vec![test_tensor(&[4, 5]), test_tensor(&[5, 6])];
+        let outputs = vec![test_tensor(&[4, 6])];
 
         let partitions = partition_tensors(&operator, &inputs, &outputs, 8).unwrap();
         assert_eq!(partitions.len(), 8);

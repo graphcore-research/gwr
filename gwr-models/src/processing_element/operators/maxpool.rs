@@ -778,7 +778,7 @@ mod tests {
     use crate::processing_element::operators::dtype::DataType;
     use crate::processing_element::operators::{Operator, Tensor, partition_tensors};
 
-    fn tensor(shape: &[usize]) -> Option<Tensor> {
+    fn test_tensor(shape: &[usize]) -> Option<Tensor> {
         Some(Tensor::new(shape, &DataType::Bf16, 0).unwrap())
     }
 
@@ -786,7 +786,7 @@ mod tests {
         Some(Tensor::new(shape, &DataType::Int64, 0).unwrap())
     }
 
-    fn tensor_view(shape: &[usize]) -> Option<TensorView> {
+    fn test_tensor_view(shape: &[usize]) -> Option<TensorView> {
         let tensor = Tensor::new(shape, &DataType::Bf16, 0).unwrap();
         Some(TensorView::new_full(tensor))
     }
@@ -812,7 +812,7 @@ mod tests {
 
         let mut rng = rand::rng();
         let outputs = op
-            .create_outputs(&[tensor(&[1, 1, 4, 4])], 1.0, &mut rng)
+            .create_outputs(&[test_tensor(&[1, 1, 4, 4])], 1.0, &mut rng)
             .unwrap();
 
         assert_eq!(
@@ -913,7 +913,7 @@ mod tests {
         let mut rng = rand::rng();
 
         let outputs = op
-            .create_outputs(&[tensor(&[1, 3, 4, 4])], 1.0, &mut rng)
+            .create_outputs(&[test_tensor(&[1, 3, 4, 4])], 1.0, &mut rng)
             .unwrap();
 
         assert_eq!(outputs.len(), 2);
@@ -938,7 +938,7 @@ mod tests {
         let mut rng = rand::rng();
 
         let outputs = op
-            .create_outputs(&[tensor(&[2, 5, 6, 7, 8])], 1.0, &mut rng)
+            .create_outputs(&[test_tensor(&[2, 5, 6, 7, 8])], 1.0, &mut rng)
             .unwrap();
 
         assert_eq!(outputs.len(), 2);
@@ -952,7 +952,7 @@ mod tests {
             &test_shape(&[2, 5, 3, 3, 3])
         );
         assert_eq!(outputs[1].as_ref().unwrap().dtype(), &DataType::Int64);
-        op.validate_tensors(&[tensor(&[2, 5, 6, 7, 8])], &outputs)
+        op.validate_tensors(&[test_tensor(&[2, 5, 6, 7, 8])], &outputs)
             .unwrap();
 
         let inputs = op.create_inputs(&outputs, 1.0, &mut rng).unwrap();
@@ -971,7 +971,7 @@ mod tests {
         let mut rng = rand::rng();
 
         let outputs = op
-            .create_outputs(&[tensor(&[1, 3, 4, 4])], 0.0, &mut rng)
+            .create_outputs(&[test_tensor(&[1, 3, 4, 4])], 0.0, &mut rng)
             .unwrap();
 
         assert_eq!(outputs.len(), 1);
@@ -989,11 +989,11 @@ mod tests {
             ..OperatorMaxPool::new(&[2, 2])
         };
 
-        op.validate_tensors(&[tensor(&[1, 3, 4, 4])], &[tensor(&[1, 3, 2, 2])])
+        op.validate_tensors(&[test_tensor(&[1, 3, 4, 4])], &[test_tensor(&[1, 3, 2, 2])])
             .unwrap();
         op.validate_tensors(
-            &[tensor(&[1, 3, 4, 4])],
-            &[tensor(&[1, 3, 2, 2]), indices(&[1, 3, 2, 2])],
+            &[test_tensor(&[1, 3, 4, 4])],
+            &[test_tensor(&[1, 3, 2, 2]), indices(&[1, 3, 2, 2])],
         )
         .unwrap();
     }
@@ -1007,16 +1007,16 @@ mod tests {
 
         let err = op
             .validate_tensors(
-                &[tensor(&[1, 3, 4, 4])],
-                &[tensor(&[1, 3, 2, 2]), indices(&[1, 3, 2, 1])],
+                &[test_tensor(&[1, 3, 4, 4])],
+                &[test_tensor(&[1, 3, 2, 2]), indices(&[1, 3, 2, 1])],
             )
             .unwrap_err();
         assert!(format!("{err}").contains("Indices shape"));
 
         let err = op
             .validate_tensors(
-                &[tensor(&[1, 3, 4, 4])],
-                &[tensor(&[1, 3, 2, 2]), tensor(&[1, 3, 2, 2])],
+                &[test_tensor(&[1, 3, 4, 4])],
+                &[test_tensor(&[1, 3, 2, 2]), test_tensor(&[1, 3, 2, 2])],
             )
             .unwrap_err();
         assert!(format!("{err}").contains("Indices dtype"));
@@ -1034,7 +1034,7 @@ mod tests {
         let mut rng = rand::rng();
 
         let outputs = op
-            .create_outputs(&[tensor(&[1, 1, 7, 7])], 1.0, &mut rng)
+            .create_outputs(&[test_tensor(&[1, 1, 7, 7])], 1.0, &mut rng)
             .unwrap();
 
         assert_eq!(
@@ -1053,7 +1053,7 @@ mod tests {
         let mut rng = rand::rng();
 
         let outputs = op
-            .create_outputs(&[tensor(&[1, 1, 5, 6])], 1.0, &mut rng)
+            .create_outputs(&[test_tensor(&[1, 1, 5, 6])], 1.0, &mut rng)
             .unwrap();
 
         assert_eq!(
@@ -1078,8 +1078,8 @@ mod tests {
         let delay = op
             .compute_delay_ticks(
                 &compute_capabilities,
-                &[tensor_view(&[1, 1, 2, 2])],
-                &[tensor_view(&[1, 1, 2, 2]), indices_view(&[1, 1, 2, 2])],
+                &[test_tensor_view(&[1, 1, 2, 2])],
+                &[test_tensor_view(&[1, 1, 2, 2]), indices_view(&[1, 1, 2, 2])],
             )
             .unwrap();
 
@@ -1094,8 +1094,8 @@ mod tests {
             strides: Some(vec![2, 2]),
             ..OperatorMaxPool::new(&[2, 2])
         };
-        let inputs = vec![tensor(&[2, 1, 4, 4])];
-        let outputs = vec![tensor(&[2, 1, 2, 2]), indices(&[2, 1, 2, 2])];
+        let inputs = vec![test_tensor(&[2, 1, 4, 4])];
+        let outputs = vec![test_tensor(&[2, 1, 2, 2]), indices(&[2, 1, 2, 2])];
 
         let partitions = partition_tensors(&op, &inputs, &outputs, 2).unwrap();
 
