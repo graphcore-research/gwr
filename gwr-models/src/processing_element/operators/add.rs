@@ -323,7 +323,10 @@ mod tests {
         let outputs = op.create_outputs(&inputs, 1.0, &mut rng).unwrap();
 
         assert_eq!(outputs.len(), 1);
-        assert_eq!(outputs[0].as_ref().unwrap().shape, test_shape(&[2, 3, 4]));
+        assert_eq!(
+            outputs[0].as_ref().unwrap().shape(),
+            &test_shape(&[2, 3, 4])
+        );
     }
 
     #[test]
@@ -335,7 +338,10 @@ mod tests {
         let outputs = op.create_outputs(&inputs, 1.0, &mut rng).unwrap();
 
         assert_eq!(outputs.len(), 1);
-        assert_eq!(outputs[0].as_ref().unwrap().shape, test_shape(&[2, 3, 4]));
+        assert_eq!(
+            outputs[0].as_ref().unwrap().shape(),
+            &test_shape(&[2, 3, 4])
+        );
     }
 
     #[test]
@@ -380,8 +386,8 @@ mod tests {
             let inputs = op.create_inputs(&outputs, 1.0, &mut rng).unwrap();
 
             assert_eq!(inputs.len(), 2);
-            assert_eq!(inputs[0].as_ref().unwrap().shape, test_shape(&[2, 3, 4]));
-            assert_eq!(inputs[1].as_ref().unwrap().shape, test_shape(&[2, 3, 4]));
+            assert_eq!(inputs[0].as_ref().unwrap().shape(), &test_shape(&[2, 3, 4]));
+            assert_eq!(inputs[1].as_ref().unwrap().shape(), &test_shape(&[2, 3, 4]));
             op.validate_tensors(&inputs, &outputs).unwrap();
         }
     }
@@ -404,7 +410,10 @@ mod tests {
                 .iter()
                 .map(|output| output.clone().unwrap())
                 .collect();
-            assert_eq!(inputs[usize::from(shrink_input_a)].shape, outputs[0].shape);
+            assert_eq!(
+                inputs[usize::from(shrink_input_a)].shape(),
+                outputs[0].shape()
+            );
             assert!(inputs[0].num_dims() <= outputs[0].num_dims());
             assert!(inputs[1].num_dims() <= outputs[0].num_dims());
             assert!(
