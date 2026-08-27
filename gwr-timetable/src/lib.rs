@@ -537,12 +537,16 @@ impl Timetable {
                     let (inputs, outputs) = self.get_input_output_tensors(idx)?;
                     machine_ops.add_assign(op.compute_machine_ops(&inputs, &outputs)?);
                     for input_view in inputs.iter().flatten() {
-                        add_to_byte_total(&mut total_load_bytes, input_view.num_bytes(), "load")?;
+                        add_to_byte_total(
+                            &mut total_load_bytes,
+                            input_view.num_access_bytes(),
+                            "load",
+                        )?;
                     }
                     for output_view in outputs.iter().flatten() {
                         add_to_byte_total(
                             &mut total_store_bytes,
-                            output_view.num_bytes(),
+                            output_view.num_access_bytes(),
                             "store",
                         )?;
                     }

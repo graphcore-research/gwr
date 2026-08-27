@@ -3,6 +3,7 @@
 //! The Operators define what operations a Processing Element can perform
 
 use std::fmt::Display;
+use std::ops::Range;
 use std::rc::Rc;
 
 use gwr_engine::sim_error;
@@ -385,22 +386,81 @@ impl TensorView {
         self.num_bytes
     }
 
-    /// Return the physical byte range touched by this view, relative to the
+    /// Return the physical byte ranges touched by this view, relative to the
     /// tensor's base address.
-    pub fn byte_range(&self) -> Result<std::ops::Range<usize>, SimError> {
+    pub fn byte_ranges(&self) -> impl Iterator<Item = Range<usize>> + '_ {
+        let tensor_dims = self.tensor.shape().get_dims();
+        let view_dims = self.shape().get_dims();
+        let offsets = self.offsets().get_dims();
+        let rank = self.num_dims();
+
+        // The innermost dimension is contiguous even when the view only covers
+        // part of it. A preceding dimension can join the same run when every
+        // enclosed inner dimension is covered in full from offset zero.
+        let mut contiguous_start = rank.saturating_sub(1);
+        while contiguous_start > 0
+            && offsets[contiguous_start] == 0
+            && view_dims[contiguous_start] == tensor_dims[contiguous_start]
+        {
+            contiguous_start -= 1;
+        }
+
+        let run_elements = view_dims[contiguous_start..].iter().product::<usize>();
+        let outer_runs = view_dims[..contiguous_start].iter().product::<usize>();
         let bits_per_element = self.tensor.dtype().num_bits();
-        let start_bit = self
-            .element_offset()
-            .checked_mul(bits_per_element)
-            .ok_or_else(|| SimError("Tensor view start offset overflows".to_string()))?;
-        let num_bits = self
-            .num_elements()
-            .checked_mul(bits_per_element)
-            .ok_or_else(|| SimError("Tensor view size overflows".to_string()))?;
-        let end_bit = start_bit
-            .checked_add(num_bits)
-            .ok_or_else(|| SimError("Tensor view end offset overflows".to_string()))?;
-        Ok((start_bit / 8)..end_bit.div_ceil(8))
+        let ranges = (0..outer_runs).scan(vec![0; contiguous_start], move |outer_coordinate, _| {
+            let start_element = tensor_dims
+                .iter()
+                .enumerate()
+                .fold(0usize, |flat, (dim, size)| {
+                    let relative_coordinate = outer_coordinate.get(dim).copied().unwrap_or(0);
+                    flat * size + offsets[dim] + relative_coordinate
+                });
+            let end_element = start_element + run_elements;
+
+            for dim in (0..contiguous_start).rev() {
+                outer_coordinate[dim] += 1;
+                if outer_coordinate[dim] < view_dims[dim] {
+                    break;
+                }
+                outer_coordinate[dim] = 0;
+            }
+
+            Some(element_range_to_byte_range(
+                start_element..end_element,
+                bits_per_element,
+            ))
+        });
+
+        coalesce_ranges(ranges)
+    }
+
+    /// Return the physical byte range enclosing every byte touched by this
+    /// view, relative to the tensor's base address.
+    ///
+    /// Unlike [`Self::byte_ranges`], these bounds may include untouched bytes
+    /// between the separate physical ranges of a strided view.
+    #[must_use]
+    pub fn byte_bounds(&self) -> Range<usize> {
+        let tensor_dims = self.tensor.shape().get_dims();
+        let view_dims = self.shape().get_dims();
+        let offsets = self.offsets().get_dims();
+        let start_element = self.element_offset();
+        let end_element = tensor_dims
+            .iter()
+            .enumerate()
+            .fold(0usize, |flat, (dim, size)| {
+                flat * size + offsets[dim] + view_dims[dim] - 1
+            })
+            + 1;
+
+        element_range_to_byte_range(start_element..end_element, self.tensor.dtype().num_bits())
+    }
+
+    /// Return the total number of physical bytes touched by this view.
+    #[must_use]
+    pub fn num_access_bytes(&self) -> usize {
+        self.byte_ranges().map(|range| range.len()).sum()
     }
 
     /// Return the offset of the first element (in number of elements).
@@ -413,6 +473,33 @@ impl TensorView {
             .zip(self.offsets().get_dims())
             .fold(0, |flat, (dim, offset)| flat * dim + offset)
     }
+}
+
+fn element_range_to_byte_range(
+    element_range: Range<usize>,
+    bits_per_element: usize,
+) -> Range<usize> {
+    const BYTE_OFFSET_INVARIANT: &str = "tensor construction guarantees byte offsets fit in usize";
+
+    let start_bit = element_range.start as u128 * bits_per_element as u128;
+    let end_bit = element_range.end as u128 * bits_per_element as u128;
+    let start_byte = usize::try_from(start_bit / 8).expect(BYTE_OFFSET_INVARIANT);
+    let end_byte = usize::try_from(end_bit.div_ceil(8)).expect(BYTE_OFFSET_INVARIANT);
+    start_byte..end_byte
+}
+
+fn coalesce_ranges(
+    ranges: impl Iterator<Item = Range<usize>>,
+) -> impl Iterator<Item = Range<usize>> {
+    let mut ranges = ranges.peekable();
+    std::iter::from_fn(move || {
+        let mut range = ranges.next()?;
+        while ranges.peek().is_some_and(|next| next.start <= range.end) {
+            let next = ranges.next().expect("peeked range is present");
+            range.end = range.end.max(next.end);
+        }
+        Some(range)
+    })
 }
 
 fn checked_num_bytes(
@@ -735,6 +822,62 @@ mod tests {
                 }],
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn strided_packed_view_returns_exact_byte_ranges() {
+        let tensor = Tensor::new(&[4, 4], &DataType::Int4, 0).unwrap();
+        let view = TensorView::new(tensor, &[3, 1], &[1, 1]).unwrap();
+
+        assert_eq!(
+            view.byte_ranges().collect::<Vec<_>>(),
+            vec![2..3, 4..5, 6..7]
+        );
+        assert_eq!(view.byte_bounds(), 2..7);
+        assert_eq!(view.num_access_bytes(), 3);
+    }
+
+    #[test]
+    fn physically_contiguous_multidimensional_view_returns_one_range() {
+        let tensor = Tensor::new(&[4, 4], &DataType::Int8, 0).unwrap();
+        let view = TensorView::new(tensor, &[2, 4], &[1, 0]).unwrap();
+
+        assert_eq!(view.byte_ranges().collect::<Vec<_>>(), vec![4..12]);
+        assert_eq!(view.byte_bounds(), 4..12);
+        assert_eq!(view.num_access_bytes(), 8);
+    }
+
+    #[test]
+    fn packed_byte_ranges_are_coalesced_when_they_overlap_or_touch() {
+        let ranges = coalesce_ranges([1..3, 2..4, 4..5].into_iter()).collect::<Vec<_>>();
+        assert_eq!(ranges, vec![1..5]);
+
+        let tensor = Tensor::new(&[2, 3], &DataType::Int4, 0).unwrap();
+        let view = TensorView::new(tensor, &[2, 1], &[0, 0]).unwrap();
+        assert_eq!(view.byte_ranges().collect::<Vec<_>>(), vec![0..2]);
+    }
+
+    #[test]
+    fn byte_ranges_accept_representable_size_without_bit_overflow() {
+        let int8 = TensorView::new_full(Tensor::new(&[usize::MAX], &DataType::Int8, 0).unwrap());
+        assert_eq!(int8.byte_ranges().collect::<Vec<_>>(), vec![0..usize::MAX]);
+
+        let int4 = TensorView::new_full(Tensor::new(&[usize::MAX], &DataType::Int4, 0).unwrap());
+        assert_eq!(
+            int4.byte_ranges().collect::<Vec<_>>(),
+            vec![0..usize::MAX.div_ceil(2)]
+        );
+    }
+
+    #[test]
+    fn large_strided_view_byte_ranges_are_generated_lazily() {
+        let tensor = Tensor::new(&[100_000_000, 2], &DataType::Int8, 0).unwrap();
+        let view = TensorView::new(tensor, &[100_000_000, 1], &[0, 0]).unwrap();
+
+        assert_eq!(
+            view.byte_ranges().take(3).collect::<Vec<_>>(),
+            vec![0..1, 2..3, 4..5]
         );
     }
 }

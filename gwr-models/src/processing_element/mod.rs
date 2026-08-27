@@ -44,7 +44,7 @@ use crate::memory::memory_map::{DeviceId, MemoryMap};
 use crate::processing_element::dispatch::Dispatch;
 use crate::processing_element::flop_monitor::FlopMonitor;
 use crate::processing_element::load_store_unit::LoadStoreUnit;
-use crate::processing_element::operators::TensorView;
+use crate::processing_element::operators::{TensorPartition, TensorView};
 use crate::processing_element::task::{ComputeTaskConfig, Task};
 
 pub mod dispatch;
@@ -496,16 +496,40 @@ async fn handle_task(
     }
 }
 
-fn tensor_view_access(view: &TensorView) -> Result<(u64, usize), SimError> {
-    let byte_range = view.byte_range()?;
-    let byte_offset = u64::try_from(byte_range.start)
-        .map_err(|error| SimError(format!("Tensor view byte offset: {error}")))?;
-    let address = view
-        .tensor()
-        .addr()
-        .checked_add(byte_offset)
-        .ok_or_else(|| SimError("Tensor view address overflows".to_string()))?;
-    Ok((address, byte_range.len()))
+type TensorAccess = (u64, usize);
+
+fn tensor_view_accesses(
+    view: &TensorView,
+) -> impl Iterator<Item = Result<TensorAccess, SimError>> + '_ {
+    view.byte_ranges().map(|byte_range| {
+        let byte_offset = u64::try_from(byte_range.start)
+            .map_err(|error| SimError(format!("Tensor view byte offset: {error}")))?;
+        let last_byte_offset = u64::try_from(byte_range.end - 1)
+            .map_err(|error| SimError(format!("Tensor view byte offset: {error}")))?;
+        let address = view
+            .tensor()
+            .addr()
+            .checked_add(byte_offset)
+            .ok_or_else(|| SimError("Tensor view address overflows".to_string()))?;
+        view.tensor()
+            .addr()
+            .checked_add(last_byte_offset)
+            .ok_or_else(|| SimError("Tensor view address range overflows".to_string()))?;
+        Ok((address, byte_range.len()))
+    })
+}
+
+fn validate_tensor_view_addresses(partitions: &[TensorPartition]) -> SimResult {
+    for view in partitions
+        .iter()
+        .flat_map(|partition| partition.inputs.iter().chain(&partition.outputs))
+        .flatten()
+    {
+        for access in tensor_view_accesses(view) {
+            access?;
+        }
+    }
+    Ok(())
 }
 
 fn compute_task_num_partitions(
@@ -519,7 +543,7 @@ fn compute_task_num_partitions(
         .filter_map(|view| view.as_ref())
         .try_fold(0usize, |total, view| {
             total
-                .checked_add(view.num_bytes())
+                .checked_add(view.num_access_bytes())
                 .ok_or_else(|| SimError("Compute task byte total overflows".to_string()))
         })?;
 
@@ -544,6 +568,7 @@ async fn handle_compute_task(
         config
             .op
             .create_partitions(&config.inputs, &config.outputs, num_partitions)?;
+    validate_tensor_view_addresses(&partitions)?;
     let activity_name = config.activity_name();
     let group = activity_lanes.create_group(&format!("{activity_name} operation"));
 
@@ -552,16 +577,18 @@ async fn handle_compute_task(
             let Some(view) = view else {
                 continue;
             };
-            let (address, num_bytes) = tensor_view_access(view)?;
-            lsu.do_access(
-                AccessType::ReadRequest,
-                num_bytes,
-                address,
-                &activity_lanes.lsu_read,
-                &format!("{activity_name} tensor {idx} read"),
-                &group,
-            )
-            .await?;
+            for access in tensor_view_accesses(view) {
+                let (address, num_bytes) = access?;
+                lsu.do_access(
+                    AccessType::ReadRequest,
+                    num_bytes,
+                    address,
+                    &activity_lanes.lsu_read,
+                    &format!("{activity_name} tensor {idx} read"),
+                    &group,
+                )
+                .await?;
+            }
         }
 
         let compute_ticks = config.op.compute_delay_ticks(
@@ -596,16 +623,18 @@ async fn handle_compute_task(
             let Some(view) = view else {
                 continue;
             };
-            let (address, num_bytes) = tensor_view_access(view)?;
-            lsu.do_access(
-                AccessType::WriteNonPostedRequest,
-                num_bytes,
-                address,
-                &activity_lanes.lsu_write,
-                &format!("{activity_name} tensor {idx} write"),
-                &group,
-            )
-            .await?;
+            for access in tensor_view_accesses(view) {
+                let (address, num_bytes) = access?;
+                lsu.do_access(
+                    AccessType::WriteNonPostedRequest,
+                    num_bytes,
+                    address,
+                    &activity_lanes.lsu_write,
+                    &format!("{activity_name} tensor {idx} write"),
+                    &group,
+                )
+                .await?;
+            }
         }
     }
 
@@ -621,11 +650,83 @@ mod tests {
     use crate::processing_element::task::ComputeOp;
 
     #[test]
-    fn tensor_view_access_includes_each_partially_touched_byte() {
+    fn tensor_view_accesses_include_each_partially_touched_byte() {
         let tensor = Tensor::new(&[4], &DataType::Int4, 0x1000).unwrap();
         let view = TensorView::new(tensor, &[2], &[1]).unwrap();
 
-        assert_eq!(tensor_view_access(&view).unwrap(), (0x1000, 2));
+        assert_eq!(
+            tensor_view_accesses(&view)
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap(),
+            vec![(0x1000, 2)]
+        );
+    }
+
+    #[test]
+    fn tensor_view_accesses_preserve_every_exact_range() {
+        let tensor = Tensor::new(&[4, 4], &DataType::Int4, 0x1000).unwrap();
+        let view = TensorView::new(tensor, &[3, 1], &[1, 1]).unwrap();
+
+        assert_eq!(
+            tensor_view_accesses(&view)
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap(),
+            vec![(0x1002, 1), (0x1004, 1), (0x1006, 1)]
+        );
+    }
+
+    #[test]
+    fn tensor_view_accesses_reject_a_later_address_overflow() {
+        let tensor = Tensor::new(&[4, 4], &DataType::Int4, u64::MAX - 4).unwrap();
+        let view = TensorView::new(tensor, &[3, 1], &[1, 1]).unwrap();
+
+        assert!(
+            tensor_view_accesses(&view)
+                .collect::<Result<Vec<_>, _>>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn tensor_view_accesses_reject_a_range_end_overflow() {
+        let tensor = Tensor::new(&[4], &DataType::Int8, u64::MAX - 1).unwrap();
+        let view = TensorView::new_full(tensor);
+
+        assert!(
+            tensor_view_accesses(&view)
+                .collect::<Result<Vec<_>, _>>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn compute_task_partitions_use_physical_byte_ranges() {
+        let packed_view = || {
+            let tensor = Tensor::new(&[4], &DataType::Int4, 0x1000).unwrap();
+            TensorView::new(tensor, &[2], &[1]).unwrap()
+        };
+        let config = ComputeTaskConfig {
+            id: "add".to_string(),
+            op: ComputeOp::Add,
+            inputs: vec![Some(packed_view()), Some(packed_view())],
+            outputs: vec![Some(packed_view())],
+        };
+
+        assert_eq!(compute_task_num_partitions(&config, 3).unwrap(), 2);
+    }
+
+    #[test]
+    fn compute_task_partitions_sum_exact_strided_ranges() {
+        let tensor = Tensor::new(&[4, 4], &DataType::Int4, 0x1000).unwrap();
+        let view = TensorView::new(tensor, &[3, 1], &[1, 1]).unwrap();
+        let config = ComputeTaskConfig {
+            id: "strided".to_string(),
+            op: ComputeOp::Add,
+            inputs: vec![Some(view)],
+            outputs: vec![],
+        };
+
+        assert_eq!(compute_task_num_partitions(&config, 3).unwrap(), 1);
     }
 
     #[test]
