@@ -205,9 +205,23 @@ impl Recipe {
         exit_on_error: bool,
         logger: &mut impl Logger,
     ) -> Result<()> {
-        let tmp_str = tmp_root.to_string_lossy().to_string() + ".sh";
-        let script_path = PathBuf::from(tmp_str);
-        self.write_script(&script_path, exit_on_error)
+        let parent = tmp_root
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty());
+        let mut script = tempfile::NamedTempFile::with_prefix_in(
+            tmp_root.file_name().unwrap_or_default(),
+            parent.unwrap_or_else(|| Path::new(".")),
+        )
+        .map_err(|e| {
+            io::Error::other(format!(
+                "Failed to create temporary script for {}: {e}",
+                tmp_root.display()
+            ))
+        })?;
+        script.disable_cleanup(keep_tmp);
+        let script_path = script.path().to_path_buf();
+        debug!("Writing recipe to {}", script_path.display());
+        self.write_script(script.as_file_mut(), exit_on_error)
             .map_err(|e| {
                 io::Error::other(format!("Failed to write {}: {e}", script_path.display()))
             })?;
@@ -236,11 +250,6 @@ impl Recipe {
             io::Error::other(format!("Running '{}' failed: {e}", script_path.display()))
         })?;
 
-        if !keep_tmp {
-            fs::remove_file(&script_path).map_err(|e| {
-                io::Error::other(format!("Failed to remove {}: {e}", script_path.display()))
-            })?;
-        }
         Ok(())
     }
 
@@ -308,21 +317,18 @@ impl Recipe {
         Ok(())
     }
 
-    fn write_script(&self, script_path: &PathBuf, exit_on_error: bool) -> io::Result<()> {
-        debug!("Writing recipe to {}", script_path.display());
-        let file = fs::File::create(script_path)?;
-
-        let mut bin_writer = Box::new(BufWriter::new(file));
+    fn write_script(&self, file: &mut File, exit_on_error: bool) -> io::Result<()> {
+        let mut bin_writer = BufWriter::new(file);
         bin_writer.write_all(HEADER.as_bytes())?;
         if exit_on_error {
             bin_writer.write_all(b"set -e\n")?;
         }
         self.write_args_to_script(&mut bin_writer)?;
         self.write_commands_to_script(&mut bin_writer)?;
-        Ok(())
+        bin_writer.flush()
     }
 
-    fn write_args_to_script(&self, bin_writer: &mut Box<BufWriter<File>>) -> io::Result<()> {
+    fn write_args_to_script(&self, bin_writer: &mut impl Write) -> io::Result<()> {
         for arg in &self.arguments {
             if arg.value.is_none() {
                 // Skip undefined arguments - assume they will come from ENV
@@ -341,7 +347,7 @@ impl Recipe {
         Ok(())
     }
 
-    fn write_commands_to_script(&self, bin_writer: &mut Box<BufWriter<File>>) -> io::Result<()> {
+    fn write_commands_to_script(&self, bin_writer: &mut impl Write) -> io::Result<()> {
         for command in &self.ingredients {
             // Write out the comments if they are defined
             let comment = &command.comment;
@@ -521,7 +527,59 @@ fn find_arguments(
 
 #[cfg(test)]
 mod tests {
-    use super::Recipe;
+    use std::sync::Barrier;
+    use std::thread;
+
+    use super::{Ingredient, Recipe};
+    use crate::Logger;
+
+    #[derive(Default)]
+    struct TestLogger {
+        messages: String,
+    }
+
+    impl Logger for TestLogger {
+        fn error(&mut self, message: &str) {
+            self.messages.push_str(message);
+        }
+
+        fn info(&mut self, message: &str) {
+            self.messages.push_str(message);
+        }
+    }
+
+    #[test]
+    fn concurrent_executions_use_separate_scripts() {
+        let dir = tempfile::tempdir().unwrap();
+        let tmp_root = dir.path().join(".tmp");
+        let barrier = Barrier::new(8);
+        thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|id| {
+                    let barrier = &barrier;
+                    let tmp_root = &tmp_root;
+                    scope.spawn(move || {
+                        let marker = format!("recipe-{id}");
+                        let mut recipe = Recipe {
+                            description: String::new(),
+                            arguments: Vec::new(),
+                            ingredients: vec![Ingredient {
+                                comment: String::new(),
+                                command: format!("printf '{marker}\\n'"),
+                            }],
+                        };
+                        let mut logger = TestLogger::default();
+                        barrier.wait();
+                        recipe.execute(tmp_root, false, true, &mut logger).unwrap();
+                        assert!(logger.messages.lines().any(|line| line == marker));
+                    })
+                })
+                .collect();
+            for handle in handles {
+                handle.join().unwrap();
+            }
+        });
+    }
 
     #[test]
     fn parse_multiline_command_from_literal_block() {
