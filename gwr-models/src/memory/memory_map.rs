@@ -5,6 +5,8 @@ use std::collections::BTreeMap;
 use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
 
+use crate::memory::checked_last_address;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct DeviceId(pub u64);
 
@@ -36,11 +38,14 @@ impl MemoryMap {
 
     /// Map a [start, start+size-1] region to a device.
     pub fn insert(&mut self, start: u64, size: u64, device: DeviceId) -> Result<(), SimError> {
-        let end = if size > 0 {
-            start + size - 1
-        } else {
+        if size == 0 {
             return sim_error!("Invalid region size {size}");
-        };
+        }
+        let end = checked_last_address(start, size).ok_or_else(|| {
+            SimError(format!(
+                "Region at {start} with size {size} overflows the address space"
+            ))
+        })?;
 
         // Check overlap with previous region (if any)
         if let Some((_, prev)) = self.regions.range(..=start).next_back()
@@ -161,6 +166,23 @@ mod tests {
     fn address_lookup_after() {
         let memmory_map = setup_map();
         assert!(memmory_map.lookup(0x0000_5000).is_none());
+    }
+
+    #[test]
+    fn adjacent_regions_can_end_at_last_address() {
+        let mut memory_map = MemoryMap::new();
+        memory_map.insert(u64::MAX - 1, 1, DeviceId(1)).unwrap();
+        memory_map.insert(u64::MAX, 1, DeviceId(2)).unwrap();
+
+        assert_eq!(memory_map.num_regions(), 2);
+        assert_eq!(memory_map.lookup(u64::MAX), Some((DeviceId(2), 0)));
+    }
+
+    #[test]
+    fn insert_rejects_range_overflow() {
+        let mut memory_map = MemoryMap::new();
+
+        assert!(memory_map.insert(u64::MAX, 2, DeviceId(1)).is_err());
     }
 
     #[test]
