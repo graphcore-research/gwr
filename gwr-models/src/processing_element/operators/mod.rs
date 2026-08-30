@@ -22,8 +22,8 @@ pub use custom::OperatorCustom;
 pub(crate) use gemm::{OperatorGemm, gemm_rhs_shape, maybe_add_input_c};
 pub use maxpool::{AutoPad, OperatorMaxPool};
 pub(crate) use maxpool::{create_maxpool_op, maybe_add_indices_output};
-pub(crate) use partition::partition_across_dimensions;
 pub use partition::{DimPartition, TensorPartition};
+pub(crate) use partition::{max_partitions_across_dimensions, partition_across_dimensions};
 pub use tensor::{HasShape, Shape, Tensor, shape_string};
 pub use tensor_view::{TensorView, TensorViewLayout, TensorViewStride};
 
@@ -32,6 +32,9 @@ pub enum ExpansionDirection {
     Backward,
     Forward,
 }
+
+pub(crate) type TensorPartitions<'a> =
+    Box<dyn Iterator<Item = Result<TensorPartition, SimError>> + 'a>;
 
 pub(crate) trait Operator {
     fn validate(&self, inputs: &[Option<TensorView>], outputs: &[Option<TensorView>]) -> SimResult;
@@ -54,12 +57,23 @@ pub(crate) trait Operator {
         outputs: &[Option<TensorView>],
     ) -> Result<MachineOpCounts, SimError>;
 
-    fn partition_views(
+    /// Return the greatest useful partition count for these views.
+    ///
+    /// Implementations must ensure that the largest partition working set does
+    /// not increase as the requested partition count increases up to this
+    /// value.
+    fn max_partition_count(
         &self,
         inputs: &[Option<TensorView>],
         outputs: &[Option<TensorView>],
+    ) -> Result<usize, SimError>;
+
+    fn partition_views<'a>(
+        &'a self,
+        inputs: &'a [Option<TensorView>],
+        outputs: &'a [Option<TensorView>],
         num_partitions: usize,
-    ) -> Result<Vec<TensorPartition>, SimError>;
+    ) -> Result<TensorPartitions<'a>, SimError>;
 }
 
 pub(crate) fn full_views(tensors: &[Option<Tensor>]) -> Vec<Option<TensorView>> {
@@ -75,5 +89,9 @@ pub(crate) fn partition_tensors(
     outputs: &[Option<Tensor>],
     num_partitions: usize,
 ) -> Result<Vec<TensorPartition>, SimError> {
-    operator.partition_views(&full_views(inputs), &full_views(outputs), num_partitions)
+    let input_views = full_views(inputs);
+    let output_views = full_views(outputs);
+    operator
+        .partition_views(&input_views, &output_views, num_partitions)?
+        .collect()
 }

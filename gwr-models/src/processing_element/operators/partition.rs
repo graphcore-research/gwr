@@ -24,12 +24,11 @@ impl TensorPartition {
     }
 }
 
-#[must_use]
 pub(crate) fn partition_across_dimensions(
     dims: &[usize],
     candidate_dims: &[usize],
     requested: usize,
-) -> Vec<Vec<DimPartition>> {
+) -> PartitionSpecs {
     let requested = requested.max(1);
     let mut split_dims = Vec::new();
     let mut achieved_partitions = 1usize;
@@ -46,7 +45,11 @@ pub(crate) fn partition_across_dimensions(
             continue;
         }
 
-        split_dims.push((dim, partition_into_ranges(dim_extent, splits)));
+        split_dims.push(SplitDimension {
+            dim,
+            num_elements: dim_extent,
+            num_partitions: splits,
+        });
         achieved_partitions *= splits;
         if achieved_partitions >= requested {
             break;
@@ -54,35 +57,38 @@ pub(crate) fn partition_across_dimensions(
     }
 
     if split_dims.is_empty() {
-        return vec![
-            dims.iter()
-                .enumerate()
-                .map(|(dim, num_elements)| DimPartition {
-                    dim,
-                    offset: 0,
-                    num_elements: *num_elements,
-                })
-                .collect(),
-        ];
+        return PartitionSpecs {
+            full_partition: Some(
+                dims.iter()
+                    .enumerate()
+                    .map(|(dim, num_elements)| DimPartition {
+                        dim,
+                        offset: 0,
+                        num_elements: *num_elements,
+                    })
+                    .collect(),
+            ),
+            split_dims,
+            next_partition: 0,
+            num_partitions: 0,
+        };
     }
 
-    let mut partitions = vec![Vec::new()];
-    for (dim, ranges) in split_dims {
-        let mut next = Vec::with_capacity(partitions.len() * ranges.len());
-        for base in &partitions {
-            for (offset, num_elements) in &ranges {
-                let mut partition = base.clone();
-                partition.push(DimPartition {
-                    dim,
-                    offset: *offset,
-                    num_elements: *num_elements,
-                });
-                next.push(partition);
-            }
-        }
-        partitions = next;
+    PartitionSpecs {
+        full_partition: None,
+        split_dims,
+        next_partition: 0,
+        num_partitions: achieved_partitions,
     }
-    partitions
+}
+
+#[must_use]
+pub(crate) fn max_partitions_across_dimensions(dims: &[usize], candidate_dims: &[usize]) -> usize {
+    candidate_dims
+        .iter()
+        .map(|dim| dims[*dim])
+        .product::<usize>()
+        .max(1)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -92,23 +98,101 @@ pub struct DimPartition {
     pub num_elements: usize,
 }
 
-fn partition_into_ranges(total: usize, requested: usize) -> Vec<(usize, usize)> {
-    let partitions = requested.clamp(1, total.max(1));
-    let base_range_size = total / partitions;
-    let remainder = total % partitions;
-    let mut start = 0;
-    let mut ranges = Vec::with_capacity(partitions);
+#[derive(Clone, Debug)]
+struct SplitDimension {
+    dim: usize,
+    num_elements: usize,
+    num_partitions: usize,
+}
 
-    for index in 0..partitions {
-        let num_elements = base_range_size + usize::from(index < remainder);
-        if num_elements != 0 {
-            ranges.push((start, num_elements));
-            start += num_elements;
+impl SplitDimension {
+    fn partition(&self, index: usize) -> DimPartition {
+        let base_num_elements = self.num_elements / self.num_partitions;
+        let remainder = self.num_elements % self.num_partitions;
+
+        DimPartition {
+            dim: self.dim,
+            offset: index * base_num_elements + index.min(remainder),
+            num_elements: base_num_elements + usize::from(index < remainder),
         }
     }
+}
 
-    if ranges.is_empty() {
-        ranges.push((0, total.max(1)));
+#[derive(Clone, Debug)]
+#[must_use]
+pub(crate) struct PartitionSpecs {
+    full_partition: Option<Vec<DimPartition>>,
+    split_dims: Vec<SplitDimension>,
+    next_partition: usize,
+    num_partitions: usize,
+}
+
+impl Iterator for PartitionSpecs {
+    type Item = Vec<DimPartition>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(partition) = self.full_partition.take() {
+            return Some(partition);
+        }
+        if self.next_partition == self.num_partitions {
+            return None;
+        }
+
+        let partition_index = self.next_partition;
+        self.next_partition += 1;
+        let mut divisor = self.num_partitions;
+        Some(
+            self.split_dims
+                .iter()
+                .map(|split_dim| {
+                    divisor /= split_dim.num_partitions;
+                    let index = partition_index / divisor % split_dim.num_partitions;
+                    split_dim.partition(index)
+                })
+                .collect(),
+        )
     }
-    ranges
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.len();
+        (remaining, Some(remaining))
+    }
+}
+
+impl ExactSizeIterator for PartitionSpecs {
+    fn len(&self) -> usize {
+        if self.full_partition.is_some() {
+            1
+        } else {
+            self.num_partitions - self.next_partition
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generates_large_partitionings_lazily() {
+        let mut partitions = partition_across_dimensions(&[usize::MAX], &[0], usize::MAX);
+
+        assert_eq!(
+            partitions.next(),
+            Some(vec![DimPartition {
+                dim: 0,
+                offset: 0,
+                num_elements: 1,
+            }])
+        );
+        assert_eq!(
+            partitions.next(),
+            Some(vec![DimPartition {
+                dim: 0,
+                offset: 1,
+                num_elements: 1,
+            }])
+        );
+        assert_eq!(partitions.len(), usize::MAX - 2);
+    }
 }

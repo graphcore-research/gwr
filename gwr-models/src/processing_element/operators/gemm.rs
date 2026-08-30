@@ -10,9 +10,9 @@ use gwr_engine::sim_error;
 use gwr_engine::types::{SimError, SimResult};
 use rand::RngExt;
 
-use super::{Operator, Tensor, TensorPartition};
+use super::{Operator, Tensor, TensorPartition, TensorPartitions};
 use crate::processing_element::operators::{
-    HasShape, Shape, TensorView, partition_across_dimensions,
+    HasShape, Shape, TensorView, max_partitions_across_dimensions, partition_across_dimensions,
 };
 use crate::processing_element::{ComputeCapabilities, MachineOp, MachineOpCounts};
 
@@ -361,12 +361,24 @@ impl Operator for OperatorGemm {
         })
     }
 
-    fn partition_views(
+    fn max_partition_count(
         &self,
         input_views: &[Option<TensorView>],
         output_views: &[Option<TensorView>],
+    ) -> Result<usize, SimError> {
+        let (_, _, output_view) = validate_input_outputs(input_views, output_views)?;
+        Ok(max_partitions_across_dimensions(
+            output_view.shape().dims(),
+            &choose_partition_dims(output_view),
+        ))
+    }
+
+    fn partition_views<'a>(
+        &'a self,
+        input_views: &'a [Option<TensorView>],
+        output_views: &'a [Option<TensorView>],
         num_partitions: usize,
-    ) -> Result<Vec<TensorPartition>, SimError> {
+    ) -> Result<TensorPartitions<'a>, SimError> {
         let (input_a_view, input_b_view, output_view) =
             validate_input_outputs(input_views, output_views)?;
 
@@ -384,8 +396,7 @@ impl Operator for OperatorGemm {
         let m_dim = rank.saturating_sub(OUTPUT_OFFSET_M);
         let n_dim = rank.saturating_sub(OUTPUT_OFFSET_N);
 
-        let mut partitions = Vec::with_capacity(partition_specs.len());
-        for spec in partition_specs {
+        Ok(Box::new(partition_specs.map(move |spec| {
             let partitioned_output =
                 TensorView::from_output_partitions_on_view(output_view, rank, &spec)?;
 
@@ -428,13 +439,11 @@ impl Operator for OperatorGemm {
                 partition_inputs.push(Some(view));
             }
 
-            partitions.push(TensorPartition {
+            Ok(TensorPartition {
                 inputs: partition_inputs,
                 outputs: vec![Some(partitioned_output)],
-            });
-        }
-
-        Ok(partitions)
+            })
+        })))
     }
 }
 
@@ -834,6 +843,8 @@ mod tests {
 
         let partitions = operator
             .partition_views(&input_views, &output_views, 8)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(partitions.len(), 8);
 
