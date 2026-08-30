@@ -34,7 +34,6 @@ use gwr_models::processing_element::task::ComputeOp;
 use gwr_platform::types::PlatformConfig;
 use gwr_timetable::timetable_file::{
     EdgeKind, EdgeSection, NodeSection, TensorConfigSection, TensorViewSection, TimetableFile,
-    dtype_num_bytes,
 };
 use log::{Level, LevelFilter, Metadata, Record, debug, info};
 use rand::prelude::*;
@@ -550,7 +549,7 @@ impl Generator {
         let total_bytes = self
             .tensors
             .iter()
-            .map(|tensor| dtype_num_bytes(tensor.dtype(), tensor.shape().num_elements()) as u64)
+            .map(|tensor| tensor.num_bytes() as u64)
             .sum();
         info!(
             "Tensors use {total_bytes} bytes ({:.2})",
@@ -780,9 +779,7 @@ impl Generator {
 
                 if log::log_enabled!(Level::Debug) {
                     let shape = view.shape();
-                    let dtype = view.tensor().dtype();
-                    let num_elements = shape.num_elements();
-                    let num_bytes = dtype_num_bytes(dtype, num_elements);
+                    let num_bytes = view.num_packed_bytes();
                     partition_input_num_bytes += num_bytes;
                     debug!("  Partitioned input {input_idx}: shape: {shape}, bytes: {num_bytes}");
                 }

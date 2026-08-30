@@ -111,8 +111,9 @@ fn main() -> Result<()> {
     let timetable_file = TimetableFile::from_file(&args.timetable)?;
     let num_nodes = timetable_file.nodes.len();
     let num_edges = timetable_file.edges.len();
+    let graph = timetable_file.into_graph()?;
 
-    let timetable = Rc::new(Timetable::new(engine.top(), timetable_file, &platform)?);
+    let timetable = Rc::new(Timetable::new(engine.top(), graph, &platform)?);
     let dispatcher: Rc<dyn Dispatch> = timetable.clone();
     platform.attach_dispatcher(&dispatcher);
 
@@ -153,7 +154,7 @@ fn main() -> Result<()> {
 
     if args.dump_stats {
         timetable.dump_stats()?;
-        platform.dump_stats(clock.time_now_ns());
+        platform.try_dump_stats(clock.time_now_ns())?;
     }
 
     Ok(())

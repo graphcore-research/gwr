@@ -207,12 +207,6 @@ impl Platform {
         }
     }
 
-    pub fn dump_stats(&self, time_now_ns: f64) {
-        if let Err(error) = self.try_dump_stats(time_now_ns) {
-            panic!("Unable to dump platform statistics: {error}");
-        }
-    }
-
     pub fn try_dump_stats(&self, time_now_ns: f64) -> SimResult {
         let machine_ops = self.processing_element_totals()?;
         self.dump_memory_totals(time_now_ns);

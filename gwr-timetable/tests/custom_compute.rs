@@ -122,7 +122,12 @@ fn create_timetable(yaml: &str) -> Timetable {
     let platform = Rc::new(Platform::from_string(&engine, &clock, PLATFORM_YAML).unwrap());
     let timetable_file = TimetableFile::from_string(yaml).unwrap();
 
-    Timetable::new(engine.top(), timetable_file, &platform).unwrap()
+    Timetable::new(
+        engine.top(),
+        timetable_file.into_graph().unwrap(),
+        &platform,
+    )
+    .unwrap()
 }
 
 #[test]
@@ -217,7 +222,8 @@ fn custom_compute_name_is_used_in_activity_trace() {
     let clock = engine.default_clock();
     let platform = Rc::new(Platform::from_string(&engine, &clock, PLATFORM_YAML).unwrap());
     let timetable_file = TimetableFile::from_string(CUSTOM_TIMETABLE_YAML).unwrap();
-    let timetable = Rc::new(Timetable::new(engine.top(), timetable_file, &platform).unwrap());
+    let graph = timetable_file.into_graph().unwrap();
+    let timetable = Rc::new(Timetable::new(engine.top(), graph, &platform).unwrap());
     let dispatcher: Rc<dyn Dispatch> = timetable.clone();
     platform.attach_dispatcher(&dispatcher);
 

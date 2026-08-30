@@ -100,7 +100,8 @@ fn compute_task_emits_operator_activity_on_pe() {
     let clock = engine.default_clock();
     let platform = Rc::new(Platform::from_string(&engine, &clock, PLATFORM_YAML).unwrap());
     let timetable_file = TimetableFile::from_string(TIMETABLE_YAML).unwrap();
-    let timetable = Rc::new(Timetable::new(engine.top(), timetable_file, &platform).unwrap());
+    let graph = timetable_file.into_graph().unwrap();
+    let timetable = Rc::new(Timetable::new(engine.top(), graph, &platform).unwrap());
     let dispatcher: Rc<dyn Dispatch> = timetable.clone();
     platform.attach_dispatcher(&dispatcher);
 

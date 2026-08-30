@@ -21,82 +21,27 @@ use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::EntityGet;
 use gwr_models::processing_element::MachineOpCounts;
 use gwr_models::processing_element::dispatch::Dispatch;
-use gwr_models::processing_element::operators::{Tensor, TensorView};
+use gwr_models::processing_element::operators::TensorView;
 use gwr_models::processing_element::task::{ComputeOp, ComputeTaskConfig, Task};
 use gwr_platform::Platform;
 use gwr_track::entity::Entity;
 use gwr_track::{debug, info, trace};
 
+pub mod graph;
 pub mod mermaid;
 pub mod timetable_file;
-pub mod types;
-use timetable_file::{NodeSection, TimetableFile};
-use types::Node;
+pub use graph::{
+    ComputeTensorDirection, ComputeTensorViews, EdgeEndpoint, TensorConnection, TimetableEdge,
+    TimetableGraph, TimetableNode,
+};
 
-use crate::mermaid::{MermaidNodeStatus, render_mermaid_from_parts};
-use crate::timetable_file::{EdgeKind, EdgeSection, TensorConfigSection, TensorViewSection};
-
-fn validate_view_in_range(
-    node_id: &str,
-    direction: &str,
-    view: Option<&TensorViewSection>,
-    tensor_config: &TensorConfigSection,
-) -> SimResult {
-    let Some(view) = view else {
-        // When the view is not provided it means we are simply using the entire
-        // Tensor so it is ok
-        return Ok(());
-    };
-
-    if view.offsets.len() != tensor_config.shape.len() {
-        return sim_error!(
-            "{direction} view on node '{}' has offsets rank {} but tensor rank {}",
-            node_id,
-            view.offsets.len(),
-            tensor_config.shape.len()
-        );
-    }
-
-    if view.shape.len() != tensor_config.shape.len() {
-        return sim_error!(
-            "{direction} view on node '{}' has shape rank {} but tensor rank {}",
-            node_id,
-            view.shape.len(),
-            tensor_config.shape.len()
-        );
-    }
-
-    for (i, ((offset, size), tensor_dim)) in view
-        .offsets
-        .iter()
-        .zip(view.shape.iter())
-        .zip(tensor_config.shape.iter())
-        .enumerate()
-    {
-        let end = offset.checked_add(*size).ok_or_else(|| {
-            SimError(format!(
-                "{direction} view on node '{node_id}' overflows in dim {i}: offset {offset} + size {size}"
-            ))
-        })?;
-        if end > *tensor_dim {
-            return sim_error!(
-                "{direction} view on node '{}' is out of range in dim {i}: offset {offset} + size {size} > {tensor_dim}",
-                node_id,
-            );
-        }
-    }
-
-    Ok(())
-}
+use crate::mermaid::{MermaidNodeStatus, render_mermaid};
 
 #[derive(EntityGet)]
 pub struct Timetable {
     entity: Rc<Entity>,
     platform: Rc<Platform>,
-    nodes: Vec<Node>,
-    edges: Vec<EdgeSection>,
-    predecessors: Vec<Vec<usize>>,
-    successors: Vec<Vec<usize>>,
+    graph: TimetableGraph,
     node_pe_indices: Vec<Option<usize>>,
     completed_node_indices: RefCell<HashSet<usize>>,
     active_node_indices: RefCell<HashSet<usize>>,
@@ -117,129 +62,39 @@ impl fmt::Debug for Timetable {
     }
 }
 
-/// Make an edge connection by updating the edge indices of a given node.
-///
-/// If the edge_idx is given then ensure the vector of edges is large enough
-/// and assign. Otherwise, simply find an unassigned index or extend the vector
-/// in order to record the edge.
-fn update_edge_indices(
-    node_idx: usize,
-    edge_idx: Option<usize>,
-    edge_indices: &mut Vec<Option<usize>>,
-) -> SimResult {
-    if let Some(idx) = edge_idx {
-        if (idx + 1) > edge_indices.len() {
-            edge_indices.resize_with(idx + 1, || None);
-        }
-        if edge_indices[idx].is_some() {
-            return sim_error!("edge index {idx} already connected");
-        }
-        edge_indices[idx] = Some(node_idx);
-    } else {
-        let mut inserted = false;
-        for edge_idx in edge_indices.iter_mut() {
-            if edge_idx.is_none() {
-                *edge_idx = Some(node_idx);
-                inserted = true;
-                break;
-            }
-        }
-        if !inserted {
-            edge_indices.push(Some(node_idx));
-        }
-    }
-    Ok(())
-}
-
-type InOutTensorViews = (Vec<Option<TensorView>>, Vec<Option<TensorView>>);
-
 impl Timetable {
-    /// Create a Timetable from a TimetableFile and validate it
-    ///
-    /// Build any helper structures required for quick accesses. This includes:
-    ///  - a map of Nodes that are mapped to each Processing Element (PE)
-    ///  - new nodes that wrap the contents of the file but also have the edge
-    ///    links
+    /// Create a runnable timetable from a validated graph.
     pub fn new(
         parent: &Rc<Entity>,
-        mut timetable_file: TimetableFile,
+        graph: TimetableGraph,
         platform: &Rc<Platform>,
     ) -> Result<Self, SimError> {
-        timetable_file.validate(platform)?;
-
         let entity = Rc::new(Entity::new(parent, "timetable"));
-        let mut node_idx_by_id = HashMap::new();
         let mut nodes_per_pe = HashMap::new();
-        let mut node_pe_indices = Vec::with_capacity(timetable_file.nodes.len());
-        let mut nodes = Vec::with_capacity(timetable_file.nodes.len());
+        let mut node_pe_indices = Vec::with_capacity(graph.nodes().len());
 
-        for (i, node_section) in timetable_file.nodes.drain(..).enumerate() {
-            let (id, pe) = node_section.id_pe();
-            node_idx_by_id.insert(id.clone(), i);
-
-            let pe_idx = if let Some(pe_id) = &pe {
-                let pe_idx = platform.pe_idx_from_name(pe_id)?;
+        for (node_index, node) in graph.nodes().iter().enumerate() {
+            let pe_idx = if let Some(pe) = node.pe() {
+                let pe_idx = platform.pe_idx_from_name(pe).map_err(|_| {
+                    SimError(format!(
+                        "Node '{}' contains invalid PE ID '{pe}'",
+                        node.id()
+                    ))
+                })?;
                 nodes_per_pe
                     .entry(pe_idx)
                     .or_insert_with(BTreeSet::new)
-                    .insert(i);
+                    .insert(node_index);
                 Some(pe_idx)
             } else {
                 None
             };
-
-            nodes.push(Node {
-                node_section,
-                inputs: Vec::new(),
-                outputs: Vec::new(),
-            });
             node_pe_indices.push(pe_idx);
-        }
-
-        let mut predecessors = vec![Vec::new(); nodes.len()];
-        let mut successors = vec![Vec::new(); nodes.len()];
-
-        // Wire up the new node inputs/outputs to build the graph connectivity
-        for edge_section in &timetable_file.edges {
-            // Note: we have validated the edges so we can just unwrap()
-            let (from_node_id, from_edge_idx) = edge_section.from_node_and_edge()?;
-            let from_node_idx = node_idx_by_id.get(from_node_id).unwrap();
-            let (to_node_id, to_edge_idx) = edge_section.to_node_and_edge()?;
-            let to_node_idx = node_idx_by_id.get(to_node_id).unwrap();
-
-            if !matches!(&edge_section.kind, EdgeKind::Data) {
-                continue;
-            }
-
-            predecessors[*to_node_idx].push(*from_node_idx);
-            successors[*from_node_idx].push(*to_node_idx);
-
-            update_edge_indices(*from_node_idx, to_edge_idx, &mut nodes[*to_node_idx].inputs)
-                .map_err(|err| {
-                    SimError(format!(
-                        "Node {from_node_idx} '{}': {err}",
-                        nodes[*from_node_idx].node_section.id()
-                    ))
-                })?;
-            update_edge_indices(
-                *to_node_idx,
-                from_edge_idx,
-                &mut nodes[*from_node_idx].outputs,
-            )
-            .map_err(|err| {
-                SimError(format!(
-                    "Node {to_node_idx} '{}': {err}",
-                    nodes[*to_node_idx].node_section.id()
-                ))
-            })?;
         }
 
         let timetable = Self {
             entity,
-            nodes,
-            edges: timetable_file.edges,
-            predecessors,
-            successors,
+            graph,
             node_pe_indices,
             platform: platform.clone(),
             completed_node_indices: RefCell::new(HashSet::new()),
@@ -251,105 +106,10 @@ impl Timetable {
             ready_nodes_changed: Repeated::new(()),
         };
 
-        timetable.validate()?;
-
         timetable.update_complete_tensors();
         timetable.initialize_scheduler_state();
 
         Ok(timetable)
-    }
-
-    fn make_tensor_view(
-        tensor_config: &TensorConfigSection,
-        view: Option<&TensorViewSection>,
-    ) -> Result<TensorView, SimError> {
-        let tensor = Tensor::new(
-            &tensor_config.shape,
-            &tensor_config.dtype,
-            tensor_config.addr,
-        )?;
-        match view {
-            Some(view) => TensorView::new(tensor, &view.shape, &view.offsets),
-            None => Ok(TensorView::new_full(tensor)),
-        }
-    }
-
-    fn validate(&self) -> SimResult {
-        for node in &self.nodes {
-            match &node.node_section {
-                NodeSection::Compute {
-                    id,
-                    input_views,
-                    output_views,
-                    ..
-                } => {
-                    self.validate_compute_node(node, id, input_views, output_views)?;
-                }
-                NodeSection::Tensor { .. } => {
-                    // Nothing for now
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    fn validate_compute_node(
-        &self,
-        node: &Node,
-        id: &str,
-        input_views: &[Option<TensorViewSection>],
-        output_views: &[Option<TensorViewSection>],
-    ) -> SimResult {
-        if node.inputs.len() != input_views.len() {
-            return sim_error!(
-                "Compute node '{}' has {} input edges but {} input views",
-                id,
-                node.inputs.len(),
-                input_views.len()
-            );
-        }
-
-        if node.outputs.len() != output_views.len() {
-            return sim_error!(
-                "Compute node '{}' has {} output edges but {} output views",
-                id,
-                node.outputs.len(),
-                output_views.len()
-            );
-        }
-
-        for (input_idx, tensor_idx) in node.inputs.iter().enumerate() {
-            let Some(tensor_idx) = tensor_idx else {
-                continue;
-            };
-            let tensor_node = &self.nodes[*tensor_idx];
-            let NodeSection::Tensor { config, .. } = &tensor_node.node_section else {
-                return sim_error!(
-                    "Compute node '{}' input {} is not connected from a Tensor node",
-                    id,
-                    input_idx
-                );
-            };
-            validate_view_in_range(id, "input", input_views[input_idx].as_ref(), config)?;
-        }
-
-        for (output_idx, tensor_idx) in node.outputs.iter().enumerate() {
-            let Some(tensor_idx) = tensor_idx else {
-                continue;
-            };
-            let tensor_node = &self.nodes[*tensor_idx];
-            let NodeSection::Tensor { config, .. } = &tensor_node.node_section else {
-                return sim_error!(
-                    "Compute node '{}' output {} is not connected to a Tensor node",
-                    id,
-                    output_idx
-                );
-            };
-            validate_view_in_range(id, "output", output_views[output_idx].as_ref(), config)?;
-        }
-
-        Ok(())
     }
 
     /// Check a given tensor index and move it if it is now complete.
@@ -359,8 +119,10 @@ impl Timetable {
             return false;
         }
 
+        let tensor_node = &self.graph.nodes()[tensor_idx];
+
         // Look for an input node that is not complete
-        for idx in &self.predecessors[tensor_idx] {
+        for idx in tensor_node.predecessors() {
             if !completed_node_indices.contains(idx) {
                 return false;
             }
@@ -374,8 +136,8 @@ impl Timetable {
 
     /// Iterate across all active tensors and move those that are now complete
     fn update_complete_tensors(&self) {
-        for (idx, node) in self.nodes.iter().enumerate() {
-            if let NodeSection::Tensor { .. } = node.node_section {
+        for (idx, node) in self.graph.nodes().iter().enumerate() {
+            if node.tensor().is_some() {
                 self.update_complete_tensor(idx);
             }
         }
@@ -383,7 +145,7 @@ impl Timetable {
 
     fn initialize_scheduler_state(&self) {
         let completed_node_indices = self.completed_node_indices.borrow();
-        let mut unresolved_input_counts = vec![0; self.nodes.len()];
+        let mut unresolved_input_counts = vec![0; self.graph.nodes().len()];
         let mut ready_nodes_per_pe: HashMap<usize, BTreeSet<usize>> = HashMap::new();
         let mut remaining_nodes_per_pe = HashMap::new();
 
@@ -395,7 +157,8 @@ impl Timetable {
                 }
 
                 remaining_nodes += 1;
-                let unresolved_inputs = self.predecessors[*node_idx]
+                let unresolved_inputs = self.graph.nodes()[*node_idx]
+                    .predecessors()
                     .iter()
                     .filter(|input_idx| !completed_node_indices.contains(input_idx))
                     .count();
@@ -442,13 +205,13 @@ impl Timetable {
     }
 
     fn mark_successors_updated(&self, node_idx: usize) {
-        for output_node_idx in &self.successors[node_idx] {
+        for output_node_idx in self.graph.nodes()[node_idx].successors() {
             self.mark_dependency_completed(*output_node_idx);
         }
     }
 
     pub fn total_tasks(&self) -> usize {
-        self.nodes.len()
+        self.graph.nodes().len()
     }
 
     #[must_use]
@@ -456,59 +219,13 @@ impl Timetable {
         self.completed_node_indices.borrow().len()
     }
 
-    pub fn get_input_output_tensors(&self, node_idx: usize) -> Result<InOutTensorViews, SimError> {
-        let node = &self.nodes[node_idx];
-        let NodeSection::Compute {
-            id,
-            input_views,
-            output_views,
-            ..
-        } = &node.node_section
-        else {
-            return sim_error!("node {} is not a compute node", node.node_section.id());
-        };
-
-        let mut input_tensors = Vec::new();
-        for (input_idx, input_node_idx) in node.inputs.iter().enumerate() {
-            if let Some(idx) = input_node_idx {
-                let tensor_node = &self.nodes[*idx];
-                let NodeSection::Tensor { config, .. } = &tensor_node.node_section else {
-                    return sim_error!(
-                        "{}: input {} is not connected from a Tensor node",
-                        id,
-                        input_idx
-                    );
-                };
-                input_tensors.push(Some(Self::make_tensor_view(
-                    config,
-                    input_views[input_idx].as_ref(),
-                )?));
-            } else {
-                input_tensors.push(None);
-            }
-        }
-
-        let mut output_tensors = Vec::new();
-        for (output_idx, output_node_idx) in node.outputs.iter().enumerate() {
-            if let Some(idx) = output_node_idx {
-                let tensor_node = &self.nodes[*idx];
-                let NodeSection::Tensor { config, .. } = &tensor_node.node_section else {
-                    return sim_error!(
-                        "{}: output {} is not connected to a Tensor node",
-                        id,
-                        output_idx
-                    );
-                };
-                output_tensors.push(Some(Self::make_tensor_view(
-                    config,
-                    output_views[output_idx].as_ref(),
-                )?));
-            } else {
-                output_tensors.push(None);
-            }
-        }
-
-        Ok((input_tensors, output_tensors))
+    fn compute_views(&self, node_idx: usize) -> Result<ComputeTensorViews, SimError> {
+        self.graph.compute_views(node_idx).ok_or_else(|| {
+            SimError(format!(
+                "node {} is not a compute node",
+                self.graph.nodes()[node_idx].id()
+            ))
+        })
     }
 
     pub fn check_tasks_complete(&self) -> SimResult {
@@ -518,7 +235,7 @@ impl Timetable {
         }
 
         let num_completed = self.completed_node_indices.borrow().len();
-        let num_tasks = self.nodes.len();
+        let num_tasks = self.graph.nodes().len();
         if num_completed != num_tasks {
             return sim_error!(
                 "{num_completed} tasks completed out of a total of {num_tasks} tasks."
@@ -534,32 +251,30 @@ impl Timetable {
         let mut machine_ops = MachineOpCounts::default();
         let mut num_compute_nodes = 0;
         let mut num_tensor_nodes = 0;
-        for (idx, node) in self.nodes.iter().enumerate() {
-            match &node.node_section {
-                NodeSection::Compute { op, .. } => {
-                    let (inputs, outputs) = self.get_input_output_tensors(idx)?;
+        for (idx, node) in self.graph.nodes().iter().enumerate() {
+            match node.operation() {
+                Some(op) => {
+                    let views = self.compute_views(idx)?;
                     machine_ops = machine_ops
-                        .checked_add(op.compute_machine_ops(&inputs, &outputs)?)
-                        .map_err(|error| {
-                            SimError(format!("{}: {error}", node.node_section.id()))
-                        })?;
-                    for input_view in inputs.iter().flatten() {
-                        total_load_bytes = total_load_bytes
-                            .checked_add(input_view.layout().num_access_bytes())
-                            .ok_or_else(|| {
-                                SimError("Timetable load byte total overflows".to_string())
-                            })?;
+                        .checked_add(op.compute_machine_ops(views.inputs(), views.outputs())?)
+                        .map_err(|error| SimError(format!("{}: {error}", node.id())))?;
+                    for input_view in views.inputs().iter().flatten() {
+                        add_to_byte_total(
+                            &mut total_load_bytes,
+                            input_view.layout().num_access_bytes(),
+                            "load",
+                        )?;
                     }
-                    for output_view in outputs.iter().flatten() {
-                        total_store_bytes = total_store_bytes
-                            .checked_add(output_view.layout().num_access_bytes())
-                            .ok_or_else(|| {
-                                SimError("Timetable store byte total overflows".to_string())
-                            })?;
+                    for output_view in views.outputs().iter().flatten() {
+                        add_to_byte_total(
+                            &mut total_store_bytes,
+                            output_view.layout().num_access_bytes(),
+                            "store",
+                        )?;
                     }
                     num_compute_nodes += 1;
                 }
-                NodeSection::Tensor { .. } => num_tensor_nodes += 1,
+                None => num_tensor_nodes += 1,
             }
         }
 
@@ -585,20 +300,19 @@ impl Timetable {
         let completed = self.completed_node_indices.borrow();
         let active = self.active_node_indices.borrow();
 
-        self.nodes
+        self.graph
+            .nodes()
             .iter()
             .enumerate()
-            .map(|(idx, node)| match &node.node_section {
-                NodeSection::Compute { id, .. } | NodeSection::Tensor { id, .. } => {
-                    let status = if completed.contains(&idx) {
-                        MermaidNodeStatus::Complete
-                    } else if active.contains(&idx) {
-                        MermaidNodeStatus::Active
-                    } else {
-                        MermaidNodeStatus::Pending
-                    };
-                    (id.clone(), status)
-                }
+            .map(|(idx, node)| {
+                let status = if completed.contains(&idx) {
+                    MermaidNodeStatus::Complete
+                } else if active.contains(&idx) {
+                    MermaidNodeStatus::Active
+                } else {
+                    MermaidNodeStatus::Pending
+                };
+                (node.id().to_string(), status)
             })
             .collect()
     }
@@ -606,14 +320,7 @@ impl Timetable {
     /// Render a mermaid of the current status of the Timetable
     #[must_use]
     pub fn render_mermaid(&self) -> String {
-        // Need to rebuild a Vec of the NodeSection as that is what the mermaid
-        // renderer uses
-        let nodes: Vec<NodeSection> = self
-            .nodes
-            .iter()
-            .map(|node| node.node_section.clone())
-            .collect();
-        render_mermaid_from_parts(&nodes, &self.edges, &self.mermaid_node_statuses())
+        render_mermaid(&self.graph, &self.mermaid_node_statuses())
     }
 }
 
@@ -633,19 +340,27 @@ fn build_compute_task(
     }
 }
 
+fn add_to_byte_total(total: &mut usize, num_bytes: usize, kind: &str) -> SimResult {
+    *total = total
+        .checked_add(num_bytes)
+        .ok_or_else(|| SimError(format!("Timetable {kind} byte total overflows")))?;
+    Ok(())
+}
+
 #[async_trait(?Send)]
 impl Dispatch for Timetable {
     fn task_by_id(&self, task_idx: usize) -> Result<Task, SimError> {
-        let node = &self.nodes[task_idx];
-        match &node.node_section {
-            NodeSection::Compute { id, op, .. } => {
-                let (inputs, outputs) = self.get_input_output_tensors(task_idx)?;
-                Ok(build_compute_task(id, op.clone(), inputs, outputs))
-            }
-            NodeSection::Tensor { .. } => {
-                sim_error!("Task Index {task_idx} refers to a Tensor node")
-            }
-        }
+        let node = &self.graph.nodes()[task_idx];
+        let Some(operation) = node.operation() else {
+            return sim_error!("Task Index {task_idx} refers to a Tensor node");
+        };
+        let (inputs, outputs) = self.compute_views(task_idx)?.into_parts();
+        Ok(build_compute_task(
+            node.id(),
+            operation.clone(),
+            inputs,
+            outputs,
+        ))
     }
 
     fn set_task_active(&self, node_idx: usize) -> SimResult {
@@ -669,6 +384,7 @@ impl Dispatch for Timetable {
             return Ok(());
         }
 
+        let node = &self.graph.nodes()[node_idx];
         if let Some(pe_idx) = self.node_pe_indices[node_idx] {
             self.ready_nodes_per_pe
                 .borrow_mut()
@@ -689,11 +405,9 @@ impl Dispatch for Timetable {
         self.completed_node_indices.borrow_mut().insert(node_idx);
         self.mark_successors_updated(node_idx);
 
-        for tensor_node_idx in &self.successors[node_idx] {
-            if matches!(
-                self.nodes[*tensor_node_idx].node_section,
-                NodeSection::Tensor { .. }
-            ) && self.update_complete_tensor(*tensor_node_idx)
+        for tensor_node_idx in node.successors() {
+            if self.graph.nodes()[*tensor_node_idx].tensor().is_some()
+                && self.update_complete_tensor(*tensor_node_idx)
             {
                 self.mark_successors_updated(*tensor_node_idx);
             }

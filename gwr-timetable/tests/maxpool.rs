@@ -94,7 +94,7 @@ edges:
     )
     .unwrap();
 
-    let timetable = Timetable::new(&top, timetable_file, &platform).unwrap();
+    let timetable = Timetable::new(&top, timetable_file.into_graph().unwrap(), &platform).unwrap();
 
     timetable.set_task_completed(1).unwrap();
     timetable.set_task_completed(1).unwrap();

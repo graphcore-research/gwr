@@ -5,7 +5,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use clap::Parser;
-use gwr_timetable::mermaid::render_mermaid_from_parts;
+use gwr_timetable::mermaid::render_mermaid;
 use gwr_timetable::timetable_file::TimetableFile;
 
 #[derive(Debug, Clone, Parser)]
@@ -28,7 +28,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let yaml = fs::read_to_string(&input)?;
     let timetable: TimetableFile = serde_yaml::from_str(&yaml)?;
-    let mermaid = render_mermaid_from_parts(&timetable.nodes, &timetable.edges, &HashMap::new());
+    let graph = timetable.into_graph()?;
+    let mermaid = render_mermaid(&graph, &HashMap::new());
 
     fs::write(output, mermaid)?;
 
