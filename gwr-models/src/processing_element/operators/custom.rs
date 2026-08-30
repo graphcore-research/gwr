@@ -33,12 +33,16 @@ impl Operator for OperatorCustom {
         _inputs: &[Option<TensorView>],
         _outputs: &[Option<TensorView>],
     ) -> Result<usize, SimError> {
-        Ok(
-            compute_capabilities.ticks_for_ops(self.machine_ops.adds, MachineOp::Add)?
-                + compute_capabilities.ticks_for_ops(self.machine_ops.muls, MachineOp::Mul)?
-                + compute_capabilities
-                    .ticks_for_ops(self.machine_ops.compares, MachineOp::Compare)?,
-        )
+        let add_ticks =
+            compute_capabilities.ticks_for_ops(self.machine_ops.adds, MachineOp::Add)?;
+        let mul_ticks =
+            compute_capabilities.ticks_for_ops(self.machine_ops.muls, MachineOp::Mul)?;
+        let compare_ticks =
+            compute_capabilities.ticks_for_ops(self.machine_ops.compares, MachineOp::Compare)?;
+        add_ticks
+            .checked_add(mul_ticks)
+            .and_then(|ticks| ticks.checked_add(compare_ticks))
+            .ok_or_else(|| SimError("Custom operator compute delay overflows".to_string()))
     }
 
     fn compute_machine_ops(
@@ -51,21 +55,21 @@ impl Operator for OperatorCustom {
 
     fn max_partition_count(
         &self,
-        _input_views: &[Option<TensorView>],
-        _output_views: &[Option<TensorView>],
+        _inputs: &[Option<TensorView>],
+        _outputs: &[Option<TensorView>],
     ) -> Result<usize, SimError> {
         Ok(1)
     }
 
     fn partition_views<'a>(
         &'a self,
-        input_views: &'a [Option<TensorView>],
-        output_views: &'a [Option<TensorView>],
+        inputs: &'a [Option<TensorView>],
+        outputs: &'a [Option<TensorView>],
         _num_partitions: usize,
     ) -> Result<TensorPartitions<'a>, SimError> {
         Ok(Box::new(std::iter::once(Ok(TensorPartition {
-            inputs: input_views.to_vec(),
-            outputs: output_views.to_vec(),
+            inputs: inputs.to_vec(),
+            outputs: outputs.to_vec(),
         }))))
     }
 }

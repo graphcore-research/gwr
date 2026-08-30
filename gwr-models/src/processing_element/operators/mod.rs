@@ -95,3 +95,21 @@ pub(crate) fn partition_tensors(
         .partition_views(&input_views, &output_views, num_partitions)?
         .collect()
 }
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::dtype::DataType;
+    use super::{Shape, Tensor, TensorView};
+
+    pub(crate) fn test_shape(dims: &[usize]) -> Shape {
+        Shape::new(dims).unwrap()
+    }
+
+    pub(crate) fn test_tensor(dims: &[usize]) -> Option<Tensor> {
+        Some(Tensor::new(dims, &DataType::Bf16, 0).unwrap())
+    }
+
+    pub(crate) fn test_tensor_view(dims: &[usize]) -> Option<TensorView> {
+        test_tensor(dims).map(TensorView::new_full)
+    }
+}

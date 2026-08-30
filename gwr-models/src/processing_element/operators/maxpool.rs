@@ -142,15 +142,18 @@ impl OperatorMaxPool {
             spatial_rank,
             1,
         )?;
+        let pads_rank = spatial_rank
+            .checked_mul(2)
+            .ok_or_else(|| SimError(format!("{NAME}: pads rank overflows")))?;
         let pads = if pads.is_empty() {
-            vec![0; spatial_rank * 2]
-        } else if pads.len() == spatial_rank * 2 {
+            vec![0; pads_rank]
+        } else if pads.len() == pads_rank {
             pads.to_vec()
         } else {
             return sim_error!(
                 "{NAME}: pads rank {} does not match 2 * spatial rank {}",
                 pads.len(),
-                spatial_rank * 2
+                pads_rank
             );
         };
 
@@ -194,7 +197,7 @@ impl OperatorMaxPool {
                 return sim_error!("{NAME}: input spatial dimensions must be greater than zero");
             }
             let effective_kernel =
-                effective_kernel(params.kernel_shape[axis], params.dilations[axis]);
+                effective_kernel(params.kernel_shape[axis], params.dilations[axis])?;
             let stride = params.strides[axis];
 
             let (output_dim, pad_begin, pad_end) = match auto_pad {
@@ -218,8 +221,15 @@ impl OperatorMaxPool {
                 }
                 AutoPad::SameUpper | AutoPad::SameLower => {
                     let output_dim = input_dim.div_ceil(stride);
+                    let covered_input = (output_dim as u128 - 1)
+                        .checked_mul(stride as u128)
+                        .and_then(|value| value.checked_add(effective_kernel as u128))
+                        .ok_or_else(|| {
+                            SimError(format!("{NAME}: output window extent overflows"))
+                        })?;
                     let pad_shape =
-                        ((output_dim - 1) * stride + effective_kernel).saturating_sub(input_dim);
+                        usize::try_from(covered_input.saturating_sub(input_dim as u128))
+                            .map_err(|_| SimError(format!("{NAME}: padding size overflows")))?;
                     let smaller_side = pad_shape / 2;
                     let larger_side = pad_shape - smaller_side;
                     match auto_pad {
@@ -258,15 +268,33 @@ impl OperatorMaxPool {
                 return sim_error!("{NAME}: output spatial dimensions must be greater than zero");
             }
             let effective_kernel =
-                effective_kernel(params.kernel_shape[axis], params.dilations[axis]);
+                effective_kernel(params.kernel_shape[axis], params.dilations[axis])?;
             let stride = params.strides[axis];
+            let last_window_start = (output_dim as u128 - 1)
+                .checked_mul(stride as u128)
+                .ok_or_else(|| {
+                    SimError(format!("{NAME}: inferred input window offset overflows"))
+                })?;
             let input_dim = match auto_pad {
-                AutoPad::SameUpper | AutoPad::SameLower => (output_dim - 1) * stride + 1,
-                AutoPad::NotSet | AutoPad::Valid => ((output_dim - 1) * stride + effective_kernel)
-                    .saturating_sub(params.pads_begin[axis] + params.pads_end[axis])
-                    .max(1),
+                AutoPad::SameUpper | AutoPad::SameLower => last_window_start
+                    .checked_add(1)
+                    .ok_or_else(|| SimError(format!("{NAME}: inferred input size overflows")))?,
+                AutoPad::NotSet | AutoPad::Valid => {
+                    let covered_input = last_window_start
+                        .checked_add(effective_kernel as u128)
+                        .ok_or_else(|| {
+                            SimError(format!("{NAME}: inferred input size overflows"))
+                        })?;
+                    let total_padding = (params.pads_begin[axis] as u128)
+                        .checked_add(params.pads_end[axis] as u128)
+                        .ok_or_else(|| SimError(format!("{NAME}: padding size overflows")))?;
+                    covered_input.saturating_sub(total_padding).max(1)
+                }
             };
-            input_dims.push(input_dim);
+            input_dims.push(
+                usize::try_from(input_dim)
+                    .map_err(|_| SimError(format!("{NAME}: inferred input size overflows")))?,
+            );
         }
 
         Shape::new(&input_dims)
@@ -346,8 +374,11 @@ fn normalize_axis_values(
     }
 }
 
-fn effective_kernel(kernel: usize, dilation: usize) -> usize {
-    dilation * (kernel - 1) + 1
+fn effective_kernel(kernel: usize, dilation: usize) -> Result<usize, SimError> {
+    dilation
+        .checked_mul(kernel - 1)
+        .and_then(|value| value.checked_add(1))
+        .ok_or_else(|| SimError(format!("{NAME}: effective kernel size overflows")))
 }
 
 fn scaled_dim(dim: usize, expand_ratio: f64) -> usize {
@@ -419,7 +450,8 @@ fn explicit_output_dim(
     if output_dim <= 0 {
         return sim_error!("{NAME}: pooling window produces an empty output dimension");
     }
-    Ok(output_dim as usize)
+    usize::try_from(output_dim)
+        .map_err(|error| SimError(format!("{NAME}: output dimension is invalid: {error}")))
 }
 
 fn valid_output_dim(
@@ -440,7 +472,8 @@ fn valid_output_dim(
     if output_dim <= 0 {
         return sim_error!("{NAME}: pooling window produces an empty output dimension");
     }
-    Ok(output_dim as usize)
+    usize::try_from(output_dim)
+        .map_err(|error| SimError(format!("{NAME}: output dimension is invalid: {error}")))
 }
 
 fn choose_partition_dims<T: HasShape>(output: &T, allow_spatial: bool) -> Vec<usize> {
@@ -564,11 +597,12 @@ pub fn maybe_add_indices_output(
     Ok(true)
 }
 
+#[cfg(test)]
 fn window_valid_element_count(
     output_coordinate: &[usize],
     input_spatial_dims: &[usize],
     params: &PoolParams,
-) -> usize {
+) -> Result<usize, SimError> {
     output_coordinate
         .iter()
         .enumerate()
@@ -583,9 +617,14 @@ fn window_valid_element_count(
                 })
                 .count()
         })
-        .product()
+        .try_fold(1usize, |count, axis_count| {
+            count
+                .checked_mul(axis_count)
+                .ok_or_else(|| SimError(format!("{NAME}: comparison count overflows")))
+        })
 }
 
+#[cfg(test)]
 fn unravel_index(mut linear_idx: usize, dims: &[usize]) -> Vec<usize> {
     let mut coordinate = vec![0; dims.len()];
     for (axis, dim) in dims.iter().enumerate().rev() {
@@ -605,18 +644,204 @@ fn maxpool_comparisons<T: HasShape>(
 
     let input_spatial_dims = &input.shape().dims()[FIRST_SPATIAL_DIM..];
     let output_spatial_dims = &output.shape().dims()[FIRST_SPATIAL_DIM..];
-    let num_spatial_outputs = output_spatial_dims.iter().product::<usize>();
+    let (valid_elements, nonempty_outputs) = (0..output_spatial_dims.len()).try_fold(
+        (1u128, 1u128),
+        |(valid_elements, nonempty_outputs), axis| {
+            let (axis_elements, axis_nonempty) = axis_window_counts(
+                input_spatial_dims[axis],
+                output_spatial_dims[axis],
+                params.kernel_shape[axis],
+                params.dilations[axis],
+                params.strides[axis],
+                params.pads_begin[axis],
+            )?;
+            Ok::<_, SimError>((
+                valid_elements
+                    .checked_mul(axis_elements)
+                    .ok_or_else(|| SimError(format!("{NAME}: comparison count overflows")))?,
+                nonempty_outputs
+                    .checked_mul(axis_nonempty)
+                    .ok_or_else(|| SimError(format!("{NAME}: output count overflows")))?,
+            ))
+        },
+    )?;
+    let comparisons_per_batch_channel = valid_elements
+        .checked_sub(nonempty_outputs)
+        .ok_or_else(|| SimError(format!("{NAME}: comparison count is invalid")))?;
 
-    let comparisons_per_batch_channel = (0..num_spatial_outputs)
-        .map(|linear_idx| {
-            let coordinate = unravel_index(linear_idx, output_spatial_dims);
-            window_valid_element_count(&coordinate, input_spatial_dims, &params).saturating_sub(1)
-        })
-        .sum::<usize>();
+    let comparisons = [
+        output.get_dim(output.num_dims(), BATCH_DIM) as u128,
+        output.get_dim(output.num_dims(), CHANNEL_DIM) as u128,
+    ]
+    .into_iter()
+    .try_fold(comparisons_per_batch_channel, |total, count| {
+        total
+            .checked_mul(count)
+            .ok_or_else(|| SimError(format!("{NAME}: comparison count overflows")))
+    })?;
 
-    Ok(output.get_dim(output.num_dims(), BATCH_DIM)
-        * output.get_dim(output.num_dims(), CHANNEL_DIM)
-        * comparisons_per_batch_channel)
+    usize::try_from(comparisons)
+        .map_err(|_| SimError(format!("{NAME}: comparison count overflows")))
+}
+
+fn axis_window_counts(
+    input_size: usize,
+    output_size: usize,
+    kernel_size: usize,
+    dilation: usize,
+    stride: usize,
+    pad_begin: usize,
+) -> Result<(u128, u128), SimError> {
+    let effective_kernel = effective_kernel(kernel_size, dilation)?;
+    let last_window_end = (output_size as u128 - 1)
+        .checked_mul(stride as u128)
+        .and_then(|start| start.checked_add(effective_kernel as u128))
+        .ok_or_else(|| SimError(format!("{NAME}: output window extent overflows")))?;
+    if pad_begin == 0 && last_window_end <= input_size as u128 {
+        let valid_elements = (output_size as u128)
+            .checked_mul(kernel_size as u128)
+            .ok_or_else(|| SimError(format!("{NAME}: comparison count overflows")))?;
+        return Ok((valid_elements, output_size as u128));
+    }
+
+    let pad_begin = pad_begin as u128;
+    let input_size = input_size as u128;
+    let output_size_u128 = output_size as u128;
+    let kernel_size_u128 = kernel_size as u128;
+    let dilation_u128 = dilation as u128;
+    let stride_u128 = stride as u128;
+    let input_end = pad_begin + input_size;
+    let valid_elements = pairs_below(
+        output_size_u128,
+        kernel_size_u128,
+        stride_u128,
+        dilation_u128,
+        input_end,
+    )?
+    .checked_sub(pairs_below(
+        output_size_u128,
+        kernel_size_u128,
+        stride_u128,
+        dilation_u128,
+        pad_begin,
+    )?)
+    .ok_or_else(|| SimError(format!("{NAME}: comparison count is invalid")))?;
+
+    let nonempty_outputs = if dilation_u128 >= input_size {
+        valid_elements
+    } else {
+        let last_kernel_offset = (kernel_size_u128 - 1) * dilation_u128;
+        let first = if pad_begin > last_kernel_offset {
+            (pad_begin - last_kernel_offset).div_ceil(stride_u128)
+        } else {
+            0
+        };
+        let end = input_end.div_ceil(stride_u128).min(output_size_u128);
+        end.saturating_sub(first)
+    };
+
+    Ok((valid_elements, nonempty_outputs))
+}
+
+fn pairs_below(
+    output_size: u128,
+    kernel_size: u128,
+    stride: u128,
+    dilation: u128,
+    bound: u128,
+) -> Result<u128, SimError> {
+    if bound == 0 {
+        return Ok(0);
+    }
+
+    let outputs = output_size.min(bound.div_ceil(stride));
+    let last_kernel_offset = (kernel_size - 1) * dilation;
+    // Count pairs (output, kernel) for which
+    //
+    // output * stride + kernel * dilation < bound.
+    //
+    // The first outputs contain the complete kernel. For the remaining
+    // outputs, reverse the output order so that the number of valid kernel
+    // positions is a floor sum with a positive step.
+    let full_outputs = if bound > last_kernel_offset {
+        outputs.min((bound - last_kernel_offset).div_ceil(stride))
+    } else {
+        0
+    };
+    let mut total = full_outputs
+        .checked_mul(kernel_size)
+        .ok_or_else(|| SimError(format!("{NAME}: comparison count overflows")))?;
+    let remaining = outputs - full_outputs;
+    if remaining == 0 {
+        return Ok(total);
+    }
+
+    let first_numerator = bound
+        .checked_add(dilation - 1)
+        .and_then(|value| value.checked_sub((outputs - 1) * stride))
+        .ok_or_else(|| SimError(format!("{NAME}: comparison count overflows")))?;
+    total = total
+        .checked_add(floor_sum(remaining, dilation, stride, first_numerator)?)
+        .ok_or_else(|| SimError(format!("{NAME}: comparison count overflows")))?;
+    Ok(total)
+}
+
+fn floor_sum(
+    mut count: u128,
+    mut modulus: u128,
+    mut step: u128,
+    mut offset: u128,
+) -> Result<u128, SimError> {
+    // Calculate
+    //
+    // sum(i = 0..count) floor((step * i + offset) / modulus).
+    //
+    // Each iteration removes the whole multiples of modulus from step and
+    // offset, then exchanges the reduced numerator and denominator. This is
+    // the Euclidean reduction of the floor sum, so its number of iterations
+    // is logarithmic in step and modulus.
+    if count == 0 {
+        return Ok(0);
+    }
+
+    let mut total = 0u128;
+    loop {
+        if step >= modulus {
+            let quotient = step / modulus;
+            let triangular = if count.is_multiple_of(2) {
+                (count / 2).checked_mul(count - 1)
+            } else {
+                count.checked_mul((count - 1) / 2)
+            }
+            .and_then(|value| value.checked_mul(quotient))
+            .ok_or_else(|| SimError(format!("{NAME}: comparison count overflows")))?;
+            total = total
+                .checked_add(triangular)
+                .ok_or_else(|| SimError(format!("{NAME}: comparison count overflows")))?;
+            step %= modulus;
+        }
+        if offset >= modulus {
+            total = total
+                .checked_add(
+                    count
+                        .checked_mul(offset / modulus)
+                        .ok_or_else(|| SimError(format!("{NAME}: comparison count overflows")))?,
+                )
+                .ok_or_else(|| SimError(format!("{NAME}: comparison count overflows")))?;
+            offset %= modulus;
+        }
+
+        let maximum = step
+            .checked_mul(count)
+            .and_then(|value| value.checked_add(offset))
+            .ok_or_else(|| SimError(format!("{NAME}: comparison count overflows")))?;
+        if maximum < modulus {
+            return Ok(total);
+        }
+        count = maximum / modulus;
+        offset = maximum % modulus;
+        std::mem::swap(&mut modulus, &mut step);
+    }
 }
 
 fn input_partition_for_output_partition(
@@ -641,21 +866,30 @@ fn input_partition_for_output_partition(
         }
 
         let axis = partition.dim - FIRST_SPATIAL_DIM;
-        let effective_kernel = effective_kernel(params.kernel_shape[axis], params.dilations[axis]);
+        let effective_kernel = effective_kernel(params.kernel_shape[axis], params.dilations[axis])?;
         let first_output = partition.offset;
         let last_output = partition
             .offset
             .checked_add(partition.num_elements)
             .and_then(|end| end.checked_sub(1))
             .ok_or_else(|| SimError(format!("{NAME}: output partition extent overflows")))?;
-        let raw_start =
-            first_output as i128 * params.strides[axis] as i128 - params.pads_begin[axis] as i128;
-        let raw_end = last_output as i128 * params.strides[axis] as i128
-            - params.pads_begin[axis] as i128
-            + effective_kernel as i128;
-
-        let start = raw_start.clamp(0, input_shape[partition.dim] as i128) as usize;
-        let end = raw_end.clamp(0, input_shape[partition.dim] as i128) as usize;
+        let first_window_start = (first_output as u128)
+            .checked_mul(params.strides[axis] as u128)
+            .ok_or_else(|| SimError(format!("{NAME}: input partition offset overflows")))?;
+        let last_window_end = (last_output as u128)
+            .checked_mul(params.strides[axis] as u128)
+            .and_then(|start| start.checked_add(effective_kernel as u128))
+            .ok_or_else(|| SimError(format!("{NAME}: input partition extent overflows")))?;
+        let pad_begin = params.pads_begin[axis] as u128;
+        let input_extent = input_shape[partition.dim] as u128;
+        let start = usize::try_from(
+            first_window_start
+                .saturating_sub(pad_begin)
+                .min(input_extent),
+        )
+        .map_err(|_| SimError(format!("{NAME}: input partition offset overflows")))?;
+        let end = usize::try_from(last_window_end.saturating_sub(pad_begin).min(input_extent))
+            .map_err(|_| SimError(format!("{NAME}: input partition extent overflows")))?;
         if start >= end {
             return sim_error!("{NAME}: partition produced an empty input view");
         }
@@ -679,7 +913,7 @@ impl OperatorMaxPool {
         let input = validate_inputs(inputs)?;
         let (output_shape, _) = self.output_shape_and_resolved_params(input)?;
 
-        let mut outputs = vec![Some(Tensor::from_shape(output_shape, &input.dtype, 0)?)];
+        let mut outputs = vec![Some(Tensor::from_shape(output_shape, input.dtype(), 0)?)];
         maybe_add_indices_output(&mut outputs, expand_ratio, rng)?;
         Ok(outputs)
     }
@@ -704,7 +938,7 @@ impl OperatorMaxPool {
         let input_shape = self.infer_input_shape(output)?;
         Ok(vec![Some(Tensor::from_shape(
             input_shape,
-            &output.dtype,
+            output.dtype(),
             0,
         )?)])
     }
@@ -793,19 +1027,13 @@ impl Operator for OperatorMaxPool {
 mod tests {
     use super::*;
     use crate::processing_element::operators::dtype::DataType;
+    use crate::processing_element::operators::test_support::{
+        test_shape, test_tensor, test_tensor_view,
+    };
     use crate::processing_element::operators::{Operator, Tensor, partition_tensors};
-
-    fn tensor(shape: &[usize]) -> Option<Tensor> {
-        Some(Tensor::new(shape, &DataType::Bf16, 0).unwrap())
-    }
 
     fn indices(shape: &[usize]) -> Option<Tensor> {
         Some(Tensor::new(shape, &DataType::Int64, 0).unwrap())
-    }
-
-    fn tensor_view(shape: &[usize]) -> Option<TensorView> {
-        let tensor = Tensor::new(shape, &DataType::Bf16, 0).unwrap();
-        Some(TensorView::new_full(tensor))
     }
 
     fn indices_view(shape: &[usize]) -> Option<TensorView> {
@@ -813,8 +1041,52 @@ mod tests {
         Some(TensorView::new_full(tensor))
     }
 
-    fn test_shape(dims: &[usize]) -> Shape {
-        Shape::new(dims).unwrap()
+    fn maxpool_with_wide_explicit_padding() -> OperatorMaxPool {
+        OperatorMaxPool {
+            pads: Some(vec![usize::MAX - 1, usize::MAX - 1]),
+            strides: Some(vec![usize::MAX]),
+            ..OperatorMaxPool::new(&[usize::MAX])
+        }
+    }
+
+    fn enumerated_comparisons(
+        op: &OperatorMaxPool,
+        input: &TensorView,
+        output: &TensorView,
+    ) -> usize {
+        let (_, params) = op.output_shape_and_resolved_params(input).unwrap();
+        let input_spatial_dims = &input.shape().dims()[FIRST_SPATIAL_DIM..];
+        let output_spatial_dims = &output.shape().dims()[FIRST_SPATIAL_DIM..];
+        let spatial_outputs = output_spatial_dims.iter().product::<usize>();
+        let comparisons = (0..spatial_outputs)
+            .map(|linear_index| {
+                let coordinate = unravel_index(linear_index, output_spatial_dims);
+                window_valid_element_count(&coordinate, input_spatial_dims, &params)
+                    .unwrap()
+                    .saturating_sub(1)
+            })
+            .sum::<usize>();
+        comparisons * output.shape().dims()[BATCH_DIM] * output.shape().dims()[CHANNEL_DIM]
+    }
+
+    #[test]
+    fn floor_sum_matches_direct_sum() {
+        for count in 0..=12 {
+            for modulus in 1..=12 {
+                for step in 0..=12 {
+                    for offset in 0..=12 {
+                        let expected = (0..count)
+                            .map(|index| (step * index + offset) / modulus)
+                            .sum::<u128>();
+                        assert_eq!(
+                            floor_sum(count, modulus, step, offset).unwrap(),
+                            expected,
+                            "count={count}, modulus={modulus}, step={step}, offset={offset}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -829,7 +1101,7 @@ mod tests {
 
         let mut rng = rand::rng();
         let outputs = op
-            .create_outputs(&[tensor(&[1, 1, 4, 4])], 1.0, &mut rng)
+            .create_outputs(&[test_tensor(&[1, 1, 4, 4])], 1.0, &mut rng)
             .unwrap();
 
         assert_eq!(
@@ -918,7 +1190,7 @@ mod tests {
         let mut rng = rand::rng();
 
         let outputs = op
-            .create_outputs(&[tensor(&[1, 3, 4, 4])], 1.0, &mut rng)
+            .create_outputs(&[test_tensor(&[1, 3, 4, 4])], 1.0, &mut rng)
             .unwrap();
 
         assert_eq!(outputs.len(), 2);
@@ -943,7 +1215,7 @@ mod tests {
         let mut rng = rand::rng();
 
         let outputs = op
-            .create_outputs(&[tensor(&[2, 5, 6, 7, 8])], 1.0, &mut rng)
+            .create_outputs(&[test_tensor(&[2, 5, 6, 7, 8])], 1.0, &mut rng)
             .unwrap();
 
         assert_eq!(outputs.len(), 2);
@@ -957,7 +1229,7 @@ mod tests {
             &test_shape(&[2, 5, 3, 3, 3])
         );
         assert_eq!(outputs[1].as_ref().unwrap().dtype(), &DataType::Int64);
-        op.validate_tensors(&[tensor(&[2, 5, 6, 7, 8])], &outputs)
+        op.validate_tensors(&[test_tensor(&[2, 5, 6, 7, 8])], &outputs)
             .unwrap();
 
         let inputs = op.create_inputs(&outputs, 1.0, &mut rng).unwrap();
@@ -976,7 +1248,7 @@ mod tests {
         let mut rng = rand::rng();
 
         let outputs = op
-            .create_outputs(&[tensor(&[1, 3, 4, 4])], 0.0, &mut rng)
+            .create_outputs(&[test_tensor(&[1, 3, 4, 4])], 0.0, &mut rng)
             .unwrap();
 
         assert_eq!(outputs.len(), 1);
@@ -994,11 +1266,11 @@ mod tests {
             ..OperatorMaxPool::new(&[2, 2])
         };
 
-        op.validate_tensors(&[tensor(&[1, 3, 4, 4])], &[tensor(&[1, 3, 2, 2])])
+        op.validate_tensors(&[test_tensor(&[1, 3, 4, 4])], &[test_tensor(&[1, 3, 2, 2])])
             .unwrap();
         op.validate_tensors(
-            &[tensor(&[1, 3, 4, 4])],
-            &[tensor(&[1, 3, 2, 2]), indices(&[1, 3, 2, 2])],
+            &[test_tensor(&[1, 3, 4, 4])],
+            &[test_tensor(&[1, 3, 2, 2]), indices(&[1, 3, 2, 2])],
         )
         .unwrap();
     }
@@ -1012,16 +1284,16 @@ mod tests {
 
         let err = op
             .validate_tensors(
-                &[tensor(&[1, 3, 4, 4])],
-                &[tensor(&[1, 3, 2, 2]), indices(&[1, 3, 2, 1])],
+                &[test_tensor(&[1, 3, 4, 4])],
+                &[test_tensor(&[1, 3, 2, 2]), indices(&[1, 3, 2, 1])],
             )
             .unwrap_err();
         assert!(format!("{err}").contains("Indices shape"));
 
         let err = op
             .validate_tensors(
-                &[tensor(&[1, 3, 4, 4])],
-                &[tensor(&[1, 3, 2, 2]), tensor(&[1, 3, 2, 2])],
+                &[test_tensor(&[1, 3, 4, 4])],
+                &[test_tensor(&[1, 3, 2, 2]), test_tensor(&[1, 3, 2, 2])],
             )
             .unwrap_err();
         assert!(format!("{err}").contains("Indices dtype"));
@@ -1039,7 +1311,7 @@ mod tests {
         let mut rng = rand::rng();
 
         let outputs = op
-            .create_outputs(&[tensor(&[1, 1, 7, 7])], 1.0, &mut rng)
+            .create_outputs(&[test_tensor(&[1, 1, 7, 7])], 1.0, &mut rng)
             .unwrap();
 
         assert_eq!(
@@ -1058,13 +1330,59 @@ mod tests {
         let mut rng = rand::rng();
 
         let outputs = op
-            .create_outputs(&[tensor(&[1, 1, 5, 6])], 1.0, &mut rng)
+            .create_outputs(&[test_tensor(&[1, 1, 5, 6])], 1.0, &mut rng)
             .unwrap();
 
         assert_eq!(
             outputs[0].as_ref().unwrap().shape(),
             &test_shape(&[1, 1, 3, 3])
         );
+    }
+
+    #[test]
+    fn same_padding_supports_a_covered_extent_larger_than_usize() {
+        let op = OperatorMaxPool {
+            auto_pad: Some(AutoPad::SameUpper),
+            strides: Some(vec![usize::MAX - 1]),
+            ..OperatorMaxPool::new(&[usize::MAX])
+        };
+        let input = Tensor::new(&[1, 1, usize::MAX], &DataType::Int8, 0).unwrap();
+
+        let (shape, params) = op.output_shape_and_resolved_params(&input).unwrap();
+
+        let padding_per_side = (usize::MAX - 1) / 2;
+        assert_eq!(shape, test_shape(&[1, 1, 2]));
+        assert_eq!(params.pads_begin, vec![padding_per_side]);
+        assert_eq!(params.pads_end, vec![padding_per_side]);
+    }
+
+    #[test]
+    fn inferred_input_shape_subtracts_padding_before_conversion() {
+        let op = maxpool_with_wide_explicit_padding();
+        let output = Tensor::new(&[1, 1, 2], &DataType::Int8, 0).unwrap();
+
+        assert_eq!(
+            op.infer_input_shape(&output).unwrap(),
+            test_shape(&[1, 1, 2])
+        );
+    }
+
+    #[test]
+    fn partition_bounds_are_clipped_after_subtracting_padding() {
+        let op = maxpool_with_wide_explicit_padding();
+
+        let partitions = partition_tensors(
+            &op,
+            &[test_tensor(&[1, 1, 2])],
+            &[test_tensor(&[1, 1, 2])],
+            1,
+        )
+        .unwrap();
+
+        assert_eq!(partitions.len(), 1);
+        let input = partitions[0].inputs[0].as_ref().unwrap();
+        assert_eq!(input.offsets(), &[0, 0, 0]);
+        assert_eq!(input.shape(), &test_shape(&[1, 1, 2]));
     }
 
     #[test]
@@ -1083,8 +1401,8 @@ mod tests {
         let delay = op
             .compute_delay_ticks(
                 &compute_capabilities,
-                &[tensor_view(&[1, 1, 2, 2])],
-                &[tensor_view(&[1, 1, 2, 2]), indices_view(&[1, 1, 2, 2])],
+                &[test_tensor_view(&[1, 1, 2, 2])],
+                &[test_tensor_view(&[1, 1, 2, 2]), indices_view(&[1, 1, 2, 2])],
             )
             .unwrap();
 
@@ -1094,13 +1412,108 @@ mod tests {
     }
 
     #[test]
+    fn analytical_comparison_counts_match_enumerated_windows() {
+        for input_size in 1..=6 {
+            for kernel_size in 1..=4 {
+                for dilation in 1..=3 {
+                    for stride in 1..=3 {
+                        for pad_begin in 0..=2 {
+                            for pad_end in 0..=2 {
+                                let op = OperatorMaxPool {
+                                    dilations: Some(vec![dilation]),
+                                    pads: Some(vec![pad_begin, pad_end]),
+                                    strides: Some(vec![stride]),
+                                    ..OperatorMaxPool::new(&[kernel_size])
+                                };
+                                let input = TensorView::new_full(
+                                    Tensor::new(&[2, 3, input_size], &DataType::Int8, 0).unwrap(),
+                                );
+                                let Ok((output_shape, _)) =
+                                    op.output_shape_and_resolved_params(&input)
+                                else {
+                                    continue;
+                                };
+                                let output = TensorView::new_full(
+                                    Tensor::from_shape(output_shape, &DataType::Int8, 0).unwrap(),
+                                );
+                                let inputs = vec![Some(input.clone())];
+                                let outputs = vec![Some(output.clone())];
+
+                                assert_eq!(
+                                    maxpool_comparisons(&op, &inputs, &outputs).unwrap(),
+                                    enumerated_comparisons(&op, &input, &output),
+                                    "input {input_size}, kernel {kernel_size}, dilation {dilation}, stride {stride}, pads {pad_begin},{pad_end}",
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn comparison_count_handles_a_billion_outputs_analytically() {
+        let op = OperatorMaxPool::new(&[2]);
+        let inputs = vec![test_tensor_view(&[1, 1, 1_000_000_001])];
+        let outputs = vec![test_tensor_view(&[1, 1, 1_000_000_000])];
+
+        assert_eq!(
+            maxpool_comparisons(&op, &inputs, &outputs).unwrap(),
+            1_000_000_000
+        );
+    }
+
+    #[test]
+    fn comparison_count_can_fit_when_valid_element_count_exceeds_usize() {
+        let output_size = usize::MAX / 2 + 1;
+        let input_size = output_size + 1;
+        let op = OperatorMaxPool::new(&[2]);
+        let inputs = vec![Some(TensorView::new_full(
+            Tensor::new(&[1, 1, input_size], &DataType::Int8, 0).unwrap(),
+        ))];
+        let outputs = vec![Some(TensorView::new_full(
+            Tensor::new(&[1, 1, output_size], &DataType::Int8, 0).unwrap(),
+        ))];
+
+        assert_eq!(
+            maxpool_comparisons(&op, &inputs, &outputs).unwrap(),
+            output_size
+        );
+    }
+
+    #[test]
+    fn comparison_count_handles_a_billion_padded_windows_analytically() {
+        assert_eq!(
+            axis_window_counts(1, 1_000_000_000, 1_000_000_000, 1, 1, 999_999_999).unwrap(),
+            (1_000_000_000, 1_000_000_000)
+        );
+    }
+
+    #[test]
+    fn rejects_effective_kernel_overflow() {
+        let op = OperatorMaxPool {
+            dilations: Some(vec![usize::MAX]),
+            ..OperatorMaxPool::new(&[2])
+        };
+        let input = Tensor::new(&[1, 1, 2], &DataType::Int8, 0).unwrap();
+
+        let error = op.output_shape_and_resolved_params(&input).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("effective kernel size overflows")
+        );
+    }
+
+    #[test]
     fn partitions_include_both_outputs() {
         let op = OperatorMaxPool {
             strides: Some(vec![2, 2]),
             ..OperatorMaxPool::new(&[2, 2])
         };
-        let inputs = vec![tensor(&[2, 1, 4, 4])];
-        let outputs = vec![tensor(&[2, 1, 2, 2]), indices(&[2, 1, 2, 2])];
+        let inputs = vec![test_tensor(&[2, 1, 4, 4])];
+        let outputs = vec![test_tensor(&[2, 1, 2, 2]), indices(&[2, 1, 2, 2])];
 
         let partitions = partition_tensors(&op, &inputs, &outputs, 2).unwrap();
 

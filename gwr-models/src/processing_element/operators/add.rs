@@ -33,7 +33,7 @@ fn choose_partition_dims<T: HasShape>(output: &T) -> Vec<usize> {
     candidate_dims
 }
 
-pub struct OperatorAdd {}
+pub(crate) struct OperatorAdd;
 
 fn broadcast_shapes(a: &Shape, b: &Shape) -> Result<Shape, SimError> {
     let rank_a = a.num_dims();
@@ -136,11 +136,11 @@ impl OperatorAdd {
     ) -> Result<Vec<Option<Tensor>>, gwr_engine::types::SimError> {
         let (input_a, input_b) = validate_inputs(inputs)?;
 
-        let output_shape = broadcast_shapes(&input_a.shape, &input_b.shape)?;
-        let output_dtype = if input_a.dtype > input_b.dtype {
-            input_a.dtype
+        let output_shape = broadcast_shapes(input_a.shape(), input_b.shape())?;
+        let output_dtype = if input_a.dtype() > input_b.dtype() {
+            *input_a.dtype()
         } else {
-            input_b.dtype
+            *input_b.dtype()
         };
 
         Ok(vec![Some(Tensor::from_shape(
@@ -163,18 +163,18 @@ impl OperatorAdd {
         let (input_a_shape, input_b_shape) = if rng.random_bool(0.5) {
             (
                 choose_input_shape(output, rng, expand_ratio)?,
-                output.shape.clone(),
+                output.shape().clone(),
             )
         } else {
             (
-                output.shape.clone(),
+                output.shape().clone(),
                 choose_input_shape(output, rng, expand_ratio)?,
             )
         };
 
         Ok(vec![
-            Some(Tensor::from_shape(input_a_shape, &output.dtype, 0)?),
-            Some(Tensor::from_shape(input_b_shape, &output.dtype, 0)?),
+            Some(Tensor::from_shape(input_a_shape, output.dtype(), 0)?),
+            Some(Tensor::from_shape(input_b_shape, output.dtype(), 0)?),
         ])
     }
 }
@@ -269,19 +269,9 @@ mod tests {
     use super::*;
     use crate::processing_element::operators::dtype::DataType;
     use crate::processing_element::operators::partition_tensors;
-
-    fn tensor(dims: &[usize]) -> Option<Tensor> {
-        Some(Tensor::new(dims, &DataType::Bf16, 0).unwrap())
-    }
-
-    fn tensor_view(dims: &[usize]) -> Option<TensorView> {
-        let tensor = Tensor::new(dims, &DataType::Bf16, 0).unwrap();
-        Some(TensorView::new_full(tensor))
-    }
-
-    fn test_shape(dims: &[usize]) -> Shape {
-        Shape::new(dims).unwrap()
-    }
+    use crate::processing_element::operators::test_support::{
+        test_shape, test_tensor, test_tensor_view,
+    };
 
     struct FixedBoolRng {
         values: Vec<bool>,
@@ -325,29 +315,35 @@ mod tests {
 
     #[test]
     fn create_outputs_broadcasts_same_rank_inputs() {
-        let inputs = vec![tensor(&[2, 3, 4]), tensor(&[1, 3, 1])];
+        let inputs = vec![test_tensor(&[2, 3, 4]), test_tensor(&[1, 3, 1])];
         let mut rng = rand::rng();
 
         let outputs = OperatorAdd::create_outputs(&inputs, 1.0, &mut rng).unwrap();
 
         assert_eq!(outputs.len(), 1);
-        assert_eq!(outputs[0].as_ref().unwrap().shape, test_shape(&[2, 3, 4]));
+        assert_eq!(
+            outputs[0].as_ref().unwrap().shape(),
+            &test_shape(&[2, 3, 4])
+        );
     }
 
     #[test]
     fn create_outputs_broadcasts_different_rank_inputs() {
-        let inputs = vec![tensor(&[3, 4]), tensor(&[2, 1, 4])];
+        let inputs = vec![test_tensor(&[3, 4]), test_tensor(&[2, 1, 4])];
         let mut rng = rand::rng();
 
         let outputs = OperatorAdd::create_outputs(&inputs, 1.0, &mut rng).unwrap();
 
         assert_eq!(outputs.len(), 1);
-        assert_eq!(outputs[0].as_ref().unwrap().shape, test_shape(&[2, 3, 4]));
+        assert_eq!(
+            outputs[0].as_ref().unwrap().shape(),
+            &test_shape(&[2, 3, 4])
+        );
     }
 
     #[test]
     fn create_outputs_rejects_non_broadcastable_inputs() {
-        let inputs = vec![tensor(&[2, 3]), tensor(&[4, 3])];
+        let inputs = vec![test_tensor(&[2, 3]), test_tensor(&[4, 3])];
         let mut rng = rand::rng();
 
         let err = OperatorAdd::create_outputs(&inputs, 1.0, &mut rng).unwrap_err();
@@ -357,18 +353,18 @@ mod tests {
 
     #[test]
     fn validate_tensors_accepts_broadcasted_output_shape() {
-        let op = OperatorAdd {};
-        let inputs = vec![tensor(&[3, 4]), tensor(&[2, 1, 4])];
-        let outputs = vec![tensor(&[2, 3, 4])];
+        let op = OperatorAdd;
+        let inputs = vec![test_tensor(&[3, 4]), test_tensor(&[2, 1, 4])];
+        let outputs = vec![test_tensor(&[2, 3, 4])];
 
         op.validate_tensors(&inputs, &outputs).unwrap();
     }
 
     #[test]
     fn validate_tensors_rejects_wrong_output_shape() {
-        let op = OperatorAdd {};
-        let inputs = vec![tensor(&[3, 4]), tensor(&[2, 1, 4])];
-        let outputs = vec![tensor(&[3, 4])];
+        let op = OperatorAdd;
+        let inputs = vec![test_tensor(&[3, 4]), test_tensor(&[2, 1, 4])];
+        let outputs = vec![test_tensor(&[3, 4])];
 
         let err = op.validate_tensors(&inputs, &outputs).unwrap_err();
 
@@ -377,8 +373,8 @@ mod tests {
 
     #[test]
     fn create_inputs_with_expand_ratio_one_preserves_output_shape() {
-        let op = OperatorAdd {};
-        let outputs = vec![tensor(&[2, 3, 4])];
+        let op = OperatorAdd;
+        let outputs = vec![test_tensor(&[2, 3, 4])];
 
         for shrink_input_a in [false, true] {
             let mut rng = FixedBoolRng::with_bool_values([shrink_input_a]);
@@ -386,16 +382,16 @@ mod tests {
             let inputs = OperatorAdd::create_inputs(&outputs, 1.0, &mut rng).unwrap();
 
             assert_eq!(inputs.len(), 2);
-            assert_eq!(inputs[0].as_ref().unwrap().shape, test_shape(&[2, 3, 4]));
-            assert_eq!(inputs[1].as_ref().unwrap().shape, test_shape(&[2, 3, 4]));
+            assert_eq!(inputs[0].as_ref().unwrap().shape(), &test_shape(&[2, 3, 4]));
+            assert_eq!(inputs[1].as_ref().unwrap().shape(), &test_shape(&[2, 3, 4]));
             op.validate_tensors(&inputs, &outputs).unwrap();
         }
     }
 
     #[test]
     fn create_inputs_with_expand_ratio_zero_creates_broadcastable_inputs() {
-        let op = OperatorAdd {};
-        let outputs = vec![tensor(&[2, 3, 4])];
+        let op = OperatorAdd;
+        let outputs = vec![test_tensor(&[2, 3, 4])];
 
         for shrink_input_a in [false, true] {
             let mut rng = FixedBoolRng::with_bool_values([shrink_input_a]);
@@ -410,7 +406,10 @@ mod tests {
                 .iter()
                 .map(|output| output.clone().unwrap())
                 .collect();
-            assert_eq!(inputs[usize::from(shrink_input_a)].shape, outputs[0].shape);
+            assert_eq!(
+                inputs[usize::from(shrink_input_a)].shape(),
+                outputs[0].shape()
+            );
             assert!(inputs[0].num_dims() <= outputs[0].num_dims());
             assert!(inputs[1].num_dims() <= outputs[0].num_dims());
             assert!(
@@ -438,12 +437,12 @@ mod tests {
             compares_per_tick: 200.0,
             sram_bytes: 1024,
         });
-        let operator = OperatorAdd {};
+        let operator = OperatorAdd;
         let delay_ticks = operator
             .compute_delay_ticks(
                 &compute_capabilities,
-                &[tensor_view(&[4, 5]), tensor_view(&[4, 5])],
-                &[tensor_view(&[4, 5])],
+                &[test_tensor_view(&[4, 5]), test_tensor_view(&[4, 5])],
+                &[test_tensor_view(&[4, 5])],
             )
             .unwrap();
         assert_eq!(delay_ticks, 20);
@@ -457,8 +456,8 @@ mod tests {
         let delay_ticks = operator
             .compute_delay_ticks(
                 &compute_capabilities,
-                &[tensor_view(&[4, 5]), tensor_view(&[4, 5])],
-                &[tensor_view(&[4, 5])],
+                &[test_tensor_view(&[4, 5]), test_tensor_view(&[4, 5])],
+                &[test_tensor_view(&[4, 5])],
             )
             .unwrap();
         assert_eq!(delay_ticks, 10);
@@ -466,8 +465,8 @@ mod tests {
         let delay_ticks = operator
             .compute_delay_ticks(
                 &compute_capabilities,
-                &[tensor_view(&[10, 4, 5]), tensor_view(&[10, 4, 5])],
-                &[tensor_view(&[10, 4, 5])],
+                &[test_tensor_view(&[10, 4, 5]), test_tensor_view(&[10, 4, 5])],
+                &[test_tensor_view(&[10, 4, 5])],
             )
             .unwrap();
         assert_eq!(delay_ticks, 100);
@@ -475,15 +474,16 @@ mod tests {
 
     #[test]
     fn flop_count_matches_output_elements() {
-        let operator = OperatorAdd {};
+        let operator = OperatorAdd;
         assert_eq!(
             operator
                 .compute_machine_ops(
-                    &[tensor_view(&[2, 3, 4]), tensor_view(&[1, 3, 1])],
-                    &[tensor_view(&[2, 3, 4])],
+                    &[test_tensor_view(&[2, 3, 4]), test_tensor_view(&[1, 3, 1])],
+                    &[test_tensor_view(&[2, 3, 4])],
                 )
                 .unwrap()
-                .total(),
+                .checked_total()
+                .unwrap(),
             24
         );
     }
@@ -513,9 +513,9 @@ mod tests {
 
     #[test]
     fn can_partition_across_one_dimension() {
-        let op = OperatorAdd {};
-        let inputs = vec![tensor(&[1, 5, 3, 4]), tensor(&[1, 5, 3, 4])];
-        let outputs = vec![tensor(&[1, 5, 3, 4])];
+        let op = OperatorAdd;
+        let inputs = vec![test_tensor(&[1, 5, 3, 4]), test_tensor(&[1, 5, 3, 4])];
+        let outputs = vec![test_tensor(&[1, 5, 3, 4])];
 
         let partitions = partition_tensors(&op, &inputs, &outputs, 5).unwrap();
         assert_eq!(partitions.len(), 5);
@@ -532,9 +532,9 @@ mod tests {
 
     #[test]
     fn can_partition_across_multiple_dimensions() {
-        let op = OperatorAdd {};
-        let inputs = vec![tensor(&[2, 3, 4]), tensor(&[2, 3, 4])];
-        let outputs = vec![tensor(&[2, 3, 4])];
+        let op = OperatorAdd;
+        let inputs = vec![test_tensor(&[2, 3, 4]), test_tensor(&[2, 3, 4])];
+        let outputs = vec![test_tensor(&[2, 3, 4])];
 
         let partitions = partition_tensors(&op, &inputs, &outputs, 5).unwrap();
         assert_eq!(partitions.len(), 6);
@@ -552,7 +552,7 @@ mod tests {
 
     #[test]
     fn partitions_preserve_subset_view_offsets() {
-        let op = OperatorAdd {};
+        let op = OperatorAdd;
         let input_a = Tensor::new(&[4, 5, 4], &DataType::Bf16, 0).unwrap();
         let input_b = Tensor::new(&[4, 5, 4], &DataType::Bf16, 0).unwrap();
         let output = Tensor::new(&[4, 5, 4], &DataType::Bf16, 0).unwrap();

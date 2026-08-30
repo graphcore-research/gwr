@@ -71,15 +71,30 @@ pub struct MachineOpCounts {
 }
 
 impl MachineOpCounts {
-    #[must_use]
-    pub fn total(&self) -> usize {
-        self.adds + self.compares + self.muls
+    pub fn checked_total(&self) -> Result<usize, SimError> {
+        self.adds
+            .checked_add(self.compares)
+            .and_then(|total| total.checked_add(self.muls))
+            .ok_or_else(|| SimError("Machine operation count overflows".to_string()))
     }
 
-    pub fn add_assign(&mut self, other: Self) {
-        self.adds += other.adds;
-        self.compares += other.compares;
-        self.muls += other.muls;
+    pub fn checked_add(self, other: Self) -> Result<Self, SimError> {
+        let counts = Self {
+            adds: self
+                .adds
+                .checked_add(other.adds)
+                .ok_or_else(|| SimError("Machine add count overflows".to_string()))?,
+            compares: self
+                .compares
+                .checked_add(other.compares)
+                .ok_or_else(|| SimError("Machine comparison count overflows".to_string()))?,
+            muls: self
+                .muls
+                .checked_add(other.muls)
+                .ok_or_else(|| SimError("Machine multiply count overflows".to_string()))?,
+        };
+        counts.checked_total()?;
+        Ok(counts)
     }
 }
 
@@ -102,7 +117,9 @@ impl ProcessingElementStatsDisplay {
 
 impl Display for ProcessingElementStatsDisplay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let total_flops = self.machine_ops.total();
+        let total_flops = self.machine_ops.adds as u128
+            + self.machine_ops.muls as u128
+            + self.machine_ops.compares as u128;
         let time_now_s = self.time_now_ns / 1e9;
         let total_gflops = total_flops as f64 / 1e9;
         let average_gflops_per_second = if time_now_s == 0.0 {
@@ -119,10 +136,7 @@ impl Display for ProcessingElementStatsDisplay {
         write!(
             f,
             "  Machine ops: {} total, {} add, {} mul, {} compare",
-            self.machine_ops.total(),
-            self.machine_ops.adds,
-            self.machine_ops.muls,
-            self.machine_ops.compares
+            total_flops, self.machine_ops.adds, self.machine_ops.muls, self.machine_ops.compares
         )
     }
 }
@@ -382,9 +396,8 @@ impl ProcessingElement {
         }
     }
 
-    #[must_use]
-    pub fn total_flops(&self) -> usize {
-        self.stats.borrow().machine_ops.total()
+    pub fn total_flops(&self) -> Result<usize, SimError> {
+        self.stats.borrow().machine_ops.checked_total()
     }
 
     #[must_use]
@@ -430,28 +443,18 @@ impl Runnable for ProcessingElement {
                 for task_idx in ready_node_indices.drain(..) {
                     dispatcher.set_task_active(task_idx)?;
 
-                    let clock = self.clock.clone();
-                    let dispatcher = dispatcher.clone();
-                    let lsu = self.lsu.clone();
-                    let compute_capabilities = self.compute_capabilities.clone();
-                    let stats = self.stats.clone();
-                    let entity = self.entity.clone();
-                    let activity_lanes = self.activity_lanes.clone();
-                    let flop_monitor = self.flop_monitor.clone();
-                    self.spawner.spawn(async move {
-                        handle_task(
-                            entity,
-                            clock,
-                            dispatcher,
-                            lsu,
-                            compute_capabilities,
-                            stats,
-                            activity_lanes,
-                            flop_monitor,
-                            task_idx,
-                        )
-                        .await
-                    });
+                    let runner = TaskRunner {
+                        entity: self.entity.clone(),
+                        clock: self.clock.clone(),
+                        dispatcher: dispatcher.clone(),
+                        lsu: self.lsu.clone(),
+                        compute_capabilities: self.compute_capabilities.clone(),
+                        stats: self.stats.clone(),
+                        activity_lanes: self.activity_lanes.clone(),
+                        flop_monitor: self.flop_monitor.clone(),
+                    };
+                    self.spawner
+                        .spawn(async move { runner.run(task_idx).await });
                 }
             }
 
@@ -462,8 +465,8 @@ impl Runnable for ProcessingElement {
     }
 }
 
-#[expect(clippy::too_many_arguments)]
-async fn handle_task(
+#[derive(Clone)]
+struct TaskRunner {
     entity: Rc<Entity>,
     clock: Clock,
     dispatcher: Dispatcher,
@@ -472,110 +475,104 @@ async fn handle_task(
     stats: Rc<RefCell<ProcessingElementStats>>,
     activity_lanes: Rc<ProcessingElementActivityLanes>,
     flop_monitor: Option<Rc<FlopMonitor>>,
-    task_idx: usize,
-) -> SimResult {
-    let task = dispatcher.task_by_id(task_idx)?;
-    match task {
-        Task::ComputeTask { config } => handle_compute_task(
-            clock,
-            dispatcher,
-            lsu,
-            task_idx,
-            compute_capabilities,
-            stats,
-            activity_lanes,
-            flop_monitor,
-            &config,
-        )
-        .await
-        .map_err(|err| SimError(format!("{entity} had error on task {}:\n{err}", config.id))),
-        Task::SyncTask { .. } => {
-            todo!();
-        }
-    }
 }
 
-#[expect(clippy::too_many_arguments)]
-async fn handle_compute_task(
-    clock: Clock,
-    dispatcher: Dispatcher,
-    lsu: Rc<LoadStoreUnit>,
-    task_idx: usize,
-    compute_capabilities: Rc<ComputeCapabilities>,
-    stats: Rc<RefCell<ProcessingElementStats>>,
-    activity_lanes: Rc<ProcessingElementActivityLanes>,
-    flop_monitor: Option<Rc<FlopMonitor>>,
-    config: &ComputeTaskConfig,
-) -> SimResult {
-    let partitions = config.op.create_partitions_for_sram(
-        &config.inputs,
-        &config.outputs,
-        compute_capabilities.sram_bytes,
-    )?;
-    let activity_name = config.activity_name();
-    let group = activity_lanes.create_group(&format!("{activity_name} operation"));
-
-    for partition in partitions {
-        for (idx, view) in partition.inputs.iter().enumerate() {
-            let Some(view) = view else {
-                continue;
-            };
-            lsu.access_ranges(
-                AccessType::ReadRequest,
-                view.address_ranges(),
-                &activity_lanes.lsu_read,
-                &format!("{activity_name} tensor {idx} read"),
-                &group,
-            )
-            .await?;
-        }
-
-        let compute_ticks = config.op.compute_delay_ticks(
-            &compute_capabilities,
-            &partition.inputs,
-            &partition.outputs,
-        )?;
-        let machine_ops = config
-            .op
-            .compute_machine_ops(&partition.inputs, &partition.outputs)?;
-        let compute_flops = machine_ops.total();
-        if let Some(flop_monitor) = &flop_monitor {
-            flop_monitor.record_interval(compute_ticks as u64, compute_flops as f64);
-        }
-        {
-            // Lanes cannot support overlapping activity. If a lane will be
-            // released in the current tick then we want to re-use it
-            // rather than allocate a new lane. Hence we wait here for the end
-            // of the current tick to ensure all lanes that will be released in
-            // this tick have been.
-            clock.wait_phase(phase::END).await;
-
-            let _activity = ActivityLanes::begin_in_group(
-                &activity_lanes.compute,
-                &format!("{activity_name} compute"),
-                &group,
-            );
-            clock.wait_ticks(compute_ticks as u64).await;
-        }
-        stats.borrow_mut().machine_ops.add_assign(machine_ops);
-
-        for (idx, view) in partition.outputs.iter().enumerate() {
-            let Some(view) = view else {
-                continue;
-            };
-            lsu.access_ranges(
-                AccessType::WriteNonPostedRequest,
-                view.address_ranges(),
-                &activity_lanes.lsu_write,
-                &format!("{activity_name} tensor {idx} write"),
-                &group,
-            )
-            .await?;
+impl TaskRunner {
+    async fn run(self, task_idx: usize) -> SimResult {
+        let task = self.dispatcher.task_by_id(task_idx)?;
+        match task {
+            Task::ComputeTask { config } => {
+                self.run_compute(task_idx, &config).await.map_err(|error| {
+                    SimError(format!(
+                        "{} had error on task {}:\n{error}",
+                        self.entity, config.id
+                    ))
+                })
+            }
+            Task::SyncTask { .. } => todo!(),
         }
     }
 
-    dispatcher.set_task_completed(task_idx)?;
-    Ok(())
+    async fn run_compute(&self, task_idx: usize, config: &ComputeTaskConfig) -> SimResult {
+        let partitions = config.op.create_partitions_for_sram(
+            &config.inputs,
+            &config.outputs,
+            self.compute_capabilities.sram_bytes,
+        )?;
+        let activity_name = config.activity_name();
+        let group = self
+            .activity_lanes
+            .create_group(&format!("{activity_name} operation"));
+
+        for partition in partitions {
+            for (idx, view) in partition.inputs.iter().enumerate() {
+                let Some(view) = view else {
+                    continue;
+                };
+                self.lsu
+                    .access_ranges(
+                        AccessType::ReadRequest,
+                        view.address_ranges(),
+                        &self.activity_lanes.lsu_read,
+                        &format!("{activity_name} tensor {idx} read"),
+                        &group,
+                    )
+                    .await?;
+            }
+
+            let compute_ticks = config.op.compute_delay_ticks(
+                &self.compute_capabilities,
+                &partition.inputs,
+                &partition.outputs,
+            )?;
+            let machine_ops = config
+                .op
+                .compute_machine_ops(&partition.inputs, &partition.outputs)?;
+            let compute_flops = machine_ops.checked_total().map_err(|error| {
+                SimError(format!("{} machine operation count: {error}", config.id))
+            })?;
+            if let Some(flop_monitor) = &self.flop_monitor {
+                flop_monitor.record_interval(compute_ticks as u64, compute_flops as f64);
+            }
+            {
+                // Lanes cannot support overlapping activity. Wait until the
+                // end of the current tick so a lane released during it can be
+                // reused.
+                self.clock.wait_phase(phase::END).await;
+
+                let _activity = ActivityLanes::begin_in_group(
+                    &self.activity_lanes.compute,
+                    &format!("{activity_name} compute"),
+                    &group,
+                );
+                self.clock.wait_ticks(compute_ticks as u64).await;
+            }
+            let total_machine_ops = self
+                .stats
+                .borrow()
+                .machine_ops
+                .checked_add(machine_ops)
+                .map_err(|error| SimError(format!("{} statistics: {error}", config.id)))?;
+            self.stats.borrow_mut().machine_ops = total_machine_ops;
+
+            for (idx, view) in partition.outputs.iter().enumerate() {
+                let Some(view) = view else {
+                    continue;
+                };
+                self.lsu
+                    .access_ranges(
+                        AccessType::WriteNonPostedRequest,
+                        view.address_ranges(),
+                        &self.activity_lanes.lsu_write,
+                        &format!("{activity_name} tensor {idx} write"),
+                        &group,
+                    )
+                    .await?;
+            }
+        }
+
+        self.dispatcher.set_task_completed(task_idx)
+    }
 }
 
 #[cfg(test)]

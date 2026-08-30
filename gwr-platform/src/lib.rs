@@ -10,7 +10,7 @@ use std::rc::Rc;
 use gwr_engine::engine::Engine;
 use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
-use gwr_engine::types::SimError;
+use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::EntityGet;
 use gwr_models::fabric::Fabric;
 use gwr_models::log_stats;
@@ -193,9 +193,16 @@ impl Platform {
     }
 
     pub fn dump_stats(&self, time_now_ns: f64) {
+        if let Err(error) = self.try_dump_stats(time_now_ns) {
+            panic!("Unable to dump platform statistics: {error}");
+        }
+    }
+
+    pub fn try_dump_stats(&self, time_now_ns: f64) -> SimResult {
+        let machine_ops = self.processing_element_totals()?;
         self.dump_memory_totals(time_now_ns);
         self.dump_cache_totals(time_now_ns);
-        self.dump_pe_totals(time_now_ns);
+        self.dump_pe_totals(time_now_ns, machine_ops);
         for mem in &self.memories {
             mem.dump_stats(time_now_ns);
         }
@@ -205,6 +212,7 @@ impl Platform {
         for pe in &self.processing_elements {
             pe.dump_stats(time_now_ns);
         }
+        Ok(())
     }
 
     fn dump_memory_totals(&self, time_now_ns: f64) {
@@ -247,14 +255,15 @@ impl Platform {
         );
     }
 
-    fn dump_pe_totals(&self, time_now_ns: f64) {
-        let machine_ops: MachineOpCounts =
-            self.processing_elements
-                .iter()
-                .fold(MachineOpCounts::default(), |mut total, pe| {
-                    total.add_assign(pe.machine_ops());
-                    total
-                });
+    fn processing_element_totals(&self) -> Result<MachineOpCounts, SimError> {
+        self.processing_elements
+            .iter()
+            .try_fold(MachineOpCounts::default(), |total, pe| {
+                total.checked_add(pe.machine_ops())
+            })
+    }
+
+    fn dump_pe_totals(&self, time_now_ns: f64, machine_ops: MachineOpCounts) {
         log_stats(
             &self.entity,
             ProcessingElementStatsDisplay::new(

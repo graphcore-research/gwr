@@ -101,11 +101,11 @@ impl HasShape for Shape {
 
 #[derive(Clone, Debug)]
 pub struct Tensor {
-    pub(super) id: Option<String>,
-    pub(super) dtype: DataType,
-    pub(super) shape: Shape,
-    pub(super) addr: u64,
-    pub(super) num_bytes: usize,
+    id: Option<String>,
+    dtype: DataType,
+    shape: Shape,
+    addr: u64,
+    num_bytes: usize,
 }
 
 impl Tensor {
