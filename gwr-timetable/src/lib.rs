@@ -519,8 +519,8 @@ impl Timetable {
     }
 
     pub fn dump_stats(&self) -> SimResult {
-        let mut total_load_bytes = 0;
-        let mut total_store_bytes = 0;
+        let mut total_load_bytes = 0usize;
+        let mut total_store_bytes = 0usize;
         let mut machine_ops = MachineOpCounts::default();
         let mut num_compute_nodes = 0;
         let mut num_tensor_nodes = 0;
@@ -530,10 +530,18 @@ impl Timetable {
                     let (inputs, outputs) = self.get_input_output_tensors(idx)?;
                     machine_ops.add_assign(op.compute_machine_ops(&inputs, &outputs)?);
                     for input_view in inputs.iter().flatten() {
-                        total_load_bytes += input_view.num_packed_bytes();
+                        total_load_bytes = total_load_bytes
+                            .checked_add(input_view.layout().num_access_bytes())
+                            .ok_or_else(|| {
+                                SimError("Timetable load byte total overflows".to_string())
+                            })?;
                     }
                     for output_view in outputs.iter().flatten() {
-                        total_store_bytes += output_view.num_packed_bytes();
+                        total_store_bytes = total_store_bytes
+                            .checked_add(output_view.layout().num_access_bytes())
+                            .ok_or_else(|| {
+                                SimError("Timetable store byte total overflows".to_string())
+                            })?;
                     }
                     num_compute_nodes += 1;
                 }

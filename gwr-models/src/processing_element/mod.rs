@@ -44,7 +44,7 @@ use crate::memory::memory_map::{DeviceId, MemoryMap};
 use crate::processing_element::dispatch::Dispatch;
 use crate::processing_element::flop_monitor::FlopMonitor;
 use crate::processing_element::load_store_unit::LoadStoreUnit;
-use crate::processing_element::operators::TensorView;
+use crate::processing_element::operators::TensorPartition;
 use crate::processing_element::task::{ComputeTaskConfig, Task};
 
 pub mod dispatch;
@@ -496,15 +496,6 @@ async fn handle_task(
     }
 }
 
-fn tensor_view_access(view: &TensorView) -> Result<(u64, usize), SimError> {
-    let bounds = view.address_bounds();
-    let address = u64::try_from(bounds.start)
-        .map_err(|error| SimError(format!("Tensor view address: {error}")))?;
-    let num_bytes = usize::try_from(bounds.end - bounds.start)
-        .map_err(|error| SimError(format!("Tensor view byte count: {error}")))?;
-    Ok((address, num_bytes))
-}
-
 #[expect(clippy::too_many_arguments)]
 async fn handle_compute_task(
     clock: Clock,
@@ -517,22 +508,13 @@ async fn handle_compute_task(
     flop_monitor: Option<Rc<FlopMonitor>>,
     config: &ComputeTaskConfig,
 ) -> SimResult {
-    let total_num_bytes: usize = config
-        .inputs
-        .iter()
-        .chain(config.outputs.iter())
-        .filter_map(|view| view.as_ref())
-        .map(TensorView::num_packed_bytes)
-        .sum();
-
-    let num_partitions = total_num_bytes
-        .div_ceil(compute_capabilities.sram_bytes.max(1))
-        .max(1);
+    let num_partitions = compute_task_num_partitions(config, compute_capabilities.sram_bytes)?;
 
     let partitions =
         config
             .op
             .create_partitions(&config.inputs, &config.outputs, num_partitions)?;
+    validate_partition_working_sets(&partitions, compute_capabilities.sram_bytes)?;
     let activity_name = config.activity_name();
     let group = activity_lanes.create_group(&format!("{activity_name} operation"));
 
@@ -541,11 +523,9 @@ async fn handle_compute_task(
             let Some(view) = view else {
                 continue;
             };
-            let (address, num_bytes) = tensor_view_access(view)?;
-            lsu.do_access(
+            lsu.access_ranges(
                 AccessType::ReadRequest,
-                num_bytes,
-                address,
+                view.address_ranges(),
                 &activity_lanes.lsu_read,
                 &format!("{activity_name} tensor {idx} read"),
                 &group,
@@ -586,11 +566,9 @@ async fn handle_compute_task(
             let Some(view) = view else {
                 continue;
             };
-            let (address, num_bytes) = tensor_view_access(view)?;
-            lsu.do_access(
+            lsu.access_ranges(
                 AccessType::WriteNonPostedRequest,
-                num_bytes,
-                address,
+                view.address_ranges(),
                 &activity_lanes.lsu_write,
                 &format!("{activity_name} tensor {idx} write"),
                 &group,
@@ -603,18 +581,99 @@ async fn handle_compute_task(
     Ok(())
 }
 
+fn compute_task_num_partitions(
+    config: &ComputeTaskConfig,
+    sram_bytes: usize,
+) -> Result<usize, SimError> {
+    let total_num_bytes = config
+        .inputs
+        .iter()
+        .chain(&config.outputs)
+        .flatten()
+        .try_fold(0usize, |total, view| {
+            total
+                .checked_add(view.layout().num_access_bytes())
+                .ok_or_else(|| SimError("Compute task byte total overflows".to_string()))
+        })?;
+
+    Ok(total_num_bytes.div_ceil(sram_bytes.max(1)).max(1))
+}
+
+fn validate_partition_working_sets(partitions: &[TensorPartition], sram_bytes: usize) -> SimResult {
+    for partition in partitions {
+        let working_set_bytes = partition.working_set_bytes()?;
+        if working_set_bytes > sram_bytes {
+            return sim_error!(
+                "Compute partition requires {working_set_bytes} bytes but the PE has {sram_bytes} bytes of SRAM"
+            );
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::processing_element::operators::Tensor;
     use crate::processing_element::operators::dtype::DataType;
+    use crate::processing_element::operators::{Tensor, TensorView};
+    use crate::processing_element::task::ComputeOp;
 
     #[test]
-    fn tensor_view_access_includes_each_partially_touched_byte() {
-        let tensor = Tensor::new(&[4], &DataType::Int4, 0x1000).unwrap();
-        let view = TensorView::new(tensor, &[2], &[1]).unwrap();
+    fn compute_task_partitions_use_physical_byte_ranges() {
+        let packed_view = || {
+            let tensor = Tensor::new(&[4], &DataType::Int4, 0x1000).unwrap();
+            TensorView::new(tensor, &[2], &[1]).unwrap()
+        };
+        let config = ComputeTaskConfig {
+            id: "add".to_string(),
+            op: ComputeOp::Add,
+            inputs: vec![Some(packed_view()), Some(packed_view())],
+            outputs: vec![Some(packed_view())],
+        };
 
-        assert_eq!(tensor_view_access(&view).unwrap(), (0x1000, 2));
+        assert_eq!(compute_task_num_partitions(&config, 3).unwrap(), 2);
+    }
+
+    #[test]
+    fn compute_task_partitions_sum_exact_strided_ranges() {
+        let tensor = Tensor::new(&[4, 4], &DataType::Int4, 0x1000).unwrap();
+        let view = TensorView::new(tensor, &[3, 1], &[1, 1]).unwrap();
+        let config = ComputeTaskConfig {
+            id: "strided".to_string(),
+            op: ComputeOp::Add,
+            inputs: vec![Some(view)],
+            outputs: vec![],
+        };
+
+        assert_eq!(compute_task_num_partitions(&config, 3).unwrap(), 1);
+    }
+
+    #[test]
+    fn compute_task_byte_total_overflow_returns_error() {
+        let tensor = Tensor::new(&[usize::MAX / 4], &DataType::Int4, 0).unwrap();
+        let view = TensorView::new_full(tensor);
+        let config = ComputeTaskConfig {
+            id: "overflow".to_string(),
+            op: ComputeOp::Add,
+            inputs: vec![Some(view); 8],
+            outputs: vec![],
+        };
+
+        assert!(compute_task_num_partitions(&config, 1).is_err());
+    }
+
+    #[test]
+    fn partition_working_set_includes_every_view() {
+        let tensor = Tensor::new(&[4, 4], &DataType::Int8, 0).unwrap();
+        let first = TensorView::new(tensor.clone(), &[4, 1], &[0, 0]).unwrap();
+        let second = TensorView::new(tensor, &[4, 1], &[0, 2]).unwrap();
+        let partition = TensorPartition {
+            inputs: vec![Some(first)],
+            outputs: vec![Some(second)],
+        };
+
+        assert_eq!(partition.working_set_bytes().unwrap(), 8);
+        assert!(validate_partition_working_sets(&[partition], 7).is_err());
     }
 
     #[test]
