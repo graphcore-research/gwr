@@ -1440,10 +1440,12 @@ dependencies = [
 name = "gwr-visualisation"
 version = "0.1.0"
 dependencies = [
+ "clap",
  "gwr-engine",
  "gwr-models",
  "gwr-platform",
  "gwr-timetable",
+ "same-file",
  "serde",
  "serde_json",
  "serde_yaml",
