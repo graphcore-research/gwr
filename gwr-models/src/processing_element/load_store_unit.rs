@@ -11,10 +11,11 @@
 //!  - One [input port](gwr_engine::port::InPort): `rx`
 //!  - One [output port](gwr_engine::port::OutPort): `tx`
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::cmp::min;
 use std::collections::VecDeque;
 use std::fmt;
+use std::ops::Range;
 use std::rc::Rc;
 
 use async_trait::async_trait;
@@ -66,9 +67,6 @@ struct LsuState {
     device_id: DeviceId,
 
     overhead_size_bytes: usize,
-
-    /// How much SRAM does this PE have in total
-    sram_bytes: usize,
 
     /// Slots to handle one or more requests simultaneously
     active_request_slots: RefCell<Vec<ActiveRequestSlot>>,
@@ -269,7 +267,6 @@ impl LoadStoreUnit {
         let num_active_requests = pe_config.num_active_requests;
         let max_access_size_bytes = pe_config.lsu_access_bytes;
         let overhead_size_bytes = pe_config.overhead_size_bytes;
-        let sram_bytes = pe_config.sram_bytes;
         let mut requests = Vec::with_capacity(num_active_requests);
         for _ in 0..num_active_requests {
             requests.push(ActiveRequestSlot::default());
@@ -280,7 +277,6 @@ impl LoadStoreUnit {
             memory_map: memory_map.clone(),
             device_id,
             overhead_size_bytes,
-            sram_bytes,
             active_request_slots: RefCell::new(requests),
             pending_request_indices: RefCell::new(VecDeque::new()),
             new_request: Repeated::new(()),
@@ -309,92 +305,78 @@ impl LoadStoreUnit {
         port_rx!(self.rx, state)
     }
 
-    /// Perform a memory access and emit an activity once the LSU has been
-    /// acquired.
-    pub async fn do_access(
+    /// Transfer a set of validated physical address ranges.
+    pub(crate) async fn access_ranges(
         &self,
         access_type: AccessType,
-        access_size_bytes: usize,
-        dst_addr: u64,
+        ranges: impl IntoIterator<Item = Range<u128>>,
         activity_lanes: &Rc<RefCell<ActivityLanes>>,
         activity_name: &str,
         group: &Rc<EntityGroup>,
     ) -> SimResult {
-        if access_size_bytes > self.state.sram_bytes {
-            return sim_error!(
-                "PE cannot do memory access of {access_size_bytes} as it only has SRAM with {} bytes.",
-                self.state.sram_bytes
-            );
-        }
-
-        let mut bytes_remaining = access_size_bytes;
-        let mut access_address = dst_addr;
-
-        let mut completed_requests = Vec::new();
+        let completion = Rc::new(TransferCompletion::new());
 
         // Ensure only one compute tensor transfer uses the LSU request issue
         // path at a time.
         let serialiser_guard = ResourceGuard::new(self.state.serialiser.clone()).await;
         let mut activity_guard = None;
 
-        loop {
-            if bytes_remaining == 0 {
-                break;
+        for range in ranges {
+            let mut access_address = u64::try_from(range.start)
+                .expect("tensor construction guarantees range starts fit in u64");
+            let mut bytes_remaining = usize::try_from(range.end - range.start)
+                .expect("tensor construction guarantees range lengths fit in usize");
+
+            while bytes_remaining > 0 {
+                let request_slot_idx = self.state.allocate_request_slot().await;
+                if activity_guard.is_none() {
+                    // Reuse a lane released in this tick before allocating one.
+                    self.clock.wait_phase(phase::END).await;
+                    activity_guard = Some(ActivityLanes::begin_in_group(
+                        activity_lanes,
+                        activity_name,
+                        group,
+                    ));
+                }
+
+                let access_size_bytes = min(self.max_access_size_bytes, bytes_remaining);
+                let access = self.state.create_memory_access(
+                    access_type,
+                    access_size_bytes,
+                    access_address,
+                    request_slot_idx,
+                )?;
+
+                {
+                    let state = self.state.clone();
+                    let completion = completion.clone();
+                    completion.request_started()?;
+                    self.spawner.spawn(async move {
+                        let response_ready_event =
+                            state.make_request_to_port_driver(request_slot_idx, access)?;
+
+                        response_ready_event.listen().await;
+                        let result = state.handle_response_in_slot(request_slot_idx);
+
+                        completion.request_completed()?;
+                        result
+                    });
+                }
+
+                bytes_remaining -= access_size_bytes;
+                if bytes_remaining != 0 {
+                    access_address = access_address
+                        .checked_add(access_size_bytes as u64)
+                        .expect("validated tensor access remains in the address space");
+                }
             }
-
-            // Wait until there is a request slot available
-            let request_slot_idx = self.state.allocate_request_slot().await;
-            if activity_guard.is_none() {
-                // Lanes cannot support overlapping activity. If a lane will be
-                // released in the current tick then we want to re-use it
-                // rather than allocate a new lane. Hence we wait here for the
-                // end of the current tick to ensure all lanes that will be
-                // released in this tick have been.
-                self.clock.wait_phase(phase::END).await;
-
-                activity_guard = Some(ActivityLanes::begin_in_group(
-                    activity_lanes,
-                    activity_name,
-                    group,
-                ));
-            }
-
-            let access_size_bytes = min(self.max_access_size_bytes, bytes_remaining);
-            let access = self.state.create_memory_access(
-                access_type,
-                access_size_bytes,
-                access_address,
-                request_slot_idx,
-            )?;
-
-            {
-                // Spawn off a handler for the request
-                let state = self.state.clone();
-                let completed = Once::default();
-                completed_requests.push(completed.clone());
-                self.spawner.spawn(async move {
-                    let response_ready_event =
-                        state.make_request_to_port_driver(request_slot_idx, access)?;
-
-                    // Wait for response to be received to slot
-                    response_ready_event.listen().await;
-                    let result = state.handle_response_in_slot(request_slot_idx);
-
-                    completed.notify()?;
-                    result
-                });
-            }
-
-            bytes_remaining -= access_size_bytes;
-            access_address += access_size_bytes as u64;
         }
 
         // Allow other requests to start
         drop(serialiser_guard);
 
-        for completed in completed_requests {
-            completed.listen().await;
-        }
+        completion.finish_issuing()?;
+        completion.complete.listen().await;
 
         Ok(())
     }
@@ -412,6 +394,55 @@ impl Runnable for LoadStoreUnit {
         }
 
         run_rx(self.state.clone(), rx).await
+    }
+}
+
+struct TransferCompletion {
+    outstanding_requests: Cell<usize>,
+    issuing: Cell<bool>,
+    complete: Once<()>,
+}
+
+impl TransferCompletion {
+    fn new() -> Self {
+        Self {
+            outstanding_requests: Cell::new(0),
+            issuing: Cell::new(true),
+            complete: Once::default(),
+        }
+    }
+
+    fn request_started(&self) -> SimResult {
+        let outstanding = self
+            .outstanding_requests
+            .get()
+            .checked_add(1)
+            .ok_or_else(|| SimError("LSU request count overflows".to_string()))?;
+        self.outstanding_requests.set(outstanding);
+        Ok(())
+    }
+
+    fn request_completed(&self) -> SimResult {
+        let outstanding = self
+            .outstanding_requests
+            .get()
+            .checked_sub(1)
+            .ok_or_else(|| {
+                SimError("LSU transfer completed more requests than it issued".to_string())
+            })?;
+        self.outstanding_requests.set(outstanding);
+        if !self.issuing.get() && outstanding == 0 {
+            self.complete.notify()?;
+        }
+        Ok(())
+    }
+
+    fn finish_issuing(&self) -> SimResult {
+        self.issuing.set(false);
+        if self.outstanding_requests.get() == 0 {
+            self.complete.notify()?;
+        }
+        Ok(())
     }
 }
 
