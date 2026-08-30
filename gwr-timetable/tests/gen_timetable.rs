@@ -142,5 +142,10 @@ fn generator_emits_multi_output_maxpool() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
     let platform = Rc::new(Platform::from_string(&engine, &clock, PLATFORM_YAML).unwrap());
-    Timetable::new(&engine.top().clone(), timetable_file, &platform).unwrap();
+    Timetable::new(
+        &engine.top().clone(),
+        timetable_file.into_graph().unwrap(),
+        &platform,
+    )
+    .unwrap();
 }
