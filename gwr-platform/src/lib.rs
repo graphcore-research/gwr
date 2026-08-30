@@ -24,13 +24,17 @@ use gwr_models::processing_element::{
 };
 use gwr_track::entity::{Entity, GetEntity};
 
-use crate::builder::{build_caches, build_fabrics, build_memories, build_memory_maps, build_pes};
+use crate::builder::{
+    build_caches_from_configs, build_fabrics_from_configs, build_memories_from_configs,
+    build_memory_maps, build_pes_from_configs,
+};
 use crate::connect::connect_ports;
 use crate::types::PlatformConfig;
 
 pub mod builder;
 mod connect;
 pub mod types;
+mod validation;
 pub mod yaml;
 
 type ProcessingElements = Vec<Rc<ProcessingElement>>;
@@ -83,15 +87,26 @@ impl Platform {
     }
 
     fn build(engine: &Engine, clock: &Clock, cfg: &PlatformConfig) -> Result<Self, SimError> {
+        let effective = cfg.validated()?;
         let device_ids = assign_device_ids(cfg)?;
 
         let top = engine.top();
-        let (memories, memories_idx_by_id) = build_memories(engine, clock, top, cfg)?;
+        let (memories, memories_idx_by_id) =
+            build_memories_from_configs(engine, clock, top, cfg, &effective.memories)?;
         let memory_maps = build_memory_maps(cfg, &memories, &memories_idx_by_id, &device_ids)?;
-        let (processing_elements, pes_idx_by_id) =
-            build_pes(engine, clock, top, cfg, &memory_maps, &device_ids)?;
-        let (caches, caches_idx_by_id) = build_caches(engine, clock, top, cfg)?;
-        let (fabrics, fabrics_idx_by_id) = build_fabrics(engine, clock, top, cfg)?;
+        let (processing_elements, pes_idx_by_id) = build_pes_from_configs(
+            engine,
+            clock,
+            top,
+            cfg,
+            &effective.processing_elements,
+            &memory_maps,
+            &device_ids,
+        )?;
+        let (caches, caches_idx_by_id) =
+            build_caches_from_configs(engine, clock, top, cfg, &effective.caches)?;
+        let (fabrics, fabrics_idx_by_id) =
+            build_fabrics_from_configs(engine, clock, top, cfg, &effective.fabrics)?;
 
         let parent = engine.top();
         let entity = Rc::new(Entity::new(parent, "platform"));

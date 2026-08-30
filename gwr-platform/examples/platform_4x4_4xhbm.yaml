@@ -14,7 +14,8 @@ fabrics:
     kind: functional
     columns: 4
     rows: 4
-    routing: column-first
+    config:
+      routing: column-first
 
 # A default PE config so that it doesn't have to be repeated
 defaults:
@@ -68,23 +69,27 @@ memories:
   - name: hbm0
     kind: hbm
     base_address: 0x1_0000_0000
-    capacity_bytes: 0x1_0000_0000
-    delay_ticks: 10
+    config:
+      capacity_bytes: 0x1_0000_0000
+      delay_ticks: 10
   - name: hbm1
     kind: hbm
     base_address: 0x2_0000_0000
-    capacity_bytes: 0x1_0000_0000
-    delay_ticks: 10
+    config:
+      capacity_bytes: 0x1_0000_0000
+      delay_ticks: 10
   - name: hbm2
     kind: hbm
     base_address: 0x3_0000_0000
-    capacity_bytes: 0x1_0000_0000
-    delay_ticks: 10
+    config:
+      capacity_bytes: 0x1_0000_0000
+      delay_ticks: 10
   - name: hbm3
     kind: hbm
     base_address: 0x4_0000_0000
-    capacity_bytes: 0x1_0000_0000
-    delay_ticks: 10
+    config:
+      capacity_bytes: 0x1_0000_0000
+      delay_ticks: 10
 
 connections:
   - connect:

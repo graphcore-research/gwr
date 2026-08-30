@@ -183,22 +183,35 @@ fn emit_fabrics(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std
         )?;
         emit_kv(&mut out, "columns", fabric.columns, 2)?;
         emit_kv(&mut out, "rows", fabric.rows, 2)?;
+        let config = &fabric.config;
+        if config.fabric_ports_per_node.is_none()
+            && config.ticks_per_hop.is_none()
+            && config.ticks_overhead.is_none()
+            && config.rx_buffer_bytes.is_none()
+            && config.tx_buffer_bytes.is_none()
+            && config.port_bits_per_tick.is_none()
+            && config.routing.is_none()
+        {
+            emit_line(&mut out, "config: {}", 2)?;
+            continue;
+        }
+        emit_line(&mut out, "config:", 2)?;
         emit_optional_kv(
             &mut out,
             "fabric_ports_per_node",
-            fabric.fabric_ports_per_node,
-            2,
+            config.fabric_ports_per_node,
+            3,
         )?;
-        emit_optional_kv(&mut out, "ticks_per_hop", fabric.ticks_per_hop, 2)?;
-        emit_optional_kv(&mut out, "ticks_overhead", fabric.ticks_overhead, 2)?;
-        emit_optional_kv(&mut out, "rx_buffer_bytes", fabric.rx_buffer_bytes, 2)?;
-        emit_optional_kv(&mut out, "tx_buffer_bytes", fabric.tx_buffer_bytes, 2)?;
-        emit_optional_kv(&mut out, "port_bits_per_tick", fabric.port_bits_per_tick, 2)?;
-        if let Some(routing) = fabric.routing {
+        emit_optional_kv(&mut out, "ticks_per_hop", config.ticks_per_hop, 3)?;
+        emit_optional_kv(&mut out, "ticks_overhead", config.ticks_overhead, 3)?;
+        emit_optional_kv(&mut out, "rx_buffer_bytes", config.rx_buffer_bytes, 3)?;
+        emit_optional_kv(&mut out, "tx_buffer_bytes", config.tx_buffer_bytes, 3)?;
+        emit_optional_kv(&mut out, "port_bits_per_tick", config.port_bits_per_tick, 3)?;
+        if let Some(routing) = config.routing {
             emit_line(
                 &mut out,
                 format_args!("routing: {}", serializable_to_str(&routing)?),
-                2,
+                3,
             )?;
         }
     }
@@ -273,14 +286,20 @@ fn emit_memories(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn st
             u64_hex_str(memory.base_address),
             2,
         )?;
+        emit_line(&mut out, "config:", 2)?;
         emit_kv(
             &mut out,
             "capacity_bytes",
-            u64_hex_str(memory.capacity_bytes),
-            2,
+            u64_hex_str(memory.config.capacity_bytes),
+            3,
         )?;
-        emit_optional_kv(&mut out, "bw_bytes_per_tick", memory.bw_bytes_per_tick, 2)?;
-        emit_optional_kv(&mut out, "delay_ticks", memory.delay_ticks, 2)?;
+        emit_optional_kv(
+            &mut out,
+            "bw_bytes_per_tick",
+            memory.config.bw_bytes_per_tick,
+            3,
+        )?;
+        emit_optional_kv(&mut out, "delay_ticks", memory.config.delay_ticks, 3)?;
     }
     Ok(Some(out))
 }
@@ -331,8 +350,9 @@ pub fn platform_to_yaml_str(
 mod tests {
     use super::platform_to_yaml_str;
     use crate::types::{
-        CacheConfigSection, CacheSection, ConnectSection, MemoryDeviceSection, MemoryMapSection,
-        PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
+        CacheConfigSection, CacheSection, ConnectSection, FabricConfigSection, FabricKind,
+        FabricSection, MemoryConfigSection, MemoryDeviceSection, MemoryKind, MemoryMapSection,
+        MemorySection, PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
     };
 
     fn test_memory_map() -> MemoryMapSection {
@@ -474,5 +494,55 @@ mod tests {
         assert_eq!(pe.config, empty_pe_config);
         assert_eq!(caches[0].config, empty_cache_config);
         assert_eq!(caches[1].config, empty_cache_config);
+    }
+
+    #[test]
+    fn emits_fabric_and_memory_configs() {
+        let fabric_config = FabricConfigSection {
+            fabric_ports_per_node: Some(2),
+            ticks_per_hop: Some(3),
+            ticks_overhead: Some(4),
+            rx_buffer_bytes: Some(5),
+            tx_buffer_bytes: Some(6),
+            port_bits_per_tick: Some(7),
+            routing: Some(gwr_models::fabric::node::FabricRoutingAlgorithm::RowFirst),
+        };
+        let memory_config = MemoryConfigSection {
+            capacity_bytes: 0x2000,
+            bw_bytes_per_tick: Some(8),
+            delay_ticks: Some(9),
+        };
+        let platform = PlatformConfig {
+            memory_maps: vec![test_memory_map()],
+            defaults: None,
+            processing_elements: None,
+            caches: None,
+            fabrics: Some(vec![FabricSection {
+                name: "fabric0".to_string(),
+                kind: FabricKind::Functional,
+                columns: 2,
+                rows: 3,
+                config: fabric_config.clone(),
+            }]),
+            memories: Some(vec![MemorySection {
+                name: "hbm0".to_string(),
+                kind: MemoryKind::HBM,
+                base_address: 0x1000,
+                config: memory_config.clone(),
+            }]),
+            connections: None,
+        };
+
+        let yaml = platform_to_yaml_str(&platform).expect("yaml generation should succeed");
+
+        let round_trip: PlatformConfig =
+            serde_yaml::from_str(&yaml).expect("generated yaml should deserialize");
+        let fabric = &round_trip.fabrics.expect("fabric should be present")[0];
+        let memory = &round_trip.memories.expect("memory should be present")[0];
+        assert_eq!(fabric.columns, 2);
+        assert_eq!(fabric.rows, 3);
+        assert_eq!(fabric.config, fabric_config);
+        assert_eq!(memory.base_address, 0x1000);
+        assert_eq!(memory.config, memory_config);
     }
 }

@@ -62,10 +62,10 @@ pub fn parse_usize_byte_str<'de, D>(deserializer: D) -> Result<usize, D::Error>
 where
     D: de::Deserializer<'de>,
 {
-    match parse_u64_byte_str(deserializer) {
-        Err(e) => Err(e),
-        Ok(value) => Ok(value as usize),
-    }
+    let value = parse_u64_byte_str(deserializer)?;
+    usize::try_from(value).map_err(|error| {
+        de::Error::custom(format!("{value} cannot be represented as usize: {error}"))
+    })
 }
 
 /// Same as `parse_u64_byte_str` but returns a `Option<u64>`.
@@ -152,6 +152,12 @@ pub struct FabricSection {
     pub kind: FabricKind,
     pub columns: usize,
     pub rows: usize,
+    pub config: FabricConfigSection,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct FabricConfigSection {
     pub fabric_ports_per_node: Option<usize>,
     pub ticks_per_hop: Option<usize>,
     pub ticks_overhead: Option<usize>,
@@ -168,6 +174,12 @@ pub struct MemorySection {
     pub kind: MemoryKind,
     #[serde(deserialize_with = "parse_u64_byte_str")]
     pub base_address: u64,
+    pub config: MemoryConfigSection,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryConfigSection {
     #[serde(deserialize_with = "parse_u64_byte_str")]
     pub capacity_bytes: u64,
     pub bw_bytes_per_tick: Option<usize>,

@@ -14,9 +14,9 @@ use gwr_platform::builder::{
     DEFAULT_PE_NUM_ACTIVE_REQUESTS, DEFAULT_PE_OVERHEAD_SIZE_BYTES, DEFAULT_PE_SRAM_BYTES,
 };
 use gwr_platform::types::{
-    CacheConfigSection, CacheSection, ConnectSection, FabricKind, FabricSection,
-    MemoryDeviceSection, MemoryKind, MemoryMapSection, MemorySection, PlatformConfig,
-    ProcessingElementConfigSection, ProcessingElementSection,
+    CacheConfigSection, CacheSection, ConnectSection, FabricConfigSection, FabricKind,
+    FabricSection, MemoryConfigSection, MemoryDeviceSection, MemoryKind, MemoryMapSection,
+    MemorySection, PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
 };
 use gwr_platform::yaml::platform_to_yaml_str;
 
@@ -188,13 +188,15 @@ fn build_fabrics(args: &Args) -> Vec<FabricSection> {
         kind: args.fabric_model,
         columns: args.num_columns,
         rows: args.num_rows,
-        fabric_ports_per_node: Some(DEFAULT_FABRIC_PORTS_PER_NODE),
-        ticks_per_hop: Some(DEFAULT_FABRIC_TICKS_PER_HOP),
-        ticks_overhead: Some(DEFAULT_FABRIC_TICKS_OVERHEAD),
-        rx_buffer_bytes: Some(DEFAULT_FABRIC_RX_BUFFER_BYTES),
-        tx_buffer_bytes: Some(DEFAULT_FABRIC_TX_BUFFER_BYTES),
-        port_bits_per_tick: Some(DEFAULT_FABRIC_PORT_BITS_PER_TICK),
-        routing: Some(args.fabric_routing),
+        config: FabricConfigSection {
+            fabric_ports_per_node: Some(DEFAULT_FABRIC_PORTS_PER_NODE),
+            ticks_per_hop: Some(DEFAULT_FABRIC_TICKS_PER_HOP),
+            ticks_overhead: Some(DEFAULT_FABRIC_TICKS_OVERHEAD),
+            rx_buffer_bytes: Some(DEFAULT_FABRIC_RX_BUFFER_BYTES),
+            tx_buffer_bytes: Some(DEFAULT_FABRIC_TX_BUFFER_BYTES),
+            port_bits_per_tick: Some(DEFAULT_FABRIC_PORT_BITS_PER_TICK),
+            routing: Some(args.fabric_routing),
+        },
     }]
 }
 
@@ -259,9 +261,11 @@ fn build_memories(args: &Args) -> Vec<MemorySection> {
                 name: format!("hbm{i}"),
                 kind: MemoryKind::HBM,
                 base_address: base as u64,
-                capacity_bytes: args.hbm_size as u64,
-                bw_bytes_per_tick: None,
-                delay_ticks: Some(DEFAULT_HBM_DELAY_TICKS),
+                config: MemoryConfigSection {
+                    capacity_bytes: args.hbm_size as u64,
+                    bw_bytes_per_tick: None,
+                    delay_ticks: Some(DEFAULT_HBM_DELAY_TICKS),
+                },
             };
             base += args.hbm_size;
             mem
