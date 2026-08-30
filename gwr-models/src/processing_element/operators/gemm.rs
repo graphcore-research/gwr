@@ -22,7 +22,7 @@ const NAME: &str = "Gemm";
 ///
 /// Prefer outer dims first. Add M and N in case required.
 fn choose_partition_dims<T: HasShape>(output: &T) -> Vec<usize> {
-    let dims = output.shape().get_dims();
+    let dims = output.shape().dims();
     let mut candidate_dims = dims
         .iter()
         .enumerate()
@@ -46,7 +46,7 @@ const OUTPUT_OFFSET_N: usize = 1;
 
 /// Return the value of a dimension starting from the inner most
 fn get_inner_dim<T: HasShape>(has_shape: &T, i: usize) -> usize {
-    has_shape.shape().get_dims()[has_shape.num_dims() - i].max(1)
+    has_shape.shape().dims()[has_shape.num_dims() - i].max(1)
 }
 
 /// Construct an input B shape for a Gemm consuming `input_a` as input A.
@@ -56,7 +56,7 @@ pub fn gemm_rhs_shape<T: HasShape>(input_a: &T) -> Result<Shape, SimError> {
         return sim_error!("{NAME}: input A must be at least 2D");
     }
 
-    let mut rhs_dims = input_a.shape().get_dims().clone();
+    let mut rhs_dims = input_a.shape().dims().to_vec();
     rhs_dims[rank - INPUT_B_OFFSET_K] = get_inner_dim(input_a, INPUT_A_OFFSET_K);
     rhs_dims[rank - INPUT_B_OFFSET_N] = get_inner_dim(input_a, INPUT_A_OFFSET_M);
     Shape::new(&rhs_dims)
@@ -275,7 +275,7 @@ fn gemm_op_counts<T: HasShape>(
 
     let num_matmuls = output_view
         .shape()
-        .get_dims()
+        .dims()
         .iter()
         .take(output_view.num_dims().saturating_sub(2))
         .product::<usize>();
@@ -308,8 +308,8 @@ impl OperatorGemm {
     ) -> Result<Vec<Option<Tensor>>, gwr_engine::types::SimError> {
         let output = validate_outputs(outputs)?;
 
-        let mut input_a_dims = output.shape().get_dims().clone();
-        let mut input_b_dims = output.shape().get_dims().clone();
+        let mut input_a_dims = output.shape().dims().to_vec();
+        let mut input_b_dims = output.shape().dims().to_vec();
 
         let k = choose_gemm_k(output, rng, expand_ratio);
 
@@ -380,7 +380,7 @@ impl Operator for OperatorGemm {
 
         let rank = output_view.num_dims();
         let partition_dims = choose_partition_dims(&output_view);
-        let output_view_dims = output_view.shape().get_dims();
+        let output_view_dims = output_view.shape().dims();
         let partition_specs =
             partition_across_dimensions(output_view_dims, &partition_dims, num_partitions);
         let m_dim = rank.saturating_sub(OUTPUT_OFFSET_M);
@@ -582,7 +582,7 @@ mod tests {
 
         OperatorGemm {}
             .validate_tensors(
-                &[tensor(input_a.get_dims()), tensor(input_b.get_dims())],
+                &[tensor(input_a.dims()), tensor(input_b.dims())],
                 &[tensor(&[19, 23, 29, 29])],
             )
             .unwrap();
@@ -716,21 +716,12 @@ mod tests {
             let in_b = partition.inputs[1].as_ref().unwrap();
             let out = partition.outputs[0].as_ref().unwrap();
 
-            assert_eq!(
-                in_a.offsets().get_dims().as_slice(),
-                (expected_partition.0).0
-            );
-            assert_eq!(in_a.shape().get_dims().as_slice(), (expected_partition.0).1);
-            assert_eq!(
-                in_b.offsets().get_dims().as_slice(),
-                (expected_partition.1).0
-            );
-            assert_eq!(in_b.shape().get_dims().as_slice(), (expected_partition.1).1);
-            assert_eq!(
-                out.offsets().get_dims().as_slice(),
-                (expected_partition.2).0
-            );
-            assert_eq!(out.shape().get_dims().as_slice(), (expected_partition.2).1);
+            assert_eq!(in_a.offsets(), (expected_partition.0).0);
+            assert_eq!(in_a.shape().dims(), (expected_partition.0).1);
+            assert_eq!(in_b.offsets(), (expected_partition.1).0);
+            assert_eq!(in_b.shape().dims(), (expected_partition.1).1);
+            assert_eq!(out.offsets(), (expected_partition.2).0);
+            assert_eq!(out.shape().dims(), (expected_partition.2).1);
         }
     }
 
@@ -796,25 +787,19 @@ mod tests {
             let out_view = partition.outputs[0].as_ref().unwrap();
 
             assert_eq!(
-                a_view.shape().get_dims().as_slice(),
+                a_view.shape().dims(),
                 &[expected_m_lengths[partition_idx], 5]
             );
-            assert_eq!(
-                a_view.offsets().get_dims().as_slice(),
-                &[expected_m_offsets[partition_idx], 0]
-            );
+            assert_eq!(a_view.offsets(), &[expected_m_offsets[partition_idx], 0]);
 
-            assert_eq!(b_view.shape().get_dims().as_slice(), &[5, 12]);
-            assert_eq!(b_view.offsets().get_dims().as_slice(), &[0, 0]);
+            assert_eq!(b_view.shape().dims(), &[5, 12]);
+            assert_eq!(b_view.offsets(), &[0, 0]);
 
             assert_eq!(
-                out_view.shape().get_dims().as_slice(),
+                out_view.shape().dims(),
                 &[expected_m_lengths[partition_idx], 12]
             );
-            assert_eq!(
-                out_view.offsets().get_dims().as_slice(),
-                &[expected_m_offsets[partition_idx], 0]
-            );
+            assert_eq!(out_view.offsets(), &[expected_m_offsets[partition_idx], 0]);
         }
     }
 

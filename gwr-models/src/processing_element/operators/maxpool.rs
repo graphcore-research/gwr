@@ -177,7 +177,7 @@ impl OperatorMaxPool {
             return sim_error!("{NAME}: input rank must be at least 3");
         }
 
-        let input_dims = input.shape().get_dims();
+        let input_dims = input.shape().dims();
         let spatial_rank = input.num_dims() - FIRST_SPATIAL_DIM;
         let mut params = self.normalize_params(spatial_rank)?;
         let auto_pad = self.auto_pad();
@@ -245,7 +245,7 @@ impl OperatorMaxPool {
             return sim_error!("{NAME}: output rank must be at least 3");
         }
 
-        let output_dims = output.shape().get_dims();
+        let output_dims = output.shape().dims();
         let spatial_rank = output.num_dims() - FIRST_SPATIAL_DIM;
         let params = self.normalize_params(spatial_rank)?;
         let auto_pad = self.auto_pad();
@@ -296,7 +296,7 @@ pub fn create_maxpool_op<T: HasShape>(
         );
     }
 
-    let dims = tensor.shape().get_dims();
+    let dims = tensor.shape().dims();
     let mut kernel_shape = Vec::with_capacity(dims.len() - FIRST_SPATIAL_DIM);
     let mut pads_begin = Vec::with_capacity(dims.len() - FIRST_SPATIAL_DIM);
     let mut pads_end = Vec::with_capacity(dims.len() - FIRST_SPATIAL_DIM);
@@ -445,7 +445,7 @@ fn valid_output_dim(
 fn choose_partition_dims<T: HasShape>(output: &T, allow_spatial: bool) -> Vec<usize> {
     output
         .shape()
-        .get_dims()
+        .dims()
         .iter()
         .enumerate()
         .filter_map(|(dim, size)| {
@@ -598,8 +598,8 @@ fn maxpool_comparisons<T: HasShape>(
     let (input, output, _) = validate_input_outputs(op, inputs, outputs)?;
     let (_, params) = op.output_shape_and_resolved_params(input)?;
 
-    let input_spatial_dims = &input.shape().get_dims()[FIRST_SPATIAL_DIM..];
-    let output_spatial_dims = &output.shape().get_dims()[FIRST_SPATIAL_DIM..];
+    let input_spatial_dims = &input.shape().dims()[FIRST_SPATIAL_DIM..];
+    let output_spatial_dims = &output.shape().dims()[FIRST_SPATIAL_DIM..];
     let num_spatial_outputs = output_spatial_dims.iter().product::<usize>();
 
     let comparisons_per_batch_channel = (0..num_spatial_outputs)
@@ -619,8 +619,8 @@ fn input_partition_for_output_partition(
     partitions: &[DimPartition],
     params: &PoolParams,
 ) -> Result<TensorView, SimError> {
-    let mut input_shape = input_view.shape().get_dims().clone();
-    let mut input_offsets = input_view.offsets().get_dims().clone();
+    let mut input_shape = input_view.shape().dims().to_vec();
+    let mut input_offsets = input_view.offsets().to_vec();
 
     for partition in partitions {
         if input_shape[partition.dim] <= 1 {
@@ -631,7 +631,7 @@ fn input_partition_for_output_partition(
             input_offsets[partition.dim] = input_offsets[partition.dim]
                 .checked_add(partition.offset)
                 .ok_or_else(|| SimError(format!("{NAME}: input partition offset overflows")))?;
-            input_shape[partition.dim] = partition.len;
+            input_shape[partition.dim] = partition.num_elements;
             continue;
         }
 
@@ -640,7 +640,7 @@ fn input_partition_for_output_partition(
         let first_output = partition.offset;
         let last_output = partition
             .offset
-            .checked_add(partition.len)
+            .checked_add(partition.num_elements)
             .and_then(|end| end.checked_sub(1))
             .ok_or_else(|| SimError(format!("{NAME}: output partition extent overflows")))?;
         let raw_start =
@@ -742,7 +742,7 @@ impl Operator for OperatorMaxPool {
         let (_, params) = self.output_shape_and_resolved_params(input_view)?;
         let allow_spatial = self.can_partition_spatial(&params);
         let partition_dims = choose_partition_dims(output_view, allow_spatial);
-        let output_view_dims = output_view.shape().get_dims();
+        let output_view_dims = output_view.shape().dims();
         let partition_specs =
             partition_across_dimensions(output_view_dims, &partition_dims, num_partitions);
         let output_rank = output_view.num_dims();
@@ -883,24 +883,12 @@ mod tests {
             let output = partition.outputs[0].as_ref().unwrap();
             let indices = partition.outputs[1].as_ref().unwrap();
 
-            assert_eq!(
-                input.offsets().get_dims().as_slice(),
-                expected_partition.0.0
-            );
-            assert_eq!(input.shape().get_dims().as_slice(), expected_partition.0.1);
-            assert_eq!(
-                output.offsets().get_dims().as_slice(),
-                expected_partition.1.0
-            );
-            assert_eq!(output.shape().get_dims().as_slice(), expected_partition.1.1);
-            assert_eq!(
-                indices.offsets().get_dims().as_slice(),
-                expected_partition.2.0
-            );
-            assert_eq!(
-                indices.shape().get_dims().as_slice(),
-                expected_partition.2.1
-            );
+            assert_eq!(input.offsets(), expected_partition.0.0);
+            assert_eq!(input.shape().dims(), expected_partition.0.1);
+            assert_eq!(output.offsets(), expected_partition.1.0);
+            assert_eq!(output.shape().dims(), expected_partition.1.1);
+            assert_eq!(indices.offsets(), expected_partition.2.0);
+            assert_eq!(indices.shape().dims(), expected_partition.2.1);
         }
     }
 
