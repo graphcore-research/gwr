@@ -3,14 +3,15 @@
 use std::rc::Rc;
 
 use gwr_engine::types::SimError;
+use rand::RngExt;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 
-use crate::processing_element::operators::add::OperatorAdd;
-use crate::processing_element::operators::custom::OperatorCustom;
-use crate::processing_element::operators::gemm::OperatorGemm;
-use crate::processing_element::operators::maxpool::OperatorMaxPool;
-use crate::processing_element::operators::{Operator, TensorPartition, TensorView};
+use crate::processing_element::operators::{
+    ExpansionDirection, HasShape, Operator, OperatorAdd, OperatorCustom, OperatorGemm,
+    OperatorMaxPool, Shape, Tensor, TensorPartition, TensorView, create_maxpool_op, gemm_rhs_shape,
+    maybe_add_indices_output, maybe_add_input_c, partition_tensors,
+};
 use crate::processing_element::{ComputeCapabilities, MachineOpCounts};
 
 #[derive(Debug, Clone)]
@@ -80,33 +81,16 @@ impl ComputeOp {
         input_views: &[Option<TensorView>],
         output_views: &[Option<TensorView>],
     ) -> Result<usize, SimError> {
-        match self {
-            ComputeOp::Add => {
-                OperatorAdd {}.compute_delay_ticks(compute_capabilities, input_views, output_views)
-            }
-            ComputeOp::Gemm => {
-                OperatorGemm {}.compute_delay_ticks(compute_capabilities, input_views, output_views)
-            }
-            ComputeOp::MaxPool(operator) => {
-                operator.compute_delay_ticks(compute_capabilities, input_views, output_views)
-            }
-            ComputeOp::Custom(operator) => {
-                operator.compute_delay_ticks(compute_capabilities, input_views, output_views)
-            }
-        }
+        self.operator()
+            .compute_delay_ticks(compute_capabilities, input_views, output_views)
     }
 
-    pub fn compute_flops(
+    pub fn validate(
         &self,
         input_views: &[Option<TensorView>],
         output_views: &[Option<TensorView>],
-    ) -> Result<usize, SimError> {
-        match self {
-            ComputeOp::Add => OperatorAdd {}.compute_flops(input_views, output_views),
-            ComputeOp::Gemm => OperatorGemm {}.compute_flops(input_views, output_views),
-            ComputeOp::MaxPool(operator) => operator.compute_flops(input_views, output_views),
-            ComputeOp::Custom(operator) => operator.compute_flops(input_views, output_views),
-        }
+    ) -> Result<(), SimError> {
+        self.operator().validate(input_views, output_views)
     }
 
     pub fn compute_machine_ops(
@@ -114,12 +98,8 @@ impl ComputeOp {
         input_views: &[Option<TensorView>],
         output_views: &[Option<TensorView>],
     ) -> Result<MachineOpCounts, SimError> {
-        match self {
-            ComputeOp::Add => OperatorAdd {}.compute_machine_ops(input_views, output_views),
-            ComputeOp::Gemm => OperatorGemm {}.compute_machine_ops(input_views, output_views),
-            ComputeOp::MaxPool(operator) => operator.compute_machine_ops(input_views, output_views),
-            ComputeOp::Custom(operator) => operator.compute_machine_ops(input_views, output_views),
-        }
+        self.operator()
+            .compute_machine_ops(input_views, output_views)
     }
 
     pub fn create_partitions(
@@ -128,19 +108,106 @@ impl ComputeOp {
         output_views: &[Option<TensorView>],
         num_partitions: usize,
     ) -> Result<Vec<TensorPartition>, SimError> {
+        self.operator()
+            .partition_views(input_views, output_views, num_partitions)
+    }
+
+    pub fn create_tensor_partitions(
+        &self,
+        inputs: &[Option<Tensor>],
+        outputs: &[Option<Tensor>],
+        num_partitions: usize,
+    ) -> Result<Vec<TensorPartition>, SimError> {
+        partition_tensors(self.operator(), inputs, outputs, num_partitions)
+    }
+
+    pub fn create_inputs(
+        &self,
+        outputs: &[Option<Tensor>],
+        expand_ratio: f64,
+        rng: &mut impl RngExt,
+    ) -> Result<Vec<Option<Tensor>>, SimError> {
         match self {
-            ComputeOp::Add => {
-                OperatorAdd {}.partition_views(input_views, output_views, num_partitions)
-            }
-            ComputeOp::Gemm => {
-                OperatorGemm {}.partition_views(input_views, output_views, num_partitions)
-            }
-            ComputeOp::MaxPool(operator) => {
-                operator.partition_views(input_views, output_views, num_partitions)
-            }
-            ComputeOp::Custom(operator) => {
-                operator.partition_views(input_views, output_views, num_partitions)
-            }
+            Self::Add => OperatorAdd::create_inputs(outputs, expand_ratio, rng),
+            Self::Gemm => OperatorGemm::create_inputs(outputs, expand_ratio, rng),
+            Self::MaxPool(operator) => operator.create_inputs(outputs, expand_ratio, rng),
+            Self::Custom(_) => Err(SimError(
+                "Custom operators cannot generate tensors".to_string(),
+            )),
+        }
+    }
+
+    pub fn create_outputs(
+        &self,
+        inputs: &[Option<Tensor>],
+        expand_ratio: f64,
+        rng: &mut impl RngExt,
+    ) -> Result<Vec<Option<Tensor>>, SimError> {
+        match self {
+            Self::Add => OperatorAdd::create_outputs(inputs, expand_ratio, rng),
+            Self::Gemm => OperatorGemm::create_outputs(inputs, expand_ratio, rng),
+            Self::MaxPool(operator) => operator.create_outputs(inputs, expand_ratio, rng),
+            Self::Custom(_) => Err(SimError(
+                "Custom operators cannot generate tensors".to_string(),
+            )),
+        }
+    }
+
+    pub fn configured_for_tensor<T: HasShape>(
+        &self,
+        tensor: &T,
+        direction: ExpansionDirection,
+        expand_ratio: f64,
+    ) -> Result<Self, SimError> {
+        match self {
+            Self::Add => Ok(Self::Add),
+            Self::Gemm => Ok(Self::Gemm),
+            Self::MaxPool(_) => Ok(Self::MaxPool(create_maxpool_op(
+                tensor,
+                direction,
+                expand_ratio,
+            )?)),
+            Self::Custom(_) => Err(SimError("Custom operators cannot be generated".to_string())),
+        }
+    }
+
+    pub fn add_optional_inputs(
+        &self,
+        inputs: &mut Vec<Option<Tensor>>,
+        expand_ratio: f64,
+        rng: &mut impl RngExt,
+    ) -> Result<bool, SimError> {
+        match self {
+            Self::Gemm => maybe_add_input_c(inputs, expand_ratio, rng),
+            _ => Ok(false),
+        }
+    }
+
+    pub fn add_optional_outputs(
+        &self,
+        outputs: &mut Vec<Option<Tensor>>,
+        expand_ratio: f64,
+        rng: &mut impl RngExt,
+    ) -> Result<bool, SimError> {
+        match self {
+            Self::MaxPool(_) => maybe_add_indices_output(outputs, expand_ratio, rng),
+            _ => Ok(false),
+        }
+    }
+
+    pub fn gemm_rhs_shape<T: HasShape>(input: &T) -> Result<Shape, SimError> {
+        gemm_rhs_shape(input)
+    }
+
+    fn operator(&self) -> &dyn Operator {
+        static ADD: OperatorAdd = OperatorAdd {};
+        static GEMM: OperatorGemm = OperatorGemm {};
+
+        match self {
+            Self::Add => &ADD,
+            Self::Gemm => &GEMM,
+            Self::MaxPool(operator) => operator,
+            Self::Custom(operator) => operator,
         }
     }
 }

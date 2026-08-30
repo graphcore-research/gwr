@@ -128,7 +128,6 @@ fn num_add_flops<T: HasShape>(
 
 impl OperatorAdd {
     pub fn create_outputs(
-        &self,
         inputs: &[Option<Tensor>],
         _expand_ratio: f64,
         _rng: &mut impl RngExt,
@@ -150,7 +149,6 @@ impl OperatorAdd {
     }
 
     pub fn create_inputs(
-        &self,
         outputs: &[Option<Tensor>],
         expand_ratio: f64,
         rng: &mut impl RngExt,
@@ -180,7 +178,7 @@ impl OperatorAdd {
 }
 
 impl Operator for OperatorAdd {
-    fn validate_tensors(&self, inputs: &[Option<Tensor>], outputs: &[Option<Tensor>]) -> SimResult {
+    fn validate(&self, inputs: &[Option<TensorView>], outputs: &[Option<TensorView>]) -> SimResult {
         validate_input_outputs(inputs, outputs)?;
         Ok(())
     }
@@ -316,11 +314,10 @@ mod tests {
 
     #[test]
     fn create_outputs_broadcasts_same_rank_inputs() {
-        let op = OperatorAdd {};
         let inputs = vec![tensor(&[2, 3, 4]), tensor(&[1, 3, 1])];
         let mut rng = rand::rng();
 
-        let outputs = op.create_outputs(&inputs, 1.0, &mut rng).unwrap();
+        let outputs = OperatorAdd::create_outputs(&inputs, 1.0, &mut rng).unwrap();
 
         assert_eq!(outputs.len(), 1);
         assert_eq!(outputs[0].as_ref().unwrap().shape, test_shape(&[2, 3, 4]));
@@ -328,11 +325,10 @@ mod tests {
 
     #[test]
     fn create_outputs_broadcasts_different_rank_inputs() {
-        let op = OperatorAdd {};
         let inputs = vec![tensor(&[3, 4]), tensor(&[2, 1, 4])];
         let mut rng = rand::rng();
 
-        let outputs = op.create_outputs(&inputs, 1.0, &mut rng).unwrap();
+        let outputs = OperatorAdd::create_outputs(&inputs, 1.0, &mut rng).unwrap();
 
         assert_eq!(outputs.len(), 1);
         assert_eq!(outputs[0].as_ref().unwrap().shape, test_shape(&[2, 3, 4]));
@@ -340,11 +336,10 @@ mod tests {
 
     #[test]
     fn create_outputs_rejects_non_broadcastable_inputs() {
-        let op = OperatorAdd {};
         let inputs = vec![tensor(&[2, 3]), tensor(&[4, 3])];
         let mut rng = rand::rng();
 
-        let err = op.create_outputs(&inputs, 1.0, &mut rng).unwrap_err();
+        let err = OperatorAdd::create_outputs(&inputs, 1.0, &mut rng).unwrap_err();
 
         assert!(format!("{err}").contains("cannot broadcast shapes"));
     }
@@ -377,7 +372,7 @@ mod tests {
         for shrink_input_a in [false, true] {
             let mut rng = FixedBoolRng::with_bool_values([shrink_input_a]);
 
-            let inputs = op.create_inputs(&outputs, 1.0, &mut rng).unwrap();
+            let inputs = OperatorAdd::create_inputs(&outputs, 1.0, &mut rng).unwrap();
 
             assert_eq!(inputs.len(), 2);
             assert_eq!(inputs[0].as_ref().unwrap().shape, test_shape(&[2, 3, 4]));
@@ -394,7 +389,7 @@ mod tests {
         for shrink_input_a in [false, true] {
             let mut rng = FixedBoolRng::with_bool_values([shrink_input_a]);
 
-            let inputs = op.create_inputs(&outputs, 0.0, &mut rng).unwrap();
+            let inputs = OperatorAdd::create_inputs(&outputs, 0.0, &mut rng).unwrap();
 
             assert_eq!(inputs.len(), 2);
             op.validate_tensors(&inputs, &outputs).unwrap();
@@ -472,11 +467,12 @@ mod tests {
         let operator = OperatorAdd {};
         assert_eq!(
             operator
-                .compute_flops(
+                .compute_machine_ops(
                     &[tensor_view(&[2, 3, 4]), tensor_view(&[1, 3, 1])],
                     &[tensor_view(&[2, 3, 4])],
                 )
-                .unwrap(),
+                .unwrap()
+                .total(),
             24
         );
     }

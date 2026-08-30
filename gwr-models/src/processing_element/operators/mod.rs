@@ -8,19 +8,20 @@ use gwr_engine::types::{SimError, SimResult};
 
 use crate::processing_element::{ComputeCapabilities, MachineOpCounts};
 
-pub mod add;
-pub mod custom;
+mod add;
+mod custom;
 pub mod dtype;
-pub mod gemm;
-pub mod maxpool;
+mod gemm;
+mod maxpool;
 mod partition;
 mod tensor;
 mod tensor_view;
 
-pub use add::OperatorAdd;
+pub(crate) use add::OperatorAdd;
 pub use custom::OperatorCustom;
-pub use gemm::{OperatorGemm, gemm_rhs_shape, maybe_add_input_c};
-pub use maxpool::{OperatorMaxPool, create_maxpool_op, maybe_add_indices_output};
+pub(crate) use gemm::{OperatorGemm, gemm_rhs_shape, maybe_add_input_c};
+pub use maxpool::{AutoPad, OperatorMaxPool};
+pub(crate) use maxpool::{create_maxpool_op, maybe_add_indices_output};
 pub(crate) use partition::partition_across_dimensions;
 pub use partition::{DimPartition, TensorPartition};
 pub use tensor::{HasShape, Shape, Tensor, shape_string};
@@ -32,8 +33,13 @@ pub enum ExpansionDirection {
     Forward,
 }
 
-pub trait Operator {
-    fn validate_tensors(&self, inputs: &[Option<Tensor>], outputs: &[Option<Tensor>]) -> SimResult;
+pub(crate) trait Operator {
+    fn validate(&self, inputs: &[Option<TensorView>], outputs: &[Option<TensorView>]) -> SimResult;
+
+    #[cfg(test)]
+    fn validate_tensors(&self, inputs: &[Option<Tensor>], outputs: &[Option<Tensor>]) -> SimResult {
+        self.validate(&full_views(inputs), &full_views(outputs))
+    }
 
     fn compute_delay_ticks(
         &self,
@@ -47,14 +53,6 @@ pub trait Operator {
         inputs: &[Option<TensorView>],
         outputs: &[Option<TensorView>],
     ) -> Result<MachineOpCounts, SimError>;
-
-    fn compute_flops(
-        &self,
-        inputs: &[Option<TensorView>],
-        outputs: &[Option<TensorView>],
-    ) -> Result<usize, SimError> {
-        Ok(self.compute_machine_ops(inputs, outputs)?.total())
-    }
 
     fn partition_views(
         &self,
@@ -71,8 +69,8 @@ pub(crate) fn full_views(tensors: &[Option<Tensor>]) -> Vec<Option<TensorView>> 
         .collect()
 }
 
-pub fn partition_tensors<T: Operator>(
-    operator: &T,
+pub(crate) fn partition_tensors(
+    operator: &dyn Operator,
     inputs: &[Option<Tensor>],
     outputs: &[Option<Tensor>],
     num_partitions: usize,
