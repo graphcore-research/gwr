@@ -75,41 +75,54 @@ where
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Shape(Vec<usize>);
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Shape {
+    dims: Vec<usize>,
+}
 
 impl Display for Shape {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", shape_string(&self.0))
+        write!(f, "{}", shape_string(&self.dims))
     }
 }
 
 impl Shape {
-    #[must_use]
-    pub fn new(dims: &[usize]) -> Self {
-        Self(dims.to_vec())
+    pub fn new(dims: &[usize]) -> Result<Self, SimError> {
+        if dims.contains(&0) {
+            return Err(SimError(format!("Shape {dims:?} has zero elements")));
+        }
+
+        dims.iter().try_fold(1usize, |num_elements, dim| {
+            num_elements
+                .checked_mul(*dim)
+                .ok_or_else(|| SimError(format!("Shape {dims:?} element count overflows")))
+        })?;
+
+        Ok(Self {
+            dims: dims.to_vec(),
+        })
     }
 
     #[must_use]
     pub fn get_dims(&self) -> &Vec<usize> {
-        &self.0
+        &self.dims
     }
 }
 
 impl HasShape for Shape {
     fn num_dims(&self) -> usize {
-        self.0.len()
+        self.dims.len()
     }
 
     fn num_elements(&self) -> usize {
-        self.0.iter().product()
+        self.dims.iter().product()
     }
 
     fn get_dim(&self, total_dims: usize, i: usize) -> usize {
         let dim_index = total_dims - i;
         let rank = self.num_dims();
         if dim_index <= rank {
-            self.0[rank - dim_index]
+            self.dims[rank - dim_index]
         } else {
             1
         }
@@ -136,18 +149,25 @@ pub struct Tensor {
     dtype: DataType,
     shape: Shape,
     addr: u64,
+    num_bytes: usize,
 }
 
 impl Tensor {
     /// Create a tensor
-    #[must_use]
-    pub fn new(dims: &[usize], dtype: &DataType, addr: u64) -> Self {
-        Self {
+    pub fn new(dims: &[usize], dtype: &DataType, addr: u64) -> Result<Self, SimError> {
+        Self::from_shape(Shape::new(dims)?, dtype, addr)
+    }
+
+    /// Create a tensor from an already validated shape.
+    pub fn from_shape(shape: Shape, dtype: &DataType, addr: u64) -> Result<Self, SimError> {
+        let num_bytes = checked_num_bytes(shape.num_elements(), dtype, "Tensor")?;
+        Ok(Self {
             id: None,
-            shape: Shape(dims.to_vec()),
+            shape,
             dtype: *dtype,
             addr,
-        }
+            num_bytes,
+        })
     }
 
     #[must_use]
@@ -170,7 +190,7 @@ impl Tensor {
     /// This currently assumes it is optimally packed into memory bytes
     #[must_use]
     pub fn num_bytes(&self) -> usize {
-        (self.num_elements() * self.dtype.num_bits()).div_ceil(8)
+        self.num_bytes
     }
 
     #[must_use]
@@ -212,28 +232,64 @@ pub struct TensorView {
     tensor: Tensor,
     shape: Shape,
     offsets: Offsets,
+    num_bytes: usize,
 }
 
 impl TensorView {
     /// Create a view into the given tensor
-    #[must_use]
-    pub fn new(tensor: Tensor, shape: &[usize], offsets: &[usize]) -> Self {
-        Self {
-            tensor,
-            shape: Shape(shape.to_vec()),
-            offsets: Offsets(offsets.to_vec()),
+    pub fn new(tensor: Tensor, shape: &[usize], offsets: &[usize]) -> Result<Self, SimError> {
+        let shape = Shape::new(shape)?;
+        let tensor_dims = tensor.shape().get_dims();
+        if shape.num_dims() != tensor_dims.len() {
+            return sim_error!(
+                "Tensor view shape rank {} does not match tensor rank {}",
+                shape.num_dims(),
+                tensor_dims.len()
+            );
         }
+        if offsets.len() != tensor_dims.len() {
+            return sim_error!(
+                "Tensor view offset rank {} does not match tensor rank {}",
+                offsets.len(),
+                tensor_dims.len()
+            );
+        }
+
+        for ((offset, extent), tensor_extent) in
+            offsets.iter().zip(shape.get_dims()).zip(tensor_dims)
+        {
+            let end = offset.checked_add(*extent).ok_or_else(|| {
+                SimError(format!(
+                    "Tensor view offset {offset} plus extent {extent} overflows"
+                ))
+            })?;
+            if end > *tensor_extent {
+                return sim_error!(
+                    "Tensor view range {offset}..{end} is out of range for dimension of size {tensor_extent}"
+                );
+            }
+        }
+
+        let num_bytes = checked_num_bytes(shape.num_elements(), tensor.dtype(), "Tensor view")?;
+        Ok(Self {
+            tensor,
+            shape,
+            offsets: Offsets(offsets.to_vec()),
+            num_bytes,
+        })
     }
 
     /// Create a view which is the full tensor
     #[must_use]
     pub fn new_full(tensor: Tensor) -> Self {
-        let shape = Shape(tensor.shape().get_dims().to_vec());
+        let shape = tensor.shape().clone();
         let offsets = Offsets(vec![0; tensor.num_dims()]);
+        let num_bytes = tensor.num_bytes();
         Self {
             tensor,
             shape,
             offsets,
+            num_bytes,
         }
     }
 
@@ -252,14 +308,13 @@ impl TensorView {
         self.shape == *self.tensor.shape() && self.offsets.0.iter().all(|offset| *offset == 0)
     }
 
-    #[must_use]
     pub fn from_output_partition(
         tensor: Tensor,
         output_rank: usize,
         partition_dim: usize,
         partition_offset: usize,
         partition_len: usize,
-    ) -> Self {
+    ) -> Result<Self, SimError> {
         Self::from_output_partitions(
             tensor,
             output_rank,
@@ -271,12 +326,11 @@ impl TensorView {
         )
     }
 
-    #[must_use]
     pub fn from_output_partitions(
         tensor: Tensor,
         output_rank: usize,
         partitions: &[DimPartition],
-    ) -> Self {
+    ) -> Result<Self, SimError> {
         let base_view = Self::new_full(tensor);
         Self::from_output_partitions_on_view(&base_view, output_rank, partitions)
     }
@@ -284,12 +338,11 @@ impl TensorView {
     /// Create a view by applying output partitions to an existing base view.
     ///
     /// This preserves the base view's offsets and shape constraints.
-    #[must_use]
     pub fn from_output_partitions_on_view(
         base_view: &TensorView,
         output_rank: usize,
         partitions: &[DimPartition],
-    ) -> Self {
+    ) -> Result<Self, SimError> {
         let view_rank = base_view.num_dims();
         let rank_pad = output_rank.saturating_sub(view_rank);
         let mut shape = base_view.shape().get_dims().clone();
@@ -302,7 +355,24 @@ impl TensorView {
 
             let view_dim = partition.dim - rank_pad;
             if view_dim < view_rank && shape[view_dim] > 1 {
-                offsets[view_dim] += partition.offset;
+                let partition_end =
+                    partition.offset.checked_add(partition.len).ok_or_else(|| {
+                        SimError("Tensor view partition extent overflows".to_string())
+                    })?;
+                if partition_end > shape[view_dim] {
+                    return sim_error!(
+                        "Tensor view partition range {}..{} is out of range for dimension of size {}",
+                        partition.offset,
+                        partition_end,
+                        shape[view_dim]
+                    );
+                }
+                offsets[view_dim] =
+                    offsets[view_dim]
+                        .checked_add(partition.offset)
+                        .ok_or_else(|| {
+                            SimError("Tensor view partition offset overflows".to_string())
+                        })?;
                 shape[view_dim] = partition.len;
             }
         }
@@ -312,15 +382,12 @@ impl TensorView {
 
     #[must_use]
     pub fn num_bytes(&self) -> usize {
-        let dtype = self.tensor.dtype();
-        let num_bits = dtype.num_bits();
-        let num_elements = self.num_elements();
-        (num_bits * num_elements).div_ceil(8)
+        self.num_bytes
     }
 
     /// Return the offset of the first element (in number of elements)
     pub fn element_offset(&self) -> Result<usize, SimError> {
-        let shape = &self.tensor.shape.0;
+        let shape = &self.tensor.shape.dims;
         let offsets = &self.offsets.0;
         if shape.len() != offsets.len() {
             return sim_error!(
@@ -341,6 +408,25 @@ impl TensorView {
         }
         Ok(total)
     }
+}
+
+fn checked_num_bytes(
+    num_elements: usize,
+    dtype: &DataType,
+    description: &str,
+) -> Result<usize, SimError> {
+    let bits_per_element = dtype.num_bits();
+    let complete_groups = num_elements / 8;
+    let remaining_elements = num_elements % 8;
+
+    complete_groups
+        .checked_mul(bits_per_element)
+        .and_then(|complete_bytes| {
+            remaining_elements
+                .checked_mul(bits_per_element)
+                .and_then(|remaining_bits| complete_bytes.checked_add(remaining_bits.div_ceil(8)))
+        })
+        .ok_or_else(|| SimError(format!("{description} storage size overflows")))
 }
 
 impl HasShape for TensorView {
@@ -553,6 +639,99 @@ pub fn apply_dim_partitions(
     }
 
     (shape, offsets)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shape_rejects_element_count_overflow() {
+        assert!(Shape::new(&[usize::MAX, 2]).is_err());
+    }
+
+    #[test]
+    fn tensor_rejects_storage_size_overflow() {
+        assert!(Tensor::new(&[usize::MAX / 2], &DataType::Int64, 0).is_err());
+    }
+
+    #[test]
+    fn tensor_accepts_representable_byte_count_without_bit_overflow() {
+        let int8 = Tensor::new(&[usize::MAX], &DataType::Int8, 0).unwrap();
+        assert_eq!(int8.num_bytes(), usize::MAX);
+
+        let int4 = Tensor::new(&[usize::MAX], &DataType::Int4, 0).unwrap();
+        assert_eq!(int4.num_bytes(), usize::MAX.div_ceil(2));
+    }
+
+    #[test]
+    fn scalar_shapes_are_preserved() {
+        let scalar = Shape::new(&[]).unwrap();
+        assert_eq!(scalar.num_elements(), 1);
+
+        let scalar_tensor = Tensor::new(&[], &DataType::Fp32, 0).unwrap();
+        assert_eq!(scalar_tensor.num_elements(), 1);
+        assert_eq!(scalar_tensor.num_bytes(), 4);
+    }
+
+    #[test]
+    fn zero_element_shapes_are_rejected() {
+        assert!(Shape::new(&[usize::MAX, 2, 0]).is_err());
+        assert!(Tensor::new(&[usize::MAX, 2, 0], &DataType::Fp32, 0).is_err());
+    }
+
+    #[test]
+    fn tensor_view_rejects_mismatched_ranks() {
+        let tensor = Tensor::new(&[4, 4], &DataType::Fp32, 0).unwrap();
+
+        assert!(TensorView::new(tensor.clone(), &[1], &[0, 0]).is_err());
+        assert!(TensorView::new(tensor, &[1, 1], &[0]).is_err());
+    }
+
+    #[test]
+    fn tensor_view_rejects_overflowing_and_out_of_range_extents() {
+        let tensor = Tensor::new(&[4], &DataType::Fp32, 0).unwrap();
+
+        assert!(TensorView::new(tensor.clone(), &[1], &[usize::MAX]).is_err());
+        assert!(TensorView::new(tensor, &[3], &[2]).is_err());
+    }
+
+    #[test]
+    fn tensor_view_rejects_zero_extent() {
+        let tensor = Tensor::new(&[4], &DataType::Fp32, 0).unwrap();
+        assert!(TensorView::new(tensor, &[0], &[4]).is_err());
+    }
+
+    #[test]
+    fn tensor_view_partition_rejects_overflow_and_base_view_escape() {
+        let tensor = Tensor::new(&[8], &DataType::Fp32, 0).unwrap();
+        let view = TensorView::new(tensor, &[4], &[2]).unwrap();
+
+        assert!(
+            TensorView::from_output_partitions_on_view(
+                &view,
+                1,
+                &[DimPartition {
+                    dim: 0,
+                    offset: usize::MAX,
+                    len: 1,
+                }],
+            )
+            .is_err()
+        );
+        assert!(
+            TensorView::from_output_partitions_on_view(
+                &view,
+                1,
+                &[DimPartition {
+                    dim: 0,
+                    offset: 4,
+                    len: 1,
+                }],
+            )
+            .is_err()
+        );
+    }
 }
 
 pub mod add;

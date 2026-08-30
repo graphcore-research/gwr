@@ -14,8 +14,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use super::{Operator, Shape, Tensor, TensorPartition};
 use crate::processing_element::operators::dtype::DataType;
 use crate::processing_element::operators::{
-    DimPartition, ExpansionDirection, HasShape, TensorView, apply_dim_partitions,
-    partition_across_dimensions,
+    DimPartition, ExpansionDirection, HasShape, TensorView, partition_across_dimensions,
 };
 use crate::processing_element::{ComputeCapabilities, MachineOp, MachineOpCounts};
 
@@ -238,7 +237,7 @@ impl OperatorMaxPool {
         params.pads_begin = resolved_pads_begin;
         params.pads_end = resolved_pads_end;
 
-        Ok((Shape(output_dims), params))
+        Ok((Shape::new(&output_dims)?, params))
     }
 
     fn infer_input_shape<T: HasShape>(&self, output: &T) -> Result<Shape, SimError> {
@@ -269,7 +268,7 @@ impl OperatorMaxPool {
             input_dims.push(input_dim);
         }
 
-        Ok(Shape(input_dims))
+        Shape::new(&input_dims)
     }
 
     fn can_partition_spatial(&self, params: &PoolParams) -> bool {
@@ -552,12 +551,11 @@ pub fn maybe_add_indices_output(
         .first()
         .and_then(Option::as_ref)
         .ok_or_else(|| SimError(format!("{NAME}: missing output 0")))?;
-    outputs.push(Some(Tensor {
-        id: None,
-        shape: output.shape().clone(),
-        dtype: DataType::Int64,
-        addr: 0,
-    }));
+    outputs.push(Some(Tensor::from_shape(
+        output.shape().clone(),
+        &DataType::Int64,
+        0,
+    )?));
     Ok(true)
 }
 
@@ -630,7 +628,9 @@ fn input_partition_for_output_partition(
         }
 
         if partition.dim < FIRST_SPATIAL_DIM {
-            input_offsets[partition.dim] += partition.offset;
+            input_offsets[partition.dim] = input_offsets[partition.dim]
+                .checked_add(partition.offset)
+                .ok_or_else(|| SimError(format!("{NAME}: input partition offset overflows")))?;
             input_shape[partition.dim] = partition.len;
             continue;
         }
@@ -638,7 +638,11 @@ fn input_partition_for_output_partition(
         let axis = partition.dim - FIRST_SPATIAL_DIM;
         let effective_kernel = effective_kernel(params.kernel_shape[axis], params.dilations[axis]);
         let first_output = partition.offset;
-        let last_output = partition.offset + partition.len - 1;
+        let last_output = partition
+            .offset
+            .checked_add(partition.len)
+            .and_then(|end| end.checked_sub(1))
+            .ok_or_else(|| SimError(format!("{NAME}: output partition extent overflows")))?;
         let raw_start =
             first_output as i128 * params.strides[axis] as i128 - params.pads_begin[axis] as i128;
         let raw_end = last_output as i128 * params.strides[axis] as i128
@@ -651,15 +655,13 @@ fn input_partition_for_output_partition(
             return sim_error!("{NAME}: partition produced an empty input view");
         }
 
-        input_offsets[partition.dim] += start;
+        input_offsets[partition.dim] = input_offsets[partition.dim]
+            .checked_add(start)
+            .ok_or_else(|| SimError(format!("{NAME}: input partition offset overflows")))?;
         input_shape[partition.dim] = end - start;
     }
 
-    Ok(TensorView::new(
-        input_view.tensor().clone(),
-        &input_shape,
-        &input_offsets,
-    ))
+    TensorView::new(input_view.tensor().clone(), &input_shape, &input_offsets)
 }
 
 impl OperatorMaxPool {
@@ -672,12 +674,7 @@ impl OperatorMaxPool {
         let input = validate_inputs(inputs)?;
         let (output_shape, _) = self.output_shape_and_resolved_params(input)?;
 
-        let mut outputs = vec![Some(Tensor {
-            id: None,
-            shape: output_shape,
-            dtype: input.dtype,
-            addr: 0,
-        })];
+        let mut outputs = vec![Some(Tensor::from_shape(output_shape, &input.dtype, 0)?)];
         maybe_add_indices_output(&mut outputs, expand_ratio, rng)?;
         Ok(outputs)
     }
@@ -700,12 +697,11 @@ impl OperatorMaxPool {
         }
 
         let input_shape = self.infer_input_shape(output)?;
-        Ok(vec![Some(Tensor {
-            id: None,
-            shape: input_shape,
-            dtype: output.dtype,
-            addr: 0,
-        })])
+        Ok(vec![Some(Tensor::from_shape(
+            input_shape,
+            &output.dtype,
+            0,
+        )?)])
     }
 }
 
@@ -749,27 +745,22 @@ impl Operator for OperatorMaxPool {
         let output_view_dims = output_view.shape().get_dims();
         let partition_specs =
             partition_across_dimensions(output_view_dims, &partition_dims, num_partitions);
+        let output_rank = output_view.num_dims();
 
         let mut partitions = Vec::with_capacity(partition_specs.len());
         for spec in partition_specs {
-            let (output_shape, partition_offsets) = apply_dim_partitions(output_view_dims, &spec);
-            let output_offsets = output_view
-                .offsets()
-                .get_dims()
-                .iter()
-                .zip(partition_offsets.iter())
-                .map(|(base, offset)| base + offset)
-                .collect::<Vec<_>>();
-
             let input_view = input_partition_for_output_partition(input_view, &spec, &params)?;
             let outputs = output_views
                 .iter()
                 .map(|maybe_output| {
-                    maybe_output.as_ref().map(|view| {
-                        TensorView::new(view.tensor().clone(), &output_shape, &output_offsets)
-                    })
+                    maybe_output
+                        .as_ref()
+                        .map(|view| {
+                            TensorView::from_output_partitions_on_view(view, output_rank, &spec)
+                        })
+                        .transpose()
                 })
-                .collect::<Vec<_>>();
+                .collect::<Result<Vec<_>, SimError>>()?;
 
             partitions.push(TensorPartition {
                 inputs: vec![Some(input_view)],
@@ -788,21 +779,25 @@ mod tests {
     use crate::processing_element::operators::{Operator, Tensor, partition_tensors};
 
     fn tensor(shape: &[usize]) -> Option<Tensor> {
-        Some(Tensor::new(shape, &DataType::Bf16, 0))
+        Some(Tensor::new(shape, &DataType::Bf16, 0).unwrap())
     }
 
     fn indices(shape: &[usize]) -> Option<Tensor> {
-        Some(Tensor::new(shape, &DataType::Int64, 0))
+        Some(Tensor::new(shape, &DataType::Int64, 0).unwrap())
     }
 
     fn tensor_view(shape: &[usize]) -> Option<TensorView> {
-        let tensor = Tensor::new(shape, &DataType::Bf16, 0);
+        let tensor = Tensor::new(shape, &DataType::Bf16, 0).unwrap();
         Some(TensorView::new_full(tensor))
     }
 
     fn indices_view(shape: &[usize]) -> Option<TensorView> {
-        let tensor = Tensor::new(shape, &DataType::Int64, 0);
+        let tensor = Tensor::new(shape, &DataType::Int64, 0).unwrap();
         Some(TensorView::new_full(tensor))
+    }
+
+    fn test_shape(dims: &[usize]) -> Shape {
+        Shape::new(dims).unwrap()
     }
 
     #[test]
@@ -822,13 +817,13 @@ mod tests {
 
         assert_eq!(
             outputs[0].as_ref().unwrap().shape(),
-            &Shape::new(&[1, 1, 3, 3])
+            &test_shape(&[1, 1, 3, 3])
         );
     }
 
     #[test]
     fn generated_forward_op_shrinks_with_larger_kernel_when_expand_ratio_is_below_one() {
-        let input = Tensor::new(&[1, 1, 10, 8], &DataType::Fp32, 0);
+        let input = Tensor::new(&[1, 1, 10, 8], &DataType::Fp32, 0).unwrap();
         let op = create_maxpool_op(&input, ExpansionDirection::Forward, 0.5).unwrap();
 
         assert_eq!(op.kernel_shape, vec![6, 5]);
@@ -838,13 +833,13 @@ mod tests {
         let outputs = op.create_outputs(&[Some(input)], 1.0, &mut rng).unwrap();
         assert_eq!(
             outputs[0].as_ref().unwrap().shape(),
-            &Shape::new(&[1, 1, 5, 4])
+            &test_shape(&[1, 1, 5, 4])
         );
     }
 
     #[test]
     fn generated_forward_op_grows_with_padding_when_expand_ratio_is_above_one() {
-        let input = Tensor::new(&[1, 1, 4, 4], &DataType::Fp32, 0);
+        let input = Tensor::new(&[1, 1, 4, 4], &DataType::Fp32, 0).unwrap();
         let op = create_maxpool_op(&input, ExpansionDirection::Forward, 1.5).unwrap();
 
         assert_eq!(op.kernel_shape, vec![1, 1]);
@@ -854,13 +849,13 @@ mod tests {
         let outputs = op.create_outputs(&[Some(input)], 1.0, &mut rng).unwrap();
         assert_eq!(
             outputs[0].as_ref().unwrap().shape(),
-            &Shape::new(&[1, 1, 6, 6])
+            &test_shape(&[1, 1, 6, 6])
         );
     }
 
     #[test]
     fn generated_backward_op_uses_expand_ratio_for_input_shape() {
-        let output = Tensor::new(&[1, 1, 4, 4], &DataType::Fp32, 0);
+        let output = Tensor::new(&[1, 1, 4, 4], &DataType::Fp32, 0).unwrap();
         let op = create_maxpool_op(&output, ExpansionDirection::Backward, 0.5).unwrap();
 
         assert_eq!(op.kernel_shape, vec![1, 1]);
@@ -870,7 +865,7 @@ mod tests {
         let inputs = op.create_inputs(&[Some(output)], 1.0, &mut rng).unwrap();
         assert_eq!(
             inputs[0].as_ref().unwrap().shape(),
-            &Shape::new(&[1, 1, 2, 2])
+            &test_shape(&[1, 1, 2, 2])
         );
     }
 
@@ -924,12 +919,12 @@ mod tests {
         assert_eq!(outputs.len(), 2);
         assert_eq!(
             outputs[0].as_ref().unwrap().shape(),
-            &Shape::new(&[1, 3, 2, 2])
+            &test_shape(&[1, 3, 2, 2])
         );
         assert_eq!(outputs[0].as_ref().unwrap().dtype(), &DataType::Bf16);
         assert_eq!(
             outputs[1].as_ref().unwrap().shape(),
-            &Shape::new(&[1, 3, 2, 2])
+            &test_shape(&[1, 3, 2, 2])
         );
         assert_eq!(outputs[1].as_ref().unwrap().dtype(), &DataType::Int64);
     }
@@ -949,12 +944,12 @@ mod tests {
         assert_eq!(outputs.len(), 2);
         assert_eq!(
             outputs[0].as_ref().unwrap().shape(),
-            &Shape::new(&[2, 5, 3, 3, 3])
+            &test_shape(&[2, 5, 3, 3, 3])
         );
         assert_eq!(outputs[0].as_ref().unwrap().dtype(), &DataType::Bf16);
         assert_eq!(
             outputs[1].as_ref().unwrap().shape(),
-            &Shape::new(&[2, 5, 3, 3, 3])
+            &test_shape(&[2, 5, 3, 3, 3])
         );
         assert_eq!(outputs[1].as_ref().unwrap().dtype(), &DataType::Int64);
         op.validate_tensors(&[tensor(&[2, 5, 6, 7, 8])], &outputs)
@@ -963,7 +958,7 @@ mod tests {
         let inputs = op.create_inputs(&outputs, 1.0, &mut rng).unwrap();
         assert_eq!(
             inputs[0].as_ref().unwrap().shape(),
-            &Shape::new(&[2, 5, 6, 7, 8])
+            &test_shape(&[2, 5, 6, 7, 8])
         );
     }
 
@@ -982,7 +977,7 @@ mod tests {
         assert_eq!(outputs.len(), 1);
         assert_eq!(
             outputs[0].as_ref().unwrap().shape(),
-            &Shape::new(&[1, 3, 2, 2])
+            &test_shape(&[1, 3, 2, 2])
         );
         assert_eq!(outputs[0].as_ref().unwrap().dtype(), &DataType::Bf16);
     }
@@ -1044,7 +1039,7 @@ mod tests {
 
         assert_eq!(
             outputs[0].as_ref().unwrap().shape(),
-            &Shape::new(&[1, 1, 3, 3])
+            &test_shape(&[1, 1, 3, 3])
         );
     }
 
@@ -1063,7 +1058,7 @@ mod tests {
 
         assert_eq!(
             outputs[0].as_ref().unwrap().shape(),
-            &Shape::new(&[1, 1, 3, 3])
+            &test_shape(&[1, 1, 3, 3])
         );
     }
 

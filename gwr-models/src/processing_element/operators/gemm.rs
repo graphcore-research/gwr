@@ -12,7 +12,7 @@ use rand::RngExt;
 
 use super::{Operator, Tensor, TensorPartition};
 use crate::processing_element::operators::{
-    HasShape, Shape, TensorView, apply_dim_partitions, partition_across_dimensions,
+    HasShape, Shape, TensorView, partition_across_dimensions,
 };
 use crate::processing_element::{ComputeCapabilities, MachineOp, MachineOpCounts};
 
@@ -59,7 +59,7 @@ pub fn gemm_rhs_shape<T: HasShape>(input_a: &T) -> Result<Shape, SimError> {
     let mut rhs_dims = input_a.shape().get_dims().clone();
     rhs_dims[rank - INPUT_B_OFFSET_K] = get_inner_dim(input_a, INPUT_A_OFFSET_K);
     rhs_dims[rank - INPUT_B_OFFSET_N] = get_inner_dim(input_a, INPUT_A_OFFSET_M);
-    Ok(Shape::new(&rhs_dims))
+    Shape::new(&rhs_dims)
 }
 
 /// Choose a value for the K in a (M,K)x(K,N) -> (M,N) Gemm
@@ -101,12 +101,7 @@ fn output_tensor_from_inputs(inputs: &[Option<Tensor>]) -> Result<Tensor, SimErr
         input_b.dtype
     };
 
-    Ok(Tensor {
-        id: None,
-        shape: output_shape,
-        dtype: output_dtype,
-        addr: 0,
-    })
+    Tensor::from_shape(output_shape, &output_dtype, 0)
 }
 
 pub fn maybe_add_input_c(
@@ -154,7 +149,7 @@ fn broadcast_shapes(a: &Shape, b: &Shape) -> Result<Shape, SimError> {
         };
     }
 
-    Ok(Shape(result))
+    Shape::new(&result)
 }
 
 fn validate_inputs<T: HasShape>(inputs: &[Option<T>]) -> Result<(&T, &T), SimError> {
@@ -313,28 +308,21 @@ impl OperatorGemm {
     ) -> Result<Vec<Option<Tensor>>, gwr_engine::types::SimError> {
         let output = validate_outputs(outputs)?;
 
-        let mut input_a_shape = output.shape.clone();
-        let mut input_b_shape = output.shape.clone();
+        let mut input_a_dims = output.shape().get_dims().clone();
+        let mut input_b_dims = output.shape().get_dims().clone();
 
         let k = choose_gemm_k(output, rng, expand_ratio);
 
         let rank = output.num_dims();
-        input_a_shape.0[rank.saturating_sub(INPUT_A_OFFSET_K)] = k;
-        input_b_shape.0[rank.saturating_sub(INPUT_B_OFFSET_K)] = k;
+        input_a_dims[rank.saturating_sub(INPUT_A_OFFSET_K)] = k;
+        input_b_dims[rank.saturating_sub(INPUT_B_OFFSET_K)] = k;
+
+        let input_a_shape = Shape::new(&input_a_dims)?;
+        let input_b_shape = Shape::new(&input_b_dims)?;
 
         let mut inputs = vec![
-            Some(Tensor {
-                id: None,
-                shape: input_a_shape,
-                dtype: output.dtype,
-                addr: 0,
-            }),
-            Some(Tensor {
-                id: None,
-                shape: input_b_shape,
-                dtype: output.dtype,
-                addr: 0,
-            }),
+            Some(Tensor::from_shape(input_a_shape, &output.dtype, 0)?),
+            Some(Tensor::from_shape(input_b_shape, &output.dtype, 0)?),
         ];
 
         maybe_add_input_c(&mut inputs, expand_ratio, rng)?;
@@ -400,16 +388,8 @@ impl Operator for OperatorGemm {
 
         let mut partitions = Vec::with_capacity(partition_specs.len());
         for spec in partition_specs {
-            let (output_shape, partition_offsets) = apply_dim_partitions(output_view_dims, &spec);
-            let output_offsets = output_view
-                .offsets()
-                .get_dims()
-                .iter()
-                .zip(partition_offsets.iter())
-                .map(|(base, offset)| base + offset)
-                .collect::<Vec<_>>();
-            let output_view =
-                TensorView::new(output_view.tensor().clone(), &output_shape, &output_offsets);
+            let partitioned_output =
+                TensorView::from_output_partitions_on_view(output_view, rank, &spec)?;
 
             let a_spec = spec
                 .iter()
@@ -429,20 +409,21 @@ impl Operator for OperatorGemm {
                 .any(|partition| partition.dim != m_dim && partition.dim != n_dim);
 
             let input_a_view = if split_outer || split_m {
-                TensorView::from_output_partitions_on_view(input_a_view, rank, &a_spec)
+                TensorView::from_output_partitions_on_view(input_a_view, rank, &a_spec)?
             } else {
                 input_a_view.clone()
             };
 
             let input_b_view = if split_outer || split_n {
-                TensorView::from_output_partitions_on_view(input_b_view, rank, &b_spec)
+                TensorView::from_output_partitions_on_view(input_b_view, rank, &b_spec)?
             } else {
                 input_b_view.clone()
             };
 
             let input_c_view = input_c_view
                 .as_ref()
-                .map(|view| TensorView::from_output_partitions_on_view(view, rank, &spec));
+                .map(|view| TensorView::from_output_partitions_on_view(view, rank, &spec))
+                .transpose()?;
 
             let mut partition_inputs = vec![Some(input_a_view), Some(input_b_view)];
             if let Some(view) = input_c_view {
@@ -451,7 +432,7 @@ impl Operator for OperatorGemm {
 
             partitions.push(TensorPartition {
                 inputs: partition_inputs,
-                outputs: vec![Some(output_view)],
+                outputs: vec![Some(partitioned_output)],
             });
         }
 
@@ -466,25 +447,29 @@ mod tests {
     use crate::processing_element::operators::{Operator, Shape, Tensor, partition_tensors};
 
     fn tensor(shape: &[usize]) -> Option<Tensor> {
-        Some(Tensor::new(shape, &DataType::Bf16, 0))
+        Some(Tensor::new(shape, &DataType::Bf16, 0).unwrap())
     }
 
     fn tensor_view(shape: &[usize]) -> Option<TensorView> {
-        let tensor = Tensor::new(shape, &DataType::Bf16, 0);
+        let tensor = Tensor::new(shape, &DataType::Bf16, 0).unwrap();
         Some(TensorView::new_full(tensor))
+    }
+
+    fn test_shape(dims: &[usize]) -> Shape {
+        Shape::new(dims).unwrap()
     }
 
     #[test]
     fn test_broadcast_shapes() {
-        let a = Shape(vec![1, 1, 4, 5]);
-        let b = Shape(vec![1, 1, 5, 10]);
+        let a = test_shape(&[1, 1, 4, 5]);
+        let b = test_shape(&[1, 1, 5, 10]);
         let c = broadcast_shapes(&a, &b).unwrap();
-        assert_eq!(c, Shape(vec![1, 1, 4, 10]));
+        assert_eq!(c, test_shape(&[1, 1, 4, 10]));
 
-        let a = Shape(vec![3, 1, 4, 5]);
-        let b = Shape(vec![1, 5, 5, 10]);
+        let a = test_shape(&[3, 1, 4, 5]);
+        let b = test_shape(&[1, 5, 5, 10]);
         let c = broadcast_shapes(&a, &b).unwrap();
-        assert_eq!(c, Shape(vec![3, 5, 4, 10]));
+        assert_eq!(c, test_shape(&[3, 5, 4, 10]));
     }
 
     #[test]
@@ -502,7 +487,7 @@ mod tests {
 
         assert_eq!(
             outputs[0].as_ref().unwrap().shape(),
-            &Shape::new(&[1, 48, 1, 1])
+            &test_shape(&[1, 48, 1, 1])
         );
     }
 
@@ -566,7 +551,7 @@ mod tests {
 
     #[test]
     fn get_inner_dim_uses_one_based_inner_offsets() {
-        let shape = Shape::new(&[7, 11, 13, 17]);
+        let shape = test_shape(&[7, 11, 13, 17]);
 
         assert_eq!(get_inner_dim(&shape, 1), 17);
         assert_eq!(get_inner_dim(&shape, 2), 13);
@@ -576,9 +561,9 @@ mod tests {
 
     #[test]
     fn gemm_named_offsets_map_to_expected_dimensions() {
-        let input_a = Shape::new(&[19, 23, 29, 31]);
-        let input_b = Shape::new(&[19, 23, 31, 37]);
-        let output = Shape::new(&[19, 23, 29, 37]);
+        let input_a = test_shape(&[19, 23, 29, 31]);
+        let input_b = test_shape(&[19, 23, 31, 37]);
+        let output = test_shape(&[19, 23, 29, 37]);
 
         assert_eq!(get_inner_dim(&input_a, INPUT_A_OFFSET_M), 29);
         assert_eq!(get_inner_dim(&input_a, INPUT_A_OFFSET_K), 31);
@@ -590,10 +575,10 @@ mod tests {
 
     #[test]
     fn gemm_rhs_shape_uses_gemm_named_offsets() {
-        let input_a = Shape::new(&[19, 23, 29, 31]);
+        let input_a = test_shape(&[19, 23, 29, 31]);
         let input_b = gemm_rhs_shape(&input_a).unwrap();
 
-        assert_eq!(input_b, Shape::new(&[19, 23, 31, 29]));
+        assert_eq!(input_b, test_shape(&[19, 23, 31, 29]));
 
         OperatorGemm {}
             .validate_tensors(
@@ -605,7 +590,7 @@ mod tests {
 
     #[test]
     fn gemm_rhs_shape_rejects_rank_below_two() {
-        let err = gemm_rhs_shape(&Shape::new(&[31])).unwrap_err();
+        let err = gemm_rhs_shape(&test_shape(&[31])).unwrap_err();
 
         assert!(format!("{err}").contains("input A must be at least 2D"));
     }
@@ -716,7 +701,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(inputs.len(), 3);
-        assert_eq!(inputs[2].as_ref().unwrap().shape(), &Shape::new(&[4, 8]));
+        assert_eq!(inputs[2].as_ref().unwrap().shape(), &test_shape(&[4, 8]));
         operator
             .validate_tensors(&inputs, &[tensor(&[4, 8])])
             .unwrap();
@@ -858,15 +843,15 @@ mod tests {
     #[test]
     fn partitions_preserve_subset_view_offsets() {
         let operator = OperatorGemm {};
-        let input_a = Tensor::new(&[8, 5], &DataType::Bf16, 0);
-        let input_b = Tensor::new(&[5, 9], &DataType::Bf16, 0);
-        let output = Tensor::new(&[8, 9], &DataType::Bf16, 0);
+        let input_a = Tensor::new(&[8, 5], &DataType::Bf16, 0).unwrap();
+        let input_b = Tensor::new(&[5, 9], &DataType::Bf16, 0).unwrap();
+        let output = Tensor::new(&[8, 9], &DataType::Bf16, 0).unwrap();
 
         let input_views = vec![
-            Some(TensorView::new(input_a, &[4, 5], &[2, 0])),
-            Some(TensorView::new(input_b, &[5, 6], &[0, 3])),
+            Some(TensorView::new(input_a, &[4, 5], &[2, 0]).unwrap()),
+            Some(TensorView::new(input_b, &[5, 6], &[0, 3]).unwrap()),
         ];
-        let output_views = vec![Some(TensorView::new(output, &[4, 6], &[2, 3]))];
+        let output_views = vec![Some(TensorView::new(output, &[4, 6], &[2, 3]).unwrap())];
 
         let partitions = operator
             .partition_views(&input_views, &output_views, 8)
