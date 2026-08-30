@@ -6,6 +6,7 @@
 
 mod address;
 mod model;
+mod payload;
 
 #[cfg(feature = "generator")]
 mod analysis;

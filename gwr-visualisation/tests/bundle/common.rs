@@ -1,6 +1,9 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+use std::io::Read;
 use std::process::Command;
+
+use flate2::read::GzDecoder;
 
 pub(super) const SMALL_TIMETABLE: &str = "../gwr-timetable/examples/small.yaml";
 
@@ -11,6 +14,7 @@ pub(super) fn generator_command() -> Command {
 pub(super) struct GeneratedReport {
     pub(super) temp: tempfile::TempDir,
     pub(super) index_html: String,
+    pub(super) data_json: String,
     pub(super) data: serde_json::Value,
 }
 
@@ -40,6 +44,7 @@ impl GeneratedReport {
         Self {
             temp,
             index_html,
+            data_json,
             data,
         }
     }
@@ -48,4 +53,18 @@ impl GeneratedReport {
         std::fs::read_to_string(self.temp.path().join(name))
             .unwrap_or_else(|error| panic!("unable to read generated {name}: {error}"))
     }
+}
+
+pub(super) fn decompress_json(compressed: &[u8]) -> serde_json::Value {
+    let mut decoder = GzDecoder::new(compressed);
+    let mut json = String::new();
+    decoder.read_to_string(&mut json).unwrap();
+    serde_json::from_str(&json).unwrap()
+}
+
+pub(super) fn payload_value<'a>(payload: &'a str, name: &str) -> &'a str {
+    let prefix = format!("{name}:\"");
+    let start = payload.find(&prefix).unwrap() + prefix.len();
+    let end = payload[start..].find('"').unwrap() + start;
+    &payload[start..end]
 }
