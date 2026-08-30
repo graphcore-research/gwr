@@ -205,8 +205,7 @@ impl Recipe {
         exit_on_error: bool,
         logger: &mut impl Logger,
     ) -> Result<()> {
-        let tmp_str = tmp_root.to_string_lossy().to_string() + ".sh";
-        let script_path = PathBuf::from(tmp_str);
+        let script_path = tmp_script_path(tmp_root);
         self.write_script(&script_path, exit_on_error)
             .map_err(|e| {
                 io::Error::other(format!("Failed to write {}: {e}", script_path.display()))
@@ -237,9 +236,7 @@ impl Recipe {
         })?;
 
         if !keep_tmp {
-            fs::remove_file(&script_path).map_err(|e| {
-                io::Error::other(format!("Failed to remove {}: {e}", script_path.display()))
-            })?;
+            remove_tmp_script(&script_path)?;
         }
         Ok(())
     }
@@ -375,6 +372,23 @@ impl Recipe {
         assert_eq!(format, "python");
         python::convert_to(self, out_path)?;
         Ok(())
+    }
+}
+
+fn tmp_script_path(tmp_root: &Path) -> PathBuf {
+    let tmp_str = format!("{}.{}.sh", tmp_root.to_string_lossy(), std::process::id());
+    PathBuf::from(tmp_str)
+}
+
+fn remove_tmp_script(script_path: &Path) -> Result<()> {
+    match fs::remove_file(script_path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(io::Error::other(format!(
+            "Failed to remove {}: {err}",
+            script_path.display()
+        ))
+        .into()),
     }
 }
 
