@@ -704,13 +704,15 @@ impl Generator {
     ) -> Result<Vec<Option<Tensor>>> {
         match compute_op {
             ComputeOp::Add => {
-                let other = Tensor::new(input_tensor.shape().get_dims(), input_tensor.dtype(), 0);
+                let other = Tensor::new(input_tensor.shape().get_dims(), input_tensor.dtype(), 0)
+                    .map_err(boxed_error)?;
                 let inputs = vec![Some(input_tensor.clone()), Some(other)];
                 Ok(inputs)
             }
             ComputeOp::Gemm => {
                 let other_shape = gemm_rhs_shape(input_tensor).map_err(boxed_error)?;
-                let other = Tensor::new(other_shape.get_dims(), input_tensor.dtype(), 0);
+                let other = Tensor::from_shape(other_shape, input_tensor.dtype(), 0)
+                    .map_err(boxed_error)?;
                 let mut inputs = vec![Some(input_tensor.clone()), Some(other)];
                 maybe_add_input_c(&mut inputs, self.args.expand_ratio, &mut self.rng)
                     .map_err(boxed_error)?;
@@ -944,8 +946,7 @@ impl Generator {
             return;
         }
 
-        let num_bytes = dtype_num_bytes(tensor.dtype(), tensor.shape().num_elements());
-        let addr = self.allocator.alloc(num_bytes as u64);
+        let addr = self.allocator.alloc(tensor.num_bytes() as u64);
         self.nodes.push(NodeSection::Tensor {
             id,
             config: TensorConfigSection {
@@ -963,11 +964,13 @@ impl Generator {
         base_name: &str,
         shape: &Shape,
         dtype: &DataType,
-    ) -> Tensor {
+    ) -> Result<Tensor> {
         let id = format!("tensor_{base_name}");
-        let mut tensor = Tensor::new(shape.get_dims(), dtype, 0).with_id(id);
+        let mut tensor = Tensor::from_shape(shape.clone(), dtype, 0)
+            .map_err(boxed_error)?
+            .with_id(id);
         self.register_tensor(&mut tensor);
-        tensor
+        Ok(tensor)
     }
 
     fn register_edge(&mut self, from: &str, to: &str, kind: EdgeKind) {
@@ -1063,7 +1066,7 @@ impl Generator {
         }
     }
 
-    fn random_shape(&mut self) -> Shape {
+    fn random_shape(&mut self) -> Result<Shape> {
         let mut rank_min = self.args.init_rank_min;
         if self.args.weight_gemm > 0.0 {
             rank_min = rank_min.max(2);
@@ -1079,14 +1082,14 @@ impl Generator {
                     .random_range(self.args.init_dim_min..=self.args.init_dim_max)
             })
             .collect();
-        Shape::new(&dims)
+        Shape::new(&dims).map_err(boxed_error)
     }
 }
 
 fn generate(mut generator: Generator) -> Result<TimetableFile> {
-    let shape = generator.random_shape();
+    let shape = generator.random_shape()?;
     let init_dtype = generator.args.init_dtype;
-    let seed_tensor = generator.make_tensor_with_dtype("initial", &shape, &init_dtype);
+    let seed_tensor = generator.make_tensor_with_dtype("initial", &shape, &init_dtype)?;
     generator.expansion_points.try_to_add_expansion_point(
         seed_tensor.clone(),
         0,
@@ -1197,7 +1200,9 @@ mod tests {
     fn expansion_points_allow_existing_layers_after_target_depth_is_reached() {
         fn point(id: &str, tensor_layer: isize, direction: ExpansionDirection) -> ExpansionPoint {
             ExpansionPoint {
-                tensor: Tensor::new(&[2, 2, 2], &DataType::Fp32, 0).with_id(id),
+                tensor: Tensor::new(&[2, 2, 2], &DataType::Fp32, 0)
+                    .unwrap()
+                    .with_id(id),
                 tensor_layer,
                 direction,
             }
