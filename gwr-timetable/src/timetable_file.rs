@@ -177,7 +177,9 @@ impl NodeSection {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EdgeKind {
+    /// Transfers tensor data and creates a scheduling dependency.
     Data,
+    /// Records a graph relationship without affecting task readiness.
     Control,
 }
 

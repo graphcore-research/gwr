@@ -4,6 +4,7 @@ use std::rc::Rc;
 use std::vec;
 
 use gwr_engine::test_helpers::start_test;
+use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::operators::dtype::DataType;
 use gwr_models::processing_element::task::ComputeOp;
 use gwr_platform::Platform;
@@ -99,6 +100,65 @@ edges:
 fn timetable_file() {
     let (top, platform, timetable_file) = create_default_timetable_file();
     Timetable::new(&top, timetable_file, &platform).unwrap();
+}
+
+#[test]
+fn control_edges_are_ignored_by_scheduler() {
+    let (top, platform, mut timetable_file) = create_default_timetable_file();
+    timetable_file.edges.push(EdgeSection {
+        from: "tensor2".to_string(),
+        to: "add0".to_string(),
+        kind: EdgeKind::Control,
+    });
+
+    let timetable = Timetable::new(&top, timetable_file, &platform).unwrap();
+    assert_eq!(timetable.ready_task_indices("pe0").unwrap().1, vec![2]);
+
+    timetable.set_task_completed(2).unwrap();
+    assert!(timetable.ready_task_indices("pe0").unwrap().1.is_empty());
+}
+
+#[test]
+fn control_edges_ignore_data_port_suffixes() {
+    let (top, platform, mut timetable_file) = create_default_timetable_file();
+    timetable_file.edges.push(EdgeSection {
+        from: "tensor2.99".to_string(),
+        to: "add0.99".to_string(),
+        kind: EdgeKind::Control,
+    });
+
+    Timetable::new(&top, timetable_file, &platform).unwrap();
+}
+
+#[test]
+fn control_edges_through_tensors_are_ignored_by_scheduler() {
+    let (top, platform, mut timetable_file) = create_default_timetable_file();
+    timetable_file.nodes.push(NodeSection::Tensor {
+        id: "gate".to_string(),
+        config: TensorConfigSection {
+            addr: 0,
+            dtype: DataType::Fp32,
+            shape: vec![1],
+        },
+    });
+    timetable_file.edges.extend([
+        EdgeSection {
+            from: "tensor2".to_string(),
+            to: "gate".to_string(),
+            kind: EdgeKind::Control,
+        },
+        EdgeSection {
+            from: "gate".to_string(),
+            to: "add0".to_string(),
+            kind: EdgeKind::Control,
+        },
+    ]);
+
+    let timetable = Timetable::new(&top, timetable_file, &platform).unwrap();
+    assert_eq!(timetable.ready_task_indices("pe0").unwrap().1, vec![2]);
+
+    timetable.set_task_completed(2).unwrap();
+    assert!(timetable.ready_task_indices("pe0").unwrap().1.is_empty());
 }
 
 #[test]
