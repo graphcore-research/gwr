@@ -343,23 +343,21 @@ impl Frontier {
     fn record_expanded_point(&mut self, point: &ExpansionPoint) {
         self.layers.record(point.next_layer());
         match point.direction {
-            ExpansionDirection::Backward => {
-                debug!(
-                    "Adding {} to tensors_with_producer",
-                    tensor_id(&point.tensor)
-                );
-                self.tensors_with_producer
-                    .insert(tensor_id(&point.tensor).to_string());
-            }
-            ExpansionDirection::Forward => {
-                debug!(
-                    "Adding {} to tensors_with_consumer",
-                    tensor_id(&point.tensor)
-                );
-                self.tensors_with_consumer
-                    .insert(tensor_id(&point.tensor).to_string());
-            }
+            ExpansionDirection::Backward => self.record_producer(&point.tensor),
+            ExpansionDirection::Forward => self.record_consumer(&point.tensor),
         }
+    }
+
+    fn record_producer(&mut self, tensor: &Tensor) {
+        debug!("Adding {} to tensors_with_producer", tensor_id(tensor));
+        self.tensors_with_producer
+            .insert(tensor_id(tensor).to_string());
+    }
+
+    fn record_consumer(&mut self, tensor: &Tensor) {
+        debug!("Adding {} to tensors_with_consumer", tensor_id(tensor));
+        self.tensors_with_consumer
+            .insert(tensor_id(tensor).to_string());
     }
 
     fn can_expand(&self, point: &ExpansionPoint) -> bool {
@@ -420,27 +418,33 @@ impl LayerBounds {
 
 #[derive(Debug)]
 struct AddrAllocator {
-    next_addr: u64,
-    align_bytes: u64,
+    next_addr: u128,
+    align_bytes: u128,
 }
 
 impl AddrAllocator {
     fn new(base_addr: u64, align_bytes: u64) -> Self {
         debug_assert!(align_bytes > 0);
         Self {
-            next_addr: base_addr,
-            align_bytes,
+            next_addr: u128::from(base_addr),
+            align_bytes: u128::from(align_bytes),
         }
     }
 
-    fn alloc(&mut self, num_bytes: u64) -> u64 {
+    fn alloc(&mut self, num_bytes: u64) -> Result<u64> {
         let rem = self.next_addr % self.align_bytes;
         if rem != 0 {
             self.next_addr += self.align_bytes - rem;
         }
         let out = self.next_addr;
-        self.next_addr += num_bytes;
-        out
+        self.next_addr = self
+            .next_addr
+            .checked_add(u128::from(num_bytes))
+            .ok_or_else(|| error_from_str("tensor address allocation overflows"))?;
+        if self.next_addr > u128::from(u64::MAX) + 1 {
+            return Err(error_from_str("tensor address allocation exceeds u64"));
+        }
+        u64::try_from(out).map_err(boxed_error)
     }
 }
 
@@ -532,7 +536,7 @@ impl Generator {
         })
     }
 
-    fn print_summary(&self) {
+    fn print_summary(&self) -> Result<()> {
         info!(
             "Created {} tensors / {} nodes / {} edges",
             self.tensors.len(),
@@ -546,15 +550,17 @@ impl Generator {
             self.op_counts[op_index(&gemm_op)],
             self.op_counts[op_index(&maxpool_op)]
         );
-        let total_bytes = self
-            .tensors
-            .iter()
-            .map(|tensor| tensor.num_bytes() as u64)
-            .sum();
+        let total_bytes = self.tensors.iter().try_fold(0u64, |total, tensor| {
+            let num_bytes = u64::try_from(tensor.num_bytes())?;
+            total
+                .checked_add(num_bytes)
+                .ok_or_else(|| error_from_str("total tensor storage size overflows"))
+        })?;
         info!(
             "Tensors use {total_bytes} bytes ({:.2})",
             Byte::from_u64(total_bytes).get_appropriate_unit(UnitType::Binary)
         );
+        Ok(())
     }
 
     fn expand_point(&mut self, point: &ExpansionPoint, compute_op: &ComputeOp) -> Result<()> {
@@ -703,6 +709,7 @@ impl Generator {
         };
 
         for input_tensor in input_tensors.iter().flatten() {
+            self.expansion_points.record_consumer(input_tensor);
             if tensor_id(input_tensor) == tensor_id(&point.tensor) {
                 continue;
             }
@@ -711,22 +718,13 @@ impl Generator {
                 input_tensor_layer,
                 ExpansionDirection::Backward,
             );
-            self.expansion_points.try_to_add_expansion_point(
-                input_tensor.clone(),
-                input_tensor_layer,
-                ExpansionDirection::Forward,
-            );
         }
 
         for output_tensor in output_tensors.iter().flatten() {
+            self.expansion_points.record_producer(output_tensor);
             if tensor_id(output_tensor) == tensor_id(&point.tensor) {
                 continue;
             }
-            self.expansion_points.try_to_add_expansion_point(
-                output_tensor.clone(),
-                output_tensor_layer,
-                ExpansionDirection::Backward,
-            );
             self.expansion_points.try_to_add_expansion_point(
                 output_tensor.clone(),
                 output_tensor_layer,
@@ -753,7 +751,7 @@ impl Generator {
         input_tensors: &[Option<Tensor>],
         output_tensors: &[Option<Tensor>],
     ) -> Result<()> {
-        let mut total_input_num_bytes = 0;
+        let mut total_input_num_bytes = 0usize;
         for (partition_idx, partition) in partitions.iter().enumerate() {
             let pe_idx = self.next_pe_idx(partition_idx);
             let pe = self.pe_names[pe_idx].clone();
@@ -767,7 +765,7 @@ impl Generator {
 
             let mut input_views = vec![None; partition.inputs.len()];
 
-            let mut partition_input_num_bytes = 0;
+            let mut partition_input_num_bytes = 0usize;
             for (input_idx, input_view) in partition.inputs.iter().enumerate() {
                 let Some(view) = input_view else {
                     continue;
@@ -780,7 +778,9 @@ impl Generator {
                 if log::log_enabled!(Level::Debug) {
                     let shape = view.shape();
                     let num_bytes = view.num_packed_bytes();
-                    partition_input_num_bytes += num_bytes;
+                    partition_input_num_bytes = partition_input_num_bytes
+                        .checked_add(num_bytes)
+                        .ok_or_else(|| error_from_str("partition input byte total overflows"))?;
                     debug!("  Partitioned input {input_idx}: shape: {shape}, bytes: {num_bytes}");
                 }
 
@@ -800,7 +800,9 @@ impl Generator {
             }
 
             if log::log_enabled!(Level::Debug) {
-                total_input_num_bytes += partition_input_num_bytes;
+                total_input_num_bytes = total_input_num_bytes
+                    .checked_add(partition_input_num_bytes)
+                    .ok_or_else(|| error_from_str("total partition input bytes overflows"))?;
                 debug!("  Partition input bytes: {partition_input_num_bytes}");
             }
 
@@ -894,7 +896,9 @@ impl Generator {
             return Ok(());
         }
 
-        let addr = self.allocator.alloc(tensor.num_bytes() as u64);
+        let num_bytes = u64::try_from(tensor.num_bytes()).map_err(boxed_error)?;
+        let addr = self.allocator.alloc(num_bytes)?;
+        tensor.set_addr(addr).map_err(boxed_error)?;
         self.nodes.push(NodeSection::Tensor {
             id,
             config: TensorConfigSection {
@@ -903,7 +907,6 @@ impl Generator {
                 shape: tensor.shape().dims().to_vec(),
             },
         });
-        tensor.set_addr(addr).map_err(boxed_error)?;
         self.tensors.push(tensor.clone());
         Ok(())
     }
@@ -1058,12 +1061,14 @@ fn generate(mut generator: Generator) -> Result<TimetableFile> {
         generator.expand_point(&point, &compute_op)?;
     }
 
-    generator.print_summary();
+    generator.print_summary()?;
 
-    Ok(TimetableFile {
+    let timetable = TimetableFile {
         nodes: generator.nodes,
         edges: generator.edges,
-    })
+    };
+    timetable.validate().map_err(boxed_error)?;
+    Ok(timetable)
 }
 
 fn main() -> Result<()> {
@@ -1113,6 +1118,27 @@ mod tests {
             tensor_align_bytes: 256,
             round_robin_pes: false,
         }
+    }
+
+    fn generator_platform() -> PlatformConfig {
+        serde_yaml::from_str(
+            r"
+memory_maps:
+  - name: default
+    devices: [{ name: hbm0 }]
+processing_elements:
+  - name: pe0
+    memory_map: default
+    config: {}
+memories:
+  - name: hbm0
+    kind: hbm
+    base_address: 0
+    config:
+      capacity_bytes: 16GiB
+",
+        )
+        .unwrap()
     }
 
     #[test]
@@ -1178,5 +1204,20 @@ mod tests {
             ExpansionDirection::Backward,
         )));
         assert!(!points.can_expand(&point("too_deep_forward", 1, ExpansionDirection::Forward,)));
+    }
+
+    #[test]
+    fn default_and_sampled_seeds_generate_valid_timetables() {
+        let platform = generator_platform();
+        for seed in std::iter::once(0x5eed_1234).chain(0..20) {
+            let mut args = valid_args();
+            args.depth = 4;
+            args.max_compute_nodes = 10;
+            args.init_dim_max = 32;
+            args.seed = seed;
+
+            let timetable = generate(Generator::new(args, &platform).unwrap()).unwrap();
+            timetable.validate().unwrap();
+        }
     }
 }
