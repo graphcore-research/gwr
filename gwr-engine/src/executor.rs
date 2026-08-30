@@ -37,9 +37,10 @@ fn waker_for_task(task: Rc<Task>) -> Waker {
 
 unsafe fn clone_raw_waker(data: *const ()) -> RawWaker {
     unsafe {
-        // Tasks are always wrapped in a reference counter to allow them to be shared
-        // read-only. The input `data` pointer is borrowed — we must not decrement its
-        // refcount, so we mem::forget the reconstructed Rc rather than letting it drop.
+        // Tasks are always wrapped in a reference counter to allow them to be
+        // shared read-only. The input `data` pointer is borrowed — we must not
+        // decrement its refcount, so we mem::forget the reconstructed Rc rather
+        // than letting it drop.
         let rc_task = Rc::from_raw(data as *const Task);
         let clone = rc_task.clone();
         mem::forget(rc_task);
@@ -50,8 +51,8 @@ unsafe fn clone_raw_waker(data: *const ()) -> RawWaker {
 
 unsafe fn wake_task(data: *const ()) {
     unsafe {
-        // Tasks are always wrapped in a reference counter to allow them to be shared
-        // read-only.
+        // Tasks are always wrapped in a reference counter to allow them to be
+        // shared read-only.
         let rc_task = Rc::from_raw(data as *const Task);
         let cloned = rc_task.clone();
         rc_task.executor_state.new_tasks.borrow_mut().push(cloned);
@@ -156,8 +157,8 @@ impl Executor {
             task_queue.shuffle(&mut *self.state.task_order_rng.borrow_mut());
         }
 
-        // Loop over all tasks, polling them. If a task is not ready, add it to the
-        // pending tasks.
+        // Loop over all tasks, polling them. If a task is not ready, add it to
+        // the pending tasks.
         for task in task_queue.drain(..) {
             if *finished.borrow() {
                 break;

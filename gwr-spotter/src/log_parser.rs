@@ -190,8 +190,8 @@ impl LogParser {
         let id: u64 = e.get(1).unwrap().as_str().parse().unwrap();
         let exited: u64 = e.get(2).unwrap().as_str().parse().unwrap();
 
-        // Add the fullness of 0 if not already there (a source only ever has exit
-        // events)
+        // Add the fullness of 0 if not already there (a source only ever has
+        // exit events)
         let fullness = id_to_fullness.entry(id).or_insert(0);
         if *fullness == 0 {
             // This is a source so never sees Enter, only Exit
@@ -413,14 +413,14 @@ pub fn start_background_load(
     thread::spawn(move || {
         let mut parser = LogParser::new();
 
-        // Keep track of the fullness of each entity so that Enter/Exit events can
-        // contain the absolute value
+        // Keep track of the fullness of each entity so that Enter/Exit events
+        // can contain the absolute value
         let mut id_to_fullness = HashMap::new();
 
-        // The BarChart widget plots u64 values. As a result, we can't simply have Exit
-        // mean the fullness is decremented as otherwise Sources will always
-        // have negative fullnesses. As a result, we detect the first operation
-        // on an entity and decide if it is a source.
+        // The BarChart widget plots u64 values. As a result, we can't simply
+        // have Exit mean the fullness is decremented as otherwise Sources will
+        // always have negative fullnesses. As a result, we detect the first
+        // operation on an entity and decide if it is a source.
         let mut id_is_source = HashMap::new();
 
         let reader = BufReader::new(file);

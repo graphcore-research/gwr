@@ -97,8 +97,8 @@ fn ring_to_io() {
     let weights = vec![1, 1];
 
     let io_dest = [0, 1, 2, 3, 4, 5];
-    // Ensure that the frames coming into the IO port are destined to a different
-    // destination
+    // Ensure that the frames coming into the IO port are destined to a
+    // different destination
     let mut ring_dest = io_dest;
     ring_dest[0] = !ring_dest[0];
 
@@ -141,8 +141,8 @@ fn all_to_ring() {
     let weights = vec![1, 1];
 
     let io_dest = [0, 1, 2, 3, 4, 5];
-    // Ensure that the frames coming into the IO port are destined to a different
-    // destination
+    // Ensure that the frames coming into the IO port are destined to a
+    // different destination
     let mut ring_dest = io_dest;
     ring_dest[0] = !ring_dest[0];
 

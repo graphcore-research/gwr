@@ -103,8 +103,8 @@ mod arbiter_harness {
             Box::new(RoundRobin::new()),
         );
 
-        // Try and connect three sources to an arbiter that only has two inputs. This
-        // should panic.
+        // Try and connect three sources to an arbiter that only has two inputs.
+        // This should panic.
         let _harness = ArbiterHarness::new(engine, arbiter, 3);
     }
 }

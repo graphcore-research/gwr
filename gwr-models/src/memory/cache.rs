@@ -279,7 +279,8 @@ where
     fn get_requests_waiting_for_response(&mut self, response: &T) -> Option<Vec<T>> {
         let (response_tag, response_index) = self.tag_and_index_for_addr(response.dst_addr());
 
-        // If there are any requests waiting for this response then return matching sets
+        // If there are any requests waiting for this response then return
+        // matching sets
         if self
             .waiting_for_response
             .iter()
@@ -579,7 +580,8 @@ where
                     state.metrics.borrow_mut().num_hits += 1;
                 }
                 Some(EntryState::Allocated) => {
-                    // There is an outstanding request to memory for this address already
+                    // There is an outstanding request to memory for this
+                    // address already
                     state
                         .contents
                         .borrow_mut()
@@ -661,7 +663,8 @@ where
             // Forward this response back to the memory (via the arbiter)
             rsp_arb_0.put(access)?.await;
 
-            // Forward on any other waiting reads that were waiting for this response
+            // Forward on any other waiting reads that were waiting for this
+            // response
             if let Some(m) = matching {
                 for x in m {
                     let response = x.to_response(state.contents.as_ref())?;

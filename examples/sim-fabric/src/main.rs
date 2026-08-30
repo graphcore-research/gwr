@@ -134,8 +134,8 @@ fn start_frame_dump(
     spawner.spawn(async move {
         let mut seen_frames = 0;
         loop {
-            // Use the `background` wait to indicate that the simulation can end if this is
-            // the only task still active.
+            // Use the `background` wait to indicate that the simulation can end
+            // if this is the only task still active.
             clock.wait_ticks_or_exit(progress_ticks as u64).await;
             let num_frames: usize = sinks.iter().map(|s| s.num_sunk()).sum();
             progress_bar.inc((num_frames - seen_frames) as u64);
@@ -207,7 +207,8 @@ fn main() -> Result<(), SimError> {
         FunctionalFabric::new_and_register(&engine, &clock, &top, "fabric", config.clone())?
     };
 
-    // By default enable all ports unless the user has constrained the generators
+    // By default enable all ports unless the user has constrained the
+    // generators
     let num_active_sources = match args.active_sources {
         Some(num_active_sources) => num_active_sources,
         None => config.num_ports(),

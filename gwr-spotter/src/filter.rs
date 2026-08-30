@@ -299,7 +299,8 @@ pub fn start_background_filter(
                 while receiver.try_recv().is_ok() {}
             }
 
-            // Get the current filter state for the duration of the filtering process.
+            // Get the current filter state for the duration of the filtering
+            // process.
             let search_state = filter.lock().unwrap().start_search();
 
             let filter_pass = run_filter_pass(&receiver, &renderer, &search_state);
@@ -352,7 +353,8 @@ fn run_filter_pass(
         renderer.lock().unwrap().restore_chunk(chunk_index, chunk);
         chunk_index += 1;
 
-        // Something has notified us, so discard the partial result and start again.
+        // Something has notified us, so discard the partial result and start
+        // again.
         if receiver.try_recv().is_ok() {
             return FilterPass::RestartRequested;
         }

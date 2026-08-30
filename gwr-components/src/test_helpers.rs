@@ -37,9 +37,9 @@ pub fn check_round_robin(inputs: &[ArbiterInputData], data: &[usize]) {
     let mut inputs = inputs.to_vec();
     let mut offset = 0;
     loop {
-        // Determine the count for each input value in the next window. Note that this
-        // copes with inputs producing the same value and inputs not producing
-        // their full weight in the window.
+        // Determine the count for each input value in the next window. Note
+        // that this copes with inputs producing the same value and inputs not
+        // producing their full weight in the window.
         let mut expected_window_counts: HashMap<usize, usize> = HashMap::new();
         let mut window_length = 0;
         let max_priority = inputs

@@ -505,8 +505,8 @@ pub fn partition_across_dimensions(
     }
 
     if split_dims.is_empty() {
-        // In the case we are just requesting a single partition we just preserve the
-        // shape
+        // In the case we are just requesting a single partition we just
+        // preserve the shape
         let preserve_shape: Vec<DimPartition> = dims
             .iter()
             .enumerate()

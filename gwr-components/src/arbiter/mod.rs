@@ -193,7 +193,8 @@ async fn run_input<T: SimObject>(
         let value = rx.get()?.await;
         entity.track_enter(value.id());
 
-        // Check if this input needs to wait for the previous value to be handled
+        // Check if this input needs to wait for the previous value to be
+        // handled
         let wait_for_space = match shared_state.input_values.borrow()[input_idx].as_ref() {
             Some(_) => {
                 let wait_for_space = Once::default();

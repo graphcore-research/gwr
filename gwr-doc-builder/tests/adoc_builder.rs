@@ -20,11 +20,11 @@ fn builds_documentation_from_cargo_expansion() {
     assert_eq!(run.documentation, expected_documentation);
 
     let dump = run.stdout();
-    // `--dump-all` prints `NodeType: full_name` for each parsed item followed by a
-    // `doc:{...}` block containing its accumulated doc-attribute text. With
-    // `GWR_DOC_BUILDER` set, `include_str!` and `typst!` expand to marker strings
-    // containing their original invocations, which is why they appear here
-    // verbatim.
+    // `--dump-all` prints `NodeType: full_name` for each parsed item followed
+    // by a `doc:{...}` block containing its accumulated doc-attribute text.
+    // With `GWR_DOC_BUILDER` set, `include_str!` and `typst!` expand to marker
+    // strings containing their original invocations, which is why they appear
+    // here verbatim.
     for expected in [
         "Module: crate",
         "Struct: crate::Widget",

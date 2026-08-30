@@ -45,8 +45,8 @@ impl Iterator for FrameGen {
             let label = self.num_sent_frames;
             self.num_sent_frames += 1;
 
-            // Send to the correct `dest`, but set `src` to a unique value to aid debug
-            // (frame count).
+            // Send to the correct `dest`, but set `src` to a unique value to
+            // aid debug (frame count).
             Some(
                 EthernetFrame::new(&self.entity, self.payload_bytes)
                     .set_dest(self.dest)

@@ -92,8 +92,8 @@ where
 
         let data_delay =
             Delay::new_and_register(engine, clock, &entity, "pipe", config.data_delay_ticks);
-        // The whole point of the flow-controlled pipeline is that the delays should
-        // never have to stall at their outputs
+        // The whole point of the flow-controlled pipeline is that the delays
+        // should never have to stall at their outputs
         data_delay.set_error_on_output_stall();
 
         let buffer =
@@ -119,8 +119,8 @@ where
             "credit_pipe",
             config.credit_delay_ticks,
         );
-        // The whole point of the flow-controlled pipeline is that the delays should
-        // never have to stall at their outputs
+        // The whole point of the flow-controlled pipeline is that the delays
+        // should never have to stall at their outputs
         credit_delay.set_error_on_output_stall();
 
         connect_port!(buffer, tx => credit_issuer, rx)

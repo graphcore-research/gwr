@@ -104,8 +104,8 @@ where
         drop_ratio: f64,
         seed: u64,
     ) -> Rc<Self> {
-        // The entity needs to be created first because it is shared between the state
-        // and the component itself.
+        // The entity needs to be created first because it is shared between the
+        // state and the component itself.
         let entity = Entity::new(parent, name);
 
         // Because it is shared it needs to be wrapped in an Rc
@@ -127,8 +127,8 @@ where
 
     /// This provides the `InPort` to which you can connect
     pub fn port_rx(&self) -> PortStateResult<T> {
-        // The `port_rx!` macro is the most consise way to access the rx port state
-        // when wrapped in `RefCell<Option<>>`.
+        // The `port_rx!` macro is the most consise way to access the rx port
+        // state when wrapped in `RefCell<Option<>>`.
         port_rx!(self.rx, state)
     }
 

@@ -21,7 +21,8 @@ fn put_get_synced() {
             // Do put before any gets happen
             tx_port.put(1)?.await;
 
-            // The `put()` should not have completed until the matching `get()` happens
+            // The `put()` should not have completed until the matching `get()`
+            // happens
             assert_eq!(clock.time_now_ns(), 1.0);
 
             tx_port.put(2)?.await;
@@ -38,7 +39,8 @@ fn put_get_synced() {
             let i = rx_port.get()?.await;
             assert_eq!(i, 2);
 
-            // Time should not change for any other reason than the `wait_ticks()`
+            // Time should not change for any other reason than the
+            // `wait_ticks()`
             assert_eq!(clock.time_now_ns(), 1.0);
 
             Ok(())
@@ -73,7 +75,8 @@ fn select_on_ports() {
             let ns = clock.time_now_ns();
             assert!(ns == 1.0 || ns == 3.0);
 
-            // Wait to ensure that data from port2 will be received before we send again
+            // Wait to ensure that data from port2 will be received before we
+            // send again
             clock.wait_ticks(3).await;
             tx_port1.put(3)?.await;
             assert_eq!(clock.time_now_ns(), 5.0);
@@ -131,7 +134,8 @@ fn select_on_ports() {
             assert_eq!(received[3], 4);
 
             received.sort_unstable();
-            // All values should be received, but order of first two is not guaranteed
+            // All values should be received, but order of first two is not
+            // guaranteed
             assert_eq!(received, [1, 2, 3, 4]);
             Ok(())
         });

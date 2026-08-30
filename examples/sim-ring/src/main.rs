@@ -91,8 +91,8 @@ fn start_frame_dump(
     spawner.spawn(async move {
         let mut seen_frames = 0;
         loop {
-            // Use the `background` wait to indicate that the simulation can end if this is
-            // the only task still active.
+            // Use the `background` wait to indicate that the simulation can end
+            // if this is the only task still active.
             clock.wait_ticks_or_exit(progress_ticks as u64).await;
             let num_frames: usize = sinks.iter().map(|s| s.num_sunk()).sum();
             progress_bar.inc((num_frames - seen_frames) as u64);
@@ -142,8 +142,8 @@ fn main() -> Result<(), SimError> {
     for i in 0..config.ring_size {
         let right = (i + 1) % config.ring_size;
 
-        // Connect the sources to the ring using a rater limiter and flow controlled
-        // pipeline.
+        // Connect the sources to the ring using a rater limiter and flow
+        // controlled pipeline.
         connect_port!(sources[i], tx => source_limiters[i], rx)?;
         connect_port!(source_limiters[i], tx => ingress_pipes[i], rx)?;
         connect_port!(ingress_pipes[i], tx => ring_nodes[i], io_rx)?;

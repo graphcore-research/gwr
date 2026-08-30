@@ -46,8 +46,8 @@ fn build_new_aka() {
     // Create a new model that is a child of the top
     let model = Rc::new(Entity::new(&top, "model"));
 
-    // And build up a new Aka that just contains "rx", having added a new rename and
-    // preserved the existing one
+    // And build up a new Aka that just contains "rx", having added a new rename
+    // and preserved the existing one
     let mut model_aka = Aka::default();
     populate_aka(
         Some(&aka),

@@ -227,8 +227,8 @@ impl TraceVisitor for BinLoader {
     }
 
     fn exit(&mut self, id: Id, exited: Id) {
-        // Add the fullness of 0 if not already there (a source only ever has exit
-        // events)
+        // Add the fullness of 0 if not already there (a source only ever has
+        // exit events)
         let fullness = {
             let fullness = self.id_to_fullness.entry(id.0).or_insert(0);
             if *fullness == 0 {

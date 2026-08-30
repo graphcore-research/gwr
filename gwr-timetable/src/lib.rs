@@ -43,8 +43,8 @@ fn validate_view_in_range(
     tensor_config: &TensorConfigSection,
 ) -> SimResult {
     let Some(view) = view else {
-        // When the view is not provided it means we are simply using the entire Tensor
-        // so it is ok
+        // When the view is not provided it means we are simply using the entire
+        // Tensor so it is ok
         return Ok(());
     };
 
@@ -579,8 +579,8 @@ impl Timetable {
     /// Render a mermaid of the current status of the Timetable
     #[must_use]
     pub fn render_mermaid(&self) -> String {
-        // Need to rebuild a Vec of the NodeSection as that is what the mermaid renderer
-        // uses
+        // Need to rebuild a Vec of the NodeSection as that is what the mermaid
+        // renderer uses
         let nodes: Vec<NodeSection> = self
             .nodes
             .iter()

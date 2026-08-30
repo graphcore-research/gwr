@@ -43,8 +43,8 @@ where
     T: Routable,
 {
     fn route(&self, obj: &T) -> Result<usize, SimError> {
-        // If the dest matches then exit via port 1, otherwise use port 0 as that is the
-        // ring
+        // If the dest matches then exit via port 1, otherwise use port 0 as
+        // that is the ring
         let dest = obj.destination() as usize;
         Ok(if self.0 == dest { IO_INDEX } else { RING_INDEX })
     }

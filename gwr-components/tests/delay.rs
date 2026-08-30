@@ -107,7 +107,8 @@ mod delay_harness {
 #[test]
 #[should_panic(expected = "top::delay delay output stalled")]
 fn error_on_output_stall() {
-    // Cause the delay to raise an assertion because it will find the buffer full
+    // Cause the delay to raise an assertion because it will find the buffer
+    // full
     const DELAY: usize = 1;
     const NUM_PUTS: usize = 10;
 

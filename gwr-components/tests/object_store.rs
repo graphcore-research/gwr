@@ -73,8 +73,8 @@ mod object_store_harness {
         let store = ObjectStore::new_and_register(&engine, &clock, top, "store_overflow", CAPACITY)
             .unwrap();
 
-        // Switch to "error on overflow" mode so `run_rx` no longer blocks once full
-        // and instead allows `State::push_value` to return a SimError.
+        // Switch to "error on overflow" mode so `run_rx` no longer blocks once
+        // full and instead allows `State::push_value` to return a SimError.
         store.set_error_on_overflow();
 
         let mut harness = ObjectStoreHarness::new(engine, store.clone());

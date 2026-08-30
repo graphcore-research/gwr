@@ -334,8 +334,8 @@ pub mod tests {
 
     #[test]
     fn write_one_commit() {
-        // Ensure that the `WriteOneCommit` field doesn't get changed, but that a
-        // callback handler would see the value written to act on it.
+        // Ensure that the `WriteOneCommit` field doesn't get changed, but that
+        // a callback handler would see the value written to act on it.
         let resolver = TestResolver::new();
         let state = Rc::new(CsrState::new());
         let mut reg: CsrRwReg = CsrRwReg::new(state);

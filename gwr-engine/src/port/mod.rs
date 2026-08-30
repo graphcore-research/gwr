@@ -257,8 +257,9 @@ where
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.value.take() {
             Some(value) => {
-                // The state is designed to be shared between one put/get pair so it should
-                // not be possible for the value in the state to be set at this point.
+                // The state is designed to be shared between one put/get pair
+                // so it should not be possible for the value in the state to be
+                // set at this point.
                 assert!(self.state.value.borrow().is_none());
 
                 *self.state.value.borrow_mut() = Some(value);
@@ -275,8 +276,8 @@ where
                     self.done = true;
                     Poll::Ready(())
                 } else {
-                    // Stay pending as the task was woken before the getter has removed
-                    // the value and released the putter.
+                    // Stay pending as the task was woken before the getter has
+                    // removed the value and released the putter.
                     *self.state.waiting_put.borrow_mut() = Some(cx.waker().clone());
                     Poll::Pending
                 }

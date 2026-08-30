@@ -156,9 +156,9 @@ impl OperatorAdd {
     ) -> Result<Vec<Option<Tensor>>, gwr_engine::types::SimError> {
         let output = validate_outputs(outputs)?;
 
-        // We cannot shrink both inputs because we need to preserve one that will
-        // cause the output to be of the right shape. So we choose one and update
-        // that.
+        // We cannot shrink both inputs because we need to preserve one that
+        // will cause the output to be of the right shape. So we choose one and
+        // update that.
         let (input_a_shape, input_b_shape) = if rng.random_bool(0.5) {
             (
                 choose_input_shape(output, rng, expand_ratio),
@@ -489,8 +489,8 @@ mod tests {
 
     type OffsetsShapes = (&'static [usize], &'static [usize]);
 
-    // Ensure that both inputs and the output are all of the expected shape as they
-    // should all be the same.
+    // Ensure that both inputs and the output are all of the expected shape as
+    // they should all be the same.
     fn check_partitions(partitions: &[TensorPartition], expected: &[OffsetsShapes]) {
         assert_eq!(partitions.len(), expected.len());
 

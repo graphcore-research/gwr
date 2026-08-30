@@ -334,7 +334,8 @@ where
             self.pending_changed.notify();
 
             if delay_ticks > 0 && !*self.error_on_output_stall.borrow() {
-                // Enforce back-pressure by waiting until there is room in the pending queue
+                // Enforce back-pressure by waiting until there is room in the
+                // pending queue
                 while self.pending.borrow().len() >= delay_ticks {
                     self.output_changed.listen().await;
                 }
