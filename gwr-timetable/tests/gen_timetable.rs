@@ -26,7 +26,8 @@ memories:
   - name: hbm0
     kind: hbm
     base_address: 0
-    capacity_bytes: 0x1000_0000
+    config:
+      capacity_bytes: 0x1000_0000
 ";
 
 fn tensor_config<'a>(timetable_file: &'a TimetableFile, id: &str) -> &'a TensorConfigSection {

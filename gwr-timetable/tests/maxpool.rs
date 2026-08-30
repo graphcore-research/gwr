@@ -30,7 +30,8 @@ memories:
   - name: hbm0
     kind: hbm
     base_address: 0
-    capacity_bytes: 0x1000_0000
+    config:
+      capacity_bytes: 0x1000_0000
 ",
     )
     .unwrap();

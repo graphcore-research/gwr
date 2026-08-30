@@ -12,9 +12,10 @@ use gwr_engine::test_helpers::start_test;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::Event;
 use gwr_engine::types::SimError;
+use gwr_models::processing_element::MachineOpCounts;
 use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::operators::dtype::DataType;
-use gwr_models::processing_element::operators::{Tensor, TensorView};
+use gwr_models::processing_element::operators::{OperatorCustom, Tensor, TensorView};
 use gwr_models::processing_element::task::{ComputeOp, ComputeTaskConfig, Task};
 use gwr_platform::Platform;
 
@@ -140,8 +141,9 @@ memories:
   - name: hbm0
     kind: hbm
     base_address: 0x1_0000_0000
-    capacity_bytes: 16GiB
-    delay_ticks: 10
+    config:
+      capacity_bytes: 16GiB
+      delay_ticks: 10
 
 connections:
   - connect:
@@ -190,6 +192,99 @@ fn simple_pe_mem_two_requests() {
     assert_eq!(clock.time_now_ns(), 32.0);
 }
 
+fn access_dispatcher(strided: bool) -> Rc<dyn Dispatch> {
+    let view = if strided {
+        let tensor = Tensor::new(&[8, 2], &DataType::Int8, 0x1_0000_0000).unwrap();
+        TensorView::new(tensor, &[8, 1], &[0, 0]).unwrap()
+    } else {
+        TensorView::new_full(Tensor::new(&[8], &DataType::Int8, 0x1_0000_0000).unwrap())
+    };
+    let task = Task::ComputeTask {
+        config: ComputeTaskConfig {
+            id: "read".to_string(),
+            op: ComputeOp::Custom(OperatorCustom {
+                name: None,
+                machine_ops: MachineOpCounts::default(),
+            }),
+            inputs: vec![Some(view)],
+            outputs: Vec::new(),
+        },
+    };
+
+    Rc::new(TestDispatcher::new(
+        HashMap::from([(0, task)]),
+        HashMap::from([("pe0".to_string(), VecDeque::from([0]))]),
+    ))
+}
+
+fn strided_platform(engine: &Engine, clock: &Clock, sram_bytes: usize) -> Platform {
+    Platform::from_string(
+        engine,
+        clock,
+        &format!(
+            "
+memory_maps:
+  - name: mm0
+    devices:
+      - name: hbm0
+
+processing_elements:
+  - name: pe0
+    memory_map: mm0
+    config:
+      num_active_requests: 8
+      lsu_access_bytes: 1
+      sram_bytes: {sram_bytes}
+
+memories:
+  - name: hbm0
+    kind: hbm
+    base_address: 0x1_0000_0000
+    config:
+      capacity_bytes: 16GiB
+      delay_ticks: 10
+
+connections:
+  - connect:
+    - pe.pe0
+    - mem.hbm0
+"
+        ),
+    )
+    .unwrap()
+}
+
+#[test]
+fn strided_ranges_share_active_requests() {
+    let run = |strided| {
+        let mut engine = start_test(file!());
+        let clock = engine.default_clock();
+        let platform = strided_platform(&engine, &clock, 8);
+        platform.attach_dispatcher(&access_dispatcher(strided));
+
+        engine.run().unwrap();
+        clock.time_now_ns()
+    };
+
+    assert_eq!(run(true), run(false));
+}
+
+#[test]
+fn strided_partition_checks_the_complete_working_set() {
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
+    let platform = strided_platform(&engine, &clock, 1);
+    platform.attach_dispatcher(&access_dispatcher(true));
+
+    let error = engine.run().unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("maximum useful partition count requires 8 bytes")
+    );
+    assert_eq!(clock.time_now_ns(), 0.0);
+}
+
 #[test]
 fn simple_pe_cache_mem() {
     let mut engine = start_test(file!());
@@ -219,8 +314,9 @@ memories:
   - name: hbm0
     kind: hbm
     base_address: 0x1_0000_0000
-    capacity_bytes: 16GiB
-    delay_ticks: 20
+    config:
+      capacity_bytes: 16GiB
+      delay_ticks: 20
 
 connections:
   - connect:

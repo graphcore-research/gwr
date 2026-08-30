@@ -39,7 +39,8 @@ memories:
   - name: hbm0
     kind: hbm
     base_address: 0x1_0000_0000
-    capacity_bytes: 0x1000_0000
+    config:
+      capacity_bytes: 0x1000_0000
 
 connections:
   - connect:

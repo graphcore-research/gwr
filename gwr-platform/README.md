@@ -62,8 +62,9 @@ memories:
   - name: mem0
     kind: ddr
     base_address: 0x1_0000_0000
-    capacity_bytes: 1GiB
-    delay_ticks: 40
+    config:
+      capacity_bytes: 1GiB
+      delay_ticks: 40
 
 connections:
   - connect:
