@@ -34,7 +34,7 @@ use timetable_file::{NodeSection, TimetableFile};
 use types::Node;
 
 use crate::mermaid::{MermaidNodeStatus, render_mermaid_from_parts};
-use crate::timetable_file::{EdgeSection, TensorConfigSection, TensorViewSection};
+use crate::timetable_file::{EdgeKind, EdgeSection, TensorConfigSection, TensorViewSection};
 
 fn validate_view_in_range(
     node_id: &str,
@@ -95,6 +95,8 @@ pub struct Timetable {
     platform: Rc<Platform>,
     nodes: Vec<Node>,
     edges: Vec<EdgeSection>,
+    predecessors: Vec<Vec<usize>>,
+    successors: Vec<Vec<usize>>,
     node_pe_indices: Vec<Option<usize>>,
     completed_node_indices: RefCell<HashSet<usize>>,
     active_node_indices: RefCell<HashSet<usize>>,
@@ -194,6 +196,9 @@ impl Timetable {
             node_pe_indices.push(pe_idx);
         }
 
+        let mut predecessors = vec![Vec::new(); nodes.len()];
+        let mut successors = vec![Vec::new(); nodes.len()];
+
         // Wire up the new node inputs/outputs to build the graph connectivity
         for edge_section in &timetable_file.edges {
             // Note: we have validated the edges so we can just unwrap()
@@ -201,6 +206,13 @@ impl Timetable {
             let from_node_idx = node_idx_by_id.get(from_node_id).unwrap();
             let (to_node_id, to_edge_idx) = edge_section.to_node_and_edge()?;
             let to_node_idx = node_idx_by_id.get(to_node_id).unwrap();
+
+            if !matches!(&edge_section.kind, EdgeKind::Data) {
+                continue;
+            }
+
+            predecessors[*to_node_idx].push(*from_node_idx);
+            successors[*from_node_idx].push(*to_node_idx);
 
             update_edge_indices(*from_node_idx, to_edge_idx, &mut nodes[*to_node_idx].inputs)
                 .map_err(|err| {
@@ -226,6 +238,8 @@ impl Timetable {
             entity,
             nodes,
             edges: timetable_file.edges,
+            predecessors,
+            successors,
             node_pe_indices,
             platform: platform.clone(),
             completed_node_indices: RefCell::new(HashSet::new()),
@@ -345,10 +359,8 @@ impl Timetable {
             return false;
         }
 
-        let tensor_node = &self.nodes[tensor_idx];
-
         // Look for an input node that is not complete
-        for idx in tensor_node.inputs.iter().flatten() {
+        for idx in &self.predecessors[tensor_idx] {
             if !completed_node_indices.contains(idx) {
                 return false;
             }
@@ -383,10 +395,8 @@ impl Timetable {
                 }
 
                 remaining_nodes += 1;
-                let unresolved_inputs = self.nodes[*node_idx]
-                    .inputs
+                let unresolved_inputs = self.predecessors[*node_idx]
                     .iter()
-                    .flatten()
                     .filter(|input_idx| !completed_node_indices.contains(input_idx))
                     .count();
                 unresolved_input_counts[*node_idx] = unresolved_inputs;
@@ -432,7 +442,7 @@ impl Timetable {
     }
 
     fn mark_successors_updated(&self, node_idx: usize) {
-        for output_node_idx in self.nodes[node_idx].outputs.iter().flatten() {
+        for output_node_idx in &self.successors[node_idx] {
             self.mark_dependency_completed(*output_node_idx);
         }
     }
@@ -659,7 +669,6 @@ impl Dispatch for Timetable {
             return Ok(());
         }
 
-        let node = &self.nodes[node_idx];
         if let Some(pe_idx) = self.node_pe_indices[node_idx] {
             self.ready_nodes_per_pe
                 .borrow_mut()
@@ -680,15 +689,14 @@ impl Dispatch for Timetable {
         self.completed_node_indices.borrow_mut().insert(node_idx);
         self.mark_successors_updated(node_idx);
 
-        match node.node_section {
-            NodeSection::Compute { .. } => {
-                for tensor_node_idx in node.outputs.iter().flatten() {
-                    if self.update_complete_tensor(*tensor_node_idx) {
-                        self.mark_successors_updated(*tensor_node_idx);
-                    }
-                }
+        for tensor_node_idx in &self.successors[node_idx] {
+            if matches!(
+                self.nodes[*tensor_node_idx].node_section,
+                NodeSection::Tensor { .. }
+            ) && self.update_complete_tensor(*tensor_node_idx)
+            {
+                self.mark_successors_updated(*tensor_node_idx);
             }
-            NodeSection::Tensor { .. } => {}
         }
 
         self.ready_nodes_changed.notify();
