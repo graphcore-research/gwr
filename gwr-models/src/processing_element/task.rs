@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize, Serializer};
 
 use crate::processing_element::operators::{
     ExpansionDirection, HasShape, Operator, OperatorAdd, OperatorCustom, OperatorGemm,
-    OperatorMaxPool, Shape, Tensor, TensorPartition, TensorView, create_maxpool_op, gemm_rhs_shape,
-    maybe_add_indices_output, maybe_add_input_c, partition_tensors,
+    OperatorMaxPool, Shape, Tensor, TensorPartition, TensorView, create_maxpool_op,
+    maybe_add_indices_output, partition_tensors,
 };
 use crate::processing_element::{ComputeCapabilities, MachineOpCounts};
 
@@ -241,7 +241,7 @@ impl ComputeOp {
         rng: &mut impl RngExt,
     ) -> Result<bool, SimError> {
         match self {
-            Self::Gemm => maybe_add_input_c(inputs, expand_ratio, rng),
+            Self::Gemm => super::operators::maybe_add_input_c(inputs, expand_ratio, rng),
             _ => Ok(false),
         }
     }
@@ -259,12 +259,12 @@ impl ComputeOp {
     }
 
     pub fn gemm_rhs_shape<T: HasShape>(input: &T) -> Result<Shape, SimError> {
-        gemm_rhs_shape(input)
+        super::operators::gemm_rhs_shape(input)
     }
 
     fn operator(&self) -> &dyn Operator {
-        static ADD: OperatorAdd = OperatorAdd {};
-        static GEMM: OperatorGemm = OperatorGemm {};
+        static ADD: OperatorAdd = OperatorAdd;
+        static GEMM: OperatorGemm = OperatorGemm;
 
         match self {
             Self::Add => &ADD,

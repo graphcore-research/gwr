@@ -528,7 +528,11 @@ impl Timetable {
             match &node.node_section {
                 NodeSection::Compute { op, .. } => {
                     let (inputs, outputs) = self.get_input_output_tensors(idx)?;
-                    machine_ops.add_assign(op.compute_machine_ops(&inputs, &outputs)?);
+                    machine_ops = machine_ops
+                        .checked_add(op.compute_machine_ops(&inputs, &outputs)?)
+                        .map_err(|error| {
+                            SimError(format!("{}: {error}", node.node_section.id()))
+                        })?;
                     for input_view in inputs.iter().flatten() {
                         total_load_bytes = total_load_bytes
                             .checked_add(input_view.layout().num_access_bytes())
@@ -556,7 +560,7 @@ impl Timetable {
         info!(self.entity ; "  loads {total_load_bytes} bytes, stores {total_store_bytes} bytes");
         info!(self.entity ;
             "  machine ops {} total, {} add, {} mul, {} compare",
-            machine_ops.total(),
+            machine_ops.checked_total()?,
             machine_ops.adds,
             machine_ops.muls,
             machine_ops.compares
