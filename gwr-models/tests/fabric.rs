@@ -16,13 +16,36 @@ use gwr_models::ethernet_frame::{EthernetFrame, SRC_MAC_BYTES, u64_to_mac};
 use gwr_models::fabric::functional::FunctionalFabric;
 use gwr_models::fabric::node::FabricRoutingAlgorithm;
 use gwr_models::fabric::routed::RoutedFabric;
-use gwr_models::fabric::{Fabric, FabricConfig};
+use gwr_models::fabric::{Fabric, FabricConfig, FabricGeometry, FabricPortConfig};
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::memory_map::DeviceId;
 use gwr_models::test_helpers::MemoryTxn;
 
 trait ToDest {
     fn to_dest(&self, source_index: usize, frame_index: usize) -> [u8; SRC_MAC_BYTES];
+}
+
+fn geometry(num_columns: usize, num_rows: usize, num_ports_per_node: usize) -> FabricGeometry {
+    FabricGeometry {
+        num_columns,
+        num_rows,
+        num_ports_per_node,
+        ports_per_node_limit: None,
+    }
+}
+
+fn port_config(
+    rx_buffer_bytes: usize,
+    tx_buffer_bytes: usize,
+    port_bits_per_tick: usize,
+) -> FabricPortConfig {
+    FabricPortConfig {
+        ticks_per_hop: 1,
+        ticks_overhead: 1,
+        rx_buffer_bytes,
+        tx_buffer_bytes,
+        port_bits_per_tick,
+    }
 }
 
 struct FixedDest(u64);
@@ -111,16 +134,16 @@ fn default_config() -> Rc<FabricConfig> {
     let port_bits_per_tick = 128;
 
     let config = FabricConfig::new(
-        num_columns,
-        num_rows,
-        num_ports_per_node,
-        None,
-        ticks_per_hop,
-        ticks_overhead,
-        rx_buffer_bytes,
-        tx_buffer_bytes,
-        port_bits_per_tick,
-    );
+        geometry(num_columns, num_rows, num_ports_per_node),
+        FabricPortConfig {
+            ticks_per_hop,
+            ticks_overhead,
+            rx_buffer_bytes,
+            tx_buffer_bytes,
+            port_bits_per_tick,
+        },
+    )
+    .unwrap();
     Rc::new(config)
 }
 
@@ -245,7 +268,19 @@ mod routed_fabric_harness {
         let mut engine = start_test(file!());
         let clock = engine.clock_ghz(1.0);
         let top = engine.top();
-        let config = Rc::new(FabricConfig::new(2, 2, 1, None, 2, 1, 1024, 1024, 128));
+        let config = Rc::new(
+            FabricConfig::new(
+                geometry(2, 2, 1),
+                FabricPortConfig {
+                    ticks_per_hop: 2,
+                    ticks_overhead: 1,
+                    rx_buffer_bytes: 1024,
+                    tx_buffer_bytes: 1024,
+                    port_bits_per_tick: 128,
+                },
+            )
+            .unwrap(),
+        );
         let fabric = RoutedFabric::new_and_register(
             &engine,
             &clock,
@@ -318,70 +353,35 @@ mod routed_fabric_harness {
 }
 
 #[test]
-#[should_panic(expected = "Cannot create fabric with less than 2 ports")]
-fn invalid_functional_fabric() {
-    let config = Rc::new(FabricConfig::new(1, 1, 1, None, 1, 1, 1, 1, 1));
-    let mut engine = start_test(file!());
-    let clock = engine.clock_ghz(1.0);
-    let top = engine.top();
+fn fabric_config_rejects_invalid_transport_settings() {
+    let cases = [
+        (
+            FabricConfig::new(geometry(1, 1, 1), port_config(1, 1, 1)),
+            "at least 2 are required",
+        ),
+        (
+            FabricConfig::new(geometry(1, 1, 2), port_config(0, 1, 1)),
+            "receive buffer size",
+        ),
+        (
+            FabricConfig::new(geometry(1, 1, 2), port_config(1, 0, 1)),
+            "transmit buffer size",
+        ),
+        (
+            FabricConfig::new(geometry(1, 1, 2), port_config(1, 1, 0)),
+            "link rate",
+        ),
+    ];
 
-    let _: Rc<FunctionalFabric<usize>> =
-        FunctionalFabric::new_and_register(&engine, &clock, top, "fabric", config).unwrap();
+    for (result, expected) in cases {
+        let error = result.unwrap_err();
+        assert!(format!("{error}").contains(expected));
+    }
 }
 
 #[test]
-fn invalid_functional_fabric_rx_buffer_bytes() {
-    let config = Rc::new(FabricConfig::new(1, 1, 2, None, 1, 1, 0, 1, 1));
-    let mut engine = start_test(file!());
-    let clock = engine.clock_ghz(1.0);
-    let top = engine.top();
+fn fabric_config_rejects_port_count_overflow() {
+    let error = FabricConfig::new(geometry(usize::MAX, 2, 2), port_config(1, 1, 1)).unwrap_err();
 
-    let result =
-        FunctionalFabric::<usize>::new_and_register(&engine, &clock, top, "fabric", config);
-
-    let Err(err) = result else {
-        panic!("Expected zero-capacity RX buffer creation to return an error");
-    };
-    assert!(
-        format!("{err}").contains("Unsupported Store with capacity of 0"),
-        "Unexpected error: {err}"
-    );
-}
-
-#[test]
-fn invalid_functional_fabric_tx_buffer_bytes() {
-    let config = Rc::new(FabricConfig::new(1, 1, 2, None, 1, 1, 1, 0, 1));
-    let mut engine = start_test(file!());
-    let clock = engine.clock_ghz(1.0);
-    let top = engine.top();
-
-    let result =
-        FunctionalFabric::<usize>::new_and_register(&engine, &clock, top, "fabric", config);
-
-    let Err(err) = result else {
-        panic!("Expected zero-capacity TX buffer creation to return an error");
-    };
-    assert!(
-        format!("{err}").contains("Unsupported Store with capacity of 0"),
-        "Unexpected error: {err}"
-    );
-}
-
-#[test]
-#[should_panic(expected = "Cannot create fabric with less than 2 ports")]
-fn invalid_routed_fabric() {
-    let config = Rc::new(FabricConfig::new(1, 1, 1, None, 1, 1, 1, 1, 1));
-    let mut engine = start_test(file!());
-    let clock = engine.clock_ghz(1.0);
-    let top = engine.top();
-
-    let _: Rc<RoutedFabric<usize>> = RoutedFabric::new_and_register(
-        &engine,
-        &clock,
-        top,
-        "fabric",
-        config,
-        FabricRoutingAlgorithm::ColumnFirst,
-    )
-    .unwrap();
+    assert_eq!(format!("{error}"), "maximum port count overflows");
 }

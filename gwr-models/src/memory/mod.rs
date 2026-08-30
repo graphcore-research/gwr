@@ -2,6 +2,7 @@
 
 use std::cell::RefCell;
 use std::fmt::{self, Display};
+use std::ops::RangeInclusive;
 use std::rc::Rc;
 
 use async_trait::async_trait;
@@ -57,6 +58,40 @@ impl MemoryConfig {
             delay_ticks,
         }
     }
+
+    pub fn validate(&self) -> SimResult {
+        self.address_range()?;
+        if self.bw_bytes_per_tick == 0 {
+            return sim_error!("bandwidth must be greater than zero");
+        }
+        Ok(())
+    }
+
+    /// Return the inclusive physical address range covered by this memory.
+    pub fn address_range(&self) -> Result<RangeInclusive<u64>, SimError> {
+        let capacity = u64::try_from(self.capacity_bytes)
+            .map_err(|error| SimError(format!("capacity cannot be represented as u64: {error}")))?;
+
+        if capacity == 0 {
+            return sim_error!("capacity must be greater than zero");
+        }
+
+        let Some(last_address) = checked_last_address(self.base_address, capacity) else {
+            return sim_error!(
+                "address range starting at 0x{:x} with capacity {} bytes exceeds the physical address space",
+                self.base_address,
+                self.capacity_bytes
+            );
+        };
+
+        Ok(self.base_address..=last_address)
+    }
+}
+
+/// Return the inclusive last address of a non-empty byte range.
+#[must_use]
+pub fn checked_last_address(start: u64, size: u64) -> Option<u64> {
+    start.checked_add(size.checked_sub(1)?)
 }
 
 #[derive(Clone, Default)]
@@ -118,6 +153,7 @@ where
     entity: Rc<Entity>,
     clock: Clock,
     config: MemoryConfig,
+    last_address: u64,
     stats: RefCell<MemoryStats>,
 
     response_delay: Rc<Delay<T>>,
@@ -137,6 +173,12 @@ where
         aka: Option<&Aka>,
         config: MemoryConfig,
     ) -> Result<Rc<Self>, SimError> {
+        let with_entity = |error| SimError(format!("{parent}::{name}: {error}"));
+        config.validate().map_err(&with_entity)?;
+        let last_address = config
+            .address_range()
+            .map(|range| *range.end())
+            .map_err(with_entity)?;
         let entity = Rc::new(Entity::new(parent, name));
 
         let rx = InPort::new_with_renames(engine, clock, &entity, "rx", aka);
@@ -161,6 +203,7 @@ where
             entity,
             clock: clock.clone(),
             config,
+            last_address,
             stats: RefCell::new(MemoryStats::default()),
             response_delay,
             rx: RefCell::new(Some(rx)),
@@ -237,16 +280,24 @@ where
 
             let begin = access.dst_addr();
             let payload_bytes = access.access_size_bytes();
-            let end = begin + (payload_bytes as u64) - 1;
+            let access_size = u64::try_from(payload_bytes).map_err(|error| {
+                SimError(format!("{}: memory access size: {error}", self.entity))
+            })?;
+            let Some(end) = checked_last_address(begin, access_size) else {
+                return sim_error!(
+                    "{}: memory access at 0x{begin:x} with size {payload_bytes} has an invalid range",
+                    self.entity
+                );
+            };
 
-            let config = &self.config;
-            assert!(
-                begin >= config.base_address
-                    && end < (config.base_address + config.capacity_bytes as u64),
-                "Out of bounds memory access received [0x{begin:x},0x{end:x}] not in [0x{:x},0x{:x}]",
-                config.base_address,
-                config.base_address + config.capacity_bytes as u64
-            );
+            if begin < self.config.base_address || end > self.last_address {
+                return sim_error!(
+                    "{}: out of bounds memory access received [0x{begin:x},0x{end:x}] not in [0x{:x},0x{:x}]",
+                    self.entity,
+                    self.config.base_address,
+                    self.last_address,
+                );
+            }
 
             let access_type = access.access_type();
             match access_type {
@@ -271,7 +322,7 @@ where
                 }
             }
 
-            let ticks = payload_bytes.div_ceil(config.bw_bytes_per_tick) as u64;
+            let ticks = payload_bytes.div_ceil(self.config.bw_bytes_per_tick) as u64;
             self.clock.wait_ticks(ticks).await;
         }
     }

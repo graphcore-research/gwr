@@ -89,6 +89,25 @@ impl CacheConfig {
             delay_ticks,
         }
     }
+
+    pub fn validate(&self) -> SimResult {
+        if self.line_size_bytes == 0 {
+            return sim_error!("cache line size must be greater than zero");
+        }
+        if self.bw_bytes_per_tick == 0 {
+            return sim_error!("cache bandwidth must be greater than zero");
+        }
+        if self.num_sets == 0 {
+            return sim_error!("cache set count must be greater than zero");
+        }
+        if self.num_ways == 0 {
+            return sim_error!("cache way count must be greater than zero");
+        }
+        self.num_sets
+            .checked_mul(self.num_ways)
+            .ok_or_else(|| SimError("cache entry count overflows".to_string()))?;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Default)]
@@ -219,8 +238,11 @@ where
     ///  - tag contains the rest of the address that is compared to determine
     ///    address matches
     fn tag_and_index_for_addr(&self, addr: u64) -> (Tag, Index) {
-        let index = (addr as usize / self.config.line_size_bytes) % self.config.num_sets;
-        let tag = addr / self.config.line_size_bytes as u64 / self.config.num_sets as u64;
+        let line_size = self.config.line_size_bytes as u64;
+        let num_sets = self.config.num_sets as u64;
+        let line = addr / line_size;
+        let index = (line % num_sets) as usize;
+        let tag = line / num_sets;
         (tag, index)
     }
 
@@ -356,6 +378,9 @@ where
         aka: Option<&Aka>,
         config: CacheConfig,
     ) -> Result<Rc<Self>, SimError> {
+        config
+            .validate()
+            .map_err(|error| SimError(format!("{parent}::{name}: {error}")))?;
         let bw_bytes_per_tick = config.bw_bytes_per_tick;
         let entity = Rc::new(Entity::new(parent, name));
 

@@ -7,8 +7,8 @@ use gwr_engine::engine::Engine;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Routable, SimObject};
-use gwr_models::fabric::FabricConfig;
 use gwr_models::fabric::node::{FabricNode, FabricRoutingAlgorithm};
+use gwr_models::fabric::{FabricConfig, FabricGeometry, FabricPortConfig};
 use gwr_track::entity::Entity;
 
 fn default_config() -> Rc<FabricConfig> {
@@ -22,16 +22,21 @@ fn default_config() -> Rc<FabricConfig> {
     let port_bits_per_tick = 128;
 
     let config = FabricConfig::new(
-        num_columns,
-        num_rows,
-        num_ports_per_node,
-        None,
-        ticks_per_hop,
-        ticks_overhead,
-        rx_buffer_bytes,
-        tx_buffer_bytes,
-        port_bits_per_tick,
-    );
+        FabricGeometry {
+            num_columns,
+            num_rows,
+            num_ports_per_node,
+            ports_per_node_limit: None,
+        },
+        FabricPortConfig {
+            ticks_per_hop,
+            ticks_overhead,
+            rx_buffer_bytes,
+            tx_buffer_bytes,
+            port_bits_per_tick,
+        },
+    )
+    .unwrap();
     Rc::new(config)
 }
 

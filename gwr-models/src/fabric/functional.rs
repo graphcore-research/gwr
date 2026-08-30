@@ -31,7 +31,6 @@ use gwr_engine::engine::Engine;
 use gwr_engine::events::repeated::Repeated;
 use gwr_engine::executor::Spawner;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
-use gwr_engine::sim_error;
 use gwr_engine::time::clock::{Clock, ClockTick};
 use gwr_engine::traits::{Event, Routable, Runnable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
@@ -93,10 +92,7 @@ where
         let entity = Rc::new(Entity::new(parent, name));
         let spawner = engine.spawner();
 
-        let num_ports = config.num_columns * config.num_rows * config.num_ports_per_node;
-        if num_ports < 2 {
-            return sim_error!("Cannot create fabric with less than 2 ports");
-        }
+        let num_ports = config.max_num_ports();
 
         let mut rx_buffer_limiters = Vec::with_capacity(num_ports);
         let mut internal_rx = Vec::with_capacity(num_ports);

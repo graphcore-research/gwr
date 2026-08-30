@@ -166,6 +166,29 @@ pub struct ProcessingElementConfig {
     pub compares_per_tick: f64,
 }
 
+impl ProcessingElementConfig {
+    pub fn validate(&self) -> SimResult {
+        if self.num_active_requests == 0 {
+            return sim_error!("LSU request-slot count must be greater than zero");
+        }
+        if self.lsu_access_bytes == 0 {
+            return sim_error!("LSU access size must be greater than zero");
+        }
+        for (name, value) in [
+            ("add", self.adds_per_tick),
+            ("multiply", self.muls_per_tick),
+            ("comparison", self.compares_per_tick),
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                return sim_error!(
+                    "{name} throughput must be finite and greater than zero, found {value}"
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
 pub struct ComputeCapabilities {
     adds_per_tick: f64,
     muls_per_tick: f64,
@@ -330,6 +353,9 @@ impl ProcessingElement {
         pe_config: &ProcessingElementConfig,
         device_id: DeviceId,
     ) -> Result<Rc<Self>, SimError> {
+        pe_config
+            .validate()
+            .map_err(|error| SimError(format!("{parent}::{name}: {error}")))?;
         let entity = Rc::new(Entity::new(parent, name));
 
         let lsu = LoadStoreUnit::new_and_register(
@@ -705,5 +731,49 @@ mod tests {
                 .ticks_for_ops(1, MachineOp::Add)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn processing_element_config_rejects_invalid_throughput() {
+        for (name, value) in [
+            ("add", 0.0),
+            ("multiply", -1.0),
+            ("comparison", f64::NAN),
+            ("add", f64::INFINITY),
+        ] {
+            let mut config = ProcessingElementConfig {
+                num_active_requests: 1,
+                lsu_access_bytes: 1,
+                overhead_size_bytes: 0,
+                sram_bytes: 1,
+                adds_per_tick: 1.0,
+                muls_per_tick: 1.0,
+                compares_per_tick: 1.0,
+            };
+            match name {
+                "add" => config.adds_per_tick = value,
+                "multiply" => config.muls_per_tick = value,
+                "comparison" => config.compares_per_tick = value,
+                _ => unreachable!(),
+            }
+
+            let error = config.validate().unwrap_err().to_string();
+            assert!(error.contains(&format!("{name} throughput")));
+        }
+    }
+
+    #[test]
+    fn processing_element_config_accepts_fractional_throughput() {
+        ProcessingElementConfig {
+            num_active_requests: 1,
+            lsu_access_bytes: 1,
+            overhead_size_bytes: 0,
+            sram_bytes: 1,
+            adds_per_tick: 0.25,
+            muls_per_tick: 0.5,
+            compares_per_tick: 0.75,
+        }
+        .validate()
+        .unwrap();
     }
 }

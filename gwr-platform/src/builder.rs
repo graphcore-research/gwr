@@ -10,7 +10,7 @@ use gwr_engine::types::SimError;
 use gwr_models::fabric::functional::FunctionalFabric;
 use gwr_models::fabric::node::FabricRoutingAlgorithm;
 use gwr_models::fabric::routed::RoutedFabric;
-use gwr_models::fabric::{Fabric, FabricConfig};
+use gwr_models::fabric::{Fabric, FabricConfig, FabricGeometry, FabricPortConfig};
 use gwr_models::memory::cache::{Cache, CacheConfig};
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::memory_map::MemoryMap;
@@ -238,16 +238,20 @@ pub fn build_fabrics(
             let fabric_algorithm = fabric_section.routing.unwrap_or(DEFAULT_FABRIC_ROUTING);
 
             let config = Rc::new(FabricConfig::new(
-                fabric_columns,
-                fabric_rows,
-                fabric_ports_per_node,
-                None,
-                ticks_per_hop,
-                ticks_overhead,
-                rx_buffer_bytes,
-                tx_buffer_bytes,
-                port_bits_per_tick,
-            ));
+                FabricGeometry {
+                    num_columns: fabric_columns,
+                    num_rows: fabric_rows,
+                    num_ports_per_node: fabric_ports_per_node,
+                    ports_per_node_limit: None,
+                },
+                FabricPortConfig {
+                    ticks_per_hop,
+                    ticks_overhead,
+                    rx_buffer_bytes,
+                    tx_buffer_bytes,
+                    port_bits_per_tick,
+                },
+            )?);
 
             let fabric: Rc<dyn Fabric<MemoryAccess>> = match fabric_section.kind {
                 FabricKind::Functional => FunctionalFabric::new_and_register(
