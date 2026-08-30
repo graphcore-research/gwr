@@ -6,6 +6,7 @@ use gwr_engine::sim_error;
 use gwr_engine::types::{SimError, SimResult};
 
 use super::dtype::DataType;
+use crate::memory::checked_last_address;
 
 pub trait HasShape {
     #[must_use]
@@ -215,10 +216,7 @@ fn checked_product(
 fn validate_address_range(addr: u64, num_bytes: usize) -> SimResult {
     let num_bytes = u64::try_from(num_bytes)
         .map_err(|error| SimError(format!("Tensor storage size: {error}")))?;
-    let last_address = num_bytes
-        .checked_sub(1)
-        .and_then(|last_offset| addr.checked_add(last_offset));
-    if last_address.is_none() {
+    if checked_last_address(addr, num_bytes).is_none() {
         return sim_error!(
             "Tensor at 0x{addr:x} with size {num_bytes} bytes exceeds the physical address space"
         );

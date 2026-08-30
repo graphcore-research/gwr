@@ -17,7 +17,7 @@ use gwr_engine::{run_simulation, sim_error};
 use gwr_models::fabric::functional::FunctionalFabric;
 use gwr_models::fabric::node::FabricRoutingAlgorithm;
 use gwr_models::fabric::routed::RoutedFabric;
-use gwr_models::fabric::{Fabric, FabricConfig};
+use gwr_models::fabric::{Fabric, FabricConfig, FabricGeometry, FabricPortConfig};
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_track::builder::{TrackerArgs, setup_trackers};
 use gwr_track::entity::Entity;
@@ -148,18 +148,22 @@ fn start_frame_dump(
     });
 }
 
-fn create_config(engine: &Engine, args: &Cli) -> (Rc<FabricConfig>, usize) {
+fn create_config(engine: &Engine, args: &Cli) -> Result<(Rc<FabricConfig>, usize), SimError> {
     let config = FabricConfig::new(
-        args.fabric_columns,
-        args.fabric_rows,
-        args.fabric_ports_per_node,
-        None,
-        args.ticks_per_hop,
-        args.ticks_overhead,
-        args.rx_buffer_bytes,
-        args.tx_buffer_bytes,
-        args.port_bits_per_tick,
-    );
+        FabricGeometry {
+            num_columns: args.fabric_columns,
+            num_rows: args.fabric_rows,
+            num_ports_per_node: args.fabric_ports_per_node,
+            ports_per_node_limit: None,
+        },
+        FabricPortConfig {
+            ticks_per_hop: args.ticks_per_hop,
+            ticks_overhead: args.ticks_overhead,
+            rx_buffer_bytes: args.rx_buffer_bytes,
+            tx_buffer_bytes: args.tx_buffer_bytes,
+            port_bits_per_tick: args.port_bits_per_tick,
+        },
+    )?;
     let config = Rc::new(config);
 
     let num_payload_bytes_to_send = args.bytes_to_send;
@@ -180,7 +184,7 @@ fn create_config(engine: &Engine, args: &Cli) -> (Rc<FabricConfig>, usize) {
     );
     info!(top ; "Using traffic pattern {}. Random seed {}", args.traffic_pattern, args.seed);
 
-    (config, num_send_frames)
+    Ok((config, num_send_frames))
 }
 
 fn main() -> Result<(), SimError> {
@@ -191,7 +195,7 @@ fn main() -> Result<(), SimError> {
     let spawner = engine.spawner();
     let clock = engine.default_clock();
 
-    let (config, num_send_frames) = create_config(&engine, &args);
+    let (config, num_send_frames) = create_config(&engine, &args)?;
     let num_ports = config.num_ports();
     let top = engine.top().clone();
     let fabric: Rc<dyn Fabric<MemoryAccess>> = if args.routed {

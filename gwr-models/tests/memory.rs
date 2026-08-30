@@ -6,6 +6,9 @@ use std::rc::Rc;
 use gwr_engine::engine::Engine;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::SimObject;
+use gwr_engine::types::SimError;
+use gwr_models::memory::memory_access::MemoryAccess;
+use gwr_models::memory::memory_map::{DeviceId, MemoryMap};
 use gwr_models::memory::traits::AccessMemory;
 use gwr_models::memory::{Memory, MemoryConfig};
 use gwr_models::test_helpers::{
@@ -49,6 +52,54 @@ mod memory_harness {
                 Tx<T> => tx,
             },
         }
+    }
+
+    fn memory_construction_error(config: MemoryConfig) -> SimError {
+        let mut engine = start_test(file!());
+        let clock = engine.default_clock();
+        let top = engine.top();
+        let Err(error) =
+            Memory::<MemoryAccess>::new_and_register(&engine, &clock, top, "memory", config)
+        else {
+            panic!("Memory construction should fail");
+        };
+        error
+    }
+
+    #[test]
+    fn memory_rejects_zero_capacity() {
+        let config = MemoryConfig::new(DST_ADDR, 0, BW_BYTES_PER_TICK, DELAY_TICKS);
+
+        let error = memory_construction_error(config);
+
+        assert_eq!(
+            error.to_string(),
+            "top::memory: capacity must be greater than zero"
+        );
+    }
+
+    #[test]
+    fn memory_rejects_address_range_overflow() {
+        let config = MemoryConfig::new(u64::MAX, 2, BW_BYTES_PER_TICK, DELAY_TICKS);
+
+        let error = memory_construction_error(config);
+
+        assert_eq!(
+            error.to_string(),
+            "top::memory: address range starting at 0xffffffffffffffff with capacity 2 bytes exceeds the physical address space"
+        );
+    }
+
+    #[test]
+    fn memory_rejects_zero_bandwidth() {
+        let config = MemoryConfig::new(DST_ADDR, CAPACITY_BYTES, 0, DELAY_TICKS);
+
+        let error = memory_construction_error(config);
+
+        assert_eq!(
+            error.to_string(),
+            "top::memory: bandwidth must be greater than zero"
+        );
     }
 
     #[test]
@@ -123,6 +174,30 @@ mod memory_harness {
         ]);
 
         assert_eq!(harness.engine.time_now_ns(), DELAY_TICKS as f64);
+    }
+
+    #[test]
+    fn memory_at_last_address_accepts_one_byte_access() {
+        let mut engine = start_test(file!());
+        let config = MemoryConfig::new(u64::MAX, 1, 1, 0);
+        let clock = engine.default_clock();
+        let top = engine.top();
+        let memory = Memory::new_and_register(&engine, &clock, top, "memory", config).unwrap();
+        let mut memory_map = MemoryMap::new();
+        memory_map.insert(0, 1, DeviceId(0)).unwrap();
+        memory_map.insert(u64::MAX, 1, DeviceId(1)).unwrap();
+        let memory_map = Rc::new(memory_map);
+        let request = create_read(engine.top(), &memory_map, 1, u64::MAX, 0, 0);
+        let mut harness = MemoryHarness::new(engine, memory);
+
+        harness.run_steps([
+            send_rx!(request),
+            expect_tx!(
+                MemoryTxn::read_rsp(u64::MAX)
+                    .with_bytes(1)
+                    .with_total_bytes(1)
+            ),
+        ]);
     }
 
     #[test]

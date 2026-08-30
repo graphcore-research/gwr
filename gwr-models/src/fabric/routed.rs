@@ -26,7 +26,6 @@ use gwr_components::delay::Delay;
 use gwr_components::{connect_dummy_rx, connect_dummy_tx, connect_port};
 use gwr_engine::engine::Engine;
 use gwr_engine::port::PortStateResult;
-use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Routable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
@@ -253,11 +252,6 @@ where
         fabric_algorithm: FabricRoutingAlgorithm,
     ) -> Result<Rc<Self>, SimError> {
         let entity = Rc::new(Entity::new(parent, name));
-        let num_ports = config.num_columns * config.num_rows * config.num_ports_per_node;
-        if num_ports < 2 {
-            return sim_error!("Cannot create fabric with less than 2 ports");
-        }
-
         let nodes = create_nodes(engine, clock, &entity, aka, &config, fabric_algorithm)?;
         connect_columns(
             engine,

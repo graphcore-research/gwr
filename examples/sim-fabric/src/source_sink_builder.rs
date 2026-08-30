@@ -42,7 +42,7 @@ pub fn build_source_sinks(
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
 
     // Create random set of sources that will be active
-    let mut all_port_indices: Vec<usize> = config.port_indices().clone();
+    let mut all_port_indices = config.port_indices().to_vec();
     all_port_indices.shuffle(&mut rng);
     let active_port_indices: Vec<usize> = all_port_indices
         .into_iter()
@@ -50,7 +50,7 @@ pub fn build_source_sinks(
         .collect();
 
     // Create an random set of initial assigments
-    let mut dest_indices: Vec<usize> = config.port_indices().clone();
+    let mut dest_indices = config.port_indices().to_vec();
     dest_indices.shuffle(&mut rng);
 
     let first_dest = dest_indices[0];
