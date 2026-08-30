@@ -11,10 +11,11 @@ use gwr_engine::types::{SimError, SimResult};
 use rand::RngExt;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use super::{Operator, Shape, Tensor, TensorPartition};
+use super::{Operator, Shape, Tensor, TensorPartition, TensorPartitions};
 use crate::processing_element::operators::dtype::DataType;
 use crate::processing_element::operators::{
-    DimPartition, ExpansionDirection, HasShape, TensorView, partition_across_dimensions,
+    DimPartition, ExpansionDirection, HasShape, TensorView, max_partitions_across_dimensions,
+    partition_across_dimensions,
 };
 use crate::processing_element::{ComputeCapabilities, MachineOp, MachineOpCounts};
 
@@ -736,12 +737,27 @@ impl Operator for OperatorMaxPool {
         })
     }
 
-    fn partition_views(
+    fn max_partition_count(
         &self,
         input_views: &[Option<TensorView>],
         output_views: &[Option<TensorView>],
+    ) -> Result<usize, SimError> {
+        let (input_view, output_view, _) = validate_input_outputs(self, input_views, output_views)?;
+        let (_, params) = self.output_shape_and_resolved_params(input_view)?;
+        let partition_dims =
+            choose_partition_dims(output_view, self.can_partition_spatial(&params));
+        Ok(max_partitions_across_dimensions(
+            output_view.shape().dims(),
+            &partition_dims,
+        ))
+    }
+
+    fn partition_views<'a>(
+        &'a self,
+        input_views: &'a [Option<TensorView>],
+        output_views: &'a [Option<TensorView>],
         num_partitions: usize,
-    ) -> Result<Vec<TensorPartition>, SimError> {
+    ) -> Result<TensorPartitions<'a>, SimError> {
         let (input_view, output_view, _) = validate_input_outputs(self, input_views, output_views)?;
         let (_, params) = self.output_shape_and_resolved_params(input_view)?;
         let allow_spatial = self.can_partition_spatial(&params);
@@ -751,8 +767,7 @@ impl Operator for OperatorMaxPool {
             partition_across_dimensions(output_view_dims, &partition_dims, num_partitions);
         let output_rank = output_view.num_dims();
 
-        let mut partitions = Vec::with_capacity(partition_specs.len());
-        for spec in partition_specs {
+        Ok(Box::new(partition_specs.map(move |spec| {
             let input_view = input_partition_for_output_partition(input_view, &spec, &params)?;
             let outputs = output_views
                 .iter()
@@ -766,13 +781,11 @@ impl Operator for OperatorMaxPool {
                 })
                 .collect::<Result<Vec<_>, SimError>>()?;
 
-            partitions.push(TensorPartition {
+            Ok(TensorPartition {
                 inputs: vec![Some(input_view)],
                 outputs,
-            });
-        }
-
-        Ok(partitions)
+            })
+        })))
     }
 }
 

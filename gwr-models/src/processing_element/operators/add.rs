@@ -10,8 +10,10 @@ use gwr_engine::sim_error;
 use gwr_engine::types::{SimError, SimResult};
 use rand::RngExt;
 
-use super::{Operator, Shape, Tensor, TensorPartition};
-use crate::processing_element::operators::{HasShape, TensorView, partition_across_dimensions};
+use super::{Operator, Shape, Tensor, TensorPartition, TensorPartitions};
+use crate::processing_element::operators::{
+    HasShape, TensorView, max_partitions_across_dimensions, partition_across_dimensions,
+};
 use crate::processing_element::{ComputeCapabilities, MachineOp, MachineOpCounts};
 
 const NAME: &str = "Add";
@@ -204,12 +206,24 @@ impl Operator for OperatorAdd {
         })
     }
 
-    fn partition_views(
+    fn max_partition_count(
         &self,
         input_views: &[Option<TensorView>],
         output_views: &[Option<TensorView>],
+    ) -> Result<usize, SimError> {
+        let (_, _, output_view) = validate_input_outputs(input_views, output_views)?;
+        Ok(max_partitions_across_dimensions(
+            output_view.shape().dims(),
+            &choose_partition_dims(output_view),
+        ))
+    }
+
+    fn partition_views<'a>(
+        &'a self,
+        input_views: &'a [Option<TensorView>],
+        output_views: &'a [Option<TensorView>],
         num_partitions: usize,
-    ) -> Result<Vec<TensorPartition>, SimError> {
+    ) -> Result<TensorPartitions<'a>, SimError> {
         let (_, _, output_view) = validate_input_outputs(input_views, output_views)?;
 
         let partition_dims = choose_partition_dims(&output_view);
@@ -218,8 +232,7 @@ impl Operator for OperatorAdd {
             partition_across_dimensions(output_view_dims, &partition_dims, num_partitions);
         let output_rank = output_view.num_dims();
 
-        let mut partitions = Vec::with_capacity(partition_specs.len());
-        for spec in partition_specs {
+        Ok(Box::new(partition_specs.map(move |spec| {
             let partitioned_output =
                 TensorView::from_output_partitions_on_view(output_view, output_rank, &spec)?;
 
@@ -239,13 +252,11 @@ impl Operator for OperatorAdd {
                 })
                 .collect::<Result<Vec<_>, SimError>>()?;
 
-            partitions.push(TensorPartition {
+            Ok(TensorPartition {
                 inputs: input_views,
                 outputs: vec![Some(partitioned_output)],
-            });
-        }
-
-        Ok(partitions)
+            })
+        })))
     }
 }
 
@@ -554,7 +565,11 @@ mod tests {
             TensorView::new(output, &[2, 2, 4], &[1, 2, 0]).unwrap(),
         )];
 
-        let partitions = op.partition_views(&input_views, &output_views, 2).unwrap();
+        let partitions = op
+            .partition_views(&input_views, &output_views, 2)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         assert_eq!(partitions.len(), 2);
 
         let expected: &[OffsetsShapes] = &[(&[1, 2, 0], &[1, 2, 4]), (&[2, 2, 0], &[1, 2, 4])];

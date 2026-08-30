@@ -44,7 +44,6 @@ use crate::memory::memory_map::{DeviceId, MemoryMap};
 use crate::processing_element::dispatch::Dispatch;
 use crate::processing_element::flop_monitor::FlopMonitor;
 use crate::processing_element::load_store_unit::LoadStoreUnit;
-use crate::processing_element::operators::TensorPartition;
 use crate::processing_element::task::{ComputeTaskConfig, Task};
 
 pub mod dispatch;
@@ -508,13 +507,11 @@ async fn handle_compute_task(
     flop_monitor: Option<Rc<FlopMonitor>>,
     config: &ComputeTaskConfig,
 ) -> SimResult {
-    let num_partitions = compute_task_num_partitions(config, compute_capabilities.sram_bytes)?;
-
-    let partitions =
-        config
-            .op
-            .create_partitions(&config.inputs, &config.outputs, num_partitions)?;
-    validate_partition_working_sets(&partitions, compute_capabilities.sram_bytes)?;
+    let partitions = config.op.create_partitions_for_sram(
+        &config.inputs,
+        &config.outputs,
+        compute_capabilities.sram_bytes,
+    )?;
     let activity_name = config.activity_name();
     let group = activity_lanes.create_group(&format!("{activity_name} operation"));
 
@@ -581,41 +578,11 @@ async fn handle_compute_task(
     Ok(())
 }
 
-fn compute_task_num_partitions(
-    config: &ComputeTaskConfig,
-    sram_bytes: usize,
-) -> Result<usize, SimError> {
-    let total_num_bytes = config
-        .inputs
-        .iter()
-        .chain(&config.outputs)
-        .flatten()
-        .try_fold(0usize, |total, view| {
-            total
-                .checked_add(view.layout().num_access_bytes())
-                .ok_or_else(|| SimError("Compute task byte total overflows".to_string()))
-        })?;
-
-    Ok(total_num_bytes.div_ceil(sram_bytes.max(1)).max(1))
-}
-
-fn validate_partition_working_sets(partitions: &[TensorPartition], sram_bytes: usize) -> SimResult {
-    for partition in partitions {
-        let working_set_bytes = partition.working_set_bytes()?;
-        if working_set_bytes > sram_bytes {
-            return sim_error!(
-                "Compute partition requires {working_set_bytes} bytes but the PE has {sram_bytes} bytes of SRAM"
-            );
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::processing_element::operators::dtype::DataType;
-    use crate::processing_element::operators::{Tensor, TensorView};
+    use crate::processing_element::operators::{Tensor, TensorPartition, TensorView};
     use crate::processing_element::task::ComputeOp;
 
     #[test]
@@ -631,7 +598,14 @@ mod tests {
             outputs: vec![Some(packed_view())],
         };
 
-        assert_eq!(compute_task_num_partitions(&config, 3).unwrap(), 2);
+        assert_eq!(
+            config
+                .op
+                .create_partitions_for_sram(&config.inputs, &config.outputs, 3)
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     #[test]
@@ -641,25 +615,18 @@ mod tests {
         let config = ComputeTaskConfig {
             id: "strided".to_string(),
             op: ComputeOp::Add,
-            inputs: vec![Some(view)],
-            outputs: vec![],
+            inputs: vec![Some(view.clone()), Some(view.clone())],
+            outputs: vec![Some(view)],
         };
 
-        assert_eq!(compute_task_num_partitions(&config, 3).unwrap(), 1);
-    }
-
-    #[test]
-    fn compute_task_byte_total_overflow_returns_error() {
-        let tensor = Tensor::new(&[usize::MAX / 4], &DataType::Int4, 0).unwrap();
-        let view = TensorView::new_full(tensor);
-        let config = ComputeTaskConfig {
-            id: "overflow".to_string(),
-            op: ComputeOp::Add,
-            inputs: vec![Some(view); 8],
-            outputs: vec![],
-        };
-
-        assert!(compute_task_num_partitions(&config, 1).is_err());
+        assert_eq!(
+            config
+                .op
+                .create_partitions_for_sram(&config.inputs, &config.outputs, 9)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -673,7 +640,6 @@ mod tests {
         };
 
         assert_eq!(partition.working_set_bytes().unwrap(), 8);
-        assert!(validate_partition_working_sets(&[partition], 7).is_err());
     }
 
     #[test]

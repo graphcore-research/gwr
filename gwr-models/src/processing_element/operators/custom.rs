@@ -7,7 +7,7 @@ use std::rc::Rc;
 use gwr_engine::types::{SimError, SimResult};
 use serde::{Deserialize, Serialize};
 
-use super::{Operator, TensorPartition, TensorView};
+use super::{Operator, TensorPartition, TensorPartitions, TensorView};
 use crate::processing_element::{ComputeCapabilities, MachineOp, MachineOpCounts};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -49,15 +49,23 @@ impl Operator for OperatorCustom {
         Ok(self.machine_ops)
     }
 
-    fn partition_views(
+    fn max_partition_count(
         &self,
-        input_views: &[Option<TensorView>],
-        output_views: &[Option<TensorView>],
+        _input_views: &[Option<TensorView>],
+        _output_views: &[Option<TensorView>],
+    ) -> Result<usize, SimError> {
+        Ok(1)
+    }
+
+    fn partition_views<'a>(
+        &'a self,
+        input_views: &'a [Option<TensorView>],
+        output_views: &'a [Option<TensorView>],
         _num_partitions: usize,
-    ) -> Result<Vec<TensorPartition>, SimError> {
-        Ok(vec![TensorPartition {
+    ) -> Result<TensorPartitions<'a>, SimError> {
+        Ok(Box::new(std::iter::once(Ok(TensorPartition {
             inputs: input_views.to_vec(),
             outputs: output_views.to_vec(),
-        }])
+        }))))
     }
 }
