@@ -17,7 +17,7 @@ use crate::processing_element::{ComputeCapabilities, MachineOp, MachineOpCounts}
 const NAME: &str = "Add";
 
 fn choose_partition_dims<T: HasShape>(output: &T) -> Vec<usize> {
-    let dims = output.shape().get_dims();
+    let dims = output.shape().dims();
     let mut candidate_dims = dims
         .iter()
         .enumerate()
@@ -63,7 +63,7 @@ fn choose_input_shape(
     expand_ratio: f64,
 ) -> Result<Shape, SimError> {
     let keep_prob = expand_ratio.clamp(0.0, 1.0);
-    let mut dims = output.shape().get_dims().clone();
+    let mut dims = output.shape().dims().to_vec();
 
     for dim in &mut dims {
         if *dim > 1 && rng.random_bool(1.0 - keep_prob) {
@@ -215,7 +215,7 @@ impl Operator for OperatorAdd {
         let (_, _, output_view) = validate_input_outputs(input_views, output_views)?;
 
         let partition_dims = choose_partition_dims(&output_view);
-        let output_view_dims = output_view.shape().get_dims();
+        let output_view_dims = output_view.shape().dims();
         let partition_specs =
             partition_across_dimensions(output_view_dims, &partition_dims, num_partitions);
         let output_rank = output_view.num_dims();
@@ -410,16 +410,16 @@ mod tests {
             assert!(
                 inputs[0]
                     .shape()
-                    .get_dims()
+                    .dims()
                     .iter()
-                    .all(|dim| *dim == 1 || outputs[0].shape().get_dims().contains(dim))
+                    .all(|dim| *dim == 1 || outputs[0].shape().dims().contains(dim))
             );
             assert!(
                 inputs[1]
                     .shape()
-                    .get_dims()
+                    .dims()
                     .iter()
-                    .all(|dim| *dim == 1 || outputs[0].shape().get_dims().contains(dim))
+                    .all(|dim| *dim == 1 || outputs[0].shape().dims().contains(dim))
             );
         }
     }
@@ -498,8 +498,8 @@ mod tests {
                 .map(|view| view.as_ref().unwrap());
 
             for view in views {
-                assert_eq!(view.offsets().get_dims().as_slice(), *expected_offsets);
-                assert_eq!(view.shape().get_dims().as_slice(), *expected_shape);
+                assert_eq!(view.offsets(), *expected_offsets);
+                assert_eq!(view.shape().dims(), *expected_shape);
             }
         }
     }

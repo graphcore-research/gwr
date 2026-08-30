@@ -137,19 +137,13 @@ fn custom_compute_accepts_multiple_inputs_and_outputs() {
     assert_eq!(config.inputs.len(), 2);
     assert_eq!(config.outputs.len(), 2);
     assert_eq!(
-        config.inputs[0].as_ref().unwrap().shape().get_dims(),
+        config.inputs[0].as_ref().unwrap().shape().dims(),
         &vec![2, 3]
     );
+    assert_eq!(config.inputs[1].as_ref().unwrap().shape().dims(), &vec![4]);
+    assert_eq!(config.outputs[0].as_ref().unwrap().shape().dims(), &vec![1]);
     assert_eq!(
-        config.inputs[1].as_ref().unwrap().shape().get_dims(),
-        &vec![4]
-    );
-    assert_eq!(
-        config.outputs[0].as_ref().unwrap().shape().get_dims(),
-        &vec![1]
-    );
-    assert_eq!(
-        config.outputs[1].as_ref().unwrap().shape().get_dims(),
+        config.outputs[1].as_ref().unwrap().shape().dims(),
         &vec![2, 2]
     );
 

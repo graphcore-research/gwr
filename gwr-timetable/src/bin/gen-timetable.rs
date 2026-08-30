@@ -675,10 +675,10 @@ impl Generator {
             maybe_add_indices_output(&mut output_tensors, self.args.expand_ratio, &mut self.rng)
                 .map_err(boxed_error)?;
         }
-        self.add_ids_and_register(&format!("{compute_id}_output"), &mut output_tensors);
+        self.add_ids_and_register(&format!("{compute_id}_output"), &mut output_tensors)?;
 
         let mut input_tensors = self.create_inputs_for_op(compute_op, &output_tensors)?;
-        self.add_ids_and_register(&format!("{compute_id}_input"), &mut input_tensors);
+        self.add_ids_and_register(&format!("{compute_id}_input"), &mut input_tensors)?;
 
         Ok((input_tensors, output_tensors))
     }
@@ -690,9 +690,9 @@ impl Generator {
         point: &ExpansionPoint,
     ) -> Result<OperatorIo> {
         let mut input_tensors = self.create_forward_inputs(compute_op, &point.tensor)?;
-        self.add_ids_and_register(&format!("{compute_id}_input"), &mut input_tensors);
+        self.add_ids_and_register(&format!("{compute_id}_input"), &mut input_tensors)?;
         let mut output_tensors = self.create_outputs_for_op(compute_op, &input_tensors)?;
-        self.add_ids_and_register(&format!("{compute_id}_output"), &mut output_tensors);
+        self.add_ids_and_register(&format!("{compute_id}_output"), &mut output_tensors)?;
 
         Ok((input_tensors, output_tensors))
     }
@@ -704,7 +704,7 @@ impl Generator {
     ) -> Result<Vec<Option<Tensor>>> {
         match compute_op {
             ComputeOp::Add => {
-                let other = Tensor::new(input_tensor.shape().get_dims(), input_tensor.dtype(), 0)
+                let other = Tensor::new(input_tensor.shape().dims(), input_tensor.dtype(), 0)
                     .map_err(boxed_error)?;
                 let inputs = vec![Some(input_tensor.clone()), Some(other)];
                 Ok(inputs)
@@ -810,8 +810,8 @@ impl Generator {
                     continue;
                 };
                 input_views[input_idx] = Some(TensorViewSection {
-                    offsets: view.offsets().get_dims().clone(),
-                    shape: view.shape().get_dims().clone(),
+                    offsets: view.offsets().to_vec(),
+                    shape: view.shape().dims().to_vec(),
                 });
 
                 if log::log_enabled!(Level::Debug) {
@@ -849,8 +849,8 @@ impl Generator {
                     continue;
                 };
                 output_views[output_idx] = Some(TensorViewSection {
-                    offsets: view.offsets().get_dims().clone(),
-                    shape: view.shape().get_dims().clone(),
+                    offsets: view.offsets().to_vec(),
+                    shape: view.shape().dims().to_vec(),
                 });
 
                 let output_tensor = output_tensors
@@ -921,7 +921,11 @@ impl Generator {
         }
     }
 
-    fn add_ids_and_register(&mut self, base_name: &str, tensors: &mut [Option<Tensor>]) {
+    fn add_ids_and_register(
+        &mut self,
+        base_name: &str,
+        tensors: &mut [Option<Tensor>],
+    ) -> Result<()> {
         for (idx, tensor) in tensors.iter_mut().enumerate() {
             let Some(tensor) = tensor else {
                 continue;
@@ -932,18 +936,19 @@ impl Generator {
         }
 
         for tensor in tensors.iter_mut().flatten() {
-            self.register_tensor(tensor);
+            self.register_tensor(tensor)?;
         }
+        Ok(())
     }
 
-    fn register_tensor(&mut self, tensor: &mut Tensor) {
+    fn register_tensor(&mut self, tensor: &mut Tensor) -> Result<()> {
         let id = tensor_id(tensor).to_string();
         if self
             .tensors
             .iter()
             .any(|registered| registered.id() == Some(id.as_str()))
         {
-            return;
+            return Ok(());
         }
 
         let addr = self.allocator.alloc(tensor.num_bytes() as u64);
@@ -952,11 +957,12 @@ impl Generator {
             config: TensorConfigSection {
                 addr,
                 dtype: *tensor.dtype(),
-                shape: tensor.shape().get_dims().clone(),
+                shape: tensor.shape().dims().to_vec(),
             },
         });
-        tensor.set_addr(addr);
+        tensor.set_addr(addr).map_err(boxed_error)?;
         self.tensors.push(tensor.clone());
+        Ok(())
     }
 
     fn make_tensor_with_dtype(
@@ -969,7 +975,7 @@ impl Generator {
         let mut tensor = Tensor::from_shape(shape.clone(), dtype, 0)
             .map_err(boxed_error)?
             .with_id(id);
-        self.register_tensor(&mut tensor);
+        self.register_tensor(&mut tensor)?;
         Ok(tensor)
     }
 
