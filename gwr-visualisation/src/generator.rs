@@ -15,23 +15,27 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 const INDEX_TEMPLATE: &str = include_str!("../assets/index.html");
 const STATIC_ASSETS: &[(&str, &str)] = &[
-    ("bootstrap.js", include_str!("../assets/bootstrap.js")),
-    ("view-model.js", include_str!("../assets/view-model.js")),
-    ("core.js", include_str!("../assets/core.js")),
-    ("filters.js", include_str!("../assets/filters.js")),
-    ("pe-grid.js", include_str!("../assets/pe-grid.js")),
-    ("timetable.js", include_str!("../assets/timetable.js")),
-    ("tensors.js", include_str!("../assets/tensors.js")),
-    ("memory.js", include_str!("../assets/memory.js")),
     (
-        "relationships.js",
-        include_str!("../assets/relationships.js"),
+        "gwr_visualisation.js",
+        include_str!("../assets/generated/gwr_visualisation.js"),
     ),
-    ("workspace.js", include_str!("../assets/workspace.js")),
-    ("app.js", include_str!("../assets/app.js")),
+    ("bootstrap.js", include_str!("../assets/bootstrap.js")),
     ("style.css", include_str!("../assets/style.css")),
 ];
-const RETIRED_OUTPUTS: &[&str] = &["data.js"];
+const WASM: &[u8] = include_bytes!("../assets/generated/gwr_visualisation_bg.wasm");
+const RETIRED_OUTPUTS: &[&str] = &[
+    "data.js",
+    "view-model.js",
+    "core.js",
+    "filters.js",
+    "pe-grid.js",
+    "timetable.js",
+    "tensors.js",
+    "memory.js",
+    "relationships.js",
+    "workspace.js",
+    "app.js",
+];
 
 /// Input files and destination for a generated report bundle.
 #[derive(Debug)]
@@ -103,14 +107,6 @@ pub fn write_bundle(inputs: &BundleInputs) -> Result<PathBuf> {
     }
 
     Ok(inputs.out_dir.join("index.html"))
-}
-
-fn browser_payload(compressed_data: &[u8], compressed_tensors: &[u8]) -> String {
-    format!(
-        "window.GWR_VISUALISATION_PAYLOAD={{data:\"{}\",tensors:\"{}\"}};\n",
-        BASE64.encode(compressed_data),
-        BASE64.encode(compressed_tensors),
-    )
 }
 
 fn input_paths(inputs: &BundleInputs) -> Vec<&Path> {
@@ -225,6 +221,16 @@ fn remove_retired_outputs(out_dir: &Path) -> io::Result<()> {
     }
     Ok(())
 }
+
+fn browser_payload(compressed_data: &[u8], compressed_tensors: &[u8]) -> String {
+    format!(
+        "window.GWR_VISUALISATION_PAYLOAD={{wasm:\"{}\",data:\"{}\",tensors:\"{}\"}};\n",
+        BASE64.encode(WASM),
+        BASE64.encode(compressed_data),
+        BASE64.encode(compressed_tensors),
+    )
+}
+
 fn read_platform(path: Option<&Path>) -> Result<Option<PlatformConfig>> {
     let Some(path) = path else {
         return Ok(None);

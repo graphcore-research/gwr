@@ -22,6 +22,9 @@ categories = [
 ]
 publish.workspace = true
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [[bin]]
 name = "gwr-visualisation"
 path = "src/main.rs"
@@ -41,19 +44,31 @@ generator = [
   "dep:serde_yaml",
   "dep:tempfile",
 ]
+web = [
+  "dep:console_error_panic_hook",
+  "dep:js-sys",
+  "dep:wasm-bindgen",
+  "dep:web-sys",
+]
+
 [dependencies]
 base64 = { workspace = true, optional = true }
 clap = { workspace = true, optional = true }
+console_error_panic_hook = { workspace = true, optional = true }
 flate2 = { workspace = true, optional = true }
 gwr-engine = { path = "../gwr-engine", version = "0.13.0", optional = true }
 gwr-models = { path = "../gwr-models", version = "0.24.0", optional = true }
 gwr-platform = { path = "../gwr-platform", version = "0.7.0", optional = true }
 gwr-timetable = { path = "../gwr-timetable", version = "0.5.0", optional = true }
+js-sys = { workspace = true, optional = true }
 same-file = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
+wasm-bindgen = { workspace = true, optional = true }
+web-sys = { workspace = true, optional = true, features = ["CanvasRenderingContext2d", "CssStyleDeclaration", "DataTransfer", "Document", "DomTokenList", "DragEvent", "Element", "Event", "EventTarget", "HtmlButtonElement", "HtmlCanvasElement", "HtmlElement", "HtmlInputElement", "HtmlOptionElement", "HtmlSelectElement", "KeyboardEvent", "MouseEvent", "Node", "NodeList", "Performance", "Storage", "Window", "console"] }
 
 [dev-dependencies]
+regex.workspace = true
 tempfile.workspace = true

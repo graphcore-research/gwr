@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
 import { execFile } from "node:child_process";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -14,9 +14,8 @@ export async function prepareReports(config) {
   const root = await mkdtemp(
     path.join(os.tmpdir(), "gwr-visualisation-benchmark-"),
   );
-  const base = path.join(root, "javascript-base");
+  const base = path.join(root, "wasm-base");
   await generateReport(config, base);
-  await addBenchmarkHooks(base);
   let sample = 0;
 
   return {
@@ -24,7 +23,7 @@ export async function prepareReports(config) {
     async sample() {
       const target = path.join(
         root,
-        `sample-${String(sample++).padStart(4, "0")}-javascript`,
+        `sample-${String(sample++).padStart(4, "0")}-wasm`,
       );
       await cp(base, target, { recursive: true });
       return pathToFileURL(path.join(target, "index.html")).href;
@@ -35,24 +34,6 @@ export async function prepareReports(config) {
       }
     },
   };
-}
-
-async function addBenchmarkHooks(report) {
-  const source = fileURLToPath(
-    new URL("../legacy/assets/benchmark-hooks.js", import.meta.url),
-  );
-  await cp(source, path.join(report, "benchmark-hooks.js"));
-  const indexPath = path.join(report, "index.html");
-  const index = await readFile(indexPath, "utf8");
-  const hooked = index.replace(
-    '    <script src="bootstrap.js"></script>',
-    "    <script>window.GWR_VISUALISATION_SCRIPTS=['benchmark-hooks.js'];</script>\n" +
-      '    <script src="bootstrap.js"></script>',
-  );
-  if (hooked === index) {
-    throw new Error("Unable to add the benchmark hooks to index.html");
-  }
-  await writeFile(indexPath, hooked);
 }
 
 async function generateReport(config, destination) {

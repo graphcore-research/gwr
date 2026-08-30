@@ -33,7 +33,8 @@ cargo binstall --disable-telemetry --no-confirm --locked   \
   lychee@0.24.2                                            \
   prek@0.4.14                                              \
   release-plz@0.3.160                                      \
-  taplo-cli@0.10.0
+  taplo-cli@0.10.0                                         \
+  wasm-bindgen-cli@0.2.126
 cargo binstall --disable-telemetry --no-confirm --locked --bin=cog cocogitto@7.0.0
 
 # The license generation tools are also required for development, but installed

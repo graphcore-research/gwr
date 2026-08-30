@@ -13,7 +13,7 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 #[cfg(feature = "generator")]
 use serde::Serialize;
-#[cfg(all(test, feature = "generator"))]
+#[cfg(any(all(feature = "web", target_arch = "wasm32"), test))]
 use serde::de::DeserializeOwned;
 
 #[cfg(feature = "generator")]
@@ -34,10 +34,16 @@ pub(crate) fn decode<T: DeserializeOwned>(compressed: &[u8]) -> Result<T, String
     serde_json::from_slice(&json).map_err(|error| format!("Unable to parse report data: {error}"))
 }
 
+#[cfg(any(all(feature = "web", target_arch = "wasm32"), test))]
+pub(crate) fn decode_json<T: DeserializeOwned>(json: &[u8]) -> Result<T, String> {
+    serde_json::from_slice(json).map_err(|error| format!("Unable to parse report data: {error}"))
+}
+
 #[cfg(test)]
 mod tests {
     use serde::{Deserialize, Serialize};
 
+    use super::decode_json;
     #[cfg(feature = "generator")]
     use super::{decode, encode};
 
@@ -58,6 +64,17 @@ mod tests {
         let compressed = encode(&expected).unwrap();
 
         assert_eq!(decode::<Example>(&compressed).unwrap(), expected);
+    }
+
+    #[test]
+    fn parses_uncompressed_browser_data() {
+        let json = br#"{"name":"browser","values":[4,5,6]}"#;
+        let expected = Example {
+            name: "browser".into(),
+            values: vec![4, 5, 6],
+        };
+
+        assert_eq!(decode_json::<Example>(json).unwrap(), expected);
     }
 
     #[test]

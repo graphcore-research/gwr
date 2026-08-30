@@ -24,7 +24,7 @@ try {
       );
       samples.push({
         browser: adapter.name,
-        implementation: "javascript",
+        implementation: "wasm",
         round,
         session_attempt: attempt,
         warmup: round < config.warmups,
@@ -32,15 +32,15 @@ try {
         ...result,
       });
       process.stdout.write(
-        `${adapter.name} JavaScript ${round < config.warmups ? "warm-up" : "run"} ${round + 1}/${config.warmups + config.runs}\n`,
+        `${adapter.name} Rust/WASM ${round < config.warmups ? "warm-up" : "run"} ${round + 1}/${config.warmups + config.runs}\n`,
       );
     }
   }
   const metadata = await environmentMetadata(config, adapters);
-  const validation = await writeResults(config, metadata, samples);
-  if (!validation.passed) {
+  const result = await writeResults(config, metadata, samples);
+  if (!result.passed) {
     throw new Error(
-      `Benchmark validation failed:\n${validation.failures.join("\n")}`,
+      `Benchmark validation failed:\n${result.failures.join("\n")}`,
     );
   }
 } finally {
@@ -61,7 +61,7 @@ async function runSample(adapter, reports, config) {
             config.interactionLayerPattern,
             (scenario, milliseconds) =>
               process.stdout.write(
-                `  ${adapter.name} JavaScript ${scenario}: ${milliseconds.toFixed(2)} ms\n`,
+                `  ${adapter.name} Rust/WASM ${scenario}: ${milliseconds.toFixed(2)} ms\n`,
               ),
           ),
         {
@@ -75,7 +75,7 @@ async function runSample(adapter, reports, config) {
     } catch (error) {
       lastError = error;
       process.stderr.write(
-        `${adapter.name} JavaScript session attempt ${attempt}/${config.sessionAttempts} failed: ${error.message}\n`,
+        `${adapter.name} Rust/WASM session attempt ${attempt}/${config.sessionAttempts} failed: ${error.message}\n`,
       );
       if (attempt < config.sessionAttempts) {
         await new Promise((resolve) => setTimeout(resolve, 1_000));
