@@ -7,7 +7,7 @@ use std::rc::Rc;
 use gwr_engine::types::{SimError, SimResult};
 use serde::{Deserialize, Serialize};
 
-use super::{Operator, Tensor, TensorPartition, TensorView};
+use super::{Operator, TensorPartition, TensorView};
 use crate::processing_element::{ComputeCapabilities, MachineOp, MachineOpCounts};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -19,10 +19,10 @@ pub struct OperatorCustom {
 }
 
 impl Operator for OperatorCustom {
-    fn validate_tensors(
+    fn validate(
         &self,
-        _inputs: &[Option<Tensor>],
-        _outputs: &[Option<Tensor>],
+        _inputs: &[Option<TensorView>],
+        _outputs: &[Option<TensorView>],
     ) -> SimResult {
         Ok(())
     }

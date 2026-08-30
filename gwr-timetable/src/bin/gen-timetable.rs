@@ -26,16 +26,9 @@ use std::{fs, io};
 
 use byte_unit::{Byte, UnitType};
 use clap::Parser;
-use gwr_models::processing_element::operators::add::OperatorAdd;
 use gwr_models::processing_element::operators::dtype::DataType;
-use gwr_models::processing_element::operators::gemm::{
-    OperatorGemm, gemm_rhs_shape, maybe_add_input_c,
-};
-use gwr_models::processing_element::operators::maxpool::{
-    OperatorMaxPool, create_maxpool_op, maybe_add_indices_output,
-};
 use gwr_models::processing_element::operators::{
-    ExpansionDirection, HasShape, Operator, Shape, Tensor, TensorPartition, partition_tensors,
+    ExpansionDirection, HasShape, OperatorMaxPool, Shape, Tensor, TensorPartition, TensorView,
 };
 use gwr_models::processing_element::task::ComputeOp;
 use gwr_platform::types::PlatformConfig;
@@ -116,16 +109,9 @@ fn create_op(
     direction: ExpansionDirection,
     expand_ratio: f64,
 ) -> Result<ComputeOp> {
-    match compute_op {
-        ComputeOp::Add => Ok(ComputeOp::Add),
-        ComputeOp::Gemm => Ok(ComputeOp::Gemm),
-        ComputeOp::MaxPool(_) => {
-            let operator =
-                create_maxpool_op(tensor, direction, expand_ratio).map_err(boxed_error)?;
-            Ok(ComputeOp::MaxPool(operator))
-        }
-        ComputeOp::Custom(_) => Err(error_from_str("custom ops are not generated")),
-    }
+    compute_op
+        .configured_for_tensor(tensor, direction, expand_ratio)
+        .map_err(boxed_error)
 }
 
 fn boxed_error(error: impl std::error::Error + 'static) -> Box<dyn std::error::Error> {
@@ -464,20 +450,17 @@ fn validate_generated_node(
     inputs: &[Option<Tensor>],
     outputs: &[Option<Tensor>],
 ) -> Result<()> {
-    match compute_op {
-        ComputeOp::Add => OperatorAdd {}
-            .validate_tensors(inputs, outputs)
-            .map_err(boxed_error),
-        ComputeOp::Gemm => OperatorGemm {}
-            .validate_tensors(inputs, outputs)
-            .map_err(boxed_error),
-        ComputeOp::MaxPool(operator) => operator
-            .validate_tensors(inputs, outputs)
-            .map_err(boxed_error),
-        ComputeOp::Custom(operator) => operator
-            .validate_tensors(inputs, outputs)
-            .map_err(boxed_error),
-    }
+    let inputs = inputs
+        .iter()
+        .cloned()
+        .map(|tensor| tensor.map(TensorView::new_full))
+        .collect::<Vec<_>>();
+    let outputs = outputs
+        .iter()
+        .cloned()
+        .map(|tensor| tensor.map(TensorView::new_full))
+        .collect::<Vec<_>>();
+    compute_op.validate(&inputs, &outputs).map_err(boxed_error)
 }
 
 fn create_partitions_for_op(
@@ -486,30 +469,9 @@ fn create_partitions_for_op(
     output_tensors: &[Option<Tensor>],
     num_partitions: usize,
 ) -> Result<Vec<TensorPartition>> {
-    match compute_op {
-        ComputeOp::Add => partition_tensors(
-            &OperatorAdd {},
-            input_tensors,
-            output_tensors,
-            num_partitions,
-        )
-        .map_err(boxed_error),
-        ComputeOp::Gemm => partition_tensors(
-            &OperatorGemm {},
-            input_tensors,
-            output_tensors,
-            num_partitions,
-        )
-        .map_err(boxed_error),
-        ComputeOp::MaxPool(operator) => {
-            partition_tensors(operator, input_tensors, output_tensors, num_partitions)
-                .map_err(boxed_error)
-        }
-        ComputeOp::Custom(operator) => {
-            partition_tensors(operator, input_tensors, output_tensors, num_partitions)
-                .map_err(boxed_error)
-        }
-    }
+    compute_op
+        .create_tensor_partitions(input_tensors, output_tensors, num_partitions)
+        .map_err(boxed_error)
 }
 
 type OperatorIo = (Vec<Option<Tensor>>, Vec<Option<Tensor>>);
@@ -672,7 +634,8 @@ impl Generator {
     ) -> Result<OperatorIo> {
         let mut output_tensors = vec![Some(point.tensor.clone())];
         if matches!(compute_op, ComputeOp::MaxPool(_)) {
-            maybe_add_indices_output(&mut output_tensors, self.args.expand_ratio, &mut self.rng)
+            compute_op
+                .add_optional_outputs(&mut output_tensors, self.args.expand_ratio, &mut self.rng)
                 .map_err(boxed_error)?;
         }
         self.add_ids_and_register(&format!("{compute_id}_output"), &mut output_tensors)?;
@@ -710,11 +673,12 @@ impl Generator {
                 Ok(inputs)
             }
             ComputeOp::Gemm => {
-                let other_shape = gemm_rhs_shape(input_tensor).map_err(boxed_error)?;
+                let other_shape = ComputeOp::gemm_rhs_shape(input_tensor).map_err(boxed_error)?;
                 let other = Tensor::from_shape(other_shape, input_tensor.dtype(), 0)
                     .map_err(boxed_error)?;
                 let mut inputs = vec![Some(input_tensor.clone()), Some(other)];
-                maybe_add_input_c(&mut inputs, self.args.expand_ratio, &mut self.rng)
+                compute_op
+                    .add_optional_inputs(&mut inputs, self.args.expand_ratio, &mut self.rng)
                     .map_err(boxed_error)?;
                 Ok(inputs)
             }
@@ -888,18 +852,9 @@ impl Generator {
         compute_op: &ComputeOp,
         outputs: &[Option<Tensor>],
     ) -> Result<Vec<Option<Tensor>>> {
-        match compute_op {
-            ComputeOp::Add => OperatorAdd {}
-                .create_inputs(outputs, self.args.expand_ratio, &mut self.rng)
-                .map_err(boxed_error),
-            ComputeOp::Gemm => OperatorGemm {}
-                .create_inputs(outputs, self.args.expand_ratio, &mut self.rng)
-                .map_err(boxed_error),
-            ComputeOp::MaxPool(operator) => operator
-                .create_inputs(outputs, self.args.expand_ratio, &mut self.rng)
-                .map_err(boxed_error),
-            ComputeOp::Custom(_) => Err(error_from_str("custom ops are not generated")),
-        }
+        compute_op
+            .create_inputs(outputs, self.args.expand_ratio, &mut self.rng)
+            .map_err(boxed_error)
     }
 
     fn create_outputs_for_op(
@@ -907,18 +862,9 @@ impl Generator {
         compute_op: &ComputeOp,
         inputs: &[Option<Tensor>],
     ) -> Result<Vec<Option<Tensor>>> {
-        match compute_op {
-            ComputeOp::Add => OperatorAdd {}
-                .create_outputs(inputs, self.args.expand_ratio, &mut self.rng)
-                .map_err(boxed_error),
-            ComputeOp::Gemm => OperatorGemm {}
-                .create_outputs(inputs, self.args.expand_ratio, &mut self.rng)
-                .map_err(boxed_error),
-            ComputeOp::MaxPool(operator) => operator
-                .create_outputs(inputs, self.args.expand_ratio, &mut self.rng)
-                .map_err(boxed_error),
-            ComputeOp::Custom(_) => Err(error_from_str("custom ops are not generated")),
-        }
+        compute_op
+            .create_outputs(inputs, self.args.expand_ratio, &mut self.rng)
+            .map_err(boxed_error)
     }
 
     fn add_ids_and_register(

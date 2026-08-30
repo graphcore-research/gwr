@@ -292,7 +292,6 @@ pub struct OperatorGemm {}
 
 impl OperatorGemm {
     pub fn create_outputs(
-        &self,
         inputs: &[Option<Tensor>],
         _expand_ratio: f64,
         _rng: &mut impl RngExt,
@@ -301,7 +300,6 @@ impl OperatorGemm {
     }
 
     pub fn create_inputs(
-        &self,
         outputs: &[Option<Tensor>],
         expand_ratio: f64,
         rng: &mut impl RngExt,
@@ -332,7 +330,7 @@ impl OperatorGemm {
 }
 
 impl Operator for OperatorGemm {
-    fn validate_tensors(&self, inputs: &[Option<Tensor>], outputs: &[Option<Tensor>]) -> SimResult {
+    fn validate(&self, inputs: &[Option<TensorView>], outputs: &[Option<TensorView>]) -> SimResult {
         validate_input_outputs(inputs, outputs)?;
         Ok(())
     }
@@ -474,16 +472,14 @@ mod tests {
 
     #[test]
     fn create_outputs_uses_gemm_m_and_n_before_broadcasting() {
-        let operator = OperatorGemm {};
         let mut rng = rand::rng();
 
-        let outputs = operator
-            .create_outputs(
-                &[tensor(&[1, 48, 1, 25]), tensor(&[1, 48, 25, 1])],
-                1.0,
-                &mut rng,
-            )
-            .unwrap();
+        let outputs = OperatorGemm::create_outputs(
+            &[tensor(&[1, 48, 1, 25]), tensor(&[1, 48, 25, 1])],
+            1.0,
+            &mut rng,
+        )
+        .unwrap();
 
         assert_eq!(
             outputs[0].as_ref().unwrap().shape(),
@@ -649,11 +645,12 @@ mod tests {
         let operator = OperatorGemm {};
         assert_eq!(
             operator
-                .compute_flops(
+                .compute_machine_ops(
                     &[tensor_view(&[4, 5]), tensor_view(&[5, 8])],
                     &[tensor_view(&[4, 8])],
                 )
-                .unwrap(),
+                .unwrap()
+                .total(),
             (4 * 5 * 8) + (4 * (5 - 1) * 8)
         );
     }
@@ -663,7 +660,7 @@ mod tests {
         let operator = OperatorGemm {};
         assert_eq!(
             operator
-                .compute_flops(
+                .compute_machine_ops(
                     &[
                         tensor_view(&[4, 5]),
                         tensor_view(&[5, 8]),
@@ -671,7 +668,8 @@ mod tests {
                     ],
                     &[tensor_view(&[4, 8])],
                 )
-                .unwrap(),
+                .unwrap()
+                .total(),
             (4 * 5 * 8) + (4 * (5 - 1) * 8) + (4 * 8)
         );
     }
@@ -681,9 +679,7 @@ mod tests {
         let operator = OperatorGemm {};
         let mut rng = rand::rng();
 
-        let inputs = operator
-            .create_inputs(&[tensor(&[4, 8])], 0.0, &mut rng)
-            .unwrap();
+        let inputs = OperatorGemm::create_inputs(&[tensor(&[4, 8])], 0.0, &mut rng).unwrap();
 
         assert_eq!(inputs.len(), 2);
         operator
@@ -696,9 +692,7 @@ mod tests {
         let operator = OperatorGemm {};
         let mut rng = rand::rng();
 
-        let inputs = operator
-            .create_inputs(&[tensor(&[4, 8])], 1.0, &mut rng)
-            .unwrap();
+        let inputs = OperatorGemm::create_inputs(&[tensor(&[4, 8])], 1.0, &mut rng).unwrap();
 
         assert_eq!(inputs.len(), 3);
         assert_eq!(inputs[2].as_ref().unwrap().shape(), &test_shape(&[4, 8]));

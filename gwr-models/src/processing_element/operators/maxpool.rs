@@ -506,7 +506,11 @@ fn validate_input_outputs<'a, 'b, T: HasShape>(
     Ok((input, output, indices))
 }
 
-fn validate_tensor_dtypes(input: &Tensor, output: &Tensor, indices: Option<&Tensor>) -> SimResult {
+fn validate_tensor_dtypes(
+    input: &TensorView,
+    output: &TensorView,
+    indices: Option<&TensorView>,
+) -> SimResult {
     if input.dtype() != output.dtype() {
         return sim_error!(
             "{NAME}: output dtype {:?} must match input dtype {:?}",
@@ -706,7 +710,7 @@ impl OperatorMaxPool {
 }
 
 impl Operator for OperatorMaxPool {
-    fn validate_tensors(&self, inputs: &[Option<Tensor>], outputs: &[Option<Tensor>]) -> SimResult {
+    fn validate(&self, inputs: &[Option<TensorView>], outputs: &[Option<TensorView>]) -> SimResult {
         let (input, output, indices) = validate_input_outputs(self, inputs, outputs)?;
         validate_tensor_dtypes(input, output, indices)
     }
