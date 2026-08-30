@@ -12,6 +12,8 @@ use crate::timetable_file::{
     EdgeKind, NodeSection, TensorViewSection, TimetableFile, parse_edge_end,
 };
 
+mod accesses;
+
 /// A timetable whose nodes, edges, tensors, and views have been resolved and
 /// validated.
 #[derive(Debug)]
@@ -19,6 +21,7 @@ pub struct TimetableGraph {
     nodes: Vec<TimetableNode>,
     edges: Vec<TimetableEdge>,
     topological_order: Vec<usize>,
+    topological_positions: Vec<usize>,
 }
 
 impl TimetableGraph {
@@ -115,12 +118,18 @@ impl TimetableGraph {
 
         validate_disconnected_views(&nodes, &view_sections)?;
         let topological_order = data_topological_order(&nodes)?;
+        let mut topological_positions = vec![0; nodes.len()];
+        for (position, node) in topological_order.iter().enumerate() {
+            topological_positions[*node] = position;
+        }
         let graph = Self {
             nodes,
             edges,
             topological_order,
+            topological_positions,
         };
         graph.validate_operators()?;
+        accesses::validate(&graph)?;
         Ok(graph)
     }
 
@@ -137,6 +146,10 @@ impl TimetableGraph {
     #[must_use]
     pub fn topological_order(&self) -> &[usize] {
         &self.topological_order
+    }
+
+    pub(super) fn topological_position(&self, node: usize) -> usize {
+        self.topological_positions[node]
     }
 
     #[must_use]
