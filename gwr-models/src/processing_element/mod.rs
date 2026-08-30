@@ -568,10 +568,11 @@ async fn handle_compute_task(
             flop_monitor.record_interval(compute_ticks as u64, compute_flops as f64);
         }
         {
-            // Lanes cannot support overlapping activity. If a lane will be released
-            // in the current clock cycle then we want to re-use it rather than allocate
-            // a new lane. Hence we wait here for the end of the current clock cycle
-            // to ensure all lanes that will be released in this cycle have been.
+            // Lanes cannot support overlapping activity. If a lane will be
+            // released in the current clock cycle then we want to re-use it
+            // rather than allocate a new lane. Hence we wait here for the end
+            // of the current clock cycle to ensure all lanes that will be
+            // released in this cycle have been.
             clock.wait_phase(phase::END).await;
 
             let _activity = ActivityLanes::begin_in_group(

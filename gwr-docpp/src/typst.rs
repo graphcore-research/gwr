@@ -19,7 +19,8 @@ pub fn process(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let command_descriptor = syn::parse_macro_input!(input as CommandDescriptor);
     handle_error(|| {
         let mut tmp = NamedTempFile::new().expect("Failed to create tmp file");
-        // Creae a header that renders an SVG that is just the size of the content
+        // Creae a header that renders an SVG that is just the size of the
+        // content
         tmp.write_all(
             b"#set page(
                   height: auto,

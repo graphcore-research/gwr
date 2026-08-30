@@ -122,9 +122,9 @@ fn tracker_returns_shared_tracker() {
 
 #[test]
 fn self_wake_does_not_repoll_completed_task() {
-    // It is essential that the engine does not poll a completed future. The easiest
-    // way to ensure the duplicate poll doesn't happen is to create a poll
-    // function that wakes itself.
+    // It is essential that the engine does not poll a completed future. The
+    // easiest way to ensure the duplicate poll doesn't happen is to create a
+    // poll function that wakes itself.
     let mut engine = start_test(file!());
     let polls = Rc::new(Cell::new(0));
 

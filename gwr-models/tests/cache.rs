@@ -178,8 +178,8 @@ mod full_cache_harness {
             expect_no_traffic!(&[Port::DevTx, Port::MemTx], DELAY_TICKS as u64),
         ]);
 
-        // All accesses are to the same address, so only the first should be passed
-        // through
+        // All accesses are to the same address, so only the first should be
+        // passed through
         assert_eq!(cache.payload_bytes_read(), num_accesses * ACCESS_SIZE_BYTES);
         assert_eq!(cache.payload_bytes_written(), 0);
     }

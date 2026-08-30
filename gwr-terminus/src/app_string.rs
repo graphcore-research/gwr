@@ -90,8 +90,8 @@ impl AppString {
 
     /// Remove the character to the left of the current index
     pub fn delete_char(&mut self) {
-        // Method "remove" is not used because on String it works on bytes instead of
-        // the chars.
+        // Method "remove" is not used because on String it works on bytes
+        // instead of the chars.
         let current_index = self.character_index;
         if current_index > 0 {
             let from_left_to_current_index = current_index - 1;

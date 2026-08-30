@@ -54,8 +54,8 @@ fn manhatten_rx_to_tx_cycles(
     let horizontal_hops = rx_col.abs_diff(tx_col);
     let vertical_hops = rx_row.abs_diff(tx_row);
 
-    // Add one hop for enterring so that there is never a zero-cycle latency which
-    // could otherwise be seen between ports on the same fabric node
+    // Add one hop for enterring so that there is never a zero-cycle latency
+    // which could otherwise be seen between ports on the same fabric node
     (horizontal_hops + vertical_hops) * config.cycles_per_hop + config.cycles_overhead
 }
 

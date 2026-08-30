@@ -130,8 +130,8 @@ where
         name: &str,
         config: &Config,
     ) -> Result<Rc<Self>, SimError> {
-        // In this case it simply uses the function that provides renaming features as
-        // well.
+        // In this case it simply uses the function that provides renaming
+        // features as well.
         Self::new_and_register_with_renames(engine, clock, parent, name, None, config)
     }
 
@@ -150,8 +150,8 @@ where
         aka: Option<&Aka>,
         config: &Config,
     ) -> Result<Rc<Self>, SimError> {
-        // The entity needs to be created first because this component will be the
-        // parent to the subcomponents.
+        // The entity needs to be created first because this component will be
+        // the parent to the subcomponents.
         let entity = Entity::new(parent, name);
 
         // Because it is shared it needs to be wrapped in an Arc
@@ -159,8 +159,9 @@ where
 
         let delay = Delay::new_and_register(engine, clock, &entity, "delay", config.delay_ticks);
 
-        // Build up a renaming that shows that this component's `tx` port is the same
-        // as the buffer's `tx` port and the user will be able to use either name.
+        // Build up a renaming that shows that this component's `tx` port is the
+        // same as the buffer's `tx` port and the user will be able to use
+        // either name.
         let buffer_aka = build_aka!(aka, &entity, &[("tx", "tx")]);
         let buffer = ObjectStore::new_and_register_with_renames(
             engine,
@@ -175,7 +176,8 @@ where
             .connect_port_tx(buffer.port_rx())
             .expect("Internal ports should connect without error");
 
-        // Create an internal `tx` port and connect into the `delay` subcomponent
+        // Create an internal `tx` port and connect into the `delay`
+        // subcomponent
         let mut tx = OutPort::new(&entity, "delay_tx");
         tx.connect(delay.port_rx())
             .expect("Internal ports should connect without error");
@@ -197,7 +199,8 @@ where
 
     /// This provides the `InPort` to which you can connect
     pub fn port_rx(&self) -> PortStateResult<T> {
-        // The `port_rx!` macro is the most consise way to access the rx port state.
+        // The `port_rx!` macro is the most consise way to access the rx port
+        // state.
         port_rx!(self.rx, state)
     }
 

@@ -221,7 +221,8 @@ pub fn render_history(
             let index_prefix = format!("{line_index}: ");
             let app_string = command.app_string();
 
-            // Show whether the line is currently selected by changing the formatting
+            // Show whether the line is currently selected by changing the
+            // formatting
             let mut style = if command.selected() {
                 Style::default().bg(Color::LightBlue).fg(Color::White)
             } else {

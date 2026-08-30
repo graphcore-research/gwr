@@ -119,8 +119,8 @@ impl LsuState {
     ) -> Result<MemoryAccess, SimError> {
         let overhead_size_bytes = self.overhead_size_bytes;
 
-        // Use the slot index as the source address so that it can be routed correctly
-        // on reply
+        // Use the slot index as the source address so that it can be routed
+        // correctly on reply
         let src_addr = request_slot_idx as u64;
 
         let dst_device = match self.memory_map.lookup(dst_addr) {
@@ -141,8 +141,8 @@ impl LsuState {
         ))
     }
 
-    // Place the request in the specified slot and notify the port driver to handle
-    // this request by putting the slot index in the pending queue.
+    // Place the request in the specified slot and notify the port driver to
+    // handle this request by putting the slot index in the pending queue.
     //
     // Returns the event that will be used to notify when the response returns.
     fn make_request_to_port_driver(
@@ -187,8 +187,8 @@ impl LsuState {
         Ok(())
     }
 
-    // Take the next active request from the pending queue and drive it onto the TX
-    // port
+    // Take the next active request from the pending queue and drive it onto the
+    // TX port
     async fn try_handle_next_active_request(
         &self,
         tx: &mut OutPort<MemoryAccess>,
@@ -332,8 +332,8 @@ impl LoadStoreUnit {
 
         let mut completed_requests = Vec::new();
 
-        // Ensure only one compute tensor transfer uses the LSU request issue path at a
-        // time.
+        // Ensure only one compute tensor transfer uses the LSU request issue
+        // path at a time.
         let serialiser_guard = ResourceGuard::new(self.state.serialiser.clone()).await;
         let mut activity_guard = None;
 
@@ -345,10 +345,11 @@ impl LoadStoreUnit {
             // Wait until there is a request slot available
             let request_slot_idx = self.state.allocate_request_slot().await;
             if activity_guard.is_none() {
-                // Lanes cannot support overlapping activity. If a lane will be released
-                // in the current clock cycle then we want to re-use it rather than allocate
-                // a new lane. Hence we wait here for the end of the current clock cycle
-                // to ensure all lanes that will be released in this cycle have been.
+                // Lanes cannot support overlapping activity. If a lane will be
+                // released in the current clock cycle then we want to re-use it
+                // rather than allocate a new lane. Hence we wait here for the
+                // end of the current clock cycle to ensure all lanes that will
+                // be released in this cycle have been.
                 self.clock.wait_phase(phase::END).await;
 
                 activity_guard = Some(ActivityLanes::begin_in_group(

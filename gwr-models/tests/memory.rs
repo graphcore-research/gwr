@@ -153,8 +153,8 @@ mod memory_harness {
         assert_eq!(memory.bytes_written(), num_accesses * ACCESS_SIZE_BYTES);
         assert_eq!(memory.bytes_read(), 0);
 
-        // Simulation will only complete once the Memory has finished handling all the
-        // delay imposed by the data it is carrying
+        // Simulation will only complete once the Memory has finished handling
+        // all the delay imposed by the data it is carrying
         let last_bw_limit_event = CYCLES_PER_ACCESS * num_accesses as u64;
         let last_event_time = last_bw_limit_event + DELAY_TICKS as u64;
         assert_eq!(harness.engine.time_now_ns(), last_event_time as f64);

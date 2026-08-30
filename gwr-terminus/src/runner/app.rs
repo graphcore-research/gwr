@@ -344,7 +344,8 @@ impl App {
             if app_recipe.recipe.matches(&search_re) {
                 self.matching_recipe_index.rows_mut().push(i);
 
-                // Find the highest matching index close to the current row index
+                // Find the highest matching index close to the current row
+                // index
                 if recipes_row_index.is_none() || i <= self.matching_recipe_index.index() {
                     recipes_row_index = Some(i);
                 }

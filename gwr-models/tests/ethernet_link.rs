@@ -109,7 +109,8 @@ mod ethernet_link_harness {
         let link = EthernetLink::<i32>::new_and_register(&engine, &clock, top, "link").unwrap();
         let mut harness = EthernetLinkHarness::new(engine, link);
 
-        // Starting the simulation causes the component to take ownership of its ports.
+        // Starting the simulation causes the component to take ownership of its
+        // ports.
         harness.run_steps([delay!(1)]);
 
         let error = harness.link.set_delay(delay_ticks).unwrap_err();

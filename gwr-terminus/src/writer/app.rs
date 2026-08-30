@@ -81,7 +81,8 @@ fn read_history(history_path: &PathBuf, error_handler: &mut impl Logger) -> Vec<
 impl App {
     #[must_use]
     pub fn new(history_path: &PathBuf, recipes_folder: &str, tui_mode: bool) -> Self {
-        // Setup the default filename to save recipe to as the RECIPES_FOLDER/.yaml
+        // Setup the default filename to save recipe to as the
+        // RECIPES_FOLDER/.yaml
         let initial_recipe_name = Path::new(recipes_folder).join(".yaml");
         let initial_recipe_str = initial_recipe_name.as_os_str().to_str().unwrap();
 
@@ -101,15 +102,16 @@ impl App {
         let initial_index = recipes_folder.len() + 1;
         app.recipe_filename.move_cursor_to(initial_index);
 
-        // Build up the history by building a Command for each line of the history
+        // Build up the history by building a Command for each line of the
+        // history
         let history = read_history(history_path, &mut app);
         let command_history = app.command_history.rows_mut();
         for cmd_str in &history {
             command_history.push(Command::new(cmd_str));
         }
 
-        // Move to the last line of the history as that is where the user normally wants
-        // to start
+        // Move to the last line of the history as that is where the user
+        // normally wants to start
         let history_len = app.command_history.rows().len();
         if history_len > 0 {
             app.command_history.set_index(history_len - 1);

@@ -169,8 +169,8 @@ impl Default for Engine {
 
 impl Drop for Engine {
     fn drop(&mut self) {
-        // The tracker can be using a buffered writer and so it needs to be shut down
-        // cleanly to ensure that it is flushed properly.
+        // The tracker can be using a buffered writer and so it needs to be shut
+        // down cleanly to ensure that it is flushed properly.
         self.tracker.shutdown();
     }
 }
