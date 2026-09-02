@@ -137,7 +137,7 @@ pub fn build_pes<S: BuildHasher>(
 }
 
 pub const DEFAULT_CACHE_LINE_SIZE_BYTES: usize = 32;
-pub const DEFAULT_CACHE_BW_BYTES_PER_CYCLE: usize = 32;
+pub const DEFAULT_CACHE_BW_BYTES_PER_TICK: usize = 32;
 pub const DEFAULT_CACHE_NUM_WAYS: usize = 4;
 pub const DEFAULT_CACHE_NUM_SETS: usize = 128;
 pub const DEFAULT_CACHE_LATENCY_TICKS: usize = 20;
@@ -151,10 +151,10 @@ pub fn build_caches(
     let mut caches = Vec::new();
     if let Some(caches_sections) = &cfg.caches {
         for cache_section in caches_sections {
-            let bw_bytes_per_cycle = cache_section
+            let bw_bytes_per_tick = cache_section
                 .config
-                .bw_bytes_per_cycle
-                .unwrap_or(DEFAULT_CACHE_BW_BYTES_PER_CYCLE);
+                .bw_bytes_per_tick
+                .unwrap_or(DEFAULT_CACHE_BW_BYTES_PER_TICK);
             let line_size_bytes = cache_section
                 .config
                 .line_size_bytes
@@ -174,7 +174,7 @@ pub fn build_caches(
 
             let config = CacheConfig::new(
                 line_size_bytes,
-                bw_bytes_per_cycle,
+                bw_bytes_per_tick,
                 num_sets,
                 num_ways,
                 delay_ticks,
@@ -203,7 +203,7 @@ pub const DEFAULT_FABRIC_TICKS_PER_HOP: usize = 2;
 pub const DEFAULT_FABRIC_TICKS_OVERHEAD: usize = 10;
 pub const DEFAULT_FABRIC_RX_BUFFER_BYTES: usize = 256;
 pub const DEFAULT_FABRIC_TX_BUFFER_BYTES: usize = 256;
-pub const DEFAULT_FABRIC_PORT_BITS_PER_TICK: usize = 32 * 8; // 32 bytes per cycle
+pub const DEFAULT_FABRIC_PORT_BITS_PER_TICK: usize = 32 * 8; // 32 bytes per tick
 pub const DEFAULT_FABRIC_ROUTING: FabricRoutingAlgorithm = FabricRoutingAlgorithm::ColumnFirst;
 
 pub fn build_fabrics(
@@ -280,7 +280,7 @@ pub fn build_fabrics(
 }
 
 pub const DEFAULT_HBM_DELAY_TICKS: usize = 10;
-pub const DEFAULT_HBM_BW_BYTES_PER_CYCLE: usize = 32;
+pub const DEFAULT_HBM_BW_BYTES_PER_TICK: usize = 32;
 pub const DEFAULT_HBM_SIZE_BYTES: usize = 1024 * 1024 * 1024;
 
 pub fn build_memories(
@@ -294,18 +294,14 @@ pub fn build_memories(
         for memory_section in memories_section {
             let base_address = memory_section.base_address;
             let capacity_bytes = memory_section.capacity_bytes as usize;
-            let bw_bytes_per_cycle = memory_section
-                .bw_bytes_per_cycle
-                .unwrap_or(DEFAULT_HBM_BW_BYTES_PER_CYCLE);
+            let bw_bytes_per_tick = memory_section
+                .bw_bytes_per_tick
+                .unwrap_or(DEFAULT_HBM_BW_BYTES_PER_TICK);
             let delay_ticks = memory_section
                 .delay_ticks
                 .unwrap_or(DEFAULT_HBM_DELAY_TICKS);
-            let config = MemoryConfig::new(
-                base_address,
-                capacity_bytes,
-                bw_bytes_per_cycle,
-                delay_ticks,
-            );
+            let config =
+                MemoryConfig::new(base_address, capacity_bytes, bw_bytes_per_tick, delay_ticks);
             memories.push(Memory::new_and_register(
                 engine,
                 clock,
@@ -356,7 +352,7 @@ mod tests {
                 kind: MemoryKind::HBM,
                 base_address: 0x4000,
                 capacity_bytes: 0x2000,
-                bw_bytes_per_cycle: None,
+                bw_bytes_per_tick: None,
                 delay_ticks: None,
             }]),
             connections: None,

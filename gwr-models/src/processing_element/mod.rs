@@ -170,7 +170,7 @@ impl ComputeCapabilities {
         }
     }
 
-    pub fn cycles_for_ops(&self, num_ops: usize, op: MachineOp) -> Result<usize, SimError> {
+    pub fn ticks_for_ops(&self, num_ops: usize, op: MachineOp) -> Result<usize, SimError> {
         if num_ops == 0 {
             return Ok(0);
         }
@@ -567,10 +567,10 @@ async fn handle_compute_task(
         }
         {
             // Lanes cannot support overlapping activity. If a lane will be
-            // released in the current clock cycle then we want to re-use it
+            // released in the current tick then we want to re-use it
             // rather than allocate a new lane. Hence we wait here for the end
-            // of the current clock cycle to ensure all lanes that will be
-            // released in this cycle have been.
+            // of the current tick to ensure all lanes that will be released in
+            // this tick have been.
             clock.wait_phase(phase::END).await;
 
             let _activity = ActivityLanes::begin_in_group(
@@ -618,7 +618,7 @@ mod tests {
     }
 
     #[test]
-    fn cycles_for_ops_uses_ceil_for_fractional_throughput() {
+    fn ticks_for_ops_uses_ceil_for_fractional_throughput() {
         let compute_capabilities = ComputeCapabilities {
             adds_per_tick: 0.5,
             muls_per_tick: 2.5,
@@ -628,26 +628,26 @@ mod tests {
 
         assert_eq!(
             compute_capabilities
-                .cycles_for_ops(3, MachineOp::Add)
+                .ticks_for_ops(3, MachineOp::Add)
                 .unwrap(),
             6
         );
         assert_eq!(
             compute_capabilities
-                .cycles_for_ops(6, MachineOp::Mul)
+                .ticks_for_ops(6, MachineOp::Mul)
                 .unwrap(),
             3
         );
         assert_eq!(
             compute_capabilities
-                .cycles_for_ops(0, MachineOp::Compare)
+                .ticks_for_ops(0, MachineOp::Compare)
                 .unwrap(),
             0
         );
     }
 
     #[test]
-    fn cycles_for_ops_rejects_invalid_throughput() {
+    fn ticks_for_ops_rejects_invalid_throughput() {
         let compute_capabilities = ComputeCapabilities {
             adds_per_tick: 0.0,
             muls_per_tick: -1.0,
@@ -657,17 +657,17 @@ mod tests {
 
         assert!(
             compute_capabilities
-                .cycles_for_ops(1, MachineOp::Add)
+                .ticks_for_ops(1, MachineOp::Add)
                 .is_err()
         );
         assert!(
             compute_capabilities
-                .cycles_for_ops(1, MachineOp::Mul)
+                .ticks_for_ops(1, MachineOp::Mul)
                 .is_err()
         );
         assert!(
             compute_capabilities
-                .cycles_for_ops(1, MachineOp::Compare)
+                .ticks_for_ops(1, MachineOp::Compare)
                 .is_err()
         );
 
@@ -680,7 +680,7 @@ mod tests {
 
         assert!(
             compute_capabilities
-                .cycles_for_ops(1, MachineOp::Add)
+                .ticks_for_ops(1, MachineOp::Add)
                 .is_err()
         );
     }

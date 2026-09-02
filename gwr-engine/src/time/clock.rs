@@ -2,7 +2,7 @@
 
 //! This module represents the time during a simulation.
 //!
-//! Time is made up of a cycle count and a phase.
+//! Time is made up of a tick count and a phase.
 
 use core::cmp::Ordering;
 use std::cell::{Cell, RefCell};

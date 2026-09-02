@@ -54,7 +54,7 @@ processing_elements:
 caches:
   - name: l1_0
     config:
-      bw_bytes_per_cycle: 32
+      bw_bytes_per_tick: 32
       line_size_bytes: 32
       delay_ticks: 4
 

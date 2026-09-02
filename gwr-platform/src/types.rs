@@ -138,7 +138,7 @@ pub struct CacheSection {
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct CacheConfigSection {
-    pub bw_bytes_per_cycle: Option<usize>,
+    pub bw_bytes_per_tick: Option<usize>,
     pub line_size_bytes: Option<usize>,
     pub num_ways: Option<usize>,
     pub num_sets: Option<usize>,
@@ -170,7 +170,7 @@ pub struct MemorySection {
     pub base_address: u64,
     #[serde(deserialize_with = "parse_u64_byte_str")]
     pub capacity_bytes: u64,
-    pub bw_bytes_per_cycle: Option<usize>,
+    pub bw_bytes_per_tick: Option<usize>,
     pub delay_ticks: Option<usize>,
 }
 

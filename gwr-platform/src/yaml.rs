@@ -233,7 +233,7 @@ fn emit_caches(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std:
             emit_line(&mut out, format_args!("config: *{anchor}"), 2)?;
         } else {
             emitted_anchors[config_idx] = true;
-            if config.bw_bytes_per_cycle.is_none()
+            if config.bw_bytes_per_tick.is_none()
                 && config.line_size_bytes.is_none()
                 && config.num_ways.is_none()
                 && config.num_sets.is_none()
@@ -242,7 +242,7 @@ fn emit_caches(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std:
                 emit_line(&mut out, format_args!("config: &{anchor} {{}}"), 2)?;
             } else {
                 emit_line(&mut out, format_args!("config: &{anchor}"), 2)?;
-                emit_optional_kv(&mut out, "bw_bytes_per_cycle", config.bw_bytes_per_cycle, 3)?;
+                emit_optional_kv(&mut out, "bw_bytes_per_tick", config.bw_bytes_per_tick, 3)?;
                 emit_optional_kv(&mut out, "line_size_bytes", config.line_size_bytes, 3)?;
                 emit_optional_kv(&mut out, "num_ways", config.num_ways, 3)?;
                 emit_optional_kv(&mut out, "num_sets", config.num_sets, 3)?;
@@ -279,7 +279,7 @@ fn emit_memories(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn st
             u64_hex_str(memory.capacity_bytes),
             2,
         )?;
-        emit_optional_kv(&mut out, "bw_bytes_per_cycle", memory.bw_bytes_per_cycle, 2)?;
+        emit_optional_kv(&mut out, "bw_bytes_per_tick", memory.bw_bytes_per_tick, 2)?;
         emit_optional_kv(&mut out, "delay_ticks", memory.delay_ticks, 2)?;
     }
     Ok(Some(out))
@@ -426,7 +426,7 @@ mod tests {
             compares_per_tick: None,
         };
         let empty_cache_config = CacheConfigSection {
-            bw_bytes_per_cycle: None,
+            bw_bytes_per_tick: None,
             line_size_bytes: None,
             num_ways: None,
             num_sets: None,

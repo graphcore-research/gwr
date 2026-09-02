@@ -17,7 +17,7 @@ use gwr_models::test_helpers::create_default_memory_map;
 const BASE_ADDRESS: u64 = 0x80000;
 const SRC_ADDR: u64 = BASE_ADDRESS - LINE_SIZE_BYTES as u64;
 
-const BW_BYTES_PER_CYCLE: usize = 8;
+const BW_BYTES_PER_TICK: usize = 8;
 const LINE_SIZE_BYTES: usize = 32;
 const NUM_SETS: usize = 32;
 const NUM_WAYS: usize = 4;
@@ -62,7 +62,7 @@ fn build_system(
 
     let config = CacheConfig::new(
         LINE_SIZE_BYTES,
-        BW_BYTES_PER_CYCLE,
+        BW_BYTES_PER_TICK,
         NUM_SETS,
         NUM_WAYS,
         DELAY_TICKS,
@@ -75,7 +75,7 @@ fn build_system(
     let config = MemoryConfig::new(
         BASE_ADDRESS,
         CACHE_CAPACITY_BYTES * 2,
-        BW_BYTES_PER_CYCLE,
+        BW_BYTES_PER_TICK,
         DELAY_TICKS,
     );
     let memory = Memory::new_and_register(&engine, &clock, top, "memory", config).unwrap();

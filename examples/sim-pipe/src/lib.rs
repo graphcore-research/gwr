@@ -23,8 +23,8 @@
 //! run with simulations with different buffer sizes.
 //!
 //! If you use the default parameters you will get a pipeline which has a
-//! bandwidth of 128-bits per cycle and frames that are 128-bit (8-byte header,
-//! 8-byte payload). So the pipe will carry an entire frame every cycle.
+//! bandwidth of 128-bits per tick and frames that are 128-bit (8-byte header,
+//! 8-byte payload). So the pipe will carry an entire frame every tick.
 //!
 //! The default pipe has a 10-entry buffer and a latency in both directions
 //! (data and credit) of 5 ticks. This results in a maximum data rate of the

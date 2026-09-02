@@ -40,11 +40,11 @@ pub struct FabricConfig {
     /// already used for x/y routing.
     ports_per_node_limit: Option<usize>,
 
-    /// Cycles per hop when routing between an ingress and egress port
-    cycles_per_hop: usize,
+    /// Ticks per hop when routing between an ingress and egress port
+    ticks_per_hop: usize,
 
     /// Fixed overhead to be added to routing delay
-    cycles_overhead: usize,
+    ticks_overhead: usize,
 
     /// Number of bytes in the rx buffer for each fabric port
     rx_buffer_bytes: usize,
@@ -144,8 +144,8 @@ impl FabricConfig {
         num_rows: usize,
         num_ports_per_node: usize,
         ports_per_node_limit: Option<usize>,
-        cycles_per_hop: usize,
-        cycles_overhead: usize,
+        ticks_per_hop: usize,
+        ticks_overhead: usize,
         rx_buffer_bytes: usize,
         tx_buffer_bytes: usize,
         port_bits_per_tick: usize,
@@ -161,8 +161,8 @@ impl FabricConfig {
             num_rows,
             num_ports_per_node,
             ports_per_node_limit,
-            cycles_per_hop,
-            cycles_overhead,
+            ticks_per_hop,
+            ticks_overhead,
             rx_buffer_bytes,
             tx_buffer_bytes,
             port_bits_per_tick,
@@ -247,13 +247,13 @@ impl FabricConfig {
     }
 
     #[must_use]
-    pub fn cycles_per_hop(&self) -> usize {
-        self.cycles_per_hop
+    pub fn ticks_per_hop(&self) -> usize {
+        self.ticks_per_hop
     }
 
     #[must_use]
-    pub fn cycles_overhead(&self) -> usize {
-        self.cycles_overhead
+    pub fn ticks_overhead(&self) -> usize {
+        self.ticks_overhead
     }
 
     #[must_use]

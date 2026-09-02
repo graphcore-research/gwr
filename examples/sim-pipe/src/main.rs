@@ -71,12 +71,12 @@ struct Cli {
     #[arg(long, default_value = "10")]
     pipe_buffer_entries: usize,
 
-    /// Set the number of cycles it takes for data to travel through the
+    /// Set the number of ticks it takes for data to travel through the
     /// pipeline
     #[arg(long, default_value = "5")]
     pipe_data_delay: usize,
 
-    /// Set the number of cycles it takes for credit to be returned to the start
+    /// Set the number of ticks it takes for credit to be returned to the start
     /// of the pipe
     #[arg(long, default_value = "5")]
     pipe_credit_delay: usize,
