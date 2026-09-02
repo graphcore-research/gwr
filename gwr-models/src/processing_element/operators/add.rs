@@ -190,7 +190,7 @@ impl Operator for OperatorAdd {
         outputs: &[Option<TensorView>],
     ) -> Result<usize, SimError> {
         let num_adds = num_add_flops(inputs, outputs)?;
-        compute_capabilities.cycles_for_ops(num_adds, MachineOp::Add)
+        compute_capabilities.ticks_for_ops(num_adds, MachineOp::Add)
     }
 
     fn compute_machine_ops(

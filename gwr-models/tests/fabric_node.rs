@@ -15,8 +15,8 @@ fn default_config() -> Rc<FabricConfig> {
     let num_columns = 3;
     let num_rows = 4;
     let num_ports_per_node = 2;
-    let cycles_per_hop = 5;
-    let cycles_overhead = 1;
+    let ticks_per_hop = 5;
+    let ticks_overhead = 1;
     let rx_buffer_bytes = 1024;
     let tx_buffer_bytes = 1024;
     let port_bits_per_tick = 128;
@@ -26,8 +26,8 @@ fn default_config() -> Rc<FabricConfig> {
         num_rows,
         num_ports_per_node,
         None,
-        cycles_per_hop,
-        cycles_overhead,
+        ticks_per_hop,
+        ticks_overhead,
         rx_buffer_bytes,
         tx_buffer_bytes,
         port_bits_per_tick,

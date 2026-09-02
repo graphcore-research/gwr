@@ -265,7 +265,7 @@ where
             &entity,
             &config,
             &nodes,
-            config.cycles_per_hop,
+            config.ticks_per_hop,
         );
         connect_rows(
             engine,
@@ -273,7 +273,7 @@ where
             &entity,
             &config,
             &nodes,
-            config.cycles_per_hop,
+            config.ticks_per_hop,
         );
         create_dummy_ports(engine, clock, &entity, &config, &nodes);
 

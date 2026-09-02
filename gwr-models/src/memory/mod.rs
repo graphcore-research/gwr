@@ -38,7 +38,7 @@ pub enum CacheHintType {
 pub struct MemoryConfig {
     base_address: u64,
     capacity_bytes: usize,
-    bw_bytes_per_cycle: usize,
+    bw_bytes_per_tick: usize,
     delay_ticks: usize,
 }
 
@@ -47,13 +47,13 @@ impl MemoryConfig {
     pub fn new(
         base_address: u64,
         capacity_bytes: usize,
-        bw_bytes_per_cycle: usize,
+        bw_bytes_per_tick: usize,
         delay_ticks: usize,
     ) -> Self {
         Self {
             base_address,
             capacity_bytes,
-            bw_bytes_per_cycle,
+            bw_bytes_per_tick,
             delay_ticks,
         }
     }
@@ -271,7 +271,7 @@ where
                 }
             }
 
-            let ticks = payload_bytes.div_ceil(config.bw_bytes_per_cycle) as u64;
+            let ticks = payload_bytes.div_ceil(config.bw_bytes_per_tick) as u64;
             self.clock.wait_ticks(ticks).await;
         }
     }

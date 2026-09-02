@@ -15,18 +15,18 @@ use gwr_models::test_helpers::{
 const DST_ADDR: u64 = 0x80000;
 const SRC_ADDR: u64 = DST_ADDR + 0x1000;
 const CAPACITY_BYTES: usize = 0x40000;
-const BW_BYTES_PER_CYCLE: usize = 32;
+const BW_BYTES_PER_TICK: usize = 32;
 const DELAY_TICKS: usize = 8;
 const ACCESS_SIZE_BYTES: usize = 128;
 const OVERHEAD_SIZE_BYTES: usize = 16;
 
-const CYCLES_PER_ACCESS: u64 = (ACCESS_SIZE_BYTES as u64).div_ceil(BW_BYTES_PER_CYCLE as u64);
+const TICKS_PER_ACCESS: u64 = (ACCESS_SIZE_BYTES as u64).div_ceil(BW_BYTES_PER_TICK as u64);
 
 fn create_memory<T>(engine: &mut Engine) -> Rc<Memory<T>>
 where
     T: SimObject + AccessMemory,
 {
-    let config = MemoryConfig::new(DST_ADDR, CAPACITY_BYTES, BW_BYTES_PER_CYCLE, DELAY_TICKS);
+    let config = MemoryConfig::new(DST_ADDR, CAPACITY_BYTES, BW_BYTES_PER_TICK, DELAY_TICKS);
     let clock = engine.default_clock();
     let top = engine.top();
 
@@ -88,8 +88,8 @@ mod memory_harness {
         assert_eq!(memory.bytes_read(), num_accesses * ACCESS_SIZE_BYTES);
         assert_eq!(memory.bytes_written(), 0);
 
-        let last_bw_limit_event = CYCLES_PER_ACCESS * num_accesses as u64;
-        let last_packet_ack = CYCLES_PER_ACCESS * ((num_accesses - 1) as u64) + DELAY_TICKS as u64;
+        let last_bw_limit_event = TICKS_PER_ACCESS * num_accesses as u64;
+        let last_packet_ack = TICKS_PER_ACCESS * ((num_accesses - 1) as u64) + DELAY_TICKS as u64;
         let last_event_time = max(last_bw_limit_event, last_packet_ack) + DELAY_TICKS as u64;
 
         assert_eq!(harness.engine.time_now_ns(), last_event_time as f64);
@@ -146,7 +146,7 @@ mod memory_harness {
 
         harness.run_steps([
             seq!(vec![send_rx!(request); num_accesses]),
-            expect_no_traffic!(&[Port::Tx], CYCLES_PER_ACCESS),
+            expect_no_traffic!(&[Port::Tx], TICKS_PER_ACCESS),
             expect_no_traffic!(&[Port::Tx], DELAY_TICKS as u64),
         ]);
 
@@ -155,7 +155,7 @@ mod memory_harness {
 
         // Simulation will only complete once the Memory has finished handling
         // all the delay imposed by the data it is carrying
-        let last_bw_limit_event = CYCLES_PER_ACCESS * num_accesses as u64;
+        let last_bw_limit_event = TICKS_PER_ACCESS * num_accesses as u64;
         let last_event_time = last_bw_limit_event + DELAY_TICKS as u64;
         assert_eq!(harness.engine.time_now_ns(), last_event_time as f64);
     }
@@ -197,8 +197,8 @@ mod memory_harness {
         assert_eq!(memory.bytes_written(), num_accesses * ACCESS_SIZE_BYTES);
         assert_eq!(memory.bytes_read(), 0);
 
-        let last_bw_limit_event = CYCLES_PER_ACCESS * num_accesses as u64;
-        let last_packet_ack = CYCLES_PER_ACCESS * ((num_accesses - 1) as u64) + DELAY_TICKS as u64;
+        let last_bw_limit_event = TICKS_PER_ACCESS * num_accesses as u64;
+        let last_packet_ack = TICKS_PER_ACCESS * ((num_accesses - 1) as u64) + DELAY_TICKS as u64;
         let last_event_time = max(last_bw_limit_event, last_packet_ack) + DELAY_TICKS as u64;
         assert_eq!(harness.engine.time_now_ns(), last_event_time as f64);
     }

@@ -343,8 +343,8 @@ impl Operator for OperatorGemm {
     ) -> Result<usize, SimError> {
         let (num_muls, num_adds) = gemm_op_counts(inputs, outputs)?;
         Ok(
-            compute_capabilities.cycles_for_ops(num_muls, MachineOp::Mul)?
-                + compute_capabilities.cycles_for_ops(num_adds, MachineOp::Add)?,
+            compute_capabilities.ticks_for_ops(num_muls, MachineOp::Mul)?
+                + compute_capabilities.ticks_for_ops(num_adds, MachineOp::Add)?,
         )
     }
 

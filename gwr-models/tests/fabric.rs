@@ -104,8 +104,8 @@ fn default_config() -> Rc<FabricConfig> {
     let num_columns = 3;
     let num_rows = 4;
     let num_ports_per_node = 2;
-    let cycles_per_hop = 5;
-    let cycles_overhead = 1;
+    let ticks_per_hop = 5;
+    let ticks_overhead = 1;
     let rx_buffer_bytes = 1024;
     let tx_buffer_bytes = 1024;
     let port_bits_per_tick = 128;
@@ -115,8 +115,8 @@ fn default_config() -> Rc<FabricConfig> {
         num_rows,
         num_ports_per_node,
         None,
-        cycles_per_hop,
-        cycles_overhead,
+        ticks_per_hop,
+        ticks_overhead,
         rx_buffer_bytes,
         tx_buffer_bytes,
         port_bits_per_tick,
@@ -216,7 +216,7 @@ fn latency() {
 
     let ticks_through_limiter = frame_bits.div_ceil(config.port_bits_per_tick());
     let num_hops = (num_columns - 1) + (num_rows - 1);
-    let ticks_through_fabric = num_hops * config.cycles_per_hop() + config.cycles_overhead();
+    let ticks_through_fabric = num_hops * config.ticks_per_hop() + config.ticks_overhead();
     let ticks = ticks_through_limiter + ticks_through_fabric;
     assert_eq!(clock.tick_now().tick(), ticks as u64);
 }

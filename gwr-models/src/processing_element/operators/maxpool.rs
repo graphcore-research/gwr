@@ -722,7 +722,7 @@ impl Operator for OperatorMaxPool {
         outputs: &[Option<TensorView>],
     ) -> Result<usize, SimError> {
         let comparisons = maxpool_comparisons(self, inputs, outputs)?;
-        compute_capabilities.cycles_for_ops(comparisons, MachineOp::Compare)
+        compute_capabilities.ticks_for_ops(comparisons, MachineOp::Compare)
     }
 
     fn compute_machine_ops(

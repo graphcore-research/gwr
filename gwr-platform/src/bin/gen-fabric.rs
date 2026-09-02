@@ -75,7 +75,7 @@ struct Args {
     l1_kib: usize,
 
     #[arg(long, default_value_t = 32)]
-    l1_bytes_per_cycle: usize,
+    l1_bytes_per_tick: usize,
 
     #[arg(long, default_value_t = 4)]
     l1_num_ways: usize,
@@ -87,7 +87,7 @@ struct Args {
     l2_kib: usize,
 
     #[arg(long, default_value_t = 32)]
-    l2_bytes_per_cycle: usize,
+    l2_bytes_per_tick: usize,
 
     #[arg(long, default_value_t = 8)]
     l2_num_ways: usize,
@@ -201,7 +201,7 @@ fn build_fabrics(args: &Args) -> Vec<FabricSection> {
 fn build_cache(
     name: String,
     kib: usize,
-    bytes_per_cycle: usize,
+    bytes_per_tick: usize,
     num_ways: usize,
     latency: usize,
 ) -> CacheSection {
@@ -209,7 +209,7 @@ fn build_cache(
     CacheSection {
         name,
         config: CacheConfigSection {
-            bw_bytes_per_cycle: Some(bytes_per_cycle),
+            bw_bytes_per_tick: Some(bytes_per_tick),
             line_size_bytes: Some(DEFAULT_CACHE_LINE_SIZE_BYTES),
             num_ways: Some(num_ways),
             num_sets: Some(num_sets),
@@ -230,7 +230,7 @@ fn build_caches(args: &Args) -> Result<Option<Vec<CacheSection>>, String> {
             caches.push(build_cache(
                 create_name("l1", column, row),
                 args.l1_kib,
-                args.l1_bytes_per_cycle,
+                args.l1_bytes_per_tick,
                 args.l1_num_ways,
                 args.l1_latency,
             ));
@@ -240,7 +240,7 @@ fn build_caches(args: &Args) -> Result<Option<Vec<CacheSection>>, String> {
             caches.push(build_cache(
                 create_name("l2", column, row),
                 args.l2_kib,
-                args.l2_bytes_per_cycle,
+                args.l2_bytes_per_tick,
                 args.l2_num_ways,
                 args.l2_latency,
             ));
@@ -260,7 +260,7 @@ fn build_memories(args: &Args) -> Vec<MemorySection> {
                 kind: MemoryKind::HBM,
                 base_address: base as u64,
                 capacity_bytes: args.hbm_size as u64,
-                bw_bytes_per_cycle: None,
+                bw_bytes_per_tick: None,
                 delay_ticks: Some(DEFAULT_HBM_DELAY_TICKS),
             };
             base += args.hbm_size;

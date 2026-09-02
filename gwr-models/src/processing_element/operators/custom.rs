@@ -34,10 +34,10 @@ impl Operator for OperatorCustom {
         _outputs: &[Option<TensorView>],
     ) -> Result<usize, SimError> {
         Ok(
-            compute_capabilities.cycles_for_ops(self.machine_ops.adds, MachineOp::Add)?
-                + compute_capabilities.cycles_for_ops(self.machine_ops.muls, MachineOp::Mul)?
+            compute_capabilities.ticks_for_ops(self.machine_ops.adds, MachineOp::Add)?
+                + compute_capabilities.ticks_for_ops(self.machine_ops.muls, MachineOp::Mul)?
                 + compute_capabilities
-                    .cycles_for_ops(self.machine_ops.compares, MachineOp::Compare)?,
+                    .ticks_for_ops(self.machine_ops.compares, MachineOp::Compare)?,
         )
     }
 

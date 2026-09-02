@@ -97,7 +97,7 @@ fn test_fc_pipeline_throughput(
     let clock = engine.default_clock();
     let top = engine.top();
 
-    // Set the rate limit such that each packet sent will take one cycle
+    // Set the rate limit such that each packet sent will take one tick
     let bits_per_tick = 128;
     let rate_limiter = rc_limiter!(&clock, bits_per_tick);
     let limiter = Limiter::new_and_register(&engine, &clock, top, "limiter", rate_limiter);

@@ -66,7 +66,7 @@ type Index = usize;
 #[derive(Clone)]
 pub struct CacheConfig {
     line_size_bytes: usize,
-    bw_bytes_per_cycle: usize,
+    bw_bytes_per_tick: usize,
     num_sets: usize,
     num_ways: usize,
     delay_ticks: usize,
@@ -76,14 +76,14 @@ impl CacheConfig {
     #[must_use]
     pub fn new(
         line_size_bytes: usize,
-        bw_bytes_per_cycle: usize,
+        bw_bytes_per_tick: usize,
         num_sets: usize,
         num_ways: usize,
         delay_ticks: usize,
     ) -> Self {
         Self {
             line_size_bytes,
-            bw_bytes_per_cycle,
+            bw_bytes_per_tick,
             num_sets,
             num_ways,
             delay_ticks,
@@ -335,7 +335,7 @@ where
     dev_rx: RefCell<Option<InPort<T>>>,
     mem_rx: RefCell<Option<InPort<T>>>,
 
-    bw_bytes_per_cycle: usize,
+    bw_bytes_per_tick: usize,
 
     // Internal ports
     req: RefCell<Option<OutPort<T>>>,
@@ -356,7 +356,7 @@ where
         aka: Option<&Aka>,
         config: CacheConfig,
     ) -> Result<Rc<Self>, SimError> {
-        let bw_bytes_per_cycle = config.bw_bytes_per_cycle;
+        let bw_bytes_per_tick = config.bw_bytes_per_tick;
         let entity = Rc::new(Entity::new(parent, name));
 
         let policy = Box::new(RoundRobin::new());
@@ -416,7 +416,7 @@ where
             request_delay: RefCell::new(Some(request_delay)),
             dev_rx: RefCell::new(Some(dev_rx)),
             mem_rx: RefCell::new(Some(mem_rx)),
-            bw_bytes_per_cycle,
+            bw_bytes_per_tick,
 
             req: RefCell::new(Some(req)),
             rsp_arb_0: RefCell::new(Some(rsp_arb_0)),
@@ -498,7 +498,7 @@ where
     clock: Clock,
     contents: Rc<RefCell<CacheContents<T>>>,
     metrics: Rc<RefCell<CacheMetrics>>,
-    bw_bytes_per_cycle: usize,
+    bw_bytes_per_tick: usize,
 }
 
 #[async_trait(?Send)]
@@ -515,7 +515,7 @@ where
                 clock: self.clock.clone(),
                 contents: self.contents.clone(),
                 metrics: self.metrics.clone(),
-                bw_bytes_per_cycle: self.bw_bytes_per_cycle,
+                bw_bytes_per_tick: self.bw_bytes_per_tick,
             };
             let req = take_option!(self.req);
             let rsp_arb_1 = take_option!(self.rsp_arb_1);
@@ -530,7 +530,7 @@ where
             clock: self.clock.clone(),
             contents: self.contents.clone(),
             metrics: self.metrics.clone(),
-            bw_bytes_per_cycle: self.bw_bytes_per_cycle,
+            bw_bytes_per_tick: self.bw_bytes_per_tick,
         };
         let rsp_arb_0 = take_option!(self.rsp_arb_0);
         run_mem_rx(state, rsp_arb_0).await
@@ -550,7 +550,7 @@ where
         trace!(state.entity ; "Device request {}", request);
         let total_bytes = request.total_bytes();
         handle_request(&state, &mut req, &mut rsp_arb_1, request).await?;
-        let ticks = total_bytes.div_ceil(state.bw_bytes_per_cycle);
+        let ticks = total_bytes.div_ceil(state.bw_bytes_per_tick);
         state.clock.wait_ticks(ticks as u64).await;
     }
 }
@@ -622,7 +622,7 @@ where
         trace!(state.entity ; "Memory response {}", response);
         let total_bytes = response.total_bytes();
         handle_response(&state, &mut rsp_arb_0, response).await?;
-        let ticks = total_bytes.div_ceil(state.bw_bytes_per_cycle);
+        let ticks = total_bytes.div_ceil(state.bw_bytes_per_tick);
         state.clock.wait_ticks(ticks as u64).await;
     }
 }
@@ -680,10 +680,10 @@ where
 #[test]
 fn basic_ways() {
     let line_size_bytes = 32;
-    let bw_bytes_per_cycle = 32;
+    let bw_bytes_per_tick = 32;
     let num_sets = 1024;
     let num_ways = 4;
-    let config = CacheConfig::new(line_size_bytes, bw_bytes_per_cycle, num_sets, num_ways, 8);
+    let config = CacheConfig::new(line_size_bytes, bw_bytes_per_tick, num_sets, num_ways, 8);
     let mut state: CacheContents<MemoryAccess> = CacheContents::new(config);
 
     let mut addrs = Vec::new();

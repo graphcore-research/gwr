@@ -37,7 +37,7 @@ processing_elements:
 caches:
   - name: c2
     config:
-      bw_bytes_per_cycle: 32
+      bw_bytes_per_tick: 32
       line_size_bytes: 32
       num_ways: 4
       num_sets: 128

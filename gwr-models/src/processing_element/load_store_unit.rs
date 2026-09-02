@@ -346,10 +346,10 @@ impl LoadStoreUnit {
             let request_slot_idx = self.state.allocate_request_slot().await;
             if activity_guard.is_none() {
                 // Lanes cannot support overlapping activity. If a lane will be
-                // released in the current clock cycle then we want to re-use it
+                // released in the current tick then we want to re-use it
                 // rather than allocate a new lane. Hence we wait here for the
-                // end of the current clock cycle to ensure all lanes that will
-                // be released in this cycle have been.
+                // end of the current tick to ensure all lanes that will be
+                // released in this tick have been.
                 self.clock.wait_phase(phase::END).await;
 
                 activity_guard = Some(ActivityLanes::begin_in_group(

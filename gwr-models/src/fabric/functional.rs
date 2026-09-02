@@ -44,7 +44,7 @@ use crate::fabric::{Fabric, FabricConfig};
 
 /// Return the Manhatten time to travel between RX and TX ports specified.
 #[must_use]
-fn manhatten_rx_to_tx_cycles(
+fn manhatten_rx_to_tx_ticks(
     config: &FabricConfig,
     rx_port_index: usize,
     tx_port_index: usize,
@@ -54,9 +54,9 @@ fn manhatten_rx_to_tx_cycles(
     let horizontal_hops = rx_col.abs_diff(tx_col);
     let vertical_hops = rx_row.abs_diff(tx_row);
 
-    // Add one hop for enterring so that there is never a zero-cycle latency
+    // Add one hop for enterring so that there is never a zero-tick latency
     // which could otherwise be seen between ports on the same fabric node
-    (horizontal_hops + vertical_hops) * config.cycles_per_hop + config.cycles_overhead
+    (horizontal_hops + vertical_hops) * config.ticks_per_hop + config.ticks_overhead
 }
 
 #[derive(EntityGet, EntityDisplay)]
@@ -308,7 +308,7 @@ where
         let value_bytes = value.total_bytes();
 
         let dest_index = routing_algorithm.route(&value)?;
-        let delay_ticks = manhatten_rx_to_tx_cycles(&config, port_index, dest_index);
+        let delay_ticks = manhatten_rx_to_tx_ticks(&config, port_index, dest_index);
 
         let mut tick = clock.tick_now();
         tick.set_tick(tick.tick() + delay_ticks as u64);

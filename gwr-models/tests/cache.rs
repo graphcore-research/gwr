@@ -17,7 +17,7 @@ const BASE_ADDRESS: u64 = 0x80000;
 const DST_ADDR: u64 = BASE_ADDRESS;
 const SRC_ADDR: u64 = BASE_ADDRESS + 0x1000;
 
-const BW_BYTES_PER_CYCLE: usize = 8;
+const BW_BYTES_PER_TICK: usize = 8;
 const LINE_SIZE_BYTES: usize = 32;
 const NUM_SETS: usize = 1024;
 const NUM_WAYS: usize = 4;
@@ -39,7 +39,7 @@ impl ReadMemory for TestMemory {
 fn cache_config() -> CacheConfig {
     CacheConfig::new(
         LINE_SIZE_BYTES,
-        BW_BYTES_PER_CYCLE,
+        BW_BYTES_PER_TICK,
         NUM_SETS,
         NUM_WAYS,
         DELAY_TICKS,
@@ -62,7 +62,7 @@ where
     let config = MemoryConfig::new(
         BASE_ADDRESS,
         CACHE_CAPACITY_BYTES * NUM_WAYS * 2,
-        BW_BYTES_PER_CYCLE,
+        BW_BYTES_PER_TICK,
         DELAY_TICKS,
     );
     let memory = Memory::new_and_register(engine, &clock, top, "memory", config).unwrap();
@@ -148,7 +148,7 @@ mod full_cache_harness {
     #[test]
     fn cache_dev_read_goes_to_mem() {
         let num_accesses = 100;
-        let cycles_per_request = OVERHEAD_SIZE_BYTES.div_ceil(BW_BYTES_PER_CYCLE) as u64;
+        let ticks_per_request = OVERHEAD_SIZE_BYTES.div_ceil(BW_BYTES_PER_TICK) as u64;
 
         let mut engine = start_test(file!());
         let cache = create_cache(&mut engine);
@@ -174,7 +174,7 @@ mod full_cache_harness {
                         .with_bytes(ACCESS_SIZE_BYTES)
                 ),
             ]),
-            expect_no_traffic!(&[Port::DevTx, Port::MemTx], cycles_per_request),
+            expect_no_traffic!(&[Port::DevTx, Port::MemTx], ticks_per_request),
             expect_no_traffic!(&[Port::DevTx, Port::MemTx], DELAY_TICKS as u64),
         ]);
 
