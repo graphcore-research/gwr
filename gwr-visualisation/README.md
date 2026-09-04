@@ -265,13 +265,30 @@ Current Safari, Chromium, and browsers with equivalent WebAssembly, gzip stream,
 DOM, canvas, and local-storage support can open reports. Startup failures are
 rendered into the document instead of leaving a blank page.
 
-### Performance
+### Browser tests and performance
 
 Install the pinned browser harness dependencies with Node.js 22 or newer:
 
 ```bash
 npm ci --prefix gwr-visualisation/benchmarks
 ```
+
+Exercise a report directly from a `file://` URL in Chromium and installed macOS
+Safari:
+
+```bash
+npm --prefix gwr-visualisation/benchmarks run browser-test -- \
+  --timetable /absolute/path/to/timetable.yaml \
+  --platform /absolute/path/to/platform.yaml \
+  --browsers chromium,safari \
+  --output /tmp/gwr-visualisation-browser-test
+```
+
+The deterministic checks cover presets, filters, single- and double-click
+selection, PE chart and grid modes, relationships, tensor and memory views,
+panel controls, workspace restoration, and startup failures. Screenshots and a
+JSON record are retained as diagnostic artifacts without a pixel-difference
+gate.
 
 Run the performance harness with two warm-ups and ten measurements per browser:
 
