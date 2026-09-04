@@ -31,7 +31,7 @@ pub trait ToFullness {
 #[derive(Debug, Clone)]
 pub enum EventLine {
     Create {
-        // Only need to keep the ID to be rendered.
+        created_by: u64,
         id: u64,
         time: f64,
     },
