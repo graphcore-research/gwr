@@ -3,15 +3,19 @@
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use gwr_platform::types::PlatformConfig;
 use gwr_timetable::timetable_file::TimetableFile;
 
 use crate::analysis::{OverlayInput, build_report};
+use crate::payload;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 const INDEX_TEMPLATE: &str = include_str!("../assets/index.html");
 const STATIC_ASSETS: &[(&str, &str)] = &[
+    ("bootstrap.js", include_str!("../assets/bootstrap.js")),
     ("view-model.js", include_str!("../assets/view-model.js")),
     ("core.js", include_str!("../assets/core.js")),
     ("filters.js", include_str!("../assets/filters.js")),
@@ -27,6 +31,7 @@ const STATIC_ASSETS: &[(&str, &str)] = &[
     ("app.js", include_str!("../assets/app.js")),
     ("style.css", include_str!("../assets/style.css")),
 ];
+const RETIRED_OUTPUTS: &[&str] = &["data.js"];
 
 /// Input files and destination for a generated report bundle.
 #[derive(Debug)]
@@ -57,7 +62,7 @@ pub fn write_bundle(inputs: &BundleInputs) -> Result<PathBuf> {
     let platform = read_platform(inputs.platform.as_deref())?;
     let overlay = read_overlay(inputs.overlay.as_deref())?;
 
-    let data = build_report(
+    let mut data = build_report(
         &graph,
         &inputs.timetable,
         platform.as_ref().zip(inputs.platform.as_deref()),
@@ -65,14 +70,14 @@ pub fn write_bundle(inputs: &BundleInputs) -> Result<PathBuf> {
     )?;
 
     let data_json = serde_json::to_string_pretty(&data)?;
-    let compact_data = serde_json::to_string(&data)?;
-    let encoded_data = serde_json::to_string(&compact_data)?;
-    let data_js = format!("window.GWR_VISUALISATION_DATA=JSON.parse({encoded_data});\n");
-    let index_html = INDEX_TEMPLATE.replace("{{DATA_SCRIPT}}", "data.js");
+    let tensors = std::mem::take(&mut data.tensors);
+    let compressed_data = payload::encode(&data)?;
+    let compressed_tensors = payload::encode(&tensors)?;
+    let payload_js = browser_payload(&compressed_data, &compressed_tensors);
     let bundle_files: Vec<_> = [
-        ("index.html", index_html.as_str()),
+        ("index.html", INDEX_TEMPLATE),
         ("data.json", data_json.as_str()),
-        ("data.js", data_js.as_str()),
+        ("payload.js", payload_js.as_str()),
     ]
     .into_iter()
     .chain(STATIC_ASSETS.iter().copied())
@@ -92,11 +97,20 @@ pub fn write_bundle(inputs: &BundleInputs) -> Result<PathBuf> {
     for (name, contents) in &bundle_files {
         fs::write(staging_dir.path().join(name), contents)?;
     }
+    remove_retired_outputs(&inputs.out_dir)?;
     for (name, _) in bundle_files {
         replace_output(&staging_dir.path().join(name), &inputs.out_dir.join(name))?;
     }
 
     Ok(inputs.out_dir.join("index.html"))
+}
+
+fn browser_payload(compressed_data: &[u8], compressed_tensors: &[u8]) -> String {
+    format!(
+        "window.GWR_VISUALISATION_PAYLOAD={{data:\"{}\",tensors:\"{}\"}};\n",
+        BASE64.encode(compressed_data),
+        BASE64.encode(compressed_tensors),
+    )
 }
 
 fn input_paths(inputs: &BundleInputs) -> Vec<&Path> {
@@ -194,6 +208,23 @@ fn replace_output(staged: &Path, destination: &Path) -> io::Result<()> {
     fs::rename(staged, destination)
 }
 
+fn remove_retired_outputs(out_dir: &Path) -> io::Result<()> {
+    for name in RETIRED_OUTPUTS {
+        let path = out_dir.join(name);
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_dir() => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("Retired output path '{}' is a directory", path.display()),
+                ));
+            }
+            Ok(_) => fs::remove_file(path)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
 fn read_platform(path: Option<&Path>) -> Result<Option<PlatformConfig>> {
     let Some(path) = path else {
         return Ok(None);

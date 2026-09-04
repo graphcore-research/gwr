@@ -65,7 +65,7 @@ fn rejects_hard_links_between_output_files() {
     let output_dir = temp.path().join("report");
     std::fs::create_dir(&output_dir).unwrap();
     let first_output = output_dir.join("index.html");
-    let second_output = output_dir.join("data.js");
+    let second_output = output_dir.join("payload.js");
     let contents = "existing report";
     std::fs::write(&first_output, contents).unwrap();
     std::fs::hard_link(&first_output, &second_output).unwrap();
@@ -80,7 +80,7 @@ fn rejects_symlinks_between_output_files() {
     let output_dir = temp.path().join("report");
     std::fs::create_dir(&output_dir).unwrap();
     let first_output = output_dir.join("index.html");
-    let second_output = output_dir.join("data.js");
+    let second_output = output_dir.join("payload.js");
     let contents = "existing report";
     std::fs::write(&first_output, contents).unwrap();
     std::os::unix::fs::symlink(&first_output, &second_output).unwrap();
@@ -166,8 +166,8 @@ fn rejects_a_dangling_output_symlink_before_writing() {
     let output_dir = temp.path().join("report");
     std::fs::create_dir(&output_dir).unwrap();
     let first_output = output_dir.join("index.html");
-    let second_output = output_dir.join("data.js");
-    std::os::unix::fs::symlink("data.js", &first_output).unwrap();
+    let second_output = output_dir.join("payload.js");
+    std::os::unix::fs::symlink("payload.js", &first_output).unwrap();
     let existing_output = output_dir.join("style.css");
     let existing_contents = "existing report";
     std::fs::write(&existing_output, existing_contents).unwrap();
@@ -183,7 +183,7 @@ fn rejects_a_dangling_output_symlink_before_writing() {
     assert!(!output.status.success());
     assert_eq!(
         std::fs::read_link(&first_output).unwrap(),
-        Path::new("data.js")
+        Path::new("payload.js")
     );
     assert!(!second_output.exists());
     assert_eq!(

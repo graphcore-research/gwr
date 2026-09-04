@@ -1,6 +1,11 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use super::common::{GeneratedReport, SMALL_TIMETABLE, generator_command};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
+
+use super::common::{
+    GeneratedReport, SMALL_TIMETABLE, decompress_json, generator_command, payload_value,
+};
 
 #[test]
 fn writes_static_bundle() {
@@ -12,7 +17,7 @@ fn writes_static_bundle() {
 }
 
 #[test]
-fn data_script_preserves_a_proto_overlay_key() {
+fn compressed_payload_preserves_a_proto_overlay_key() {
     let temp = tempfile::tempdir().unwrap();
     let overlay = temp.path().join("overlay.json");
     std::fs::write(
@@ -39,25 +44,67 @@ fn data_script_preserves_a_proto_overlay_key() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let data_script = std::fs::read_to_string(temp.path().join("data.js")).unwrap();
-    assert!(data_script.starts_with("window.GWR_VISUALISATION_DATA=JSON.parse("));
-    assert!(data_script.contains(r#"\"__proto__\""#));
+    let payload = std::fs::read_to_string(temp.path().join("payload.js")).unwrap();
+    let compressed_data = BASE64.decode(payload_value(&payload, "data")).unwrap();
+    let data = decompress_json(&compressed_data);
+    assert!(
+        data["overlay_metrics"]
+            .as_object()
+            .unwrap()
+            .contains_key("__proto__")
+    );
+}
+
+#[test]
+fn removes_data_file_from_older_report_bundles() {
+    let temp = tempfile::tempdir().unwrap();
+    let retired = ["data.js"];
+    for name in retired {
+        std::fs::write(temp.path().join(name), "old report data").unwrap();
+    }
+
+    let output = generator_command()
+        .arg("--timetable")
+        .arg(SMALL_TIMETABLE)
+        .arg("--out")
+        .arg(temp.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "gwr-visualisation failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for name in retired {
+        assert!(!temp.path().join(name).exists(), "retained {name}");
+    }
+    assert!(temp.path().join("payload.js").is_file());
+}
+
+#[test]
+fn leaves_the_bundle_unchanged_when_a_retired_path_is_a_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    let index = temp.path().join("index.html");
+    std::fs::write(&index, "existing report").unwrap();
+    std::fs::create_dir(temp.path().join("data.js")).unwrap();
+
+    let output = generator_command()
+        .arg("--timetable")
+        .arg(SMALL_TIMETABLE)
+        .arg("--out")
+        .arg(temp.path())
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert_eq!(std::fs::read_to_string(index).unwrap(), "existing report");
+    assert!(temp.path().join("data.js").is_dir());
+    assert!(!temp.path().join("payload.js").exists());
 }
 
 fn assert_script_bundle(report: &GeneratedReport) {
-    let scripts = [
-        "data.js",
-        "view-model.js",
-        "core.js",
-        "filters.js",
-        "pe-grid.js",
-        "timetable.js",
-        "tensors.js",
-        "memory.js",
-        "relationships.js",
-        "workspace.js",
-        "app.js",
-    ];
+    let scripts = ["payload.js", "bootstrap.js"];
     let mut previous_position = 0;
     for script in scripts {
         let contents = report.asset(script);
@@ -72,12 +119,34 @@ fn assert_script_bundle(report: &GeneratedReport) {
         );
         previous_position = position;
     }
+    for script in [
+        "view-model.js",
+        "core.js",
+        "filters.js",
+        "pe-grid.js",
+        "timetable.js",
+        "tensors.js",
+        "memory.js",
+        "relationships.js",
+        "workspace.js",
+        "app.js",
+    ] {
+        assert!(!report.asset(script).is_empty());
+        assert!(!report.index_html.contains(script));
+    }
     assert!(report.asset("style.css").contains("color-scheme"));
-    assert!(
-        report
-            .asset("data.js")
-            .starts_with("window.GWR_VISUALISATION_DATA=JSON.parse(")
-    );
+    assert!(report.asset("bootstrap.js").contains("decompressGzip"));
+    assert_compressed_payload(report);
+}
+
+fn assert_compressed_payload(report: &GeneratedReport) {
+    let payload = report.asset("payload.js");
+    let compressed_data = BASE64.decode(payload_value(&payload, "data")).unwrap();
+    let compressed_tensors = BASE64.decode(payload_value(&payload, "tensors")).unwrap();
+    let mut browser_data = decompress_json(&compressed_data);
+    browser_data["tensors"] = decompress_json(&compressed_tensors);
+    assert_eq!(browser_data, report.data);
+    assert!(compressed_data.len() + compressed_tensors.len() < report.data_json.len());
 }
 
 fn assert_report_controls(index_html: &str) {
