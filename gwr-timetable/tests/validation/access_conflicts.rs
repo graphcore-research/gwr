@@ -292,6 +292,26 @@ fn accepts_disjoint_writers_to_aliased_tensors() {
 }
 
 #[test]
+fn accepts_wide_finite_stride_writers() {
+    const COUNT: usize = 100_000_000;
+
+    let file = timetable(
+        vec![
+            compute("producer0", vec![], vec![view(&[0, 0], &[COUNT, 2])]),
+            tensor("output0", 0, DataType::Int8, &[COUNT, 1_000_000_001]),
+            compute("producer1", vec![], vec![view(&[0, 0], &[COUNT, 2])]),
+            tensor("output1", 2, DataType::Int8, &[COUNT, 1_000_000_005]),
+        ],
+        vec![
+            data_edge("producer0", "output0"),
+            data_edge("producer1", "output1"),
+        ],
+    );
+
+    file.validate().unwrap();
+}
+
+#[test]
 fn rejects_aliased_tensor_views_sharing_a_packed_byte() {
     let file = timetable(
         vec![
