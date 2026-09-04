@@ -6,6 +6,7 @@ use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
 
 use super::dtype::DataType;
+use super::floor_sum::checked_floor_sum;
 use super::partition::DimPartition;
 use super::tensor::{HasShape, Shape, Tensor, checked_num_bytes};
 
@@ -663,10 +664,10 @@ fn ranges_overlap<T: Ord>(first: &Range<T>, second: &Range<T>) -> bool {
 // compared.
 #[derive(Clone, Copy, Debug)]
 struct ByteStartProgression {
-    first: i128,
-    last: i128,
+    first_start: i128,
+    last_start: i128,
     stride: i128,
-    num_bytes: i128,
+    num_bytes_per_range: i128,
 }
 
 impl TensorViewLayout {
@@ -691,10 +692,10 @@ impl TensorViewLayout {
             .map(|stride| byte_offset(stride.stride_elements))
             .fold(0, gcd);
         ByteStartProgression {
-            first: i128::from(base_address) + byte_offset(self.first_element) as i128,
-            last: i128::from(base_address) + byte_offset(self.last_range_element()) as i128,
+            first_start: i128::from(base_address) + byte_offset(self.first_element) as i128,
+            last_start: i128::from(base_address) + byte_offset(self.last_range_element()) as i128,
             stride: stride as i128,
-            num_bytes: byte_offset(self.elements_per_range) as i128,
+            num_bytes_per_range: byte_offset(self.elements_per_range) as i128,
         }
     }
 
@@ -748,14 +749,14 @@ impl TensorViewLayout {
             let stride = stride as i128;
             let upper = base_address + (last_element / 2) as i128;
             ByteStartProgression {
-                first,
-                last: if stride == 0 {
+                first_start: first,
+                last_start: if stride == 0 {
                     first
                 } else {
                     first + (upper - first).div_euclid(stride) * stride
                 },
                 stride,
-                num_bytes: range_elements.div_ceil(2) as i128,
+                num_bytes_per_range: range_elements.div_ceil(2) as i128,
             }
         };
         let mut progressions = vec![progression(self.first_element)];
@@ -785,123 +786,181 @@ impl TensorViewLayout {
 }
 
 fn start_progressions_may_overlap(
-    first: ByteStartProgression,
-    second: ByteStartProgression,
+    first_progression: ByteStartProgression,
+    second_progression: ByteStartProgression,
 ) -> bool {
-    if first.first >= second.last + second.num_bytes || second.first >= first.last + first.num_bytes
+    if first_progression.first_start
+        >= second_progression.last_start + second_progression.num_bytes_per_range
+        || second_progression.first_start
+            >= first_progression.last_start + first_progression.num_bytes_per_range
     {
         return false;
     }
-    if first.num_bytes == 1 && second.num_bytes == 1 {
-        return bounded_progressions_intersect(first, second);
-    }
 
-    // Two ranges overlap when the difference between their start addresses is
-    // between these limits. Reachable differences have one residue modulo the
-    // greatest common divisor of the strides. For ranges wider than one byte,
-    // this is only a necessary condition; an inconclusive result falls back to
-    // comparing the exact ranges.
-    let minimum_difference = 1 - second.num_bytes;
-    let maximum_difference = first.num_bytes - 1;
-    let first_difference = second.first - first.first;
-    let stride = gcd(first.stride as usize, second.stride as usize) as i128;
-    if stride == 0 {
-        return (minimum_difference..=maximum_difference).contains(&first_difference);
-    }
-
-    let remainder = (minimum_difference - first_difference).rem_euclid(stride);
-    let first_candidate = if remainder == 0 {
-        minimum_difference
-    } else {
-        minimum_difference + stride - remainder
-    };
-    first_candidate <= maximum_difference
+    bounded_progression_ranges_overlap(first_progression, second_progression).unwrap_or(true)
 }
 
-fn bounded_progressions_intersect(
-    first: ByteStartProgression,
-    second: ByteStartProgression,
-) -> bool {
-    match (first.stride, second.stride) {
-        (0, 0) => first.first == second.first,
-        (0, _) => progression_contains(second, first.first),
-        (_, 0) => progression_contains(first, second.first),
-        (first_stride, second_stride) => {
-            // Solve
-            //
-            // first.first + i * first.stride = second.first + j *
-            // second.stride.
-            //
-            // The difference between the first values must be divisible by the
-            // greatest common divisor of the strides. After dividing by it, the
-            // strides are coprime, so a modular inverse gives the first
-            // intersection. Shift that value by the common period until it is
-            // inside the finite bounds of both progressions.
-            let first_value = first.first as u128;
-            let second_value = second.first as u128;
-            let first_stride = first_stride as u128;
-            let second_stride = second_stride as u128;
-            let divisor = gcd(first_stride as usize, second_stride as usize) as u128;
-            let difference = first_value.abs_diff(second_value);
-            if !difference.is_multiple_of(divisor) {
-                return false;
-            }
+fn bounded_progression_ranges_overlap(
+    first_progression: ByteStartProgression,
+    second_progression: ByteStartProgression,
+) -> Option<bool> {
+    let min_start_difference = 1i128.checked_sub(second_progression.num_bytes_per_range)?;
+    let max_start_difference = first_progression.num_bytes_per_range.checked_sub(1)?;
 
-            let first_step = first_stride / divisor;
-            let second_step = second_stride / divisor;
-            let difference = if second_value >= first_value {
-                (second_value - first_value) / divisor % second_step
-            } else {
-                let difference = (first_value - second_value) / divisor % second_step;
-                (second_step - difference) % second_step
-            };
-            let first_index = if second_step == 1 {
-                0
-            } else {
-                difference * modular_inverse(first_step, second_step) % second_step
-            };
-            let Some(mut intersection) = first_stride
-                .checked_mul(first_index)
-                .and_then(|offset| first_value.checked_add(offset))
-            else {
-                return false;
-            };
-            let lower = first_value.max(second_value);
-            let upper = (first.last as u128).min(second.last as u128);
-            if intersection < lower {
-                let period = first_step * second_stride;
-                let offset = (lower - intersection).div_ceil(period) * period;
-                let Some(value) = intersection.checked_add(offset) else {
-                    return false;
-                };
-                intersection = value;
-            }
-            intersection <= upper
+    match (first_progression.stride, second_progression.stride) {
+        (0, _) => progression_has_value_between(
+            second_progression,
+            first_progression
+                .first_start
+                .checked_add(min_start_difference)?,
+            first_progression
+                .first_start
+                .checked_add(max_start_difference)?,
+        ),
+        (_, 0) => progression_has_value_between(
+            first_progression,
+            second_progression
+                .first_start
+                .checked_sub(max_start_difference)?,
+            second_progression
+                .first_start
+                .checked_sub(min_start_difference)?,
+        ),
+        (_, _) => {
+            // A pair of ranges overlaps when the difference between their
+            // start addresses lies in the inclusive interval above. Count the
+            // finite progression pairs at or below each end of that interval;
+            // a larger count at the upper end proves that at least one pair
+            // overlaps without visiting the individual ranges.
+            let before_interval = count_progression_differences_at_most(
+                first_progression,
+                second_progression,
+                min_start_difference.checked_sub(1)?,
+            )?;
+            let through_interval = count_progression_differences_at_most(
+                first_progression,
+                second_progression,
+                max_start_difference,
+            )?;
+            Some(through_interval > before_interval)
         }
     }
 }
 
-fn progression_contains(progression: ByteStartProgression, value: i128) -> bool {
-    value >= progression.first
-        && value <= progression.last
-        && (progression.stride == 0
-            || (value - progression.first).rem_euclid(progression.stride) == 0)
+fn progression_has_value_between(
+    progression: ByteStartProgression,
+    lower: i128,
+    upper: i128,
+) -> Option<bool> {
+    let lower = lower.max(progression.first_start);
+    let upper = upper.min(progression.last_start);
+    if lower > upper {
+        return Some(false);
+    }
+    if progression.stride == 0 {
+        return Some(true);
+    }
+
+    let offset = lower.checked_sub(progression.first_start)?;
+    let steps = offset.checked_add(progression.stride.checked_sub(1)?)? / progression.stride;
+    let first_value = progression
+        .stride
+        .checked_mul(steps)
+        .and_then(|offset| progression.first_start.checked_add(offset))?;
+    Some(first_value <= upper)
 }
 
-fn modular_inverse(value: u128, modulus: u128) -> u128 {
-    let modulus = i128::try_from(modulus).expect("tensor byte strides fit in i128");
-    let value = i128::try_from(value).expect("tensor byte strides fit in i128");
-    let (mut previous_remainder, mut remainder) = (modulus, value);
-    let (mut previous_coefficient, mut coefficient) = (0i128, 1i128);
-    while remainder != 0 {
-        let quotient = previous_remainder / remainder;
-        (previous_remainder, remainder) = (remainder, previous_remainder - quotient * remainder);
-        (previous_coefficient, coefficient) =
-            (coefficient, previous_coefficient - quotient * coefficient);
+fn count_progression_differences_at_most(
+    first_progression: ByteStartProgression,
+    second_progression: ByteStartProgression,
+    max_start_difference: i128,
+) -> Option<u128> {
+    debug_assert_ne!(first_progression.stride, 0);
+    debug_assert_ne!(second_progression.stride, 0);
+
+    // For each start in `first_progression`, count the starts in
+    // `second_progression` for which
+    //
+    // second_start - first_start <= max_start_difference.
+    //
+    // The count is initially zero, then a floor progression, and finally the
+    // complete second progression. Find those boundaries arithmetically and
+    // sum only the middle section.
+    let first_count = progression_count(first_progression)?;
+    let second_count = progression_count(second_progression)?;
+    let first_stride = u128::try_from(first_progression.stride).ok()?;
+    let second_stride = u128::try_from(second_progression.stride).ok()?;
+    let first_numerator = max_start_difference
+        .checked_add(first_progression.first_start)?
+        .checked_sub(second_progression.first_start)?;
+    let partial_start = first_index_at_least(first_numerator, first_stride, 0, first_count)?;
+    let complete_threshold = second_progression
+        .last_start
+        .checked_sub(second_progression.first_start)
+        .and_then(|span| u128::try_from(span).ok())?;
+    let complete_start = first_index_at_least(
+        first_numerator,
+        first_stride,
+        i128::try_from(complete_threshold).ok()?,
+        first_count,
+    )?;
+
+    let partial_count = complete_start.checked_sub(partial_start)?;
+    let partial_pairs = if partial_count == 0 {
+        0
+    } else {
+        let partial_offset = first_stride
+            .checked_mul(partial_start)
+            .and_then(|offset| i128::try_from(offset).ok())
+            .and_then(|offset| first_numerator.checked_add(offset))
+            .and_then(|offset| u128::try_from(offset).ok())?;
+        checked_floor_sum(partial_count, second_stride, first_stride, partial_offset)?
+            .checked_add(partial_count)?
+    };
+    let complete_pairs = first_count
+        .checked_sub(complete_start)?
+        .checked_mul(second_count)?;
+    partial_pairs.checked_add(complete_pairs)
+}
+
+fn progression_count(progression: ByteStartProgression) -> Option<u128> {
+    if progression.stride == 0 {
+        return Some(1);
     }
-    debug_assert_eq!(previous_remainder, 1);
-    u128::try_from(previous_coefficient.rem_euclid(modulus))
-        .expect("a modular inverse is non-negative")
+
+    let span = progression
+        .last_start
+        .checked_sub(progression.first_start)?;
+    u128::try_from(span / progression.stride)
+        .ok()?
+        .checked_add(1)
+}
+
+fn first_index_at_least(
+    first_value: i128,
+    stride: u128,
+    target: i128,
+    count: u128,
+) -> Option<u128> {
+    if stride == 0 {
+        return None;
+    }
+    if first_value >= target {
+        return Some(0);
+    }
+
+    let difference = target
+        .checked_sub(first_value)
+        .and_then(|difference| u128::try_from(difference).ok())?;
+    Some(difference.div_ceil(stride).min(count))
+}
+
+#[cfg(test)]
+fn progression_contains(progression: ByteStartProgression, value: i128) -> bool {
+    value >= progression.first_start
+        && value <= progression.last_start
+        && (progression.stride == 0
+            || (value - progression.first_start).rem_euclid(progression.stride) == 0)
 }
 
 fn gcd(mut first: usize, mut second: usize) -> usize {
@@ -965,6 +1024,39 @@ mod tests {
             }
         }
         views
+    }
+
+    fn progression(
+        first: i128,
+        stride: i128,
+        count: i128,
+        num_bytes_per_range: i128,
+    ) -> ByteStartProgression {
+        assert!(count > 0);
+        assert!(num_bytes_per_range > 0);
+        let count = if stride == 0 { 1 } else { count };
+        ByteStartProgression {
+            first_start: first,
+            last_start: first + stride * (count - 1),
+            stride,
+            num_bytes_per_range,
+        }
+    }
+
+    fn exact_progression_ranges_overlap(
+        first: ByteStartProgression,
+        second: ByteStartProgression,
+    ) -> bool {
+        let first_count = i128::try_from(progression_count(first).unwrap()).unwrap();
+        let second_count = i128::try_from(progression_count(second).unwrap()).unwrap();
+        (0..first_count).any(|first_index| {
+            let first_start = first.first_start + first_index * first.stride;
+            (0..second_count).any(|second_index| {
+                let second_start = second.first_start + second_index * second.stride;
+                first_start < second_start + second.num_bytes_per_range
+                    && second_start < first_start + first.num_bytes_per_range
+            })
+        })
     }
 
     #[test]
@@ -1114,6 +1206,60 @@ mod tests {
     }
 
     #[test]
+    fn bounded_progression_overlap_matches_exact_ranges() {
+        for first_start in 0..=4 {
+            for second_start in 0..=4 {
+                for first_stride in 0..=4 {
+                    for second_stride in 0..=4 {
+                        for first_count in 1..=5 {
+                            for second_count in 1..=5 {
+                                for first_num_bytes in 1..=4 {
+                                    for second_num_bytes in 1..=4 {
+                                        let first = progression(
+                                            first_start,
+                                            first_stride,
+                                            first_count,
+                                            first_num_bytes,
+                                        );
+                                        let second = progression(
+                                            second_start,
+                                            second_stride,
+                                            second_count,
+                                            second_num_bytes,
+                                        );
+                                        assert_eq!(
+                                            bounded_progression_ranges_overlap(first, second),
+                                            Some(exact_progression_ranges_overlap(first, second)),
+                                            "first={first:?}, second={second:?}",
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bounded_progression_overlap_includes_the_final_physical_byte() {
+        let final_byte = i128::from(u64::MAX);
+        let first = progression(final_byte - 1, 0, 1, 2);
+        let overlapping = progression(final_byte, 0, 1, 1);
+        let disjoint = progression(final_byte - 2, 0, 1, 1);
+
+        assert_eq!(
+            bounded_progression_ranges_overlap(first, overlapping),
+            Some(true)
+        );
+        assert_eq!(
+            bounded_progression_ranges_overlap(disjoint, overlapping),
+            Some(false)
+        );
+    }
+
+    #[test]
     fn packed_elements_in_one_byte_overlap() {
         let tensor = tensor(&[2], DataType::Int4);
         let first = TensorView::new(tensor.clone(), &[1], &[0]).unwrap();
@@ -1155,7 +1301,7 @@ mod tests {
                 {
                     assert!(progressions.iter().any(|progression| {
                         progression_contains(*progression, range.start as i128)
-                            && progression.num_bytes >= range.len() as i128
+                            && progression.num_bytes_per_range >= range.len() as i128
                     }));
                 }
             }
@@ -1207,6 +1353,23 @@ mod tests {
         let second_tensor = Tensor::new(&[COUNT, STRIDE + 1], &DataType::Int8, 1).unwrap();
         let first = TensorView::new(first_tensor, &[COUNT, 1], &[0, 0]).unwrap();
         let second = TensorView::new(second_tensor, &[COUNT, 1], &[0, 0]).unwrap();
+
+        assert!(ranges_overlap(
+            &first.address_bounds(),
+            &second.address_bounds()
+        ));
+        assert!(first.byte_strides_are_disjoint(&second));
+        assert_eq!(first.first_overlapping_byte_ranges(&second), None);
+    }
+
+    #[test]
+    fn proves_wide_finite_byte_strides_are_disjoint() {
+        const COUNT: usize = 100_000_000;
+
+        let first_tensor = Tensor::new(&[COUNT, 1_000_000_001], &DataType::Int8, 0).unwrap();
+        let second_tensor = Tensor::new(&[COUNT, 1_000_000_005], &DataType::Int8, 2).unwrap();
+        let first = TensorView::new(first_tensor, &[COUNT, 2], &[0, 0]).unwrap();
+        let second = TensorView::new(second_tensor, &[COUNT, 2], &[0, 0]).unwrap();
 
         assert!(ranges_overlap(
             &first.address_bounds(),

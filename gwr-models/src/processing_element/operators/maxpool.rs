@@ -13,6 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::{Operator, Shape, Tensor, TensorPartition, TensorPartitions};
 use crate::processing_element::operators::dtype::DataType;
+use crate::processing_element::operators::floor_sum::checked_floor_sum;
 use crate::processing_element::operators::{
     DimPartition, ExpansionDirection, HasShape, TensorView, max_partitions_across_dimensions,
     partition_across_dimensions,
@@ -781,67 +782,12 @@ fn pairs_below(
         .and_then(|value| value.checked_sub((outputs - 1) * stride))
         .ok_or_else(|| SimError(format!("{NAME}: comparison count overflows")))?;
     total = total
-        .checked_add(floor_sum(remaining, dilation, stride, first_numerator)?)
+        .checked_add(
+            checked_floor_sum(remaining, dilation, stride, first_numerator)
+                .ok_or_else(|| SimError(format!("{NAME}: comparison count overflows")))?,
+        )
         .ok_or_else(|| SimError(format!("{NAME}: comparison count overflows")))?;
     Ok(total)
-}
-
-fn floor_sum(
-    mut count: u128,
-    mut modulus: u128,
-    mut step: u128,
-    mut offset: u128,
-) -> Result<u128, SimError> {
-    // Calculate
-    //
-    // sum(i = 0..count) floor((step * i + offset) / modulus).
-    //
-    // Each iteration removes the whole multiples of modulus from step and
-    // offset, then exchanges the reduced numerator and denominator. This is
-    // the Euclidean reduction of the floor sum, so its number of iterations
-    // is logarithmic in step and modulus.
-    if count == 0 {
-        return Ok(0);
-    }
-
-    let mut total = 0u128;
-    loop {
-        if step >= modulus {
-            let quotient = step / modulus;
-            let triangular = if count.is_multiple_of(2) {
-                (count / 2).checked_mul(count - 1)
-            } else {
-                count.checked_mul((count - 1) / 2)
-            }
-            .and_then(|value| value.checked_mul(quotient))
-            .ok_or_else(|| SimError(format!("{NAME}: comparison count overflows")))?;
-            total = total
-                .checked_add(triangular)
-                .ok_or_else(|| SimError(format!("{NAME}: comparison count overflows")))?;
-            step %= modulus;
-        }
-        if offset >= modulus {
-            total = total
-                .checked_add(
-                    count
-                        .checked_mul(offset / modulus)
-                        .ok_or_else(|| SimError(format!("{NAME}: comparison count overflows")))?,
-                )
-                .ok_or_else(|| SimError(format!("{NAME}: comparison count overflows")))?;
-            offset %= modulus;
-        }
-
-        let maximum = step
-            .checked_mul(count)
-            .and_then(|value| value.checked_add(offset))
-            .ok_or_else(|| SimError(format!("{NAME}: comparison count overflows")))?;
-        if maximum < modulus {
-            return Ok(total);
-        }
-        count = maximum / modulus;
-        offset = maximum % modulus;
-        std::mem::swap(&mut modulus, &mut step);
-    }
 }
 
 fn input_partition_for_output_partition(
@@ -1067,26 +1013,6 @@ mod tests {
             })
             .sum::<usize>();
         comparisons * output.shape().dims()[BATCH_DIM] * output.shape().dims()[CHANNEL_DIM]
-    }
-
-    #[test]
-    fn floor_sum_matches_direct_sum() {
-        for count in 0..=12 {
-            for modulus in 1..=12 {
-                for step in 0..=12 {
-                    for offset in 0..=12 {
-                        let expected = (0..count)
-                            .map(|index| (step * index + offset) / modulus)
-                            .sum::<u128>();
-                        assert_eq!(
-                            floor_sum(count, modulus, step, offset).unwrap(),
-                            expected,
-                            "count={count}, modulus={modulus}, step={step}, offset={offset}"
-                        );
-                    }
-                }
-            }
-        }
     }
 
     #[test]

@@ -11,6 +11,7 @@ use crate::processing_element::{ComputeCapabilities, MachineOpCounts};
 mod add;
 mod custom;
 pub mod dtype;
+mod floor_sum;
 mod gemm;
 mod maxpool;
 mod partition;
