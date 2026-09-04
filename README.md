@@ -253,6 +253,12 @@ prefix from the outset. Branches named with this prefix do not cause the
 push-specific CI workflow to run, avoiding a duplicate run alongside the pull
 request-specific workflow.
 
+Draft pull requests create only skipped CI job entries, so no runner work is
+performed. CI runs when a pull request is opened as ready for review, when a
+draft is marked ready, when a ready pull request is reopened, and after each
+subsequent push or rebase. Moving a pull request back to draft cancels any
+in-progress CI run.
+
 ### Committing a Change
 
 All commits made to the GWR repo must follow the [Conventional Commits] 1.0.0
