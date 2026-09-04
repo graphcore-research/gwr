@@ -200,6 +200,30 @@ tensor, or metrics from an overlay file. Both layouts retain the active measure
 when toggled and display the filtered average and maximum. The layout and
 Measure controls remain visible while the chart or grid content scrolls.
 
+## Browser Benchmark
+
+The benchmark harness exercises report startup, filtering, relationships, and
+the browser-independent calculation kernels in Chromium or Safari. Install its
+dependencies and run a short Chromium sample with:
+
+```bash
+npm ci --prefix gwr-visualisation/benchmarks
+npm --prefix gwr-visualisation/benchmarks run benchmark -- \
+  --timetable "$PWD/gwr-timetable/examples/small.yaml" \
+  --platform "$PWD/gwr-platform/examples/platform_4x4.yaml" \
+  --browsers chromium \
+  --warmups 1 \
+  --runs 1
+```
+
+Use `--browsers chromium,safari` on macOS to include Safari. Safari's isolated
+automation windows reject local-file navigation, so the harness serves the same
+generated report over the loopback interface for Safari sessions. Enable
+Develop > Allow Remote Automation before running Safari benchmarks. Opening a
+generated report directly in Safari also requires Develop > Disable Local File
+Restrictions. An explicit `--baseline` enables regression checks only when the
+input-file hashes and all scenario settings match the recorded workload.
+
 ## Development
 
 The browser code uses classic scripts and a shared
@@ -220,6 +244,7 @@ cargo +nightly fmt
 cargo check -p gwr-visualisation
 cargo test -p gwr-visualisation
 node --test gwr-visualisation/tests/view-model.test.mjs
+npm --prefix gwr-visualisation/benchmarks test
 npx prettier --check gwr-visualisation/assets/*.js
 npx eslint gwr-visualisation/assets
 ```
