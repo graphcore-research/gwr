@@ -35,7 +35,7 @@
 //! # let clock = engine.default_clock();
 //! engine.spawn(async move {
 //!     clock.wait_ticks(10000).await;
-//!     timeout.notify();
+//!     timeout.notify()?;
 //!     Ok(())
 //! });
 //!
@@ -43,7 +43,7 @@
 //! # let clock = engine.default_clock();
 //! engine.spawn(async move {
 //!     clock.wait_ticks(1000).await;
-//!     ok.notify();
+//!     ok.notify()?;
 //!     Ok(())
 //! });
 //!

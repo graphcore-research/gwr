@@ -8,7 +8,7 @@ edition.workspace = true
 rust-version.workspace = true
 description = "Library for managing/checking execution timetables for processing elements"
 documentation.workspace = true
-readme.workspace = true
+readme = "README.md"
 homepage.workspace = true
 repository.workspace = true
 license.workspace = true
@@ -37,6 +37,9 @@ log.workspace = true
 rand.workspace = true
 serde.workspace = true
 serde_yaml.workspace = true
+
+[build-dependencies]
+gwr-build = { path = "../gwr-build", version = "0.2.0" }
 
 [dev-dependencies]
 tempfile.workspace = true

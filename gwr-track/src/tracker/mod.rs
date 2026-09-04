@@ -277,7 +277,9 @@ impl EntityManager {
     /// ```rust
     /// use gwr_track::tracker::EntityManager;
     /// let mut manager = EntityManager::new(log::Level::Warn);
-    /// manager.add_entity_level_filter(".*arb.*", log::Level::Trace);
+    /// manager
+    ///     .add_entity_level_filter(".*arb.*", log::Level::Trace)
+    ///     .unwrap();
     /// ```
     pub fn add_entity_level_filter(
         &mut self,
@@ -303,7 +305,9 @@ impl EntityManager {
     /// ```rust
     /// use gwr_track::tracker::EntityManager;
     /// let mut manager = EntityManager::new(log::Level::Warn);
-    /// manager.set_monitor_window_size_for(".*fabric::ingress.*", 250);
+    /// manager
+    ///     .set_monitor_window_size_for(".*fabric::ingress.*", 250)
+    ///     .unwrap();
     /// ```
     pub fn set_monitor_window_size_for(
         &mut self,

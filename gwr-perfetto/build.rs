@@ -6,6 +6,8 @@ use std::path::Path;
 use gwr_perfetto_sys::PERFETTO_SOURCE;
 
 fn main() {
+    gwr_build::write_expanded_readme_docs();
+
     let perfetto_src = fs::canonicalize(Path::new(PERFETTO_SOURCE)).unwrap();
 
     let mut prost_build = prost_build::Config::new();
