@@ -1,0 +1,267 @@
+<!-- Copyright (c) 2026 Graphcore Ltd. All rights reserved. -->
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GWR Timetable Visualisation</title>
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>GWR Timetable Visualisation</h1>
+          <p id="source-path"></p>
+        </div>
+      </header>
+
+      <section class="stats" aria-label="Timetable totals">
+        <article><span>Static machine ops</span><strong id="stat-machine-ops"></strong><em id="stat-compute"></em></article>
+        <article><span>Tensors</span><strong id="stat-tensors"></strong></article>
+        <article><span>Timetable reads</span><strong id="stat-read-bytes"></strong></article>
+        <article><span>Timetable writes</span><strong id="stat-write-bytes"></strong></article>
+        <article><span>Data edges</span><strong id="stat-edges"></strong></article>
+        <article><span>Active PEs</span><strong id="stat-pes"></strong></article>
+      </section>
+
+      <section class="filter-controls" aria-labelledby="filter-heading">
+        <h2 id="filter-heading">Filters</h2>
+        <details class="filter-picker">
+          <summary><span>Layers</span><strong id="layer-filter-summary"></strong></summary>
+          <div class="filter-picker-actions">
+            <button id="layer-filter-all" type="button">All</button>
+            <button id="layer-filter-none" type="button">None</button>
+          </div>
+          <div class="filter-pattern">
+            <label for="layer-filter-pattern">Regular expression</label>
+            <div>
+              <input id="layer-filter-pattern" type="text" placeholder="^layer (1|2)$" spellcheck="false">
+              <button id="layer-filter-select-matches" type="button">Select matches</button>
+              <button id="layer-filter-clear-pattern" type="button">Clear</button>
+            </div>
+            <output id="layer-filter-pattern-status" aria-live="polite"></output>
+          </div>
+          <div id="layer-filter" class="filter-options layer-filter-options" role="group" aria-label="Layers"></div>
+        </details>
+        <details class="filter-picker">
+          <summary><span>Processing elements</span><strong id="pe-filter-summary"></strong></summary>
+          <div class="filter-picker-actions">
+            <button id="pe-filter-all" type="button">All</button>
+            <button id="pe-filter-none" type="button">None</button>
+          </div>
+          <div class="filter-pattern">
+            <label for="pe-filter-pattern">Regular expression</label>
+            <div>
+              <input id="pe-filter-pattern" type="text" placeholder="^pe_0_" spellcheck="false">
+              <button id="pe-filter-select-matches" type="button">Select matches</button>
+              <button id="pe-filter-clear-pattern" type="button">Clear</button>
+            </div>
+            <output id="pe-filter-pattern-status" aria-live="polite"></output>
+          </div>
+          <div id="pe-filter" class="filter-options pe-filter-options" role="group" aria-label="Processing elements"></div>
+        </details>
+        <details class="filter-picker">
+          <summary><span>Memories</span><strong id="memory-filter-summary"></strong></summary>
+          <div class="filter-picker-actions">
+            <button id="memory-filter-all" type="button">All</button>
+            <button id="memory-filter-none" type="button">None</button>
+          </div>
+          <div class="filter-pattern">
+            <label for="memory-filter-pattern">Regular expression</label>
+            <div>
+              <input id="memory-filter-pattern" type="text" placeholder="^hbm[0-3]$" spellcheck="false">
+              <button id="memory-filter-select-matches" type="button">Select matches</button>
+              <button id="memory-filter-clear-pattern" type="button">Clear</button>
+            </div>
+            <output id="memory-filter-pattern-status" aria-live="polite"></output>
+          </div>
+          <div id="memory-filter" class="filter-options memory-filter-options" role="group" aria-label="Memories"></div>
+        </details>
+        <details class="filter-picker">
+          <summary><span>Tensors</span><strong id="tensor-filter-summary"></strong></summary>
+          <div class="filter-picker-actions">
+            <button id="tensor-filter-all" type="button">All</button>
+            <button id="tensor-filter-none" type="button">None</button>
+          </div>
+          <div class="filter-pattern">
+            <label for="tensor-filter-pattern">Regular expression</label>
+            <div>
+              <input id="tensor-filter-pattern" type="text" placeholder="activation.*input" spellcheck="false">
+              <button id="tensor-filter-select-matches" type="button">Select matches</button>
+              <button id="tensor-filter-clear-pattern" type="button">Clear</button>
+            </div>
+            <output id="tensor-filter-pattern-status" aria-live="polite"></output>
+          </div>
+          <div id="tensor-filter" class="filter-options tensor-filter-options" role="group" aria-label="Tensors"></div>
+        </details>
+      </section>
+
+      <section class="view-controls" aria-label="View controls">
+        <h2>Workspace</h2>
+        <label>
+          Layout
+          <select id="view-layout">
+            <option value="auto">responsive grid</option>
+            <option value="one" selected>one column</option>
+            <option value="two">two columns</option>
+            <option value="three">three columns</option>
+          </select>
+        </label>
+        <div class="workspace-actions">
+          <label>
+            Add panel
+            <select id="workspace-add-view"></select>
+          </label>
+          <button id="workspace-add" type="button">Add</button>
+          <button id="workspace-reset" type="button">Reset workspace</button>
+        </div>
+        <div class="view-presets" aria-label="Analysis view">
+          <button type="button" data-preset="summary">Summary</button>
+          <button type="button" data-preset="layers">Layers</button>
+          <button type="button" data-preset="compute">Compute</button>
+          <button type="button" data-preset="memory">Memory</button>
+          <button type="button" data-preset="tensor">Tensor</button>
+        </div>
+        <div class="view-toggles" aria-label="Visible views" hidden>
+          <label><input type="checkbox" data-view-toggle="timetable-summary" checked> Timetable summary</label>
+          <label><input type="checkbox" data-view-toggle="layer-summary" checked> Layers summary</label>
+          <label><input type="checkbox" data-view-toggle="layer-details" checked> Layer detail</label>
+          <label><input type="checkbox" data-view-toggle="relationships"> Relationships</label>
+          <label><input type="checkbox" data-view-toggle="compute-summary"> Compute summary</label>
+          <label><input type="checkbox" data-view-toggle="pe-grid"> PE overview</label>
+          <label><input type="checkbox" data-view-toggle="selected-pe"> PE detail</label>
+          <label><input type="checkbox" data-view-toggle="tensor-memory"> Tensor memory</label>
+          <label><input type="checkbox" data-view-toggle="memory-summary"> Memory summary</label>
+          <label><input type="checkbox" data-view-toggle="memories-overview"> Memories overview</label>
+          <label><input type="checkbox" data-view-toggle="memory-details"> Memory detail</label>
+          <label><input type="checkbox" data-view-toggle="selected-tensor"> Tensor detail</label>
+        </div>
+      </section>
+
+      <div id="views" class="views layout-one">
+        <section class="view-panel" data-view="timetable-summary" aria-labelledby="timetable-summary-heading">
+          <h2 id="timetable-summary-heading">Timetable summary</h2>
+          <div id="timetable-summary" class="timetable-summary"></div>
+        </section>
+
+        <section class="view-panel" data-view="layer-summary" aria-labelledby="layer-summary-heading">
+          <h2 id="layer-summary-heading">Layers summary</h2>
+          <div id="layer-summary" class="layer-summary"></div>
+        </section>
+
+        <section class="view-panel" data-view="layer-details" aria-labelledby="layer-detail-heading">
+          <h2 id="layer-detail-heading">Layer detail</h2>
+          <div id="layer-detail" class="layer-detail"></div>
+        </section>
+
+        <section class="view-panel relationship-panel" data-view="relationships" aria-labelledby="relationships-heading">
+          <div class="panel-title-row relationship-title-row">
+            <h2 id="relationships-heading">Timetable relationships</h2>
+            <div class="relationship-controls">
+              <label>
+                Relationship
+                <select id="relationship-mode">
+                  <option value="compute">Layer to compute</option>
+                  <option value="memory">Layer to memory</option>
+                  <option value="pe-memory">PE to memory</option>
+                  <option value="tensor-memory">Tensor to memory</option>
+                  <option value="tensor-pe">Tensor to PE</option>
+                </select>
+              </label>
+              <label>
+                Measure
+                <select id="relationship-measure"></select>
+              </label>
+              <label>
+                Bundle strength <output id="relationship-strength-value">85%</output>
+                <input id="relationship-strength" type="range" min="0" max="100" value="85">
+              </label>
+            </div>
+          </div>
+          <div id="relationship-bundle" class="relationship-bundle"></div>
+        </section>
+
+        <section class="view-panel" data-view="compute-summary" aria-labelledby="compute-summary-heading">
+          <h2 id="compute-summary-heading">Compute summary</h2>
+          <div id="compute-summary" class="compute-summary"></div>
+        </section>
+
+        <section class="view-panel" data-view="pe-grid" aria-labelledby="pe-overview-heading">
+          <div class="panel-title-row">
+            <h2 id="pe-overview-heading">PE overview</h2>
+            <div class="pe-overview-controls">
+              <div class="pe-overview-mode" role="group" aria-label="View">
+                <button type="button" data-pe-overview-mode="chart">Chart</button>
+                <button type="button" data-pe-overview-mode="grid">Grid</button>
+              </div>
+              <label>
+                Measure
+                <select id="pe-overview-measure"></select>
+              </label>
+            </div>
+          </div>
+          <div class="pe-overview-content">
+            <div id="pe-overview-chart" class="pe-overview-chart"></div>
+            <div id="pe-overview-grid">
+              <div class="matrix-shell">
+                <div id="row-axis" class="row-axis" aria-hidden="true"></div>
+                <div>
+                  <div id="pe-grid" class="pe-grid"></div>
+                  <div id="col-axis" class="col-axis" aria-hidden="true"></div>
+                </div>
+              </div>
+              <div id="pe-overview-legend" class="pe-overview-legend"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="view-panel" data-view="selected-pe" aria-labelledby="selected-pe-heading">
+          <h2 id="selected-pe-heading">PE detail</h2>
+          <div id="selected-pe" class="selected-pe" aria-live="polite"></div>
+        </section>
+
+        <section class="view-panel" data-view="memory-summary" aria-labelledby="memory-summary-heading">
+          <h2 id="memory-summary-heading">Memory summary</h2>
+          <div id="memory-summary" class="memory-summary"></div>
+        </section>
+
+        <section class="view-panel" data-view="memories-overview" aria-labelledby="memories-overview-heading">
+          <h2 id="memories-overview-heading">Memories overview</h2>
+          <div id="memories-overview" class="memories-overview"></div>
+        </section>
+
+        <section class="view-panel" data-view="tensor-memory" aria-labelledby="tensor-heading">
+          <div class="panel-title-row">
+            <h2 id="tensor-heading">Tensor memory map</h2>
+            <label class="tensor-memory-controls"><input id="skip-memory-gaps" type="checkbox" checked> Collapse large gaps</label>
+          </div>
+          <div id="tensor-memory" class="tensor-memory"></div>
+        </section>
+
+        <section class="view-panel" data-view="memory-details" aria-labelledby="memory-detail-heading">
+          <h2 id="memory-detail-heading">Memory detail</h2>
+          <div id="memory-detail" class="memory-detail"></div>
+        </section>
+
+        <section class="view-panel" data-view="selected-tensor" aria-labelledby="selected-tensor-heading">
+          <h2 id="selected-tensor-heading">Tensor detail</h2>
+          <div id="selected-tensor" class="selected-tensor" aria-live="polite"></div>
+        </section>
+      </div>
+      <section id="warnings" class="warnings" aria-live="polite"></section>
+    </main>
+    <script src="{{DATA_SCRIPT}}"></script>
+    <script src="view-model.js"></script>
+    <script src="core.js"></script>
+    <script src="filters.js"></script>
+    <script src="pe-grid.js"></script>
+    <script src="timetable.js"></script>
+    <script src="tensors.js"></script>
+    <script src="memory.js"></script>
+    <script src="relationships.js"></script>
+    <script src="workspace.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
