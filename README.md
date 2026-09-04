@@ -240,16 +240,18 @@ prek install
 
 Changes to GWR packages are developed on branches separate to `main` (the
 default) branch of the repo, and then incorporated when complete via a pull
-request. Long running or collaborative development will likely benefit from
-having the branch pushed to the `origin` well in advance of when a pull request
-may be opened, and doing so will cause the CI workflows to be run on every
-commit.
+request.
 
-For short lived branches pushed only at the point of opening a pull request the
-branch naming prefix `pr-` should be used, for example, `pr-new-example-app`.
-Branches named with this prefix will still cause the pull request specific CI
-workflow to run, but will avoid the push specific CI workflow from running until
-the point they are merged.
+Push-specific CI runs only on `main` and branches whose names begin with
+`feature-`, for example, `feature-new-example-app`. Long running or
+collaborative development should use this prefix when a branch needs to be
+pushed to `origin` and validated before a pull request is opened.
+
+Before opening a pull request, a feature branch must be renamed to use the `pr-`
+prefix, for example, `pr-new-example-app`. Short lived branches may use this
+prefix from the outset. Branches named with this prefix do not cause the
+push-specific CI workflow to run, avoiding a duplicate run alongside the pull
+request-specific workflow.
 
 ### Committing a Change
 
