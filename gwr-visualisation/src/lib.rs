@@ -4,8 +4,11 @@
 
 #![warn(missing_docs)]
 
+#[cfg(any(feature = "generator", target_arch = "wasm32", test))]
 mod address;
+#[cfg(any(feature = "generator", target_arch = "wasm32", test))]
 mod model;
+#[cfg(any(feature = "generator", target_arch = "wasm32", test))]
 mod payload;
 
 #[cfg(feature = "generator")]
@@ -14,3 +17,7 @@ mod analysis;
 mod generator;
 #[cfg(feature = "generator")]
 pub use generator::{BundleInputs, write_bundle};
+
+#[cfg(any(all(feature = "web", target_arch = "wasm32"), test))]
+#[cfg_attr(not(all(feature = "web", target_arch = "wasm32")), allow(dead_code))]
+mod web;
