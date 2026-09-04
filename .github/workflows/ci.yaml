@@ -8,6 +8,7 @@ on:
       - main
       - "feature-**"
   pull_request:
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
   merge_group:
 
 concurrency:
@@ -32,10 +33,12 @@ jobs:
     # toolchain commits. CI runs once the corresponding workflow has amended
     # and pushed the final commit through `gwr-bot`.
     if: >-
-      ${{ !(github.actor == 'dependabot[bot]' &&
-            (startsWith(github.head_ref, 'dependabot-cargo-') ||
-             startsWith(github.head_ref, 'dependabot-github_actions-') ||
-             startsWith(github.head_ref, 'dependabot-rust_toolchain-'))) }}
+      ${{ github.event_name != 'pull_request' ||
+          (github.event.pull_request.draft == false &&
+           !(github.actor == 'dependabot[bot]' &&
+             (startsWith(github.head_ref, 'dependabot-cargo-') ||
+              startsWith(github.head_ref, 'dependabot-github_actions-') ||
+              startsWith(github.head_ref, 'dependabot-rust_toolchain-')))) }}
     runs-on: ubuntu-latest
     steps:
       - run: ":"
