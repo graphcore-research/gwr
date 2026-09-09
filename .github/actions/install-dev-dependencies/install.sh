@@ -25,8 +25,6 @@ npm install --no-save \
   globals@17.11.0     \
   prettier@3.9.6
 
-rustup toolchain install --profile minimal --component rustfmt nightly
-
 cargo binstall --disable-telemetry --no-confirm --locked   \
   cargo-deny@0.20.2                                        \
   cargo-semver-checks@0.50.0                               \
@@ -39,3 +37,7 @@ cargo binstall --disable-telemetry --no-confirm --locked --bin=cog cocogitto@7.0
 # The license generation tools are also required for development, but installed
 # via a separate script (to optimise certain CI workflows).
 "$(dirname "$0")/../install-license-tools/install.sh"
+
+# The nightly tools are also required for development, but installed via a
+# separate script so they can be shared with fuzzing workflows.
+"$(dirname "$0")/../install-nightly-tools/install.sh"
