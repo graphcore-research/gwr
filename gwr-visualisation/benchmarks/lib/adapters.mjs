@@ -76,6 +76,7 @@ class ChromiumAdapter {
 class ChromiumSession {
   constructor(page) {
     this.page = page;
+    this.reloadGeneration = 0;
     this.messages = [];
     page.on("console", (message) => {
       this.messages.push({ type: message.type(), text: message.text() });
@@ -90,9 +91,17 @@ class ChromiumSession {
     await this.waitUntilReady(allowStartupError, waitForSummary);
   }
 
-  async reload() {
+  async reload(waitForSummary = false) {
+    const marker = String(++this.reloadGeneration);
+    await this.page.evaluate((value) => {
+      document.documentElement.dataset.gwrBrowserReload = value;
+    }, marker);
     await this.page.reload({ waitUntil: "load" });
-    await this.waitUntilReady();
+    await this.waitForCondition(
+      `document.documentElement.dataset.gwrBrowserReload !== ${JSON.stringify(marker)}`,
+      "the reloaded document to replace the previous page",
+    );
+    await this.waitUntilReady(false, waitForSummary);
   }
 
   async waitUntilReady(allowStartupError = false, waitForSummary = false) {
@@ -150,8 +159,17 @@ class ChromiumSession {
     );
   }
 
-  async wait(milliseconds) {
-    await this.page.waitForTimeout(milliseconds);
+  async waitForCondition(condition, description, timeout = 120_000) {
+    try {
+      const handle = await this.page.waitForFunction(
+        (source) => Function(`return (${source})`)(),
+        condition,
+        { timeout },
+      );
+      await handle.dispose();
+    } catch (error) {
+      throw conditionWaitError(description, condition, error);
+    }
   }
 
   async screenshot(destination) {
@@ -219,6 +237,7 @@ class SafariAdapter {
 class SafariSession {
   constructor(driver) {
     this.driver = driver;
+    this.reloadGeneration = 0;
   }
 
   async navigate(url, allowStartupError = false, waitForSummary = false) {
@@ -226,9 +245,18 @@ class SafariSession {
     await this.waitUntilReady(allowStartupError, waitForSummary);
   }
 
-  async reload() {
+  async reload(waitForSummary = false) {
+    const marker = String(++this.reloadGeneration);
+    await this.driver.executeScript(
+      "document.documentElement.dataset.gwrBrowserReload = arguments[0]",
+      marker,
+    );
     await this.driver.navigate().refresh();
-    await this.waitUntilReady();
+    await this.waitForCondition(
+      `document.documentElement.dataset.gwrBrowserReload !== ${JSON.stringify(marker)}`,
+      "the reloaded document to replace the previous page",
+    );
+    await this.waitUntilReady(false, waitForSummary);
   }
 
   async waitUntilReady(allowStartupError = false, waitForSummary = false) {
@@ -284,8 +312,19 @@ class SafariSession {
     return this.driver.executeScript(`return (${source})`);
   }
 
-  async wait(milliseconds) {
-    await this.driver.sleep(milliseconds);
+  async waitForCondition(condition, description, timeout = 120_000) {
+    try {
+      await this.driver.wait(
+        () =>
+          this.driver.executeScript(
+            "return Boolean(Function('return (' + arguments[0] + ')')());",
+            condition,
+          ),
+        timeout,
+      );
+    } catch (error) {
+      throw conditionWaitError(description, condition, error);
+    }
   }
 
   async screenshot(destination) {
@@ -349,6 +388,13 @@ function throwReportError(browser, status, allowStartupError = false) {
   if (status.error && !allowStartupError) {
     throw new Error(`${browser} report startup failed: ${status.error}`);
   }
+}
+
+function conditionWaitError(description, condition, error) {
+  return new Error(
+    `Failed while waiting for ${description}; unmet condition: ${condition}. ${error.message}`,
+    { cause: error },
+  );
 }
 
 async function captureFailure(session, { directory, name }) {
