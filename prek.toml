@@ -137,6 +137,16 @@ pass_filenames = false
 priority = 5
 
 [[repos.hooks]]
+id = "gwr-visualisation-browser-harness-tests"
+name = "gwr visualisation browser harness tests"
+description = "test visualisation browser benchmark results"
+language = "system"
+files = '^gwr-visualisation/benchmarks/.*\.mjs$'
+entry = "npm --prefix gwr-visualisation/benchmarks test"
+pass_filenames = false
+priority = 5
+
+[[repos.hooks]]
 id = "cargo-deny"
 name = "cargo deny"
 description = "check Rust dependencies licenses and for vulnerabilities"

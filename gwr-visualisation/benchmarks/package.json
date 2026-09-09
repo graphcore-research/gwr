@@ -1,0 +1,16 @@
+{
+  "name": "gwr-visualisation-benchmarks",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "benchmark": "node benchmark.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "1.62.1",
+    "selenium-webdriver": "4.47.0"
+  }
+}

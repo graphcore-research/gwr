@@ -360,6 +360,7 @@
     filtersChanged,
     applyViewConfig,
     setViewPreset,
+    flushRender: renderDirtyPanels,
   });
   initializeFilterControls();
   initializePeOverviewControls();
