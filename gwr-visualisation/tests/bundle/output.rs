@@ -56,9 +56,21 @@ fn compressed_payload_preserves_a_proto_overlay_key() {
 }
 
 #[test]
-fn removes_data_file_from_older_report_bundles() {
+fn removes_files_from_older_report_bundles() {
     let temp = tempfile::tempdir().unwrap();
-    let retired = ["data.js"];
+    let retired = [
+        "data.js",
+        "view-model.js",
+        "core.js",
+        "filters.js",
+        "pe-grid.js",
+        "timetable.js",
+        "tensors.js",
+        "memory.js",
+        "relationships.js",
+        "workspace.js",
+        "app.js",
+    ];
     for name in retired {
         std::fs::write(temp.path().join(name), "old report data").unwrap();
     }
@@ -104,7 +116,7 @@ fn leaves_the_bundle_unchanged_when_a_retired_path_is_a_directory() {
 }
 
 fn assert_script_bundle(report: &GeneratedReport) {
-    let scripts = ["payload.js", "bootstrap.js"];
+    let scripts = ["payload.js", "gwr_visualisation.js", "bootstrap.js"];
     let mut previous_position = 0;
     for script in scripts {
         let contents = report.asset(script);
@@ -119,7 +131,18 @@ fn assert_script_bundle(report: &GeneratedReport) {
         );
         previous_position = position;
     }
-    for script in [
+    assert!(
+        report
+            .asset("gwr_visualisation.js")
+            .contains("wasm_bindgen")
+    );
+    let bootstrap = report.asset("bootstrap.js");
+    assert!(bootstrap.contains("Unable to start visualisation"));
+    assert!(bootstrap.contains("decodeBase64"));
+    assert_compressed_payload(report);
+
+    for legacy in [
+        "data.js",
         "view-model.js",
         "core.js",
         "filters.js",
@@ -131,16 +154,22 @@ fn assert_script_bundle(report: &GeneratedReport) {
         "workspace.js",
         "app.js",
     ] {
-        assert!(!report.asset(script).is_empty());
-        assert!(!report.index_html.contains(script));
+        assert!(
+            !report.temp.path().join(legacy).exists(),
+            "legacy production script {legacy} was generated"
+        );
+        assert!(
+            !report.index_html.contains(legacy),
+            "legacy production script {legacy} was referenced"
+        );
     }
-    assert!(report.asset("style.css").contains("color-scheme"));
-    assert!(report.asset("bootstrap.js").contains("decompressGzip"));
-    assert_compressed_payload(report);
 }
 
 fn assert_compressed_payload(report: &GeneratedReport) {
     let payload = report.asset("payload.js");
+    let wasm = BASE64.decode(payload_value(&payload, "wasm")).unwrap();
+    assert_eq!(&wasm[..4], b"\0asm");
+
     let compressed_data = BASE64.decode(payload_value(&payload, "data")).unwrap();
     let compressed_tensors = BASE64.decode(payload_value(&payload, "tensors")).unwrap();
     let mut browser_data = decompress_json(&compressed_data);
@@ -188,10 +217,6 @@ fn assert_report_data(report: &GeneratedReport) {
     assert!(report.data["pes"][0]["machine_ops_by_layer"].is_object());
     assert!(report.data["tensors"][0]["reads_by_pe"][0]["by_layer"].is_object());
     assert!(report.data["tensors"][0]["reads_by_pe"][0]["transfers"].is_array());
-
-    let transfer = &report.data["tensors"][0]["reads_by_pe"][0]["transfers"][0];
-    assert!(transfer["access"]["strides"].is_array());
-    assert!(transfer["access"]["num_access_bytes"].is_string());
 
     let machine_ops = report.data["machine_ops"].as_array().unwrap();
     assert_eq!(machine_ops.len(), 3);

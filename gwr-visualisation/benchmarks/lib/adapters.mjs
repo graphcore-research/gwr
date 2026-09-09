@@ -1,5 +1,7 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+/* global wasm_bindgen */
+
 import { mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -20,7 +22,7 @@ export function browserAdapters(config) {
     if (name === "safari") {
       if (os.platform() !== "darwin") {
         throw new Error(
-          "Safari benchmarks require macOS and the system safaridriver",
+          "Safari browser tests require macOS and the system safaridriver",
         );
       }
       return new SafariAdapter();
@@ -36,7 +38,15 @@ class ChromiumAdapter {
     this.version = null;
   }
 
-  async withSession(url, action, { failureEvidence = null } = {}) {
+  async withSession(
+    url,
+    action,
+    {
+      allowStartupError = false,
+      waitForSummary = false,
+      failureEvidence = null,
+    } = {},
+  ) {
     const browser = await chromium.launch({
       executablePath: this.executable,
       headless: true,
@@ -44,10 +54,12 @@ class ChromiumAdapter {
     });
     this.version ||= browser.version();
     try {
-      const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+      const page = await browser.newPage({
+        viewport: { width: 1440, height: 1000 },
+      });
       const session = new ChromiumSession(page);
       try {
-        await session.navigate(url);
+        await session.navigate(url, allowStartupError, waitForSummary);
         return await action(session);
       } catch (error) {
         if (failureEvidence) {
@@ -73,9 +85,9 @@ class ChromiumSession {
     });
   }
 
-  async navigate(url) {
+  async navigate(url, allowStartupError = false, waitForSummary = false) {
     await this.page.goto(url, { waitUntil: "load" });
-    await this.waitUntilReady();
+    await this.waitUntilReady(allowStartupError, waitForSummary);
   }
 
   async reload() {
@@ -83,18 +95,24 @@ class ChromiumSession {
     await this.waitUntilReady();
   }
 
-  async waitUntilReady() {
-    const handle = await this.page.waitForFunction(reportStatus, null, {
-      timeout: 120_000,
-    });
+  async waitUntilReady(allowStartupError = false, waitForSummary = false) {
+    const handle = await this.page.waitForFunction(
+      reportStatus,
+      waitForSummary,
+      {
+        timeout: 120_000,
+      },
+    );
     const status = await handle.jsonValue();
     await handle.dispose();
-    throwReportError("Chromium", status);
+    throwReportError("Chromium", status, allowStartupError);
   }
 
   async coldStartup() {
-    return this.page.evaluate(() =>
-      performance.getEntriesByName("gwr-initial-summary-ready").at(-1)?.startTime,
+    return this.page.evaluate(
+      () =>
+        performance.getEntriesByName("gwr-initial-summary-ready").at(-1)
+          ?.startTime,
     );
   }
 
@@ -116,10 +134,7 @@ class ChromiumSession {
   async measureKernel(name, iterations) {
     return this.page.evaluate(
       ({ name, iterations }) => {
-        const run = window.GWR_BENCHMARK_KERNELS?.run;
-        if (!run) {
-          throw new Error("The report did not expose benchmark kernels");
-        }
+        const run = wasm_bindgen.benchmark_kernel;
         const start = performance.now();
         const checksum = run(name, iterations);
         return { milliseconds: performance.now() - start, checksum };
@@ -129,7 +144,10 @@ class ChromiumSession {
   }
 
   async evaluate(source) {
-    return this.page.evaluate((script) => Function(`return (${script})`)(), source);
+    return this.page.evaluate(
+      (script) => Function(`return (${script})`)(),
+      source,
+    );
   }
 
   async wait(milliseconds) {
@@ -159,7 +177,15 @@ class SafariAdapter {
     this.version = null;
   }
 
-  async withSession(url, action, { failureEvidence = null } = {}) {
+  async withSession(
+    url,
+    action,
+    {
+      allowStartupError = false,
+      waitForSummary = false,
+      failureEvidence = null,
+    } = {},
+  ) {
     const report = await serveReport(url);
     try {
       const driver = await createSafariDriver();
@@ -173,7 +199,7 @@ class SafariAdapter {
         this.version ||= capabilities.get("browserVersion") || "unknown";
         const session = new SafariSession(driver);
         try {
-          await session.navigate(report.url);
+          await session.navigate(report.url, allowStartupError, waitForSummary);
           return await action(session);
         } catch (error) {
           if (failureEvidence) {
@@ -195,9 +221,9 @@ class SafariSession {
     this.driver = driver;
   }
 
-  async navigate(url) {
+  async navigate(url, allowStartupError = false, waitForSummary = false) {
     await this.driver.get(url);
-    await this.waitUntilReady();
+    await this.waitUntilReady(allowStartupError, waitForSummary);
   }
 
   async reload() {
@@ -205,11 +231,11 @@ class SafariSession {
     await this.waitUntilReady();
   }
 
-  async waitUntilReady() {
+  async waitUntilReady(allowStartupError = false, waitForSummary = false) {
     let status;
     try {
       status = await this.driver.wait(
-        () => this.driver.executeScript(reportStatus),
+        () => this.driver.executeScript(reportStatus, waitForSummary),
         120_000,
       );
     } catch (error) {
@@ -219,7 +245,7 @@ class SafariSession {
         { cause: error },
       );
     }
-    throwReportError("Safari", status);
+    throwReportError("Safari", status, allowStartupError);
   }
 
   async coldStartup() {
@@ -245,8 +271,7 @@ class SafariSession {
 
   async measureKernel(name, iterations) {
     return this.driver.executeScript(
-      `const run = window.GWR_BENCHMARK_KERNELS?.run;
-       if (!run) throw new Error('The report did not expose benchmark kernels');
+      `const run = wasm_bindgen.benchmark_kernel;
        const start = performance.now();
        const checksum = run(arguments[0], arguments[1]);
        return { milliseconds: performance.now() - start, checksum };`,
@@ -298,10 +323,11 @@ async function createSafariDriver() {
   }
 }
 
-function reportStatus() {
+function reportStatus(waitForSummary = false) {
   const root = document.documentElement;
   const error = root.dataset.gwrError || null;
-  if (root.dataset.gwrReady !== "complete" && !error) {
+  const marker = waitForSummary ? "gwrSummaryReady" : "gwrReady";
+  if (root.dataset[marker] !== "complete" && !error) {
     return null;
   }
   return { error };
@@ -312,14 +338,15 @@ function reportPageState() {
   return {
     url: location.href,
     readyState: document.readyState,
+    reportSummaryReady: root.dataset.gwrSummaryReady || null,
     reportReady: root.dataset.gwrReady || null,
     reportError: root.dataset.gwrError || null,
     scripts: Array.from(document.scripts, (script) => script.src || "inline"),
   };
 }
 
-function throwReportError(browser, status) {
-  if (status.error) {
+function throwReportError(browser, status, allowStartupError = false) {
+  if (status.error && !allowStartupError) {
     throw new Error(`${browser} report startup failed: ${status.error}`);
   }
 }

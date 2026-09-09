@@ -9,6 +9,7 @@ export default [
       "target/**",
       "gwr-developer-guide/book/**",
       "gwr-developer-guide/rustdoc_cache/**",
+      "gwr-visualisation/assets/generated/**",
       "gwr-onnx-sys/onnx_src/**",
       "gwr-perfetto-sys/perfetto_src/**",
       "gwr-spotter/frontend/lib/d3.v7.min.js",

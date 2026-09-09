@@ -2,9 +2,9 @@
 
 # GWR Visualisation
 
-`gwr-visualisation` generates a static web report for exploring gwr-timetable
-YAML files. It reads a timetable, an optional platform, and an optional metric
-overlay, then writes a browser-based visualisation bundle to disk.
+`gwr-visualisation` generates a static web report for exploring `gwr-timetable`
+YAML files. It parses the timetable, optional platform, and optional metric
+overlay files, then writes a browser-based visualisation bundle to disk.
 
 ## Usage
 
@@ -29,14 +29,20 @@ cargo run -p gwr-visualisation -- \
 The output directory will contain:
 
 - `index.html`: the static report entry point
-- `data.json`: the exported visualisation data model
-- `payload.js`: compressed report data embedded for direct file opening
-- `bootstrap.js`: payload decompression and report startup
-- `view-model.js`, `core.js`, `filters.js`, `pe-grid.js`, `timetable.js`,
-  `tensors.js`, `memory.js`, `relationships.js`, and `workspace.js`: focused UI
-  modules loaded in dependency order
-- `app.js`: render orchestration, event wiring, and startup
+- `data.json`: the human-readable report data
+- `payload.js`: separately gzip-compressed core report and tensor-detail JSON,
+  plus the WASM module, encoded for direct `file://` loading
+- `gwr_visualisation.js`: generated `wasm-bindgen` loading glue
+- `bootstrap.js`: a small decoder and startup-error boundary
 - `style.css`: local report styling
+
+The production bundle contains no handwritten application JavaScript. Filtering,
+aggregation, formatting, rendering, relationships, interaction handling, and
+workspace persistence run in Rust/WASM. `payload.js` deliberately uses a classic
+script instead of `fetch`, so an output directory remains portable and its
+`index.html` can be opened directly without a web server. The bootstrap renders
+the initial Summary from the smaller core payload, yields for layout, then
+attaches tensor details before declaring the full application ready.
 
 ## What The Report Shows
 
@@ -129,11 +135,11 @@ data edge are graph roots. Compute nodes that consume those root tensors advance
 the layer depth, while other compute nodes inherit the current layer. If no
 compute node consumes a root tensor, every compute node starts a layer.
 
-The analysis assumes that data dependencies are acyclic. Disconnected roots at
-the beginning of the graph are treated as parallel. A disconnected layer root
-listed after the graph has advanced beyond layer 1 is assumed to continue the
-model sequence at the next layer; this handles timetable aliases without a
-general graph-repair heuristic.
+Timetables with cyclic data dependencies are rejected. Disconnected roots at the
+beginning of the graph are treated as parallel. A disconnected layer root listed
+after the graph has advanced beyond layer 1 is assumed to continue the model
+sequence at the next layer, preserving source-order layer numbering for
+timetable aliases.
 
 If no platform is provided, the report is still generated from timetable PE
 names such as `pe_3_17`.
@@ -193,7 +199,9 @@ cargo run -p gwr-visualisation -- \
 ```
 
 Overlay PE names must match timetable or platform PE names. Unknown PE names are
-reported as warnings in `data.json` and in the web report.
+reported as warnings in `data.json` and in the web report. A metric that appears
+in `metrics_by_pe` without a `metrics` entry is added to the Measure control
+using its key as its label.
 
 The PE overview has one Measure control shared by its chart and grid layouts. It
 can show compute allocation, filtered data traffic, traffic for the selected
@@ -201,42 +209,115 @@ tensor, or metrics from an overlay file. Both layouts retain the active measure
 when toggled and display the filtered average and maximum. The layout and
 Measure controls remain visible while the chart or grid content scrolls.
 
-## Browser Benchmark
+## Development
 
-The benchmark harness exercises report startup, filtering, relationships, and
-the browser-independent calculation kernels in Chromium or Safari. Install its
-dependencies and run a short Chromium sample with:
+The crate has two targets. The default `generator` feature builds the native
+library and CLI. The `web` feature builds the browser runtime for
+`wasm32-unknown-unknown`; it is separate from native timetable dependencies.
+`src/model.rs` is the typed report contract shared by both.
+
+The native generator parses a `TimetableFile` into a `TimetableGraph`. Graph
+construction resolves ports and tensor views and validates the timetable before
+either simulation or report analysis uses it. The report builder borrows that
+graph and produces `ReportData`; it does not rebuild timetable connections or
+tensor views. `src/address.rs` contains the half-open address-range operations
+shared by native analysis and the browser.
+
+The browser code is divided by responsibility:
+
+- `web/state.rs` owns filters and serializable interaction state.
+- `web/address.rs` owns tensor-transfer arithmetic and memory geometry.
+- `web/logic.rs` owns indexed lookup, cached aggregation, and filtered report
+  totals.
+- `web/relationships.rs` filters and bounds the relationship model before it is
+  rendered.
+- `web/render.rs` and its `render/` children own panel markup and drawing.
+- `web/workspace.rs` owns version-1 local-storage restoration and panel layout.
+- `web/app.rs` owns event delegation and coordinates state with visible panels.
+- `payload.rs` owns deterministic gzip encoding and decoding.
+
+High-cardinality filter lists are constructed only when opened and display a
+500-item window when more than 1,000 values match. Layer comparisons display a
+deterministic 500-layer window, and relationship plots retain at most 500
+matching sources and the 5,000 strongest links. The selected source is retained,
+and omitted source and link counts are shown separately. Filtered contexts and
+summaries are cached by state generation. Hidden panels are not rendered, and
+selection or mode changes only rerender panels that depend on the changed state.
+
+### Generated WASM assets
+
+Install the pinned target and generator, then rebuild the committed runtime:
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo install --locked wasm-bindgen-cli --version 0.2.126
+./gwr-visualisation/scripts/build-wasm.sh
+```
+
+The Rust dependency and CLI are both pinned to `wasm-bindgen` 0.2.126. CI checks
+that committed files in `assets/generated/` match a clean release build:
+
+```bash
+./gwr-visualisation/scripts/build-wasm.sh --check
+```
+
+Current Safari, Chromium, and browsers with equivalent WebAssembly, gzip stream,
+DOM, canvas, and local-storage support can open reports. Startup failures are
+rendered into the document instead of leaving a blank page.
+
+### Performance
+
+Install the pinned browser harness dependencies with Node.js 22 or newer:
 
 ```bash
 npm ci --prefix gwr-visualisation/benchmarks
-npm --prefix gwr-visualisation/benchmarks run benchmark -- \
-  --timetable "$PWD/gwr-timetable/examples/small.yaml" \
-  --platform "$PWD/gwr-platform/examples/platform_4x4.yaml" \
-  --browsers chromium \
-  --warmups 1 \
-  --runs 1
 ```
 
-Use `--browsers chromium,safari` on macOS to include Safari. Safari's isolated
-automation windows reject local-file navigation, so the harness serves the same
-generated report over the loopback interface for Safari sessions. Enable
-Develop > Allow Remote Automation before running Safari benchmarks. Opening a
-generated report directly in Safari also requires Develop > Disable Local File
-Restrictions. An explicit `--baseline` enables regression checks only when the
-input-file hashes and all scenario settings match the recorded workload.
+Run the performance harness with two warm-ups and ten measurements per browser:
 
-## Development
+```bash
+npm --prefix gwr-visualisation/benchmarks run benchmark -- \
+  --timetable /absolute/path/to/partitioned-izi-gpt-oss20b.yaml \
+  --browsers chromium,safari \
+  --warmups 2 \
+  --runs 10 \
+  --session-attempts 3 \
+  --output /tmp/gwr-visualisation-benchmark
+```
 
-The browser code uses classic scripts and a shared
-`window.GWR_VISUALISATION_APP` namespace so generated reports continue to work
-when opened directly from disk. `view-model.js` provides browser-independent
-range, traffic, and focus helpers; `core.js` owns shared state and utilities;
-`filters.js` owns filter state and aggregation; `pe-grid.js` owns PE-overview
-measure and layout selection; the timetable, tensor, memory, and relationship
-files own their respective renderers; `workspace.js` owns panel layout,
-ordering, visibility, sizing, focus, and persistence; and `app.js` connects the
-modules without adding a bundler or runtime dependency. Each module exposes only
-the functions required by modules loaded later in that dependency order.
+The harness creates a fresh automation session and unique report path for every
+sample, and runs Safari serially. It records raw JSON, a Markdown median table,
+browser and OS versions, hardware, and the configuration. Cold startup ends when
+the initial Summary has rendered. Interactions use a deterministic 64-layer
+slice by default; override it with `--interaction-layer-pattern REGEX`.
+
+Without a baseline, the harness records timings and validates deterministic
+kernel checksums but does not apply a performance gate. To reject regressions,
+pass a previous `benchmark.json`; the default limit is 10% for every metric:
+
+```bash
+npm --prefix gwr-visualisation/benchmarks run benchmark -- \
+  --timetable /absolute/path/to/partitioned-izi-gpt-oss20b.yaml \
+  --browsers chromium,safari \
+  --baseline /absolute/path/to/benchmark.json \
+  --max-regression-percent 10 \
+  --output /tmp/gwr-visualisation-benchmark
+```
+
+The baseline must contain every requested browser and metric, and must use the
+same timetable, platform, overlay, kernel iteration count, and interaction
+pattern. Input files are compared by SHA-256 digest rather than pathname.
+Browser, operating system, and hardware differences are reported as warnings
+because they can make timing comparisons unreliable.
+
+Chromium uses Playwright with installed Google Chrome and opens the generated
+report directly from its `file://` URL. Safari uses Selenium with the real
+`/usr/bin/safaridriver`, not Playwright WebKit. Safari's isolated automation
+windows reject local-file navigation, so the harness serves the same generated
+report over the loopback interface for Safari sessions. Safari requires macOS
+and Develop > Allow Remote Automation. Opening a generated report directly in
+Safari also requires Develop > Disable Local File Restrictions. The harness does
+not clear or modify the user's normal Safari profile.
 
 Useful checks for this crate:
 
@@ -244,19 +325,13 @@ Useful checks for this crate:
 cargo +nightly fmt
 cargo check -p gwr-visualisation
 cargo test -p gwr-visualisation
-node --test gwr-visualisation/tests/view-model.test.mjs
-npm --prefix gwr-visualisation/benchmarks test
-npx prettier --check gwr-visualisation/assets/*.js
-npx eslint gwr-visualisation/assets
+cargo clippy-strict
+./gwr-visualisation/scripts/build-wasm.sh --check
+prek run --all-files
 ```
-
-The repository's `prek` configuration runs the browser-independent tests,
-Prettier, and ESLint for changed visualisation JavaScript before commits and
-merge commits. The development dependency installer pins both tools so local and
-CI checks use the same versions.
 
 `generator.rs` owns input loading and static bundle generation.
 `analysis/mod.rs` builds report data from the validated timetable graph, while
 its child modules calculate compute, tensor, memory, platform, and graph
-summaries. `model.rs` contains the serialized report model, and
-`analysis/tests/` groups the tests by the report data they cover.
+summaries. Run nightly formatting because the repository CI and contributor
+guidance use the nightly formatter.

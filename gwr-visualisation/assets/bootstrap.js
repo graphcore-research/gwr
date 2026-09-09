@@ -1,20 +1,9 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+/* global wasm_bindgen */
+
 (() => {
   "use strict";
-
-  const applicationScripts = [
-    "view-model.js",
-    "core.js",
-    "filters.js",
-    "pe-grid.js",
-    "timetable.js",
-    "tensors.js",
-    "memory.js",
-    "relationships.js",
-    "workspace.js",
-    "app.js",
-  ];
 
   function decodeBase64(value) {
     if (typeof Uint8Array.fromBase64 === "function") {
@@ -64,44 +53,21 @@
     document.documentElement.dataset.gwrReady = "complete";
   }
 
-  function loadScript(source) {
-    return new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = source;
-      script.addEventListener("load", resolve, { once: true });
-      script.addEventListener(
-        "error",
-        () => reject(new Error(`Unable to load ${source}`)),
-        { once: true },
-      );
-      document.body.append(script);
-    });
-  }
-
   async function start() {
     const payload = window.GWR_VISUALISATION_PAYLOAD;
     if (!payload) {
       throw new Error("Report payload is missing");
     }
-    const [dataJson, tensorsJson] = await Promise.all([
-      decompressGzip(decodeBase64(payload.data)),
-      decompressGzip(decodeBase64(payload.tensors)),
-    ]);
-    const decoder = new TextDecoder();
-    const data = JSON.parse(decoder.decode(dataJson));
-    data.tensors = JSON.parse(decoder.decode(tensorsJson));
-    window.GWR_VISUALISATION_DATA = data;
-    for (const script of [
-      ...applicationScripts,
-      ...(window.GWR_VISUALISATION_SCRIPTS || []),
-    ]) {
-      await loadScript(script);
-    }
+    const module = WebAssembly.compile(decodeBase64(payload.wasm));
+    const data = decompressGzip(decodeBase64(payload.data));
+    await wasm_bindgen({ module_or_path: await module });
+    wasm_bindgen.run(await data);
     await waitForSummaryRender();
     markSummaryReady();
+    const tensors = await decompressGzip(decodeBase64(payload.tensors));
+    wasm_bindgen.load_tensors(tensors);
     markApplicationReady();
     delete window.GWR_VISUALISATION_PAYLOAD;
-    delete window.GWR_VISUALISATION_SCRIPTS;
   }
 
   start().catch(showError);

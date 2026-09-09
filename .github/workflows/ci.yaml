@@ -85,6 +85,9 @@ jobs:
       - name: Lint with prek
         run: prek run --all-files --show-diff-on-failure
 
+      - name: Verify generated WebAssembly assets
+        run: gwr-visualisation/scripts/build-wasm.sh --check
+
   build:
     strategy:
       fail-fast: true

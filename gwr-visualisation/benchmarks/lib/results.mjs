@@ -298,7 +298,7 @@ function markdown(metadata, summary, validation, regression) {
     lines.push(`## ${browser} ${metadata.browsers[browser]}`, "");
     if (regression.enabled && regression.comparisons[browser]) {
       lines.push(
-        "| Scenario | JavaScript median (ms) | Baseline (ms) | Change |",
+        "| Scenario | Rust/WASM median (ms) | Baseline (ms) | Change |",
         "| --- | ---: | ---: | ---: |",
       );
       for (const [metric, label] of Object.entries(metricLabels)) {
@@ -310,7 +310,7 @@ function markdown(metadata, summary, validation, regression) {
         }
       }
     } else {
-      lines.push("| Scenario | JavaScript median (ms) |", "| --- | ---: |");
+      lines.push("| Scenario | Rust/WASM median (ms) |", "| --- | ---: |");
       for (const [metric, label] of Object.entries(metricLabels)) {
         lines.push(`| ${label} | ${formatTiming(metrics[metric])} |`);
       }
