@@ -1,12 +1,15 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-//! Build report data from GWR timetable graphs.
+//! Generate a self-contained browser report from GWR timetable data.
 
 #![warn(missing_docs)]
-#![cfg_attr(not(test), allow(dead_code))]
 
 mod address;
 mod model;
 
 #[cfg(feature = "generator")]
 mod analysis;
+#[cfg(feature = "generator")]
+mod generator;
+#[cfg(feature = "generator")]
+pub use generator::{BundleInputs, write_bundle};

@@ -8,10 +8,10 @@ edition.workspace = true
 rust-version.workspace = true
 description = "Static web visualisations for GWR timetable and platform data"
 documentation.workspace = true
+readme = "README.md"
 homepage.workspace = true
 repository.workspace = true
 license.workspace = true
-readme = "../README.md"
 keywords.workspace = true
 categories = [
   "command-line-utilities",
@@ -22,24 +22,35 @@ categories = [
 ]
 publish.workspace = true
 
+[[bin]]
+name = "gwr-visualisation"
+path = "src/main.rs"
+required-features = ["generator"]
+
 [features]
 default = ["generator"]
 generator = [
+  "dep:clap",
   "dep:gwr-engine",
   "dep:gwr-models",
   "dep:gwr-platform",
   "dep:gwr-timetable",
+  "dep:same-file",
   "dep:serde_yaml",
+  "dep:tempfile",
 ]
 
 [dependencies]
+clap = { workspace = true, optional = true }
 gwr-engine = { path = "../gwr-engine", version = "0.13.0", optional = true }
 gwr-models = { path = "../gwr-models", version = "0.24.0", optional = true }
 gwr-platform = { path = "../gwr-platform", version = "0.7.0", optional = true }
 gwr-timetable = { path = "../gwr-timetable", version = "0.5.0", optional = true }
+same-file = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
