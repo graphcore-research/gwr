@@ -4,11 +4,26 @@ use std::fs;
 
 use super::*;
 use crate::analysis::memory::summarize_memory;
-use crate::analysis::model::{OverlayMetricMetadata, TensorPeConsumption, TensorSummary};
+use crate::analysis::model::{
+    OverlayMetricMetadata, TensorAccessDirection, TensorPeConsumption, TensorSummary,
+};
 use crate::analysis::tensors::summarize_tensor_traffic;
 
 fn small_timetable() -> TimetableFile {
     TimetableFile::from_file(Path::new("../gwr-timetable/examples/small.yaml")).unwrap()
+}
+
+#[test]
+fn derives_dominant_machine_operation_with_stable_ties() {
+    assert_eq!(
+        dominant_machine_op(MachineOpCounts {
+            adds: 12,
+            compares: 3,
+            muls: 12,
+        }),
+        Some("adds")
+    );
+    assert_eq!(dominant_machine_op(MachineOpCounts::default()), None);
 }
 
 #[test]
@@ -20,7 +35,10 @@ fn tensor_traffic_summary_saturates_connection_totals() {
             addr: 0,
             num_bytes: u64::MAX,
             dtype: "int8".to_string(),
+            element_bits: 8,
             shape: vec![usize::MAX],
+            views: Vec::new(),
+            accesses: Vec::new(),
             production_by_pe: vec![
                 TensorPeConsumption {
                     pe: "pe0".to_string(),
@@ -75,7 +93,10 @@ fn memory_summary_saturates_connection_and_memory_totals() {
                 addr: 0,
                 num_bytes: 8,
                 dtype: "int8".to_string(),
+                element_bits: 8,
                 shape: vec![8],
+                views: Vec::new(),
+                accesses: Vec::new(),
                 production_by_pe: vec![
                     TensorPeConsumption {
                         pe: "pe0".to_string(),
@@ -113,7 +134,10 @@ fn memory_summary_saturates_connection_and_memory_totals() {
                 addr: 16,
                 num_bytes: 8,
                 dtype: "int8".to_string(),
+                element_bits: 8,
                 shape: vec![8],
+                views: Vec::new(),
+                accesses: Vec::new(),
                 production_by_pe: vec![TensorPeConsumption {
                     pe: "pe2".to_string(),
                     bytes: u64::MAX - 1,
@@ -136,11 +160,13 @@ memories:
   - name: hbm0
     kind: hbm
     base_address: 0
-    capacity_bytes: 8
+    config:
+      capacity_bytes: 8
   - name: hbm1
     kind: hbm
     base_address: 16
-    capacity_bytes: 8
+    config:
+      capacity_bytes: 8
 ",
     )
     .unwrap();
@@ -169,7 +195,10 @@ fn memory_summary_counts_tensor_ending_at_final_physical_byte() {
             addr: u64::MAX - 1,
             num_bytes: 1,
             dtype: "int8".to_string(),
+            element_bits: 8,
             shape: vec![1],
+            views: Vec::new(),
+            accesses: Vec::new(),
             production_by_pe: vec![TensorPeConsumption {
                 pe: "pe0".to_string(),
                 bytes: 1,
@@ -191,7 +220,8 @@ memories:
   - name: top
     kind: hbm
     base_address: 18446744073709551614
-    capacity_bytes: 1
+    config:
+      capacity_bytes: 1
 ",
     )
     .unwrap();
@@ -219,9 +249,22 @@ fn summarizes_small_timetable_by_pe() {
     assert_eq!(data.summary.tensor_nodes, 6);
     assert_eq!(data.summary.edges, 9);
     assert_eq!(data.summary.active_pes, 3);
+    assert_eq!(data.compute_nodes.len(), 3);
+    assert_eq!(data.compute_nodes[0].id, "pe_0_0_add");
+    assert_eq!(data.compute_nodes[0].pe, "pe_0_0");
+    assert_eq!(data.compute_nodes[0].layer, "layer 1");
+    assert_eq!(data.compute_nodes[0].op, "add");
+    assert_eq!(data.compute_nodes[0].machine_ops, 100_352);
     assert_eq!(data.tensors.len(), 6);
     assert_eq!(data.summary.total_tensor_read_bytes, 1_204_224);
     assert_eq!(data.summary.total_tensor_write_bytes, 802_816);
+    assert_eq!(data.machine_ops[0].name, "adds");
+    assert_eq!(data.machine_ops[0].colour, "#16856f");
+    assert!(
+        data.machine_ops
+            .iter()
+            .all(|machine_op| machine_op.colour.starts_with('#'))
+    );
     assert_eq!(data.layers.len(), 2);
     assert_eq!(data.layers[0].name, "layer 1");
     assert_eq!(data.layers[0].compute_nodes, 2);
@@ -261,7 +304,23 @@ fn summarizes_small_timetable_by_pe() {
         .find(|tensor| tensor.id == "tensor_0_0_to_0_1")
         .unwrap();
     assert_eq!(tensor.dtype, "fp32");
+    assert_eq!(tensor.element_bits, 32);
     assert_eq!(tensor.shape, vec![2, 224, 224]);
+    assert_eq!(tensor.views.len(), 2);
+    assert_eq!(tensor.views[0].offsets, vec![0, 0, 0]);
+    assert_eq!(tensor.views[0].shape, vec![1, 224, 224]);
+    assert_eq!(tensor.views[0].byte_offset, 0);
+    assert_eq!(tensor.views[0].num_bytes, 200_704);
+    assert_eq!(tensor.views[1].byte_offset, 200_704);
+    assert_eq!(tensor.accesses.len(), 3);
+    assert_eq!(tensor.accesses[0].direction, TensorAccessDirection::Write);
+    assert_eq!(tensor.accesses[0].slot, Some(0));
+    assert_eq!(tensor.accesses[0].view, None);
+    assert_eq!(tensor.accesses[1].direction, TensorAccessDirection::Read);
+    assert_eq!(tensor.accesses[1].slot, Some(0));
+    assert_eq!(tensor.accesses[1].view, Some(0));
+    assert_eq!(tensor.accesses[2].slot, Some(1));
+    assert_eq!(tensor.accesses[2].view, Some(1));
     assert_eq!(tensor.production_by_pe.len(), 1);
     assert_eq!(tensor.production_by_pe[0].pe, "pe_0_0");
     assert_eq!(tensor.production_by_pe[0].bytes, 401_408);
@@ -320,6 +379,7 @@ fabrics:
     kind: functional
     columns: 4
     rows: 3
+    config: {}
 processing_elements:
   - name: worker_a
     memory_map: default
@@ -467,6 +527,7 @@ fabrics:
     kind: functional
     columns: 12
     rows: 24
+    config: {}
 processing_elements:
   - name: worker
     memory_map: default
@@ -687,71 +748,77 @@ edges:
     assert_eq!(data.summary.total_tensor_write_bytes, 2);
     assert_eq!(source.consumption_by_pe[0].bytes, 2);
     assert_eq!(target.production_by_pe[0].bytes, 2);
+    assert_eq!(source.views[0].byte_offset, 0);
+    assert_eq!(source.views[0].num_bytes, 2);
+    assert_eq!(source.accesses[0].direction, TensorAccessDirection::Read);
+    assert_eq!(source.accesses[0].view, Some(0));
+    assert_eq!(target.views[0].byte_offset, 0);
+    assert_eq!(target.views[0].num_bytes, 2);
+    assert_eq!(target.accesses[0].direction, TensorAccessDirection::Write);
+    assert_eq!(target.accesses[0].view, Some(0));
 }
 
 #[test]
-fn counts_full_tensor_memory_loads() {
-    let timetable =
-        TimetableFile::from_file(Path::new("../gwr-timetable/examples/cache.yaml")).unwrap();
-    let data = summarize(&timetable, Path::new("cache.yaml"), None, None);
-    let tensor = data
-        .tensors
-        .iter()
-        .find(|tensor| tensor.id == "tensor_A")
-        .unwrap();
-    let pe0 = data.pes.iter().find(|pe| pe.name == "pe0").unwrap();
-
-    assert_eq!(data.summary.memory_nodes, 2);
-    assert_eq!(data.summary.total_tensor_read_bytes, 64);
-    assert_eq!(tensor.consumption_by_pe.len(), 1);
-    assert_eq!(tensor.consumption_by_pe[0].pe, "pe0");
-    assert_eq!(tensor.consumption_by_pe[0].bytes, 64);
-    assert_eq!(tensor.consumption_by_pe[0].edge_count, 2);
-    assert_eq!(pe0.tensor_read_bytes, 64);
-}
-
-#[test]
-fn counts_memory_node_views() {
+fn deduplicates_identical_tensor_views() {
     let yaml = r"
 nodes:
   - id: source
     kind: tensor
-    config:
-      addr: 0
-      dtype: fp32
-      shape: [8]
-  - id: load
-    kind: memory
-    op: load
+    config: { addr: 0, dtype: fp32, shape: [4] }
+  - id: compute
+    kind: compute
+    op: add
     pe: pe0
-    config:
-      view:
-        offsets: [2]
-        shape: [3]
-  - id: store
-    kind: memory
-    op: store
-    pe: pe1
-    config:
-      view:
-        offsets: [0]
-        shape: [2]
-  - id: target
-    kind: tensor
-    config:
-      addr: 64
-      dtype: fp32
-      shape: [8]
+    input_views:
+      - { offsets: [1], shape: [2] }
+      - { offsets: [1], shape: [2] }
+      - { offsets: [0], shape: [4] }
+    output_views: []
 edges:
-  - from: source
-    to: load
-    kind: data
-  - from: store
-    to: target
-    kind: data
+  - { from: source, to: compute, kind: data }
+  - { from: source, to: compute, kind: data }
+  - { from: source, to: compute, kind: data }
 ";
     let timetable = TimetableFile::from_string(yaml).unwrap();
-    let data = summarize(&timetable, Path::new("memory-views.yaml"), None, None);
+    let data = summarize(&timetable, Path::new("duplicate-views.yaml"), None, None);
+    let source = data
+        .tensors
+        .iter()
+        .find(|tensor| tensor.id == "source")
+        .unwrap();
+
+    assert_eq!(source.views.len(), 1);
+    assert_eq!(source.accesses.len(), 3);
+    assert_eq!(source.accesses[0].view, Some(0));
+    assert_eq!(source.accesses[1].view, Some(0));
+    assert_eq!(source.accesses[0].slot, Some(0));
+    assert_eq!(source.accesses[1].slot, Some(1));
+    assert_eq!(source.accesses[2].slot, Some(2));
+    assert_eq!(source.accesses[2].view, None);
+}
+
+#[test]
+fn records_compute_edges_without_declared_slots() {
+    let yaml = r"
+nodes:
+  - id: source
+    kind: tensor
+    config: { addr: 0, dtype: fp32, shape: [1] }
+  - id: compute
+    kind: compute
+    op: add
+    pe: pe_0_0
+    input_views: []
+    output_views: []
+  - id: target
+    kind: tensor
+    config: { addr: 4, dtype: fp32, shape: [1] }
+edges:
+  - { from: source, to: compute, kind: data }
+  - { from: compute, to: target, kind: data }
+";
+    let timetable = TimetableFile::from_string(yaml).unwrap();
+    let data = summarize(&timetable, Path::new("missing-slots.yaml"), None, None);
     let source = data
         .tensors
         .iter()
@@ -762,57 +829,43 @@ edges:
         .iter()
         .find(|tensor| tensor.id == "target")
         .unwrap();
-    let pe0 = data.pes.iter().find(|pe| pe.name == "pe0").unwrap();
-    let pe1 = data.pes.iter().find(|pe| pe.name == "pe1").unwrap();
 
-    assert_eq!(data.summary.total_tensor_read_bytes, 12);
-    assert_eq!(data.summary.total_tensor_write_bytes, 8);
-    assert_eq!(source.consumption_by_pe[0].bytes, 12);
-    assert_eq!(target.production_by_pe[0].bytes, 8);
-    assert_eq!(pe0.tensor_read_bytes, 12);
-    assert_eq!(pe1.tensor_write_bytes, 8);
+    assert_eq!(source.accesses.len(), 1);
+    assert_eq!(source.accesses[0].slot, None);
+    assert_eq!(source.accesses[0].direction, TensorAccessDirection::Read);
+    assert_eq!(target.accesses.len(), 1);
+    assert_eq!(target.accesses[0].slot, None);
+    assert_eq!(target.accesses[0].direction, TensorAccessDirection::Write);
 }
 
 #[test]
-fn counts_unaligned_sub_byte_memory_node_views_as_physical_bytes() {
-    let yaml = r"
-nodes:
-  - id: source
-    kind: tensor
-    config:
-      addr: 0
-      dtype: int4
-      shape: [4]
-  - id: load
-    kind: memory
-    op: load
-    pe: pe0
-    config:
-      view:
-        offsets: [1]
-        shape: [2]
-edges:
-  - from: source
-    to: load
-    kind: data
-";
-    let timetable = TimetableFile::from_string(yaml).unwrap();
-    let data = summarize(
-        &timetable,
-        Path::new("sub-byte-memory-views.yaml"),
-        None,
-        None,
-    );
-    let source = data
+fn counts_repeated_full_tensor_compute_inputs() {
+    let timetable =
+        TimetableFile::from_file(Path::new("../gwr-timetable/examples/cache.yaml")).unwrap();
+    let data = summarize(&timetable, Path::new("cache.yaml"), None, None);
+    let tensor = data
         .tensors
         .iter()
-        .find(|tensor| tensor.id == "source")
+        .find(|tensor| tensor.id == "tensor_A")
         .unwrap();
     let pe0 = data.pes.iter().find(|pe| pe.name == "pe0").unwrap();
 
-    assert_eq!(data.summary.total_tensor_read_bytes, 2);
-    assert_eq!(source.consumption_by_pe[0].bytes, 2);
-    assert_eq!(pe0.tensor_read_bytes, 2);
+    assert_eq!(data.summary.memory_nodes, 0);
+    assert_eq!(data.summary.total_tensor_read_bytes, 64);
+    assert_eq!(tensor.consumption_by_pe.len(), 1);
+    assert_eq!(tensor.consumption_by_pe[0].pe, "pe0");
+    assert_eq!(tensor.consumption_by_pe[0].bytes, 64);
+    assert_eq!(tensor.consumption_by_pe[0].edge_count, 2);
+    assert_eq!(pe0.tensor_read_bytes, 64);
+    assert_eq!(tensor.accesses.len(), 2);
+    assert!(
+        tensor
+            .accesses
+            .iter()
+            .all(|access| access.direction == TensorAccessDirection::Read && access.view.is_none())
+    );
+    assert_eq!(data.compute_nodes.len(), 1);
+    assert_eq!(data.compute_nodes[0].id, "add");
 }
 
 #[test]

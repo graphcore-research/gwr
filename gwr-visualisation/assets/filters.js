@@ -179,25 +179,7 @@
   }
 
   function matchingFilterValues(picker) {
-    const source = picker.input.value;
-    let expression;
-    try {
-      expression = source ? new RegExp(source, "i") : null;
-      picker.input.removeAttribute("aria-invalid");
-    } catch {
-      picker.input.setAttribute("aria-invalid", "true");
-      picker.status.textContent = "Invalid regular expression";
-      return null;
-    }
-    const matches = expression
-      ? picker.values.filter((value) => expression.test(value))
-      : picker.values;
-    const matching = new Set(matches);
-    for (const option of picker.container.querySelectorAll(".filter-option")) {
-      option.hidden = !matching.has(option.querySelector("input").value);
-    }
-    picker.status.textContent = `${fmt.format(matches.length)} shown`;
-    return matches;
+    return App.matchingPickerValues(picker);
   }
 
   function selectMatchingFilterValues(picker) {
@@ -240,6 +222,10 @@
   function bindSelectAndFilter(element, select, picker, value) {
     markSelectionElement(element, picker, value);
     let selectTimer = null;
+    element.addEventListener("keydown", (event) => {
+      if (App.overviewNavigationKeys.includes(event.key))
+        clearTimeout(selectTimer);
+    });
     element.addEventListener("click", () => {
       clearTimeout(selectTimer);
       selectTimer = setTimeout(select, SELECTION_CLICK_DELAY_MS);
@@ -254,21 +240,28 @@
   function markSelectionElement(element, picker, value) {
     element.dataset.selectionKind = picker.kind;
     element.dataset.selectionId = value;
+    App.markEntityElement(element, picker.kind, value);
   }
 
   function initializeFilterControls() {
     for (const picker of Object.values(filterPickers)) {
       const details = picker.container.closest("details");
-      if (picker !== filterPickers.tensors) {
-        ensureFilterOptions(picker);
-      } else {
-        details.addEventListener("toggle", () => {
-          if (details.open) {
-            ensureFilterOptions(picker);
-            matchingFilterValues(picker);
-          }
-        });
-      }
+      const positionDropdown = () => {
+        if (!details.open) return;
+        const menu = details.querySelector(".filter-dropdown");
+        const left = details.getBoundingClientRect().left;
+        const available = document.documentElement.clientWidth - 12;
+        const offset = Math.min(0, available - left - menu.offsetWidth);
+        menu.style.setProperty("--dropdown-offset", `${offset}px`);
+      };
+      details.addEventListener("toggle", () => {
+        positionDropdown();
+        if (details.open) {
+          ensureFilterOptions(picker);
+          matchingFilterValues(picker);
+        }
+      });
+      window.addEventListener("resize", positionDropdown);
       picker.input.addEventListener("input", () =>
         matchingFilterValues(picker),
       );
@@ -284,9 +277,24 @@
       picker.clearPattern.addEventListener("click", () =>
         clearFilterPattern(picker),
       );
-      matchingFilterValues(picker);
     }
     updateFilterSummaries();
+  }
+
+  function layerOverviewTraffic(layer, unfiltered, filteredContext) {
+    if (unfiltered) {
+      return {
+        readBytes: toBigInt(layer.tensor_read_bytes),
+        writeBytes: toBigInt(layer.tensor_write_bytes),
+        tensorCount: Number(layer.tensor_count || 0),
+      };
+    }
+    const context = filteredContext();
+    return {
+      readBytes: context.readBytes,
+      writeBytes: context.writeBytes,
+      tensorCount: context.tensors.length,
+    };
   }
 
   function connectionTrafficFor(
@@ -630,6 +638,7 @@
     allPeNames,
     allMemoryNames,
     allTensorIds,
+    allFilter: ALL_FILTER,
     filterState,
     filterPickers,
     layerFilterValue,
@@ -645,6 +654,7 @@
     bindSelectAndFilter,
     markSelectionElement,
     initializeFilterControls,
+    layerOverviewTraffic,
     tensorTrafficFor,
     tensorTraffic,
     tensorMemoryShare,

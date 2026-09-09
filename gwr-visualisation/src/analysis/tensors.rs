@@ -2,20 +2,21 @@
 
 use std::collections::BTreeMap;
 
-use gwr_timetable::timetable_file::{
-    EdgeSection, MemoryConfigSection, TensorConfigSection, TensorViewSection,
-    checked_dtype_byte_range,
-};
+use gwr_timetable::timetable_file::{EdgeSection, TensorConfigSection, TensorViewSection};
 
 use super::TimetableIndex;
 use super::graph::{is_data_edge, layer_name};
-use super::model::{PeSummary, TensorLayerTraffic, TensorPeConsumption, TensorSummary};
+use super::model::{
+    PeSummary, TensorAccessDirection, TensorAccessSummary, TensorLayerTraffic, TensorPeConsumption,
+    TensorSummary, TensorViewSummary,
+};
 
 pub(super) fn apply_tensor_edges(
     edges: &[EdgeSection],
     tensors_by_id: &mut BTreeMap<String, TensorSummary>,
     index: &TimetableIndex,
     node_layers: &BTreeMap<String, usize>,
+    compute_node_indices: &BTreeMap<String, usize>,
 ) {
     let mut slots = TensorViewSlots::default();
     for edge in edges {
@@ -50,6 +51,15 @@ pub(super) fn apply_tensor_edges(
                     bytes,
                     node_layers.get(to).copied().map(layer_name).as_deref(),
                 );
+                record_compute_access(
+                    tensor,
+                    from,
+                    to,
+                    input_index,
+                    compute_node_indices,
+                    index,
+                    TensorAccessDirection::Read,
+                );
             }
         }
 
@@ -69,9 +79,85 @@ pub(super) fn apply_tensor_edges(
                     bytes,
                     node_layers.get(from).copied().map(layer_name).as_deref(),
                 );
+                record_compute_access(
+                    tensor,
+                    to,
+                    from,
+                    output_index,
+                    compute_node_indices,
+                    index,
+                    TensorAccessDirection::Write,
+                );
             }
         }
     }
+}
+
+fn record_compute_access(
+    tensor: &mut TensorSummary,
+    tensor_id: &str,
+    node_id: &str,
+    slot: Option<usize>,
+    compute_node_indices: &BTreeMap<String, usize>,
+    index: &TimetableIndex,
+    direction: TensorAccessDirection,
+) {
+    let Some(&node) = compute_node_indices.get(node_id) else {
+        return;
+    };
+    let node_views = match direction {
+        TensorAccessDirection::Read => &index.node_input_views,
+        TensorAccessDirection::Write => &index.node_output_views,
+    };
+    let Some(view) = slot
+        .and_then(|slot| node_views.get(node_id).and_then(|views| views.get(slot)))
+        .and_then(Option::as_ref)
+    else {
+        tensor.accesses.push(TensorAccessSummary {
+            node,
+            direction,
+            slot,
+            view: None,
+        });
+        return;
+    };
+    let Some(config) = index.tensor_configs.get(tensor_id) else {
+        return;
+    };
+    let view = if view.offsets.iter().all(|offset| *offset == 0) && view.shape == config.shape {
+        None
+    } else {
+        intern_tensor_view(tensor, config, view)
+    };
+    tensor.accesses.push(TensorAccessSummary {
+        node,
+        direction,
+        slot,
+        view,
+    });
+}
+
+fn intern_tensor_view(
+    tensor: &mut TensorSummary,
+    config: &TensorConfigSection,
+    view: &TensorViewSection,
+) -> Option<usize> {
+    let range = view_byte_range(config, view)?;
+    let summary = TensorViewSummary {
+        offsets: view.offsets.clone(),
+        shape: view.shape.clone(),
+        byte_offset: range.start,
+        num_bytes: range.end - range.start,
+    };
+    if let Some(index) = tensor
+        .views
+        .iter()
+        .position(|candidate| candidate == &summary)
+    {
+        return Some(index);
+    }
+    tensor.views.push(summary);
+    Some(tensor.views.len() - 1)
 }
 
 #[derive(Default)]
@@ -213,37 +299,26 @@ fn tensor_node_bytes(
         &index.tensor_configs,
         node_views,
     )
-    .or_else(|| {
-        memory_view_bytes(
-            tensor_id,
-            tensors_by_id,
-            &index.tensor_configs,
-            index.node_memory_configs.get(node_id),
-        )
-    })
-}
-
-fn memory_view_bytes(
-    tensor_id: &str,
-    tensors_by_id: &BTreeMap<String, TensorSummary>,
-    tensor_configs_by_id: &BTreeMap<String, TensorConfigSection>,
-    memory_config: Option<&MemoryConfigSection>,
-) -> Option<u64> {
-    let tensor = tensors_by_id.get(tensor_id)?;
-    let config = tensor_configs_by_id.get(tensor_id)?;
-    memory_config?
-        .view
-        .as_ref()
-        .map_or(Some(tensor.num_bytes), |view| {
-            view_physical_bytes(config, view)
-        })
 }
 
 fn view_physical_bytes(config: &TensorConfigSection, view: &TensorViewSection) -> Option<u64> {
-    let offset = view_element_offset(&config.shape, &view.offsets)?;
-    let elements = u64::try_from(view.num_elements()).ok()?;
-    let range = checked_dtype_byte_range(&config.dtype, offset, elements)?;
+    let range = view_byte_range(config, view)?;
     Some(range.end - range.start)
+}
+
+fn view_byte_range(
+    config: &TensorConfigSection,
+    view: &TensorViewSection,
+) -> Option<std::ops::Range<u64>> {
+    let offset = view_element_offset(&config.shape, &view.offsets)?;
+    let elements = view.shape.iter().try_fold(1_u64, |total, dim| {
+        total.checked_mul(u64::try_from(*dim).ok()?)
+    })?;
+    let bits_per_element = u64::try_from(config.dtype.num_bits()).ok()?;
+    let start_bit = offset.checked_mul(bits_per_element)?;
+    let num_bits = elements.checked_mul(bits_per_element)?;
+    let end_bit = start_bit.checked_add(num_bits)?;
+    Some((start_bit / 8)..end_bit.div_ceil(8))
 }
 
 fn view_element_offset(shape: &[usize], offsets: &[usize]) -> Option<u64> {

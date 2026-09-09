@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct VisualisationData {
     pub(super) summary: Summary,
     pub(super) layers: Vec<LayerSummary>,
+    pub(super) compute_nodes: Vec<ComputeNodeSummary>,
+    pub(super) graph: GraphSummary,
     pub(super) ops: Vec<String>,
     pub(super) machine_ops: Vec<MachineOpMetadata>,
     pub(super) memory: MemorySummary,
@@ -26,18 +28,20 @@ pub(crate) struct VisualisationData {
 pub(super) struct MachineOpMetadata {
     pub(super) name: String,
     pub(super) label: String,
+    pub(super) colour: String,
 }
 
 pub(super) fn machine_op_metadata() -> Vec<MachineOpMetadata> {
     [
-        ("adds", "Adds"),
-        ("compares", "Compares"),
-        ("muls", "Multiplies"),
+        ("adds", "Adds", "#16856f"),
+        ("compares", "Compares", "#7b61a8"),
+        ("muls", "Multiplies", "#d45f45"),
     ]
     .into_iter()
-    .map(|(name, label)| MachineOpMetadata {
+    .map(|(name, label, colour)| MachineOpMetadata {
         name: name.to_string(),
         label: label.to_string(),
+        colour: colour.to_string(),
     })
     .collect()
 }
@@ -119,6 +123,12 @@ pub(super) struct MachineOpSummary {
 }
 
 impl MachineOpSummary {
+    pub(super) fn from_counts(counts: MachineOpCounts) -> Self {
+        let mut summary = Self::default();
+        summary.add_counts(counts);
+        summary
+    }
+
     pub(super) fn add_counts(&mut self, counts: MachineOpCounts) {
         self.adds = self.adds.saturating_add(counts.adds as u64);
         self.muls = self.muls.saturating_add(counts.muls as u64);
@@ -155,6 +165,37 @@ pub(super) struct LayerPeSummary {
     pub(super) tensor_read_bytes: u64,
     #[serde(serialize_with = "serialize_u64_as_string")]
     pub(super) tensor_write_bytes: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct ComputeNodeSummary {
+    pub(super) id: String,
+    pub(super) pe: String,
+    pub(super) layer: String,
+    pub(super) op: String,
+    #[serde(serialize_with = "serialize_u64_as_string")]
+    pub(super) machine_ops: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) dominant_machine_op: Option<String>,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub(super) struct GraphSummary {
+    pub(super) compute_groups: Vec<ComputeGroupSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) control_edges: Vec<ControlEdgeSummary>,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct ComputeGroupSummary {
+    pub(super) id: String,
+    pub(super) members: Vec<usize>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub(super) struct ControlEdgeSummary {
+    pub(super) from: usize,
+    pub(super) to: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -203,9 +244,41 @@ pub(super) struct TensorSummary {
     #[serde(serialize_with = "serialize_u64_as_string")]
     pub(super) num_bytes: u64,
     pub(super) dtype: String,
+    pub(super) element_bits: usize,
     pub(super) shape: Vec<usize>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) views: Vec<TensorViewSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) accesses: Vec<TensorAccessSummary>,
     pub(super) production_by_pe: Vec<TensorPeConsumption>,
     pub(super) consumption_by_pe: Vec<TensorPeConsumption>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub(super) struct TensorViewSummary {
+    pub(super) offsets: Vec<usize>,
+    pub(super) shape: Vec<usize>,
+    #[serde(serialize_with = "serialize_u64_as_string")]
+    pub(super) byte_offset: u64,
+    #[serde(serialize_with = "serialize_u64_as_string")]
+    pub(super) num_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub(super) struct TensorAccessSummary {
+    pub(super) node: usize,
+    pub(super) direction: TensorAccessDirection,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) slot: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) view: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(super) enum TensorAccessDirection {
+    Read,
+    Write,
 }
 
 fn serialize_u64_as_string<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>

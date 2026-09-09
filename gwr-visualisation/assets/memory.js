@@ -12,6 +12,7 @@
     memoryDetail,
     memoryMetricsCache,
     skipMemoryGaps,
+    memoryVisualMode,
     filterPickers,
     filteredTensors,
     tensorTraffic,
@@ -36,11 +37,94 @@
     formatBytes,
     formatHex,
     escapeHtml,
-    metricBreakdownMarkup,
-    comparisonMetricsMarkup,
+    metricStripMarkup,
+    trafficMarkup,
     buildTensorRegions,
     memoryTensorTitle,
+    createOverviewColumnConfiguration,
+    overviewColumnControlsMarkup,
+    bindOverviewColumnControls,
+    overviewGridTemplate,
+    overviewTableMinimumWidth,
+    bindOverviewColumnResizing,
   } = App;
+
+  const memoryOverviewControls = {
+    sortKey: "memory",
+    sortDirection: "asc",
+  };
+  const memoryOverviewColumns = [
+    {
+      key: "capacity",
+      label: "Capacity",
+      colour: "var(--activity)",
+      format: formatBytes,
+      defaultWidth: 130,
+      minWidth: 100,
+    },
+    {
+      key: "allocated",
+      label: "Allocated",
+      colour: "var(--activity)",
+      format: formatBytes,
+      defaultWidth: 130,
+      minWidth: 100,
+    },
+    {
+      key: "allocated-ratio",
+      label: "Allocated %",
+      colour: "var(--activity)",
+      format: (value) => `${Number(value).toFixed(3)}%`,
+      defaultWidth: 120,
+      minWidth: 100,
+    },
+    {
+      key: "read",
+      label: "Read",
+      colour: "var(--read)",
+      format: formatBytes,
+      defaultWidth: 130,
+      minWidth: 100,
+    },
+    {
+      key: "write",
+      label: "Written",
+      colour: "var(--write)",
+      format: formatBytes,
+      defaultWidth: 130,
+      minWidth: 100,
+    },
+    {
+      key: "tensors",
+      label: "Tensors",
+      colour: "var(--activity)",
+      format: (value) => fmt.format(value),
+      defaultWidth: 100,
+      minWidth: 85,
+    },
+    {
+      key: "kind",
+      label: "Kind",
+      defaultWidth: 100,
+      minWidth: 80,
+    },
+  ];
+  const memoryOverviewColumnConfiguration = createOverviewColumnConfiguration(
+    memoryOverviewColumns,
+    memoryOverviewColumns.map((column) => column.key),
+  );
+
+  function setMemoryOverviewSort(key, direction) {
+    if (
+      key !== "memory" &&
+      !memoryOverviewColumns.some((column) => column.key === key)
+    ) {
+      return;
+    }
+    memoryOverviewControls.sortKey = key;
+    memoryOverviewControls.sortDirection =
+      direction === "desc" ? "desc" : "asc";
+  }
 
   function filteredMemories() {
     const visibleTensorIds = new Set(
@@ -98,6 +182,24 @@
       },
       { capacity: 0n, allocated: 0n, read: 0n, write: 0n },
     );
+  }
+
+  function memoryAllocationMarkup(allocated, capacity, caption) {
+    return metricStripMarkup({
+      label: "Memory allocation",
+      total: allocated,
+      formatter: formatBytes,
+      maximum: capacity,
+      entries: [
+        {
+          label: "Allocated",
+          value: allocated,
+          formatter: formatBytes,
+          colour: "var(--activity)",
+        },
+      ],
+      caption,
+    });
   }
 
   function memoryMetrics() {
@@ -159,25 +261,107 @@
       return;
     }
 
-    const totalAllocatedPercent = totals.capacity
-      ? ratioPercent(totals.allocated, totals.capacity)
-      : 0;
-    memorySummary.innerHTML = metricBreakdownMarkup(
-      "Memories",
-      memories.length,
-      [
-        ["Capacity", totals.capacity, formatBytes],
-        [
-          "Allocated",
-          totals.allocated,
-          (value) =>
-            `${formatBytes(value)} (${totalAllocatedPercent.toFixed(3)}%)`,
-        ],
-        ["Read", totals.read, formatBytes],
-        ["Written", totals.write, formatBytes],
-      ],
-      true,
+    const totalAllocatedPercent = ratioPercent(
+      totals.allocated,
+      bigIntMax(totals.capacity, 1n),
     );
+    memorySummary.innerHTML = `
+      <div class="summary-metrics">
+        <div><span>Memories</span><strong>${fmt.format(memories.length)}</strong></div>
+        <div><span>Capacity</span><strong>${formatBytes(totals.capacity)}</strong></div>
+      </div>
+      ${memoryAllocationMarkup(
+        totals.allocated,
+        totals.capacity,
+        `${totalAllocatedPercent.toFixed(3)}% of total capacity`,
+      )}
+      ${trafficMarkup({ read: totals.read, write: totals.write })}
+    `;
+  }
+
+  function memoryOverviewMetric(memory) {
+    const capacity = toBigInt(memory.capacity_bytes);
+    const allocated = toBigInt(memory.allocated_bytes);
+    return {
+      memory,
+      capacity,
+      allocated,
+      "allocated-ratio": ratioPercent(allocated, bigIntMax(capacity, 1n)),
+      read: toBigInt(memory.read_bytes),
+      write: toBigInt(memory.write_bytes),
+      tensors: Number(memory.tensor_count || 0),
+      kind: memory.kind,
+    };
+  }
+
+  function compareMemoryOverviewMetric(left, right, key) {
+    const leftValue = key === "memory" ? left.memory.name : left[key];
+    const rightValue = key === "memory" ? right.memory.name : right[key];
+    if (typeof leftValue === "bigint" || typeof rightValue === "bigint") {
+      return bigIntCompare(leftValue, rightValue);
+    }
+    if (typeof leftValue === "number" && typeof rightValue === "number") {
+      return leftValue - rightValue;
+    }
+    return String(leftValue).localeCompare(String(rightValue), undefined, {
+      numeric: true,
+    });
+  }
+
+  function memoryOverviewColumnStatistics(metrics, columns) {
+    return new Map(
+      columns
+        .filter((column) => column.format)
+        .map((column) => {
+          const values = metrics.map((metric) => metric[column.key]);
+          const hasBigInt = values.some((value) => typeof value === "bigint");
+          const maximum = hasBigInt
+            ? values.reduce(
+                (current, value) => bigIntMax(current, toBigInt(value)),
+                1n,
+              )
+            : Math.max(...values.map(Number), 1);
+          const average = hasBigInt
+            ? integerAverage(
+                values.reduce((total, value) => total + toBigInt(value), 0n),
+                values.length,
+              )
+            : values.reduce((total, value) => total + Number(value), 0) /
+              Math.max(values.length, 1);
+          return [column.key, { maximum, average }];
+        }),
+    );
+  }
+
+  function memoryOverviewMetricMarkup(metric, column, statistics) {
+    if (!column.format) {
+      return `<span class="memory-overview-text">${escapeHtml(metric[column.key])}</span>`;
+    }
+    const value = metric[column.key];
+    const formatted = column.format(value);
+    const width = Math.min(ratioPercent(value, statistics.maximum), 100);
+    const average = Math.min(
+      ratioPercent(statistics.average, statistics.maximum),
+      100,
+    );
+    return `
+      <span class="memory-overview-metric" title="${escapeHtml(`${column.label}: ${formatted}; average ${column.format(statistics.average)}`)}">
+        <strong>${formatted}</strong>
+        <span class="memory-overview-track" style="--metric-colour: ${column.colour}">
+          <i style="width: ${width}%"></i>
+          <b style="left: ${average}%" aria-hidden="true"></b>
+        </span>
+      </span>`;
+  }
+
+  function memoryOverviewHeaderMarkup(key, label) {
+    const active = memoryOverviewControls.sortKey === key;
+    const direction = active ? memoryOverviewControls.sortDirection : "";
+    const button = `<button type="button" data-memory-sort="${escapeHtml(key)}" aria-pressed="${active}" title="Sort by ${escapeHtml(label)}"><span>${escapeHtml(label)}</span><i aria-hidden="true">${direction === "asc" ? "↑" : direction === "desc" ? "↓" : ""}</i></button>`;
+    if (key === "memory") {
+      return button;
+    }
+    return `<span class="overview-column-header" data-column-key="${escapeHtml(key)}">${button}<span class="overview-column-resize" data-column-resize="${escapeHtml(key)}" role="separator" aria-orientation="vertical" aria-label="Resize ${escapeHtml(label)} column" tabindex="0" title="Drag to resize ${escapeHtml(label)}; double-click to distribute columns evenly"></span></span>`;
   }
 
   function renderMemoriesOverview() {
@@ -185,8 +369,14 @@
     if (panel?.hidden) {
       return;
     }
-    const { key, memories, totals } = memoryMetrics();
-    const overviewKey = `${key}:${state.selectedMemoryName || ""}`;
+    const { key, memories } = memoryMetrics();
+    const overviewKey = JSON.stringify({
+      key,
+      selected: state.selectedMemoryName || "",
+      sortKey: memoryOverviewControls.sortKey,
+      sortDirection: memoryOverviewControls.sortDirection,
+      columns: memoryOverviewColumnConfiguration.snapshot(),
+    });
     if (
       state.renderedMemoriesOverviewKey === overviewKey &&
       memoriesOverview.childElementCount
@@ -202,30 +392,56 @@
     }
     selectedMemory(memories);
 
-    const maxAllocated = memories.reduce(
-      (maximum, memory) => bigIntMax(maximum, toBigInt(memory.allocated_bytes)),
-      1n,
+    const columns = memoryOverviewColumnConfiguration.visible();
+    const metrics = memories.map(memoryOverviewMetric);
+    const statistics = memoryOverviewColumnStatistics(metrics, columns);
+    const direction = memoryOverviewControls.sortDirection === "desc" ? -1 : 1;
+    metrics.sort(
+      (left, right) =>
+        direction *
+          compareMemoryOverviewMetric(
+            left,
+            right,
+            memoryOverviewControls.sortKey,
+          ) ||
+        left.memory.name.localeCompare(right.memory.name, undefined, {
+          numeric: true,
+        }),
     );
-    const maxRead = memories.reduce(
-      (maximum, memory) => bigIntMax(maximum, toBigInt(memory.read_bytes)),
-      1n,
+    const identityWidth = 150;
+    App.bindOverviewKeyboard(
+      memoriesOverview,
+      metrics.map((metric) => metric.memory.name),
+      () => state.selectedMemoryName,
+      (name) => App.selectMemory(name),
     );
-    const maxWrite = memories.reduce(
-      (maximum, memory) => bigIntMax(maximum, toBigInt(memory.write_bytes)),
-      1n,
+    const tableWidth = overviewTableMinimumWidth(
+      memoryOverviewColumnConfiguration,
+      identityWidth,
     );
-    const averageRead = integerAverage(totals.read, memories.length);
-    const averageWrite = integerAverage(totals.write, memories.length);
-    const list = document.createElement("div");
-    list.className = "memories-overview-list";
-    for (const memory of memories) {
-      const capacity = bigIntMax(toBigInt(memory.capacity_bytes), 1n);
-      const allocated = toBigInt(memory.allocated_bytes);
-      const read = toBigInt(memory.read_bytes);
-      const write = toBigInt(memory.write_bytes);
+    const gridTemplate = overviewGridTemplate(
+      memoryOverviewColumnConfiguration,
+      identityWidth,
+    );
+
+    memoriesOverview.innerHTML = `
+      <div class="memory-overview-status">Displaying ${fmt.format(metrics.length)} memories · Bars use filtered maximum; markers show filtered average</div>
+      ${overviewColumnControlsMarkup(memoryOverviewColumnConfiguration)}
+      <div class="memories-overview-table overview-table" style="--overview-grid-template: ${gridTemplate}; --overview-table-width: ${tableWidth}px">
+        <div class="memory-overview-header">
+          ${memoryOverviewHeaderMarkup("memory", "Memory")}
+          ${columns.map((column) => memoryOverviewHeaderMarkup(column.key, column.label)).join("")}
+        </div>
+        <div class="memories-overview-list"></div>
+      </div>`;
+
+    const list = memoriesOverview.querySelector(".memories-overview-list");
+    const fragment = document.createDocumentFragment();
+    for (const metric of metrics) {
+      const { memory } = metric;
       const row = document.createElement("button");
       row.type = "button";
-      row.className = "memories-overview-row comparison-row";
+      row.className = "memories-overview-row";
       if (memory.name === state.selectedMemoryName) {
         row.classList.add("selected");
       }
@@ -235,55 +451,78 @@
       );
       row.setAttribute(
         "aria-label",
-        `${memory.name}: ${formatBytes(allocated)} allocated, ${formatBytes(read)} read, ${formatBytes(write)} written`,
+        `${memory.name}: ${columns
+          .map((column) =>
+            column.format
+              ? `${column.label} ${column.format(metric[column.key])}`
+              : `${column.label} ${metric[column.key]}`,
+          )
+          .join(", ")}`,
       );
       row.innerHTML = `
-      <div class="comparison-heading">
-        <strong>${escapeHtml(memory.name)}</strong>
-        <span>${escapeHtml(memory.kind)} · ${fmt.format(memory.tensor_count || 0)} tensors</span>
-      </div>
-      ${comparisonMetricsMarkup(
-        [
-          {
-            label: "Allocated",
-            value: allocated,
-            formatted: `${formatBytes(allocated)} <em>${ratioPercent(allocated, capacity).toFixed(3)}%</em>`,
-            mode: "allocated",
-            maximum: maxAllocated,
-          },
-          {
-            label: "Read",
-            value: read,
-            formatted: formatBytes(read),
-            mode: "read",
-            maximum: maxRead,
-            marker: ratioPercent(averageRead, maxRead),
-          },
-          {
-            label: "Written",
-            value: write,
-            formatted: formatBytes(write),
-            mode: "write",
-            maximum: maxWrite,
-            marker: ratioPercent(averageWrite, maxWrite),
-          },
-        ],
-        "memory-comparison-metrics",
-      )}
-    `;
+        <span class="memory-overview-name" title="${escapeHtml(memory.name)}">${escapeHtml(memory.name)}</span>
+        ${columns
+          .map((column) =>
+            memoryOverviewMetricMarkup(
+              metric,
+              column,
+              statistics.get(column.key),
+            ),
+          )
+          .join("")}`;
       bindSelectAndFilter(
         row,
         () => {
-          state.selectedMemoryName = memory.name;
-          App.selectionChanged("memory");
+          App.selectMemory(memory.name);
         },
         filterPickers.memories,
         memory.name,
       );
-      list.append(row);
+      fragment.append(row);
     }
+    list.append(fragment);
 
-    memoriesOverview.append(list);
+    bindOverviewColumnControls(
+      memoriesOverview,
+      memoryOverviewColumnConfiguration,
+      [],
+      () => {
+        if (
+          memoryOverviewControls.sortKey !== "memory" &&
+          !memoryOverviewColumnConfiguration
+            .visible()
+            .some((column) => column.key === memoryOverviewControls.sortKey)
+        ) {
+          setMemoryOverviewSort("memory", "asc");
+        }
+        renderMemoriesOverview();
+        App.workspaceChanged?.();
+      },
+    );
+    bindOverviewColumnResizing(
+      memoriesOverview,
+      memoryOverviewColumnConfiguration,
+      identityWidth,
+      () => {
+        renderMemoriesOverview();
+        App.workspaceChanged?.();
+      },
+    );
+    for (const header of memoriesOverview.querySelectorAll(
+      "[data-memory-sort]",
+    )) {
+      header.addEventListener("click", () => {
+        const sortKey = header.dataset.memorySort;
+        const sortDirection =
+          memoryOverviewControls.sortKey === sortKey &&
+          memoryOverviewControls.sortDirection === "desc"
+            ? "asc"
+            : "desc";
+        setMemoryOverviewSort(sortKey, sortDirection);
+        renderMemoriesOverview();
+        App.workspaceChanged?.();
+      });
+    }
   }
 
   function renderMemoryDetail() {
@@ -299,6 +538,7 @@
       tensorFilterValue(),
       state.selectedMemoryName || null,
       state.selectedTensor?.id || null,
+      memoryVisualMode.value,
     );
     if (
       state.renderedMemoryDetailKey === memoryKey &&
@@ -354,32 +594,28 @@
         <h3>${escapeHtml(memory.name)}</h3>
         <span>${escapeHtml(memory.kind)} · ${formatHex(memory.base_addr)} - ${formatHex(addressRange(memory.base_addr, memory.capacity_bytes)[1])}</span>
       </div>
-      <strong>${formatBytes(allocated)} / ${formatBytes(memory.capacity_bytes)} allocated (${allocatedPercent.toFixed(3)}%)</strong>
     `;
 
-    const meter = document.createElement("div");
-    meter.className = "memory-detail-meter";
-    meter.innerHTML = `<div style="width: ${allocatedPercent}%"></div>`;
-
-    const traffic = document.createElement("div");
-    traffic.className = "memory-detail-traffic";
-    traffic.innerHTML = `
-      <div class="memory-detail-traffic-row">
-        <span>Read</span>
-        <div class="memory-detail-traffic-track read"><div style="width: ${ratioPercent(read, maxRead)}%"></div><i style="left: ${ratioPercent(averageRead, maxRead)}%" aria-hidden="true"></i></div>
-        <strong>${formatBytes(read)}</strong>
-        <em>${ratioPercent(read, maxRead).toFixed(1)}% of maximum · average ${formatBytes(averageRead)}</em>
-      </div>
-      <div class="memory-detail-traffic-row">
-        <span>Written</span>
-        <div class="memory-detail-traffic-track write"><div style="width: ${ratioPercent(write, maxWrite)}%"></div><i style="left: ${ratioPercent(averageWrite, maxWrite)}%" aria-hidden="true"></i></div>
-        <strong>${formatBytes(write)}</strong>
-        <em>${ratioPercent(write, maxWrite).toFixed(1)}% of maximum · average ${formatBytes(averageWrite)}</em>
-      </div>
+    const metrics = document.createElement("div");
+    metrics.className = "memory-detail-metrics";
+    metrics.innerHTML = `
+      ${memoryAllocationMarkup(
+        allocated,
+        capacity,
+        `${allocatedPercent.toFixed(3)}% of ${formatBytes(memory.capacity_bytes)} capacity`,
+      )}
+      ${trafficMarkup({
+        read,
+        write,
+        maximum: bigIntMax(maxRead, maxWrite),
+        averageRead,
+        averageWrite,
+        caption: `Compared with filtered memories; averages Read ${formatBytes(averageRead)}, Written ${formatBytes(averageWrite)}`,
+      })}
     `;
 
     const layout = document.createElement("div");
-    layout.className = "memory-detail-layout";
+    layout.className = `memory-detail-layout memory-mode-${memoryVisualMode.value}`;
     const tensors = (memory.tensors || [])
       .map((id) => tensorsById.get(id))
       .filter(Boolean)
@@ -438,8 +674,7 @@
           bindSelectAndFilter(
             label,
             () => {
-              state.selectedTensor = tensor;
-              App.selectionChanged("tensor");
+              App.selectTensor(tensor);
             },
             filterPickers.tensors,
             tensor.id,
@@ -466,8 +701,7 @@
           bindSelectAndFilter(
             block,
             () => {
-              state.selectedTensor = tensor;
-              App.selectionChanged("tensor");
+              App.selectTensor(tensor);
             },
             filterPickers.tensors,
             tensor.id,
@@ -484,13 +718,16 @@
       }
     }
 
-    section.append(header, meter, traffic, layout);
+    section.append(header, metrics, layout);
     list.append(section);
 
     memoryDetail.append(list);
   }
 
   Object.assign(App, {
+    memoryOverviewControls,
+    memoryOverviewColumnConfiguration,
+    setMemoryOverviewSort,
     renderMemorySummary,
     renderMemoriesOverview,
     renderMemoryDetail,

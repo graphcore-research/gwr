@@ -7,6 +7,7 @@ export default [
   {
     ignores: [
       "target/**",
+      "reports/**",
       "gwr-developer-guide/book/**",
       "gwr-developer-guide/rustdoc_cache/**",
       "gwr-onnx-sys/onnx_src/**",

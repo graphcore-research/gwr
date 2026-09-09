@@ -7,9 +7,14 @@
     state,
     machineOpTypes,
     machineOpsFor,
+    allFilter,
+    isAllFilter,
+    peFilterValue,
+    filterMatches,
     filteredLayers,
     filteredTensors,
     tensorTraffic,
+    tensorTrafficFor,
     scaleTensorToMemory,
     option,
     labelFromName,
@@ -19,19 +24,36 @@
     toBigInt,
     bigIntCompare,
     integerAverage,
+    createOverviewColumnConfiguration,
   } = App;
 
   const peOverviewControls = {
     measure: document.getElementById("pe-overview-measure"),
+    measureControl: document.getElementById("pe-overview-measure-control"),
     modes: [...document.querySelectorAll("[data-pe-overview-mode]")],
+    gridEncodings: [...document.querySelectorAll("[data-pe-grid-encoding]")],
+    gridEncodingGroup: document.getElementById("pe-grid-encoding"),
     chart: document.getElementById("pe-overview-chart"),
     grid: document.getElementById("pe-overview-grid"),
     legend: document.getElementById("pe-overview-legend"),
+    scale: document.getElementById("pe-overview-scale"),
+    scaleControl: document.getElementById("pe-overview-scale-control"),
+    fixedScale: document.getElementById("pe-overview-fixed-scale"),
+    fixedMaximum: document.getElementById("pe-overview-fixed-maximum"),
+    stateLegend: document.getElementById("pe-visual-state-legend"),
     mode: "grid",
+    gridEncoding: "colour",
+    chartOrder: "pe-asc",
+    chartSortKey: "pe",
+    chartSortDirection: "asc",
+    scaleMode: "global",
   };
   const overlayNumber = new Intl.NumberFormat("en", {
     maximumFractionDigits: 2,
   });
+  function cssColour(colour) {
+    return colour.startsWith("--") ? `var(${colour})` : colour;
+  }
 
   function formatDurationNs(value) {
     const nanoseconds = Number(value || 0);
@@ -60,9 +82,10 @@
       : `${formatted}${unit ? ` ${escapeHtml(unit)}` : ""}`;
   }
 
-  function computeNodeValues(pes) {
+  function computeNodeValues(pes, scope = "filtered") {
     const values = new Map(pes.map((pe) => [pe.name, 0]));
-    for (const layer of filteredLayers()) {
+    const layers = scope === "global" ? data.layers : filteredLayers();
+    for (const layer of layers) {
       for (const pe of layer.pes || []) {
         if (values.has(pe.name)) {
           values.set(
@@ -75,10 +98,13 @@
     return values;
   }
 
-  function trafficValues(tensors, direction) {
+  function trafficValues(tensors, direction, scope = "filtered") {
     const values = new Map();
     for (const tensor of tensors) {
-      const traffic = tensorTraffic(tensor);
+      const traffic =
+        scope === "global"
+          ? tensorTrafficFor(tensor, allFilter, allFilter)
+          : tensorTraffic(tensor);
       let connections = traffic.writes;
       if (direction === "read") {
         connections = traffic.reads;
@@ -89,7 +115,11 @@
         values.set(
           connection.pe,
           toBigInt(values.get(connection.pe)) +
-            scaleTensorToMemory(tensor, connection.bytes),
+            scaleTensorToMemory(
+              tensor,
+              connection.bytes,
+              scope === "global" ? allFilter : undefined,
+            ),
         );
       }
     }
@@ -103,7 +133,11 @@
         group: "Compute allocation",
         label: "Machine ops",
         colour: "--activity",
-        metricValue: (pe) => toBigInt(machineOpsFor(pe)?.total),
+        metricValue: (pe, scope) =>
+          toBigInt(
+            machineOpsFor(pe, scope === "global" ? allFilter : undefined)
+              ?.total,
+          ),
         integer: true,
         format: formatCount,
       },
@@ -119,66 +153,73 @@
         value: `compute:machine-op:${machineOp.name}`,
         group: "Compute allocation",
         label: machineOp.label,
-        colour: "--activity",
-        metricValue: (pe) => toBigInt(machineOpsFor(pe)?.[machineOp.name]),
+        colour: machineOp.colour,
+        metricValue: (pe, scope) =>
+          toBigInt(
+            machineOpsFor(pe, scope === "global" ? allFilter : undefined)?.[
+              machineOp.name
+            ],
+          ),
         integer: true,
         format: formatCount,
       })),
       {
         value: "data:total",
         group: "Data",
-        label: "Total",
+        label: "All tensors: Total",
         colour: "--activity",
-        values: () => trafficValues(filteredTensors(), "total"),
+        values: (_, scope) =>
+          trafficValues(
+            scope === "global" ? data.tensors : filteredTensors(),
+            "total",
+            scope,
+          ),
         integer: true,
         format: formatBytes,
       },
       {
         value: "data:read",
         group: "Data",
-        label: "Read",
+        label: "All tensors: Read",
         colour: "--read",
-        values: () => trafficValues(filteredTensors(), "read"),
+        values: (_, scope) =>
+          trafficValues(
+            scope === "global" ? data.tensors : filteredTensors(),
+            "read",
+            scope,
+          ),
         integer: true,
         format: formatBytes,
       },
       {
         value: "data:write",
         group: "Data",
-        label: "Written",
+        label: "All tensors: Written",
         colour: "--write",
-        values: () => trafficValues(filteredTensors(), "write"),
-        integer: true,
-        format: formatBytes,
-      },
-      {
-        value: "tensor:read",
-        group: "Selected tensor",
-        label: "Read bytes",
-        colour: "--read",
-        values: () =>
+        values: (_, scope) =>
           trafficValues(
-            state.selectedTensor ? [state.selectedTensor] : [],
-            "read",
-          ),
-        integer: true,
-        format: formatBytes,
-        context: () => state.selectedTensor?.id || "No tensor selected",
-      },
-      {
-        value: "tensor:write",
-        group: "Selected tensor",
-        label: "Written bytes",
-        colour: "--write",
-        values: () =>
-          trafficValues(
-            state.selectedTensor ? [state.selectedTensor] : [],
+            scope === "global" ? data.tensors : filteredTensors(),
             "write",
+            scope,
+          ),
+        integer: true,
+        format: formatBytes,
+      },
+      ...["read", "write"].map((direction) => ({
+        value: `tensor:${direction}`,
+        group: "Data",
+        label: `Selected tensor: ${direction === "read" ? "Read" : "Written"}`,
+        colour: direction === "read" ? "--read" : "--write",
+        values: (_, scope) =>
+          trafficValues(
+            state.selectedTensor ? [state.selectedTensor] : [],
+            direction,
+            scope,
           ),
         integer: true,
         format: formatBytes,
         context: () => state.selectedTensor?.id || "No tensor selected",
-      },
+      })),
     ];
   }
 
@@ -201,7 +242,30 @@
       .sort((left, right) => left.label.localeCompare(right.label));
   }
 
-  const peOverviewMeasures = [...staticMeasures(), ...overlayMeasures()];
+  const timetablePeMeasures = staticMeasures();
+  const overlayPeMeasures = overlayMeasures();
+  const peOverviewMeasures = [...timetablePeMeasures, ...overlayPeMeasures];
+  const peChartColumnConfiguration = createOverviewColumnConfiguration(
+    peOverviewMeasures.map((measure) => ({
+      ...measure,
+      key: measure.value,
+      defaultWidth: 140,
+      minWidth: 90,
+    })),
+    ["compute:machine-ops", "compute:compute-nodes", "data:read", "data:write"],
+  );
+  const peChartColumnPresets = [
+    {
+      key: "timetable",
+      label: "Timetable data",
+      keys: timetablePeMeasures.map((measure) => measure.value),
+    },
+    {
+      key: "metrics",
+      label: "Metrics overlay",
+      keys: overlayPeMeasures.map((measure) => measure.value),
+    },
+  ];
 
   function appendMeasureGroup(label, measures) {
     if (!measures.length) {
@@ -219,25 +283,61 @@
 
   function initializePeOverviewControls() {
     peOverviewControls.measure.replaceChildren();
-    for (const group of [
-      "Compute allocation",
-      "Data",
-      "Selected tensor",
-      "Metrics file",
-    ]) {
+    for (const group of ["Compute allocation", "Data", "Metrics file"]) {
       appendMeasureGroup(
         group,
         peOverviewMeasures.filter((measure) => measure.group === group),
       );
     }
-    peOverviewControls.measure.value = "compute:machine-ops";
+    setPeOverviewMeasure("compute:machine-ops");
+    setPeGridEncoding("colour");
+    setPeChartOrder("pe-asc");
+    setPeScaleMode("global");
     setPeOverviewMode("grid");
+  }
+
+  function setPeOverviewMeasure(value) {
+    const measure = peOverviewMeasures.find(
+      (candidate) => candidate.value === value,
+    );
+    if (!measure) {
+      return false;
+    }
+    peOverviewControls.measure.value = measure.value;
+    for (const action of document.querySelectorAll(
+      "[data-pe-overview-measure]",
+    )) {
+      action.setAttribute(
+        "aria-pressed",
+        action.dataset.peOverviewMeasure === measure.value ? "true" : "false",
+      );
+    }
+    return true;
   }
 
   function setPeOverviewMode(mode) {
     peOverviewControls.mode = mode === "chart" ? "chart" : "grid";
     peOverviewControls.chart.hidden = peOverviewControls.mode !== "chart";
     peOverviewControls.grid.hidden = peOverviewControls.mode !== "grid";
+    peOverviewControls.measureControl.hidden =
+      peOverviewControls.mode === "chart";
+    peOverviewControls.scaleControl.hidden =
+      peOverviewControls.mode === "chart";
+    peOverviewControls.fixedScale.hidden =
+      peOverviewControls.mode === "chart" ||
+      peOverviewControls.scaleMode !== "fixed";
+    peOverviewControls.gridEncodingGroup.hidden =
+      peOverviewControls.mode !== "grid";
+    peOverviewControls.legend.hidden = peOverviewControls.mode === "chart";
+    for (const state of peOverviewControls.stateLegend.querySelectorAll(
+      "[data-grid-state]",
+    )) {
+      state.hidden = peOverviewControls.mode !== "grid";
+    }
+    peOverviewControls.stateLegend.querySelector(
+      "[data-filtered-state]",
+    ).hidden =
+      peOverviewControls.mode !== "grid" || isAllFilter(peFilterValue());
     for (const button of peOverviewControls.modes) {
       button.setAttribute(
         "aria-pressed",
@@ -248,6 +348,90 @@
     }
   }
 
+  function setPeGridEncoding(encoding) {
+    peOverviewControls.gridEncoding = encoding === "size" ? "size" : "colour";
+    for (const button of peOverviewControls.gridEncodings) {
+      button.setAttribute(
+        "aria-pressed",
+        button.dataset.peGridEncoding === peOverviewControls.gridEncoding
+          ? "true"
+          : "false",
+      );
+    }
+  }
+
+  function setPeChartOrder(order) {
+    peOverviewControls.chartOrder = [
+      "pe-asc",
+      "pe-desc",
+      "value-asc",
+      "value-desc",
+    ].includes(order)
+      ? order
+      : "pe-asc";
+    if (peOverviewControls.chartOrder.startsWith("pe-")) {
+      setPeChartSort(
+        "pe",
+        peOverviewControls.chartOrder.endsWith("desc") ? "desc" : "asc",
+      );
+    } else {
+      setPeChartSort(
+        selectedPeOverviewMeasure().value,
+        peOverviewControls.chartOrder.endsWith("asc") ? "asc" : "desc",
+      );
+    }
+  }
+
+  function setPeChartSort(key, direction) {
+    if (
+      key !== "pe" &&
+      !peOverviewMeasures.some((measure) => measure.value === key)
+    ) {
+      return;
+    }
+    peOverviewControls.chartSortKey = key;
+    peOverviewControls.chartSortDirection =
+      direction === "desc" ? "desc" : "asc";
+  }
+
+  function setPeScaleMode(mode) {
+    const nextMode = ["global", "fixed"].includes(mode) ? mode : "filtered";
+    if (nextMode === "fixed" && peOverviewControls.scaleMode !== "fixed") {
+      peOverviewControls.fixedMaximum.value = currentPeOverviewMaximum();
+    }
+    peOverviewControls.scaleMode = nextMode;
+    peOverviewControls.scale.value = peOverviewControls.scaleMode;
+    peOverviewControls.fixedScale.hidden =
+      peOverviewControls.mode === "chart" ||
+      peOverviewControls.scaleMode !== "fixed";
+  }
+
+  function currentPeOverviewMaximum() {
+    const measure = selectedPeOverviewMeasure();
+    const scope =
+      peOverviewControls.scaleMode === "global" ? "global" : "filtered";
+    const population = data.pes.filter(
+      (pe) =>
+        (pe.present_in_platform || pe.present_in_timetable) &&
+        (scope === "global" || filterMatches(peFilterValue(), pe.name)),
+    );
+    const values = peOverviewMeasureValues(population, measure, scope);
+    if (measure.integer) {
+      let maximum = 0n;
+      for (const value of values.values()) {
+        const integer = toBigInt(value);
+        const magnitude = integer < 0n ? -integer : integer;
+        maximum = magnitude > maximum ? magnitude : maximum;
+      }
+      return maximum.toString();
+    }
+    let maximum = 0;
+    for (const value of values.values()) {
+      maximum = Math.max(maximum, Math.abs(Number(value)));
+    }
+    return String(maximum);
+  }
+
   function selectedPeOverviewMeasure() {
     return (
       peOverviewMeasures.find(
@@ -256,8 +440,12 @@
     );
   }
 
-  function peOverviewMeasureValue(pe, measure = selectedPeOverviewMeasure()) {
-    const rawValue = measure?.metricValue(pe);
+  function peOverviewMeasureValue(
+    pe,
+    measure = selectedPeOverviewMeasure(),
+    scope = "filtered",
+  ) {
+    const rawValue = measure?.metricValue(pe, scope);
     if (rawValue === undefined || rawValue === null) {
       return null;
     }
@@ -268,9 +456,13 @@
     return Number.isFinite(value) ? value : null;
   }
 
-  function peOverviewMeasureValues(pes, measure = selectedPeOverviewMeasure()) {
+  function peOverviewMeasureValues(
+    pes,
+    measure = selectedPeOverviewMeasure(),
+    scope = "filtered",
+  ) {
     if (measure.values) {
-      const values = measure.values(pes);
+      const values = measure.values(pes, scope);
       return new Map(
         pes.map((pe) => [
           pe.name,
@@ -282,12 +474,40 @@
     }
     const values = new Map();
     for (const pe of pes) {
-      const value = peOverviewMeasureValue(pe, measure);
+      const value = peOverviewMeasureValue(pe, measure, scope);
       if (value !== null) {
         values.set(pe.name, value);
       }
     }
     return values;
+  }
+
+  function peOverviewScaleRange(population, measure, filteredValues) {
+    if (peOverviewControls.scaleMode === "fixed") {
+      const maximum = Math.max(
+        0.000001,
+        Number(peOverviewControls.fixedMaximum.value) || 1,
+      );
+      const observed = [...filteredValues.values()].map(Number);
+      const hasNegative = observed.some((value) => value < 0);
+      const hasPositive = observed.some((value) => value > 0);
+      return peOverviewValueRange(
+        hasNegative && hasPositive
+          ? [-maximum, maximum]
+          : hasNegative
+            ? [-maximum, 0]
+            : [0, maximum],
+      );
+    }
+    const valuesByPe =
+      peOverviewControls.scaleMode === "global"
+        ? peOverviewMeasureValues(data.pes, measure, "global")
+        : filteredValues;
+    return peOverviewValueRange(
+      population
+        .filter((pe) => valuesByPe.has(pe.name))
+        .map((pe) => valuesByPe.get(pe.name)),
+    );
   }
 
   function peOverviewValueRange(values) {
@@ -342,16 +562,17 @@
     return values.reduce((sum, value) => sum + value, 0) / values.length;
   }
 
-  function renderPeOverviewLegend(population, measure, valuesByPe) {
+  function renderPeOverviewLegend(population, measure, valuesByPe, scaleRange) {
     const values = population
       .filter((pe) => valuesByPe.has(pe.name))
       .map((pe) => valuesByPe.get(pe.name));
-    const range = peOverviewValueRange(values);
+    const observedRange = peOverviewValueRange(values);
+    const range = scaleRange || observedRange;
     const average = metricAverage(values);
     const context = measure.context?.();
     peOverviewControls.legend.style.setProperty(
       "--grid-colour",
-      `var(${measure.colour})`,
+      cssColour(measure.colour),
     );
     peOverviewControls.legend.style.setProperty(
       "--zero-position",
@@ -374,21 +595,31 @@
       <strong>${escapeHtml(measure.label)}</strong>
       ${context ? `<em>${escapeHtml(context)}</em>` : ""}
     </div>
-    <div class="pe-overview-legend-stats"><span>Minimum ${measure.format(range.observedMinimum)}</span><span>Average ${measure.format(average)}</span><span>Maximum ${measure.format(range.observedMaximum)}</span></div>
-    <div class="pe-overview-legend-scale" aria-hidden="true"><span>${measure.format(range.minimum)}</span><i class="${range.minimum < 0 ? (range.maximum > 0 ? "signed" : "negative") : ""}"></i><span>${measure.format(range.maximum)}</span></div>
+    <div class="pe-overview-legend-stats"><span>Minimum ${measure.format(observedRange.observedMinimum)}</span><span>Average ${measure.format(average)}</span><span>Maximum ${measure.format(observedRange.observedMaximum)}</span></div>
+    <div class="pe-overview-legend-scale" aria-hidden="true"><span>${measure.format(range.minimum)}</span><i class="${peOverviewControls.gridEncoding === "size" ? "size" : range.minimum < 0 ? (range.maximum > 0 ? "signed" : "negative") : ""}"></i><span>${measure.format(range.maximum)}</span></div>
   `;
   }
 
   Object.assign(App, {
     peOverviewControls,
+    peOverviewMeasures,
+    peChartColumnConfiguration,
+    peChartColumnPresets,
     initializePeOverviewControls,
+    setPeOverviewMeasure,
     setPeOverviewMode,
+    setPeGridEncoding,
+    setPeChartOrder,
+    setPeChartSort,
+    setPeScaleMode,
     selectedPeOverviewMeasure,
     computeNodeValues,
     peOverviewMeasureValues,
     peOverviewValueRange,
+    peOverviewScaleRange,
     metricCompare,
     metricAverage,
+    cssColour,
     renderPeOverviewLegend,
   });
 })();

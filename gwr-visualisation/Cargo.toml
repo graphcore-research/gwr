@@ -24,8 +24,8 @@ publish.workspace = true
 
 [dependencies]
 clap.workspace = true
-gwr-models = { path = "../gwr-models", version = "0.21.0" }
-gwr-platform = { path = "../gwr-platform", version = "0.6.0" }
+gwr-models = { path = "../gwr-models", version = "0.25.0" }
+gwr-platform = { path = "../gwr-platform", version = "0.8.0" }
 gwr-timetable = { path = "../gwr-timetable", version = "0.5.0" }
 serde.workspace = true
 serde_json.workspace = true

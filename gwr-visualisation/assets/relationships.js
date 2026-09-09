@@ -60,6 +60,7 @@
       ["write", "Written"],
     ],
   };
+  let relationshipHoverController = null;
   const layerOrderByName = new Map(
     (data.layers || []).map((layer, index) => [layer.name, index]),
   );
@@ -554,13 +555,17 @@
   function selectRelationshipEntity(side, id) {
     const kind = relationshipEntityKind(side);
     if (kind === "layer") {
-      state.selectedLayerName = id;
+      App.selectGraphLayer(id);
+      return;
     } else if (kind === "PE") {
-      state.selectedPe = pesByName.get(id) || state.selectedPe;
+      App.selectPe(pesByName.get(id));
+      return;
     } else if (kind === "memory") {
-      state.selectedMemoryName = id;
+      App.selectMemory(id);
+      return;
     } else if (kind === "tensor") {
-      state.selectedTensor = tensorsById.get(id) || state.selectedTensor;
+      App.selectGraphTensor(tensorsById.get(id));
+      return;
     }
     App.selectionChanged(kind.toLowerCase());
   }
@@ -582,6 +587,11 @@
     keyboardAccessible = false,
   ) {
     let selectTimer = null;
+    App.markEntityElement(
+      element,
+      relationshipEntityKind(side).toLowerCase(),
+      node.id,
+    );
     element.classList.add("interactive");
     if (keyboardAccessible) {
       element.setAttribute(
@@ -624,6 +634,8 @@
       return;
     }
     relationshipControls.strengthValue.value = `${relationshipControls.strength.value}%`;
+    relationshipHoverController?.abort();
+    relationshipHoverController = new AbortController();
     relationshipBundle.innerHTML = "";
     const requiresPlatform = ["memory", "pe-memory", "tensor-memory"].includes(
       relationshipControls.mode.value,
@@ -637,6 +649,14 @@
     if (!model.edges.length) {
       relationshipBundle.innerHTML = `<p class="memory-empty">No relationships match the current filters and measure.</p>`;
       return;
+    }
+    const totalEdgeCount = model.edges.length;
+    const linkLimit = Number(relationshipControls.limit.value);
+    const edges = [...model.edges].sort((left, right) =>
+      bigIntCompare(right.value, left.value),
+    );
+    if (linkLimit > 0) {
+      edges.length = Math.min(edges.length, linkLimit);
     }
     const sourceLabel = relationshipEntityLabel(
       model.sourceLabel,
@@ -682,14 +702,13 @@
     );
     const sourcesById = new Map(model.sources.map((node) => [node.id, node]));
     const targetsById = new Map(model.targets.map((node) => [node.id, node]));
-    const maximum = model.edges.reduce(
-      (max, edge) => bigIntMax(max, edge.value),
-      1n,
-    );
-    const total = model.edges.reduce((sum, edge) => sum + edge.value, 0n);
+    const maximum = edges.reduce((max, edge) => bigIntMax(max, edge.value), 1n);
+    const total = edges.reduce((sum, edge) => sum + edge.value, 0n);
     const sourceTotals = new Map();
     const targetTotals = new Map();
-    for (const edge of model.edges) {
+    const sourceConnections = new Map();
+    const targetConnections = new Map();
+    for (const edge of edges) {
       sourceTotals.set(
         edge.source,
         toBigInt(sourceTotals.get(edge.source)) + edge.value,
@@ -697,6 +716,14 @@
       targetTotals.set(
         edge.target,
         toBigInt(targetTotals.get(edge.target)) + edge.value,
+      );
+      sourceConnections.set(
+        edge.source,
+        Number(sourceConnections.get(edge.source) || 0) + 1,
+      );
+      targetConnections.set(
+        edge.target,
+        Number(targetConnections.get(edge.target) || 0) + 1,
       );
     }
     const maximumSourceTotal = [...sourceTotals.values()].reduce(
@@ -719,14 +746,24 @@
     canvas.height = height;
     canvas.setAttribute("aria-hidden", "true");
     const context = canvas.getContext("2d");
+    const focusCanvas = document.createElement("canvas");
+    focusCanvas.width = width;
+    focusCanvas.height = height;
+    focusCanvas.className = "relationship-focus-canvas";
+    focusCanvas.setAttribute("aria-hidden", "true");
+    const focusContext = focusCanvas.getContext("2d");
     const styles = getComputedStyle(document.documentElement);
     const mode = relationshipControls.measure.value;
+    const machineOpColour = machineOpTypes.find(
+      (machineOp) => machineOp.name === mode,
+    )?.colour;
     const edgeColor =
       mode === "read"
         ? styles.getPropertyValue("--read").trim()
         : mode === "write"
           ? styles.getPropertyValue("--write").trim()
-          : styles.getPropertyValue("--activity-strong").trim();
+          : machineOpColour ||
+            styles.getPropertyValue("--activity-strong").trim();
 
     const edgePoints = (edge) => {
       const source = sourcesById.get(edge.source);
@@ -740,19 +777,27 @@
         target,
       ];
     };
-    for (const edge of model.edges) {
-      const weight = Math.sqrt(ratioPercent(edge.value, maximum) / 100);
-      context.strokeStyle = edgeColor;
-      context.globalAlpha = relationshipEdgeAlpha(model.edges.length, weight);
-      context.lineWidth = 0.35 + weight * 1.8;
-      drawBundledCurve(context, edgePoints(edge), strength);
-    }
-    context.globalAlpha = 1;
+    const drawEdges = (drawingContext, visibleEdges, focused = false) => {
+      drawingContext.clearRect(0, 0, width, height);
+      for (const edge of visibleEdges) {
+        const weight = Math.sqrt(ratioPercent(edge.value, maximum) / 100);
+        drawingContext.strokeStyle = focused
+          ? styles.getPropertyValue("--activity-strong").trim()
+          : edgeColor;
+        drawingContext.globalAlpha = focused
+          ? 0.85
+          : relationshipEdgeAlpha(edges.length, weight);
+        drawingContext.lineWidth = (focused ? 1.2 : 0.35) + weight * 1.8;
+        drawBundledCurve(drawingContext, edgePoints(edge), strength);
+      }
+      drawingContext.globalAlpha = 1;
+    };
+    drawEdges(context, edges);
 
     const svg = svgNode("svg", {
       viewBox: `0 0 ${width} ${height}`,
       role: "group",
-      "aria-label": `${model.edges.length} bundled relationships between ${model.sources.length} ${sourceLabel} and ${model.targets.length} ${targetLabel}`,
+      "aria-label": `${edges.length} bundled relationships between ${model.sources.length} ${sourceLabel} and ${model.targets.length} ${targetLabel}`,
     });
     const title = svgNode("title");
     title.textContent = "Hierarchical edge bundle of timetable relationships";
@@ -783,14 +828,12 @@
 
     const appendNodes = (nodes, side) => {
       const group = svgNode("g", { class: `relationship-nodes ${side}` });
-      const labelStride =
-        side === "source"
-          ? Math.ceil(nodes.length / 28)
-          : Math.ceil(nodes.length / 24);
       const totals = side === "source" ? sourceTotals : targetTotals;
+      const connectionCounts =
+        side === "source" ? sourceConnections : targetConnections;
       const maximumTotal =
         side === "source" ? maximumSourceTotal : maximumTargetTotal;
-      nodes.forEach((node, index) => {
+      nodes.forEach((node) => {
         const selected =
           side === "source"
             ? node.id === selectedSource
@@ -805,12 +848,11 @@
           class: `${mode} weighted${selected ? " selected" : ""}`,
         });
         const tooltip = svgNode("title");
-        tooltip.textContent = `${node.label}: ${relationshipControls.mode.value === "compute" ? formatCount(nodeTotal) : formatBytes(nodeTotal)}; click to select, double-click to filter`;
+        tooltip.textContent = `${node.label}: ${relationshipControls.mode.value === "compute" ? formatCount(nodeTotal) : formatBytes(nodeTotal)} across ${fmt.format(connectionCounts.get(node.id) || 0)} ${side === "source" ? "outgoing" : "incoming"} links; click to pin, double-click to filter`;
         circle.append(tooltip);
         makeRelationshipEntityInteractive(circle, node, side, true);
         group.append(circle);
-        const showLabel =
-          selected || nodes.length <= 32 || index % labelStride === 0;
+        const showLabel = selected || nodes.length <= 32;
         if (showLabel) {
           const labelRadius = leafRadius + 12;
           const x = centerX + Math.cos(node.angle) * labelRadius;
@@ -842,7 +884,25 @@
       groupLabels.append(text);
     }
     svg.append(groupLabels);
-    shell.append(canvas, svg);
+    shell.append(canvas, focusCanvas, svg);
+    const hoverHandler = (event) => {
+      const hovered = event.detail;
+      const sourceKind = relationshipEntityKind("source").toLowerCase();
+      const targetKind = relationshipEntityKind("target").toLowerCase();
+      let focusedEdges = [];
+      if (hovered?.kind === sourceKind) {
+        focusedEdges = edges.filter((edge) => edge.source === hovered.id);
+        shell.dataset.focusDirection = "outgoing";
+      } else if (hovered?.kind === targetKind) {
+        focusedEdges = edges.filter((edge) => edge.target === hovered.id);
+        shell.dataset.focusDirection = "incoming";
+      }
+      shell.classList.toggle("has-edge-focus", focusedEdges.length > 0);
+      drawEdges(focusContext, focusedEdges, true);
+    };
+    window.addEventListener("gwr-hover-change", hoverHandler, {
+      signal: relationshipHoverController.signal,
+    });
 
     const measureLabel =
       relationshipControls.measure.options[
@@ -852,12 +912,12 @@
     status.className = "relationship-status";
     status.innerHTML = `
     <span><i class="${mode}"></i>${escapeHtml(measureLabel)}</span>
-    <span>${fmt.format(model.edges.length)} links</span>
+    <span>Displaying ${fmt.format(edges.length)} of ${fmt.format(totalEdgeCount)} links</span>
     <span>${fmt.format(model.sources.length)} ${escapeHtml(sourceLabel)}</span>
     <span>${fmt.format(model.targets.length)} ${escapeHtml(targetLabel)}</span>
     <strong>${mode === "nodes" || relationshipControls.mode.value === "compute" ? formatCount(total) : formatBytes(total)} total</strong>
   `;
-    relationshipBundle.append(shell, status);
+    relationshipBundle.append(status, shell);
   }
 
   Object.assign(App, {

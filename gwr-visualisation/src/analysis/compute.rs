@@ -361,9 +361,9 @@ fn make_tensor_views(
         .zip(views)
         .map(|(tensor_id, view)| {
             let config = tensor_configs.get(tensor_id.as_deref()?)?;
-            let tensor = Tensor::new(&config.shape, &config.dtype, config.addr);
+            let tensor = Tensor::new(&config.shape, &config.dtype, config.addr).ok()?;
             Some(match view {
-                Some(view) => TensorView::new(tensor, &view.shape, &view.offsets),
+                Some(view) => TensorView::new(tensor, &view.shape, &view.offsets).ok()?,
                 None => TensorView::new_full(tensor),
             })
         })

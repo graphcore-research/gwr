@@ -16,20 +16,47 @@ use gwr_timetable::timetable_file::TimetableFile;
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 const INDEX_TEMPLATE: &str = include_str!("../assets/index.html");
+const OBSOLETE_STATIC_ASSETS: &[&str] = &["d3.v7.min.js"];
 const STATIC_ASSETS: &[(&str, &str)] = &[
     ("core.js", include_str!("../assets/core.js")),
+    ("palettes.js", include_str!("../assets/palettes.js")),
     ("filters.js", include_str!("../assets/filters.js")),
+    (
+        "timetable-graph-layout.js",
+        include_str!("../assets/timetable-graph-layout.js"),
+    ),
+    (
+        "timetable-graph-viewport.js",
+        include_str!("../assets/timetable-graph-viewport.js"),
+    ),
+    (
+        "timetable-graph.js",
+        include_str!("../assets/timetable-graph.js"),
+    ),
     ("pe-grid.js", include_str!("../assets/pe-grid.js")),
     ("timetable.js", include_str!("../assets/timetable.js")),
     ("tensors.js", include_str!("../assets/tensors.js")),
+    (
+        "tensor-accesses.js",
+        include_str!("../assets/tensor-accesses.js"),
+    ),
     ("memory.js", include_str!("../assets/memory.js")),
     (
         "relationships.js",
         include_str!("../assets/relationships.js"),
     ),
+    (
+        "workspace-model.js",
+        include_str!("../assets/workspace-model.js"),
+    ),
+    (
+        "workspace-settings.js",
+        include_str!("../assets/workspace-settings.js"),
+    ),
     ("workspace.js", include_str!("../assets/workspace.js")),
     ("app.js", include_str!("../assets/app.js")),
     ("style.css", include_str!("../assets/style.css")),
+    ("workspace.css", include_str!("../assets/workspace.css")),
 ];
 
 /// Input files and destination for a generated report bundle.
@@ -68,6 +95,13 @@ pub fn write_bundle(inputs: &BundleInputs) -> Result<PathBuf> {
     );
 
     fs::create_dir_all(&inputs.out_dir)?;
+    for name in OBSOLETE_STATIC_ASSETS {
+        match fs::remove_file(inputs.out_dir.join(name)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
 
     let data_json = serde_json::to_string_pretty(&data)?;
     let compact_data = serde_json::to_string(&data)?;
