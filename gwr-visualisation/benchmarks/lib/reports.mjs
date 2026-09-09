@@ -45,8 +45,9 @@ async function addBenchmarkHooks(report) {
   const indexPath = path.join(report, "index.html");
   const index = await readFile(indexPath, "utf8");
   const hooked = index.replace(
-    "</body>",
-    '    <script src="benchmark-hooks.js"></script>\n  </body>',
+    '    <script src="bootstrap.js"></script>',
+    "    <script>window.GWR_VISUALISATION_SCRIPTS=['benchmark-hooks.js'];</script>\n" +
+      '    <script src="bootstrap.js"></script>',
   );
   if (hooked === index) {
     throw new Error("Unable to add the benchmark hooks to index.html");

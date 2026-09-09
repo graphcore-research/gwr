@@ -30,7 +30,8 @@ The output directory will contain:
 
 - `index.html`: the static report entry point
 - `data.json`: the exported visualisation data model
-- `data.js`: a compact copy of the data embedded for direct file opening
+- `payload.js`: compressed report data embedded for direct file opening
+- `bootstrap.js`: payload decompression and report startup
 - `view-model.js`, `core.js`, `filters.js`, `pe-grid.js`, `timetable.js`,
   `tensors.js`, `memory.js`, `relationships.js`, and `workspace.js`: focused UI
   modules loaded in dependency order
