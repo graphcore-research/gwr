@@ -6,7 +6,6 @@
     data,
     fmt,
     state,
-    pesByName,
     grid,
     rowAxis,
     colAxis,
@@ -17,6 +16,8 @@
     computeSummary,
     allLayerNames,
     machineOpKeys,
+    machineOpTypes,
+    computeNodeTypes,
     emptyMachineOps,
     filterPickers,
     layerFilterValue,
@@ -32,21 +33,30 @@
     formatCount,
     formatBytes,
     escapeHtml,
-    metricBreakdownMarkup,
     computeNodesMarkup,
     machineOpsMarkup,
-    comparisonMaxima,
-    comparisonBarsMarkup,
+    trafficMarkup,
     dims,
     peOverviewControls,
+    peChartColumnConfiguration,
+    peChartColumnPresets,
     selectedPeOverviewMeasure,
     computeNodeValues,
     peOverviewMeasureValues,
     peOverviewValueRange,
+    peOverviewScaleRange,
     metricCompare,
     metricAverage,
+    cssColour,
     renderPeOverviewLegend,
     setPeOverviewMode,
+    setPeChartSort,
+    createOverviewColumnConfiguration,
+    overviewColumnControlsMarkup,
+    bindOverviewColumnControls,
+    overviewGridTemplate,
+    overviewTableMinimumWidth,
+    bindOverviewColumnResizing,
     toBigInt,
     bigIntMax,
     ratioPercent,
@@ -54,6 +64,95 @@
   } = App;
 
   const MAX_PE_GRID_CELLS = 10_000;
+  const LAYER_WINDOW_SIZE = 200;
+  const layerOverviewControls = {
+    sortKey: "layer",
+    sortDirection: "asc",
+  };
+  const layerOverviewColumns = [
+    {
+      key: "nodes",
+      label: "Compute nodes",
+      colour: "var(--activity)",
+      format: (value) => fmt.format(value),
+      defaultWidth: 130,
+      minWidth: 105,
+    },
+    {
+      key: "ops",
+      label: "Machine ops",
+      colour: "var(--activity)",
+      format: formatCount,
+      defaultWidth: 130,
+      minWidth: 105,
+    },
+    {
+      key: "read",
+      label: "Read",
+      colour: "var(--read)",
+      format: formatBytes,
+      defaultWidth: 120,
+      minWidth: 95,
+    },
+    {
+      key: "write",
+      label: "Written",
+      colour: "var(--write)",
+      format: formatBytes,
+      defaultWidth: 120,
+      minWidth: 95,
+    },
+    {
+      key: "tensors",
+      label: "Tensors",
+      colour: "var(--activity)",
+      format: (value) => fmt.format(value),
+      defaultWidth: 100,
+      minWidth: 80,
+    },
+    {
+      key: "active-pes",
+      label: "Active PEs",
+      colour: "var(--activity)",
+      format: (value) => fmt.format(value),
+      defaultWidth: 105,
+      minWidth: 85,
+    },
+    ...computeNodeTypes.map((type) => ({
+      key: `nodes:${type.name}`,
+      label: `Compute nodes: ${type.label}`,
+      colour: type.colour,
+      format: (value) => fmt.format(value),
+      defaultWidth: 150,
+      minWidth: 105,
+    })),
+    ...machineOpTypes.map((type) => ({
+      key: `ops:${type.name}`,
+      label: `Machine ops: ${type.label}`,
+      colour: type.colour,
+      format: formatCount,
+      defaultWidth: 150,
+      minWidth: 105,
+    })),
+  ];
+  const layerOverviewColumnConfiguration = createOverviewColumnConfiguration(
+    layerOverviewColumns,
+    ["nodes", "ops", "read", "write", "tensors", "active-pes"],
+  );
+  let layerWindowStart = 0;
+  let pendingLayerOverviewReveal = null;
+
+  function setLayerOverviewSort(key, direction) {
+    if (
+      key !== "layer" &&
+      !layerOverviewColumns.some((column) => column.key === key)
+    ) {
+      return;
+    }
+    layerOverviewControls.sortKey = key;
+    layerOverviewControls.sortDirection = direction === "desc" ? "desc" : "asc";
+    layerWindowStart = 0;
+  }
 
   function peGridIsSafe(rows, cols) {
     return (
@@ -110,21 +209,156 @@
       return;
     }
     const summary = filteredSummary();
-    const machineOps = summary.machineOps || {};
     const layerCount = filteredLayers().length;
     timetableSummary.innerHTML = `
-    ${metricBreakdownMarkup(
-      "Layers",
-      layerCount,
-      [
-        ["Read", summary.readBytes, formatBytes],
-        ["Written", summary.writeBytes, formatBytes],
-      ],
-      true,
-    )}
-    ${computeNodesMarkup(summary.computeNodes, summary.computeNodesByOp)}
-    ${machineOpsMarkup(machineOps)}
+    <div class="summary-metrics">
+      <div><span>Layers</span><strong>${fmt.format(layerCount)}</strong></div>
+      <div><span>Tensors</span><strong>${fmt.format(summary.tensors.length)}</strong></div>
+      <div><span>Compute nodes</span><strong>${fmt.format(summary.computeNodes)}</strong></div>
+      <div><span>Edges</span><strong>${fmt.format(summary.edges)}</strong></div>
+      <div><span>Active PEs</span><strong>${fmt.format(summary.activePes)}</strong></div>
+    </div>
   `;
+  }
+
+  function layerOverviewMetric(layer) {
+    const aggregate = aggregateLayer(layer);
+    const context = contextSnapshot(layer.name, peFilterValue());
+    return {
+      layer,
+      nodes: aggregate.computeNodes,
+      ops: toBigInt(aggregate.machineOps.total),
+      read: context.readBytes,
+      write: context.writeBytes,
+      tensors: context.tensors.length,
+      "active-pes": aggregate.activePeNames.size,
+      ...Object.fromEntries(
+        computeNodeTypes.map((type) => [
+          `nodes:${type.name}`,
+          Number(aggregate.computeNodesByOp[type.name] || 0),
+        ]),
+      ),
+      ...Object.fromEntries(
+        machineOpTypes.map((type) => [
+          `ops:${type.name}`,
+          toBigInt(aggregate.machineOps[type.name]),
+        ]),
+      ),
+    };
+  }
+
+  function compareLayerOverviewMetric(left, right, key) {
+    if (key === "layer") {
+      return left.layer.name.localeCompare(right.layer.name, undefined, {
+        numeric: true,
+      });
+    }
+    return metricCompare(left[key], right[key]);
+  }
+
+  function sortedLayerOverviewMetrics(layers = filteredLayers()) {
+    const direction = layerOverviewControls.sortDirection === "desc" ? -1 : 1;
+    return layers.map(layerOverviewMetric).sort(
+      (left, right) =>
+        direction *
+          compareLayerOverviewMetric(
+            left,
+            right,
+            layerOverviewControls.sortKey,
+          ) ||
+        left.layer.name.localeCompare(right.layer.name, undefined, {
+          numeric: true,
+        }),
+    );
+  }
+
+  function revealLayerOverviewSelection(layerName) {
+    const index = sortedLayerOverviewMetrics().findIndex(
+      (metric) => metric.layer.name === layerName,
+    );
+    if (index < 0) {
+      return false;
+    }
+    pendingLayerOverviewReveal = layerName;
+    const inWindow =
+      index >= layerWindowStart && index < layerWindowStart + LAYER_WINDOW_SIZE;
+    if (!inWindow) {
+      layerWindowStart =
+        Math.floor(index / LAYER_WINDOW_SIZE) * LAYER_WINDOW_SIZE;
+    }
+    const panel = layerSummary.closest("[data-view]");
+    if (!inWindow || panel?.hidden) {
+      return true;
+    }
+    scrollLayerOverviewSelectionIntoView();
+    return false;
+  }
+
+  function scrollLayerOverviewSelectionIntoView() {
+    if (!pendingLayerOverviewReveal) {
+      return;
+    }
+    const row = [...layerSummary.querySelectorAll(".layer-summary-row")].find(
+      (candidate) => candidate.dataset.layer === pendingLayerOverviewReveal,
+    );
+    const table = row?.closest(".layer-overview-table");
+    if (!row || !table) {
+      return;
+    }
+    const tableBounds = table.getBoundingClientRect();
+    const headerHeight =
+      table.querySelector(".layer-overview-header")?.getBoundingClientRect()
+        .height || 0;
+    const rowBounds = row.getBoundingClientRect();
+    const visibleTop = tableBounds.top + headerHeight;
+    if (rowBounds.top < visibleTop) {
+      table.scrollTop -= visibleTop - rowBounds.top;
+    } else if (rowBounds.bottom > tableBounds.bottom) {
+      table.scrollTop += rowBounds.bottom - tableBounds.bottom;
+    }
+    pendingLayerOverviewReveal = null;
+  }
+
+  function layerOverviewColumnStatistics(metrics, columns) {
+    return new Map(
+      columns.map((column) => {
+        const values = metrics.map((metric) => metric[column.key]);
+        const maximum = values.reduce(
+          (current, value) =>
+            metricCompare(value, current) > 0 ? value : current,
+          values.some((value) => typeof value === "bigint") ? 1n : 1,
+        );
+        return [column.key, { maximum, average: metricAverage(values) }];
+      }),
+    );
+  }
+
+  function layerOverviewMetricMarkup(metric, column, statistics) {
+    const value = metric[column.key];
+    const formatted = column.format(value);
+    const width = Math.min(ratioPercent(value, statistics.maximum), 100);
+    const average = Math.min(
+      ratioPercent(statistics.average, statistics.maximum),
+      100,
+    );
+    return `
+      <span class="layer-overview-metric" title="${escapeHtml(`${column.label}: ${formatted}; average ${column.format(statistics.average)}`)}">
+        <strong>${formatted}</strong>
+        <span class="layer-overview-track" style="--metric-colour: ${column.colour}">
+          <i style="width: ${width}%"></i>
+          <b style="left: ${average}%" aria-hidden="true"></b>
+        </span>
+      </span>`;
+  }
+
+  function layerOverviewHeaderMarkup(key, label) {
+    const active = layerOverviewControls.sortKey === key;
+    const direction = active ? layerOverviewControls.sortDirection : "";
+    const button = `<button type="button" data-layer-sort="${escapeHtml(key)}" aria-pressed="${active}" title="Sort by ${escapeHtml(label)}"><span>${escapeHtml(label)}</span><i aria-hidden="true">${direction === "asc" ? "↑" : direction === "desc" ? "↓" : ""}</i></button>`;
+    if (key === "layer") {
+      return button;
+    }
+    return `<span class="overview-column-header" data-column-key="${escapeHtml(key)}">${button}<span class="overview-column-resize" data-column-resize="${escapeHtml(key)}" role="separator" aria-orientation="vertical" aria-label="Resize ${escapeHtml(label)} column" tabindex="0" title="Drag to resize ${escapeHtml(label)}; double-click to distribute columns evenly"></span></span>`;
   }
 
   function renderLayerSummary() {
@@ -137,29 +371,68 @@
       return;
     }
     selectedLayerData();
-    const metrics = layers.map((layer) => {
-      const aggregate = aggregateLayer(layer);
-      const context = contextSnapshot(layer.name, peFilterValue());
-      return {
-        layer,
-        nodes: aggregate.computeNodes,
-        ops: toBigInt(aggregate.machineOps.total),
-        tensors: context.tensors,
-        read: context.readBytes,
-        write: context.writeBytes,
-        activePes: aggregate.activePeNames.size,
-      };
-    });
-    const maxima = comparisonMaxima(metrics);
+    const columns = layerOverviewColumnConfiguration.visible();
+    const metrics = sortedLayerOverviewMetrics(layers);
+    App.bindOverviewKeyboard(
+      layerSummary,
+      metrics.map((metric) => metric.layer.name),
+      () => state.selectedLayerName,
+      (name) => App.selectGraphLayer(name),
+    );
+    const statistics = layerOverviewColumnStatistics(metrics, columns);
     layerSummary.innerHTML = "";
-    const list = document.createElement("div");
-    list.className = "layer-summary-list";
+    layerWindowStart = Math.min(
+      layerWindowStart,
+      Math.max(0, metrics.length - LAYER_WINDOW_SIZE),
+    );
+    const visibleMetrics = metrics.slice(
+      layerWindowStart,
+      layerWindowStart + LAYER_WINDOW_SIZE,
+    );
+    if (metrics.length > LAYER_WINDOW_SIZE) {
+      const navigator = document.createElement("label");
+      navigator.className = "layer-window-navigator";
+      navigator.innerHTML = `<span>Displaying ${fmt.format(layerWindowStart + 1)}-${fmt.format(layerWindowStart + visibleMetrics.length)} of ${fmt.format(metrics.length)} layers</span><input type="range" min="0" max="${Math.max(0, metrics.length - LAYER_WINDOW_SIZE)}" step="${LAYER_WINDOW_SIZE}" value="${layerWindowStart}" aria-label="First displayed layer">`;
+      navigator.querySelector("input").addEventListener("input", (event) => {
+        layerWindowStart = Number(event.target.value);
+        renderLayerSummary();
+      });
+      layerSummary.append(navigator);
+    } else {
+      const status = document.createElement("p");
+      status.className = "display-status";
+      status.textContent = `Displaying ${fmt.format(metrics.length)} layers · Bars use filtered maximum; markers show filtered average`;
+      layerSummary.append(status);
+    }
 
-    for (const metric of metrics) {
-      const { layer, nodes, ops, read, write } = metric;
+    const identityWidth = 180;
+    const tableWidth = overviewTableMinimumWidth(
+      layerOverviewColumnConfiguration,
+      identityWidth,
+    );
+    const gridTemplate = overviewGridTemplate(
+      layerOverviewColumnConfiguration,
+      identityWidth,
+    );
+    layerSummary.insertAdjacentHTML(
+      "beforeend",
+      `${overviewColumnControlsMarkup(layerOverviewColumnConfiguration)}
+       <div class="layer-overview-table overview-table" style="--overview-grid-template: ${gridTemplate}; --overview-table-width: ${tableWidth}px">
+         <div class="layer-overview-header">
+           ${layerOverviewHeaderMarkup("layer", "Layer")}
+           ${columns.map((column) => layerOverviewHeaderMarkup(column.key, column.label)).join("")}
+         </div>
+         <div class="layer-summary-list"></div>
+       </div>`,
+    );
+    const list = layerSummary.querySelector(".layer-summary-list");
+    const fragment = document.createDocumentFragment();
+
+    for (const metric of visibleMetrics) {
+      const { layer } = metric;
       const row = document.createElement("button");
       row.type = "button";
-      row.className = "layer-summary-row comparison-row";
+      row.className = "layer-summary-row";
       row.dataset.layer = layer.name;
       if (layer.name === state.selectedLayerName) {
         row.classList.add("selected");
@@ -170,27 +443,73 @@
       );
       row.setAttribute(
         "aria-label",
-        `${layer.name}: ${fmt.format(nodes)} compute nodes, ${fmt.format(ops)} machine ops, ${formatBytes(read)} read, ${formatBytes(write)} written`,
+        `${layer.name}: ${columns
+          .map(
+            (column) => `${column.label} ${column.format(metric[column.key])}`,
+          )
+          .join(", ")}`,
       );
       row.innerHTML = `
-      <div class="comparison-heading">
-        <strong>${escapeHtml(layer.name)}</strong>
-        <span>${fmt.format(metric.activePes)} PEs · ${fmt.format(metric.tensors.length)} tensors</span>
-      </div>
-      ${comparisonBarsMarkup(metric, maxima)}
-    `;
+        <span class="layer-overview-name" title="${escapeHtml(layer.name)}">${escapeHtml(layer.name)}</span>
+        ${columns
+          .map((column) =>
+            layerOverviewMetricMarkup(
+              metric,
+              column,
+              statistics.get(column.key),
+            ),
+          )
+          .join("")}`;
       bindSelectAndFilter(
         row,
-        () => {
-          state.selectedLayerName = layer.name;
-          App.selectionChanged("layer");
-        },
+        () => App.selectLayer(layer.name),
         filterPickers.layers,
         layer.name,
       );
-      list.append(row);
+      fragment.append(row);
     }
-    layerSummary.append(list);
+    list.append(fragment);
+
+    bindOverviewColumnControls(
+      layerSummary,
+      layerOverviewColumnConfiguration,
+      [],
+      () => {
+        if (
+          layerOverviewControls.sortKey !== "layer" &&
+          !layerOverviewColumnConfiguration
+            .visible()
+            .some((column) => column.key === layerOverviewControls.sortKey)
+        ) {
+          setLayerOverviewSort("layer", "asc");
+        }
+        renderLayerSummary();
+        App.workspaceChanged?.();
+      },
+    );
+    bindOverviewColumnResizing(
+      layerSummary,
+      layerOverviewColumnConfiguration,
+      identityWidth,
+      () => {
+        renderLayerSummary();
+        App.workspaceChanged?.();
+      },
+    );
+    for (const header of layerSummary.querySelectorAll("[data-layer-sort]")) {
+      header.addEventListener("click", () => {
+        const sortKey = header.dataset.layerSort;
+        const sortDirection =
+          layerOverviewControls.sortKey === sortKey &&
+          layerOverviewControls.sortDirection === "desc"
+            ? "asc"
+            : "desc";
+        setLayerOverviewSort(sortKey, sortDirection);
+        renderLayerSummary();
+        App.workspaceChanged?.();
+      });
+    }
+    scrollLayerOverviewSelectionIntoView();
   }
 
   function renderLayerDetail() {
@@ -207,78 +526,12 @@
     const layerOps = aggregate.machineOps;
     const computeNodes = aggregate.computeNodes;
     const computeNodesByOp = aggregate.computeNodesByOp;
-    const peMetrics = [...(layer.pes || [])]
-      .filter((pe) => filterMatches(peFilterValue(), pe.name))
-      .sort((left, right) => {
-        const leftPe = pesByName.get(left.name) || {};
-        const rightPe = pesByName.get(right.name) || {};
-        return (
-          Number(leftPe.row || 0) - Number(rightPe.row || 0) ||
-          Number(leftPe.col || 0) - Number(rightPe.col || 0) ||
-          left.name.localeCompare(right.name)
-        );
-      })
-      .map((pe) => {
-        const context = contextSnapshot(layer.name, pe.name);
-        return {
-          pe,
-          nodes: Number(pe.compute_nodes || 0),
-          ops: toBigInt(pe.machine_ops?.total),
-          read: context.readBytes,
-          write: context.writeBytes,
-        };
-      });
-    const peMaxima = comparisonMaxima(peMetrics);
-
     layerDetail.innerHTML = `
     <div class="layer-detail-heading"><h3>${escapeHtml(layer.name)}</h3><span>${fmt.format(aggregate.activePeNames.size)} PEs</span></div>
-    <div class="layer-detail-metrics">
-      <div><span>Read</span><strong>${formatBytes(layerContext.readBytes)}</strong></div>
-      <div><span>Written</span><strong>${formatBytes(layerContext.writeBytes)}</strong></div>
-    </div>
+    ${trafficMarkup({ read: layerContext.readBytes, write: layerContext.writeBytes })}
     ${computeNodesMarkup(computeNodes, computeNodesByOp)}
     ${machineOpsMarkup(layerOps)}
-    <div class="layer-pe-summary-list"></div>
   `;
-
-    const list = layerDetail.querySelector(".layer-pe-summary-list");
-    if (!peMetrics.length) {
-      list.innerHTML = `<p>No processing elements in this layer.</p>`;
-      return;
-    }
-
-    for (const metric of peMetrics) {
-      const pe = pesByName.get(metric.pe.name);
-      const selected = pe?.name === state.selectedPe?.name;
-      const row = document.createElement("button");
-      row.type = "button";
-      row.className = "layer-pe-summary-row comparison-row";
-      row.classList.toggle("selected", selected);
-      row.setAttribute("aria-pressed", selected ? "true" : "false");
-      row.setAttribute(
-        "aria-label",
-        `${metric.pe.name}: ${fmt.format(metric.nodes)} compute nodes, ${fmt.format(metric.ops)} machine ops, ${formatBytes(metric.read)} read, ${formatBytes(metric.write)} written`,
-      );
-      row.innerHTML = `
-      <div class="comparison-heading">
-        <strong>${escapeHtml(metric.pe.name)}</strong>
-        <span>${fmt.format(metric.pe.tensor_count || 0)} tensors</span>
-      </div>
-      ${comparisonBarsMarkup(metric, peMaxima)}
-    `;
-      bindSelectAndFilter(
-        row,
-        () => {
-          if (pe) {
-            state.selectedPe = pe;
-            App.selectionChanged("pe");
-          }
-        },
-        filterPickers.pes,
-        metric.pe.name,
-      );
-      list.append(row);
-    }
   }
 
   function computePopulation() {
@@ -330,62 +583,94 @@
       }
       return totals;
     }, emptyMachineOps());
+    const summary = filteredSummary();
 
     computeSummary.innerHTML = `
     <div class="compute-summary-context"><strong>Machine ops</strong><span>${escapeHtml(layer)}</span></div>
-    <div class="compute-summary-metrics">
+    <div class="summary-metrics">
       <div><span>Total</span><strong>${formatCount(total)}</strong></div>
       <div><span>Average per PE</span><strong>${formatCount(average)}</strong></div>
       <div><span>Maximum</span><strong>${formatCount(maximum)}</strong></div>
       <div><span>Max / average</span><strong>${imbalance.toFixed(2)}×</strong></div>
       <div><span>Allocated PEs</span><strong>${fmt.format(allocated)} / ${fmt.format(population.length)}</strong></div>
     </div>
+    ${computeNodesMarkup(summary.computeNodes, summary.computeNodesByOp)}
     ${machineOpsMarkup(machineOps)}
   `;
   }
 
   function renderPeChart() {
     const population = computePopulation();
-    const measure = selectedPeOverviewMeasure();
-    const values = peOverviewMeasureValues(data.pes, measure);
-    const rows = population
-      .filter((pe) => values.has(pe.name))
-      .map((pe) => ({ pe, value: values.get(pe.name) }))
-      .sort(
-        (left, right) =>
-          metricCompare(right.value, left.value) ||
-          left.pe.row - right.pe.row ||
-          left.pe.col - right.pe.col,
+    const columns = peChartColumnConfiguration.visible();
+    const statistics = new Map(
+      columns.map((measure) => {
+        const values = peOverviewMeasureValues(data.pes, measure);
+        const availableValues = population
+          .filter((pe) => values.has(pe.name))
+          .map((pe) => values.get(pe.name));
+        const range = peOverviewValueRange(availableValues);
+        return [
+          measure.key,
+          {
+            values,
+            range,
+            average: metricAverage(availableValues),
+          },
+        ];
+      }),
+    );
+    const rows = [...population].sort((left, right) => {
+      const direction =
+        peOverviewControls.chartSortDirection === "desc" ? -1 : 1;
+      if (peOverviewControls.chartSortKey === "pe") {
+        return direction * peIdOrder(left, right);
+      }
+      const values = statistics.get(peOverviewControls.chartSortKey)?.values;
+      const leftAvailable = values?.has(left.name) || false;
+      const rightAvailable = values?.has(right.name) || false;
+      if (leftAvailable !== rightAvailable) {
+        return leftAvailable ? -1 : 1;
+      }
+      return (
+        direction *
+          metricCompare(
+            values?.get(left.name) ?? 0,
+            values?.get(right.name) ?? 0,
+          ) || peIdOrder(left, right)
       );
-    const range = peOverviewValueRange(rows.map((row) => row.value));
-    const average = metricAverage(rows.map((row) => row.value));
-    const averagePercent =
-      ((Number(average) - range.minimum) / range.span) * 100;
-    peOverviewControls.chart.innerHTML = "";
-    peOverviewControls.chart.style.setProperty(
-      "--overview-colour",
-      `var(${measure.colour})`,
+    });
+    const identityWidth = 150;
+    App.bindOverviewKeyboard(
+      peOverviewControls.chart,
+      rows.map((pe) => pe.name),
+      () => state.selectedPe?.name,
+      (name) => App.selectPe(App.pesByName.get(name)),
+    );
+    const tableWidth = overviewTableMinimumWidth(
+      peChartColumnConfiguration,
+      identityWidth,
+    );
+    const gridTemplate = overviewGridTemplate(
+      peChartColumnConfiguration,
+      identityWidth,
     );
 
-    const legend = document.createElement("div");
-    const context = measure.context?.();
-    legend.className = "pe-overview-chart-legend";
-    legend.innerHTML = rows.length
-      ? `<span>${escapeHtml(measure.group)} · ${escapeHtml(measure.label)}${context ? ` · ${escapeHtml(context)}` : ""}</span><span>Minimum ${measure.format(range.observedMinimum)}</span><span>Average ${measure.format(average)}</span><span>Maximum ${measure.format(range.observedMaximum)}</span>`
-      : `<span>${escapeHtml(measure.group)} · ${escapeHtml(measure.label)}${context ? ` · ${escapeHtml(context)}` : ""}</span><span>No values supplied</span>`;
-    peOverviewControls.chart.append(legend);
+    peOverviewControls.chart.innerHTML = `
+      <div class="pe-overview-chart-status"><span>Displaying ${rows.length} of ${data.pes.length} PEs</span><span>Bars use per-column filtered ranges; markers show filtered averages</span></div>
+      ${columns.some((column) => column.key.startsWith("tensor:")) ? `<p>Selected tensor: ${escapeHtml(state.selectedTensor?.id || "None")}</p>` : ""}
+      ${overviewColumnControlsMarkup(peChartColumnConfiguration, peChartColumnPresets)}
+      <div class="pe-overview-table overview-table" style="--overview-grid-template: ${gridTemplate}; --overview-table-width: ${tableWidth}px">
+        <div class="pe-overview-chart-header">
+          ${peChartHeaderMarkup("pe", "PE ID")}
+          ${columns.map((column) => peChartHeaderMarkup(column.key, column.label)).join("")}
+        </div>
+        <div class="pe-overview-chart-list"></div>
+      </div>`;
 
-    if (!rows.length) {
-      return;
-    }
-
-    const list = document.createElement("div");
-    list.className = "pe-overview-chart-list";
-    for (const { pe, value } of rows) {
-      const numericValue = Number(value);
-      const barStart = Math.min(numericValue, 0);
-      const barLeft = ((barStart - range.minimum) / range.span) * 100;
-      const barWidth = (Math.abs(numericValue) / range.span) * 100;
+    const list = peOverviewControls.chart.querySelector(
+      ".pe-overview-chart-list",
+    );
+    for (const pe of rows) {
       const row = document.createElement("button");
       row.type = "button";
       row.className = "pe-overview-chart-row";
@@ -394,28 +679,114 @@
       }
       row.setAttribute(
         "aria-label",
-        `${pe.name}, ${measure.format(value)} ${measure.group} ${measure.label}`,
+        `${pe.name}: ${columns
+          .map((column) => {
+            const value = statistics.get(column.key).values.get(pe.name);
+            return `${column.label} ${value === undefined ? "unavailable" : column.format(value)}`;
+          })
+          .join(", ")}`,
       );
       row.innerHTML = `
-      <span>${escapeHtml(pe.name)}</span>
-      <div class="pe-overview-chart-track">
-        <div class="pe-overview-chart-fill${value < 0 ? " negative" : ""}" style="left: ${barLeft}%; width: ${barWidth}%"></div>
-        <i style="left: ${averagePercent}%" aria-hidden="true"></i>
-      </div>
-      <strong>${measure.format(value)}</strong>
-    `;
+        <span class="pe-overview-chart-name" title="${escapeHtml(pe.name)}">${escapeHtml(pe.name)}</span>
+        ${columns
+          .map((column) =>
+            peChartMetricMarkup(column, statistics.get(column.key), pe.name),
+          )
+          .join("")}`;
       bindSelectAndFilter(
         row,
         () => {
-          state.selectedPe = pe;
-          App.selectionChanged("pe");
+          App.selectPe(pe);
         },
         filterPickers.pes,
         pe.name,
       );
       list.append(row);
     }
-    peOverviewControls.chart.append(list);
+
+    bindOverviewColumnControls(
+      peOverviewControls.chart,
+      peChartColumnConfiguration,
+      peChartColumnPresets,
+      () => {
+        if (
+          peOverviewControls.chartSortKey !== "pe" &&
+          !peChartColumnConfiguration
+            .visible()
+            .some((column) => column.key === peOverviewControls.chartSortKey)
+        ) {
+          setPeChartSort("pe", "asc");
+        }
+        renderPeChart();
+        App.workspaceChanged?.();
+      },
+    );
+    bindOverviewColumnResizing(
+      peOverviewControls.chart,
+      peChartColumnConfiguration,
+      identityWidth,
+      () => {
+        renderPeChart();
+        App.workspaceChanged?.();
+      },
+    );
+    for (const button of peOverviewControls.chart.querySelectorAll(
+      "[data-pe-chart-sort]",
+    )) {
+      button.addEventListener("click", () => {
+        const key = button.dataset.peChartSort;
+        const direction =
+          peOverviewControls.chartSortKey === key &&
+          peOverviewControls.chartSortDirection === "desc"
+            ? "asc"
+            : "desc";
+        setPeChartSort(key, direction);
+        renderPeChart();
+        App.workspaceChanged?.();
+      });
+    }
+  }
+
+  function peChartMetricMarkup(measure, statistics, peName) {
+    const value = statistics.values.get(peName);
+    if (value === undefined) {
+      return `<span class="pe-overview-chart-metric unavailable">Unavailable</span>`;
+    }
+    const numericValue = Number(value);
+    const { range, average } = statistics;
+    const barStart = Math.min(numericValue, 0);
+    const left = ((barStart - range.minimum) / range.span) * 100;
+    const width = Math.min((Math.abs(numericValue) / range.span) * 100, 100);
+    const averagePosition = Math.min(
+      Math.max(((Number(average) - range.minimum) / range.span) * 100, 0),
+      100,
+    );
+    const formatted = measure.format(value);
+    return `
+      <span class="pe-overview-chart-metric" title="${escapeHtml(`${measure.label}: ${formatted}; average ${measure.format(average)}`)}">
+        <strong>${formatted}</strong>
+        <span class="pe-overview-chart-track" style="--overview-colour: ${cssColour(measure.colour)}; --zero-position: ${range.zeroPercent}%">
+          <i class="pe-overview-chart-fill${numericValue < 0 ? " negative" : ""}" style="left: ${left}%; width: ${width}%"></i>
+          <b style="left: ${averagePosition}%" aria-hidden="true"></b>
+        </span>
+      </span>`;
+  }
+
+  function peChartHeaderMarkup(key, label) {
+    const active = peOverviewControls.chartSortKey === key;
+    const direction = active ? peOverviewControls.chartSortDirection : "";
+    const button = `<button type="button" data-pe-chart-sort="${escapeHtml(key)}" aria-pressed="${active}" title="Sort by ${escapeHtml(label)}"><span>${escapeHtml(label)}</span><i aria-hidden="true">${direction === "asc" ? "↑" : direction === "desc" ? "↓" : ""}</i></button>`;
+    if (key === "pe") {
+      return button;
+    }
+    return `<span class="overview-column-header" data-column-key="${escapeHtml(key)}">${button}<span class="overview-column-resize" data-column-resize="${escapeHtml(key)}" role="separator" aria-orientation="vertical" aria-label="Resize ${escapeHtml(label)} column" tabindex="0" title="Drag to resize ${escapeHtml(label)}; double-click to distribute columns evenly"></span></span>`;
+  }
+
+  function peIdOrder(left, right) {
+    return left.name.localeCompare(right.name, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
   }
 
   function renderGrid() {
@@ -442,16 +813,14 @@
       measure.value === "compute:compute-nodes"
         ? valuesByPe
         : computeNodeValues(data.pes);
-    const range = peOverviewValueRange(
-      population.map((pe) => valuesByPe.get(pe.name) ?? 0),
-    );
+    const range = peOverviewScaleRange(population, measure, valuesByPe);
     grid.style.gridTemplateColumns = `repeat(${cols}, clamp(14px, 3.8vw, 34px))`;
     colAxis.style.gridTemplateColumns = `repeat(${cols}, clamp(14px, 3.8vw, 34px))`;
     rowAxis.style.gridTemplateRows = `repeat(${rows}, clamp(14px, 3.8vw, 34px))`;
     grid.innerHTML = "";
     rowAxis.innerHTML = "";
     colAxis.innerHTML = "";
-    renderPeOverviewLegend(population, measure, valuesByPe);
+    renderPeOverviewLegend(population, measure, valuesByPe, range);
 
     for (let row = 0; row < rows; row++) {
       const label = document.createElement("span");
@@ -493,19 +862,29 @@
             const hasValue = valuesByPe.has(pe.name);
             const value = hasValue ? valuesByPe.get(pe.name) : 0;
             const numericValue = Number(value);
-            button.title = hasValue ? pe.name : `${pe.name}: no value supplied`;
+            button.title = hasValue
+              ? `${pe.name}: ${measure.format(value)} ${measure.label}`
+              : `${pe.name}: no value supplied`;
+            if (!matchesFilter) {
+              button.title = `${pe.name}: filtered out`;
+            }
             const normalized =
               matchesFilter && hasValue
                 ? Math.abs(numericValue) / range.magnitude
                 : 0;
             const intensity = Math.round(10 + Math.sqrt(normalized) * 90);
+            const size = Math.sqrt(normalized) * 100;
             button.style.setProperty(
               "--grid-colour",
-              `var(${numericValue < 0 ? "--write" : measure.colour})`,
+              numericValue < 0 ? "var(--write)" : cssColour(measure.colour),
             );
             button.style.setProperty(
               "--intensity",
               `${matchesFilter && hasValue && numericValue !== 0 ? intensity : 0}%`,
+            );
+            button.style.setProperty(
+              "--size",
+              `${matchesFilter && hasValue && numericValue !== 0 ? size : 0}%`,
             );
             button.style.setProperty(
               "--platform",
@@ -513,9 +892,15 @@
             );
             button.setAttribute(
               "aria-label",
-              `${pe.name}, ${hasValue ? measure.format(value) : "no value supplied"} ${measure.group} ${measure.label}, ${fmt.format(computeNodesByPe.get(pe.name) || 0)} compute nodes`,
+              matchesFilter
+                ? `${pe.name}, ${hasValue ? measure.format(value) : "no value supplied"} ${measure.group} ${measure.label}, ${fmt.format(computeNodesByPe.get(pe.name) || 0)} compute nodes`
+                : `${pe.name}, filtered out`,
             );
             button.classList.toggle("unavailable", !hasValue);
+            button.classList.toggle(
+              "size-encoded",
+              peOverviewControls.gridEncoding === "size",
+            );
             if (pe === state.selectedPe) {
               button.classList.add("selected");
             }
@@ -525,8 +910,7 @@
             bindSelectAndFilter(
               button,
               () => {
-                state.selectedPe = pe;
-                App.selectionChanged("pe");
+                App.selectPe(pe);
               },
               filterPickers.pes,
               pe.name,
@@ -543,6 +927,7 @@
     if (grid.closest("[data-view]")?.hidden) {
       return;
     }
+    setPeOverviewMode(peOverviewControls.mode);
     if (peOverviewControls.mode === "chart") {
       renderPeChart();
     } else {
@@ -581,10 +966,24 @@
     }, 1n);
     const readBytes = selectedTraffic.read;
     const writeBytes = selectedTraffic.write;
-    const readPercent = ratioPercent(readBytes, trafficMaximum);
-    const writePercent = ratioPercent(writeBytes, trafficMaximum);
-    const selectedValue = valueFor(state.selectedPe);
-    const populationValues = computePopulation().map((pe) => valueFor(pe));
+    const trafficTotals = trafficPopulation.reduce(
+      (totals, pe) => {
+        const traffic = peTraffic(pe);
+        totals.read += traffic.read;
+        totals.write += traffic.write;
+        return totals;
+      },
+      { read: 0n, write: 0n },
+    );
+    const averageRead = integerAverage(
+      trafficTotals.read,
+      trafficPopulation.length,
+    );
+    const averageWrite = integerAverage(
+      trafficTotals.write,
+      trafficPopulation.length,
+    );
+    const populationValues = trafficPopulation.map((pe) => valueFor(pe));
     const maxCompute = populationValues.reduce(
       (maximum, value) => bigIntMax(maximum, value),
       1n,
@@ -597,34 +996,49 @@
     const peAggregate = aggregatePeAcrossLayers(state.selectedPe.name);
     const computeNodes = peAggregate.computeNodes;
     const computeNodesByOp = peAggregate.computeNodesByOp;
+    const populationNodeCounts = trafficPopulation.map(
+      (pe) => aggregatePeAcrossLayers(pe.name).computeNodes,
+    );
+    const maximumNodes = populationNodeCounts.reduce(
+      (maximum, value) => Math.max(maximum, value),
+      1,
+    );
+    const averageNodes = Math.floor(
+      populationNodeCounts.reduce((sum, value) => sum + value, 0) /
+        Math.max(populationNodeCounts.length, 1),
+    );
 
     selectedPanel.innerHTML = `
     <h2>${escapeHtml(state.selectedPe.name)}</h2>
     <p>Row ${state.selectedPe.row}, column ${state.selectedPe.col}</p>
     ${platform}
-    <div class="selected-compute" aria-label="Static compute allocation">
-      <div><span>Machine ops</span><strong>${formatCount(selectedValue)}</strong></div>
-      <div class="selected-compute-track">
-        <div style="width: ${ratioPercent(selectedValue, maxCompute)}%"></div>
-        <i style="left: ${ratioPercent(averageCompute, maxCompute)}%" aria-hidden="true"></i>
-      </div>
-      <p>${ratioPercent(selectedValue, maxCompute).toFixed(1)}% of maximum · average ${formatCount(averageCompute)}</p>
-      ${computeNodesMarkup(computeNodes, computeNodesByOp)}
-      ${machineOpsMarkup(ops)}
-    </div>
-    <div class="pe-traffic" aria-label="Tensor traffic">
-      <span>Read</span>
-      <div class="traffic-track read"><div style="width: ${readPercent}%"></div></div>
-      <strong>${formatBytes(readBytes)} <em>${readPercent.toFixed(1)}%</em></strong>
-      <span>Written</span>
-      <div class="traffic-track write"><div style="width: ${writePercent}%"></div></div>
-      <strong>${formatBytes(writeBytes)} <em>${writePercent.toFixed(1)}%</em></strong>
-    </div>
+    ${computeNodesMarkup(computeNodes, computeNodesByOp, {
+      maximum: maximumNodes,
+      marker: ratioPercent(averageNodes, maximumNodes),
+      caption: `Compared with filtered PEs; average ${formatCount(averageNodes)}`,
+    })}
+    ${machineOpsMarkup(ops, {
+      maximum: maxCompute,
+      marker: ratioPercent(averageCompute, maxCompute),
+      caption: `Compared with filtered PEs; average ${formatCount(averageCompute)}`,
+    })}
+    ${trafficMarkup({
+      read: readBytes,
+      write: writeBytes,
+      maximum: trafficMaximum,
+      averageRead,
+      averageWrite,
+      caption: `Compared with filtered PEs; averages Read ${formatBytes(averageRead)}, Written ${formatBytes(averageWrite)}`,
+    })}
     <div class="overlay-list">${overlayPills}</div>
   `;
   }
 
   Object.assign(App, {
+    layerOverviewControls,
+    layerOverviewColumnConfiguration,
+    setLayerOverviewSort,
+    revealLayerOverviewSelection,
     renderGlobalStats,
     renderTimetableSummary,
     renderLayerSummary,

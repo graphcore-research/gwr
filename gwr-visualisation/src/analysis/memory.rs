@@ -51,7 +51,7 @@ fn summarize_memory_device(
     tensors_by_id: &BTreeMap<String, TensorSummary>,
 ) -> MemoryDeviceSummary {
     let memory_start = u128::from(memory.base_address);
-    let memory_end = memory_start + u128::from(memory.capacity_bytes);
+    let memory_end = memory_start + u128::from(memory.config.capacity_bytes);
     let mut allocated_bytes = 0_u64;
     let mut read_bytes = 0_u64;
     let mut write_bytes = 0_u64;
@@ -85,7 +85,7 @@ fn summarize_memory_device(
         name: memory.name.clone(),
         kind: format!("{:?}", memory.kind).to_lowercase(),
         base_addr: memory.base_address,
-        capacity_bytes: memory.capacity_bytes,
+        capacity_bytes: memory.config.capacity_bytes,
         allocated_bytes,
         read_bytes,
         write_bytes,

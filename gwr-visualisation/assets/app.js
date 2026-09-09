@@ -5,17 +5,16 @@
   const {
     data,
     controls,
-    viewControls,
     state,
     pesByName,
     peOverviewControls,
     skipMemoryGaps,
+    memoryVisualMode,
     relationshipControls,
     memoryLayoutCache,
     memoryMetricsCache,
     filterContextCache,
     relationshipModelCache,
-    viewPresets,
     allLayerNames,
     allPeNames,
     allMemoryNames,
@@ -40,11 +39,21 @@
     renderComputeSummary,
     renderPeOverview,
     renderSelected,
+    renderTensorOverview,
+    renderTensorAccesses,
     renderTensorMemory,
     renderMemorySummary,
     renderMemoriesOverview,
     renderMemoryDetail,
     renderSelectedTensor,
+    renderTimetableGraph,
+    renderSelectedNode,
+    syncSelectedNode,
+    resetTensorOverviewPage,
+    resetTensorAccessPage,
+    revealLayerOverviewSelection,
+    revealTensorOverviewSelection,
+    revealTensorMemorySelection,
   } = App;
 
   const panelRenderers = new Map([
@@ -55,11 +64,15 @@
     ["compute-summary", renderComputeSummary],
     ["pe-grid", renderPeOverview],
     ["selected-pe", renderSelected],
+    ["tensor-overview", renderTensorOverview],
+    ["tensor-accesses", renderTensorAccesses],
     ["tensor-memory", renderTensorMemory],
     ["memory-summary", renderMemorySummary],
     ["memories-overview", renderMemoriesOverview],
     ["memory-details", renderMemoryDetail],
     ["selected-tensor", renderSelectedTensor],
+    ["timetable-graph", renderTimetableGraph],
+    ["selected-node", renderSelectedNode],
   ]);
 
   const filterBindings = [
@@ -72,76 +85,13 @@
   const dirtyPanels = new Set(allPanelNames);
   const selectionDependencies = {
     layer: ["layer-details", "relationships"],
-    pe: ["selected-pe", "relationships"],
-    memory: ["memory-details", "relationships"],
-    tensor: ["selected-tensor", "relationships", "pe-grid"],
+    pe: ["selected-pe", "relationships", "tensor-accesses"],
+    memory: ["memory-details", "tensor-memory", "relationships"],
+    tensor: ["selected-tensor", "tensor-accesses", "relationships", "pe-grid"],
+    node: ["timetable-graph", "selected-node"],
   };
   let globalStatsDirty = true;
   let renderFrame = null;
-
-  function visibleViewNames() {
-    return new Set(
-      viewControls.toggles
-        .filter((toggle) => toggle.checked)
-        .map((toggle) => toggle.dataset.viewToggle),
-    );
-  }
-
-  function applyViewConfig(activePreset = null) {
-    const visible = visibleViewNames();
-    for (const name of ["auto", "one", "two", "three"]) {
-      viewControls.views.classList.remove(`layout-${name}`);
-    }
-    viewControls.views.classList.add(`layout-${viewControls.layout.value}`);
-    for (const panel of viewControls.panels) {
-      panel.hidden = !visible.has(panel.dataset.view);
-    }
-    for (const button of viewControls.presets) {
-      button.setAttribute(
-        "aria-pressed",
-        button.dataset.preset === activePreset ? "true" : "false",
-      );
-    }
-    renderDirtyPanels();
-    App.workspaceChanged?.();
-  }
-
-  function setViewPreset(name) {
-    if (name === "compute" || name === "memory") {
-      relationshipControls.mode.value = name;
-      updateRelationshipMeasureOptions();
-      peOverviewControls.measure.value =
-        name === "compute" ? "compute:machine-ops" : "data:total";
-      setPeOverviewMode(name === "compute" ? "grid" : "chart");
-    } else if (name === "tensor") {
-      peOverviewControls.measure.value = "tensor:read";
-      setPeOverviewMode("grid");
-    }
-    markPanelsDirty(["pe-grid", "relationships"]);
-    const preset = viewPresets[name] || viewPresets.layers;
-    const currentPanels = [...viewControls.views.children];
-    const panelByName = new Map(
-      currentPanels.map((panel) => [panel.dataset.view, panel]),
-    );
-    for (const panelName of preset) {
-      const panel = panelByName.get(panelName);
-      if (panel) {
-        viewControls.views.append(panel);
-        panelByName.delete(panelName);
-      }
-    }
-    for (const panel of currentPanels) {
-      if (panelByName.has(panel.dataset.view)) {
-        viewControls.views.append(panel);
-      }
-    }
-
-    const visible = new Set(preset);
-    for (const toggle of viewControls.toggles) {
-      toggle.checked = visible.has(toggle.dataset.viewToggle);
-    }
-    applyViewConfig(name);
-  }
 
   function renderWarnings() {
     const warnings = document.getElementById("warnings");
@@ -211,6 +161,10 @@
     ) {
       state.selectedTensor = tensors[0] || null;
     }
+    const visible = App.workspaceVisibleViews();
+    if (["timetable-graph", "selected-node"].some((name) => visible.has(name)))
+      syncSelectedNode();
+    syncActiveEntity();
   }
 
   function renderDirtyPanels() {
@@ -223,12 +177,13 @@
       renderGlobalStats();
       globalStatsDirty = false;
     }
-    const visible = visibleViewNames();
+    App.refreshWorkspaceInspector();
+    const visible = App.workspaceVisibleViews();
     for (const name of [...dirtyPanels]) {
       if (!visible.has(name)) {
         continue;
       }
-      panelRenderers.get(name)();
+      App.viewRegistry.get(name)?.render?.();
       dirtyPanels.delete(name);
     }
   }
@@ -261,22 +216,185 @@
     scheduleRender(selectionDependencies[kind] || []);
   }
 
-  peOverviewControls.measure.addEventListener("change", () =>
-    scheduleRender(["pe-grid"]),
-  );
+  function setActiveEntity(kind, id) {
+    state.activeEntity = id ? { kind, id } : null;
+    markPanelsDirty([
+      "selected-tensor",
+      "selected-node",
+      "layer-details",
+      "selected-pe",
+      "memory-details",
+    ]);
+  }
+
+  function selectPe(pe) {
+    if (!pe) return;
+    state.selectedPe = pe;
+    setActiveEntity("pe", pe.name);
+    selectionChanged("pe");
+  }
+
+  function selectMemory(name) {
+    if (!name) return;
+    state.selectedMemoryName = name;
+    setActiveEntity("memory", name);
+    selectionChanged("memory");
+  }
+
+  function syncActiveEntity() {
+    if (!state.activeEntity) return;
+    const { kind, id } = state.activeEntity;
+    const eligible = {
+      tensor: state.selectedTensor?.id,
+      pe: state.selectedPe?.name,
+      layer: state.selectedLayerName,
+      memory: state.selectedMemoryName,
+    };
+    if (["compute", "group"].includes(kind)) {
+      const candidates =
+        kind === "compute"
+          ? data.compute_nodes || []
+          : data.graph?.compute_groups || [];
+      const model = App.graphSelectionModel();
+      const candidateId = (value, index) =>
+        kind === "compute" ? value.id : String(index);
+      const current = candidates.find(
+        (value, index) =>
+          candidateId(value, index) === id &&
+          App.graphSelectionExists({ kind, id }, model),
+      );
+      const index = current
+        ? candidates.indexOf(current)
+        : candidates.findIndex((value, index) =>
+            App.graphSelectionExists(
+              { kind, id: candidateId(value, index) },
+              model,
+            ),
+          );
+      eligible[kind] = index < 0 ? null : candidateId(candidates[index], index);
+    }
+    const next = eligible[kind];
+    if (!next) {
+      state.activeEntity = { kind, id: null };
+      return;
+    }
+    if (next !== id) setActiveEntity(kind, next);
+    if (["tensor", "compute", "group", "layer"].includes(kind))
+      state.selectedNode = { kind, id: next };
+  }
+
+  function selectTensor(tensor) {
+    if (!tensor) {
+      return;
+    }
+    state.selectedTensor = tensor;
+    setActiveEntity("tensor", tensor.id);
+    state.selectedNode = { kind: "tensor", id: tensor.id };
+    App.focusTimetableGraphSelection?.();
+    revealTensorOverviewSelection(tensor.id);
+    revealTensorMemorySelection(tensor.id);
+    markPanelsDirty(["tensor-overview", "tensor-memory"]);
+    selectionChanged("tensor");
+    selectionChanged("node");
+  }
+
+  function selectGraphTensor(tensor) {
+    selectTensor(tensor);
+  }
+
+  function selectCompute(node) {
+    if (!node) {
+      return;
+    }
+    setActiveEntity("compute", node.id);
+    state.selectedNode = { kind: "compute", id: node.id };
+    state.selectedPe = pesByName.get(node.pe) || state.selectedPe;
+    state.selectedLayerName = node.layer || state.selectedLayerName;
+    App.focusTimetableGraphSelection?.();
+    selectionChanged("node");
+    selectionChanged("pe");
+    selectionChanged("layer");
+  }
+
+  function selectComputeGroup(group) {
+    if (!group) {
+      return;
+    }
+    setActiveEntity("group", String(group.index));
+    state.selectedNode = { kind: "group", id: String(group.index) };
+    App.focusTimetableGraphSelection?.();
+    selectionChanged("node");
+  }
+
+  function selectLayer(layer, { revealOverview = false } = {}) {
+    if (!layer) {
+      return;
+    }
+    state.selectedLayerName = layer;
+    setActiveEntity("layer", layer);
+    state.selectedNode = { kind: "layer", id: layer };
+    App.focusTimetableGraphSelection?.();
+    if (revealOverview && revealLayerOverviewSelection(layer)) {
+      markPanelsDirty(["layer-summary"]);
+    }
+    selectionChanged("layer");
+    selectionChanged("node");
+  }
+
+  function selectGraphLayer(layer) {
+    selectLayer(layer, { revealOverview: true });
+  }
+
+  peOverviewControls.measure.addEventListener("change", () => {
+    App.setPeOverviewMeasure(peOverviewControls.measure.value);
+    scheduleRender(["pe-grid"]);
+    App.workspaceChanged?.();
+  });
+  document.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-pe-overview-measure]");
+    if (
+      !action ||
+      !App.setPeOverviewMeasure(action.dataset.peOverviewMeasure)
+    ) {
+      return;
+    }
+    scheduleRender(["pe-grid"]);
+    App.workspaceChanged?.();
+  });
   for (const button of peOverviewControls.modes) {
     button.addEventListener("click", () => {
       setPeOverviewMode(button.dataset.peOverviewMode);
       scheduleRender(["pe-grid"]);
+      App.workspaceChanged?.();
     });
   }
+  for (const button of peOverviewControls.gridEncodings) {
+    button.addEventListener("click", () => {
+      App.setPeGridEncoding(button.dataset.peGridEncoding);
+      scheduleRender(["pe-grid"]);
+      App.workspaceChanged?.();
+    });
+  }
+  peOverviewControls.scale.addEventListener("change", () => {
+    App.setPeScaleMode(peOverviewControls.scale.value);
+    scheduleRender(["pe-grid"]);
+    App.workspaceChanged?.();
+  });
+  peOverviewControls.fixedMaximum.addEventListener("input", () => {
+    scheduleRender(["pe-grid"]);
+    App.workspaceChanged?.();
+  });
 
   function filtersChanged() {
     updateFilterSummaries();
     memoryLayoutCache.clear();
+    App.tensorOverviewMetricsCache.clear();
+    resetTensorOverviewPage();
+    resetTensorAccessPage();
     memoryMetricsCache.clear();
     filterContextCache.clear();
     relationshipModelCache.clear();
+    App.invalidateTimetableGraph?.();
     invalidateFilteredViews();
     scheduleRender(allPanelNames, true);
   }
@@ -332,42 +450,52 @@
   relationshipControls.mode.addEventListener("change", () => {
     updateRelationshipMeasureOptions();
     scheduleRender(["relationships"]);
+    App.workspaceChanged();
   });
-  relationshipControls.measure.addEventListener("change", () =>
-    scheduleRender(["relationships"]),
-  );
-  relationshipControls.strength.addEventListener("input", () =>
-    scheduleRender(["relationships"]),
-  );
+  relationshipControls.measure.addEventListener("change", () => {
+    scheduleRender(["relationships"]);
+    App.workspaceChanged();
+  });
+  relationshipControls.limit.addEventListener("change", () => {
+    scheduleRender(["relationships"]);
+    App.workspaceChanged?.();
+  });
+  relationshipControls.strength.addEventListener("input", () => {
+    scheduleRender(["relationships"]);
+    App.workspaceChanged();
+  });
   skipMemoryGaps.addEventListener("change", () => {
     scheduleRender(["tensor-memory", "memory-details"]);
+    App.workspaceChanged?.();
   });
-
-  viewControls.layout.addEventListener("change", () => applyViewConfig());
-  for (const toggle of viewControls.toggles) {
-    toggle.addEventListener("change", () => applyViewConfig());
-  }
-  for (const button of viewControls.presets) {
-    button.addEventListener("click", () =>
-      setViewPreset(button.dataset.preset),
-    );
-  }
+  memoryVisualMode.addEventListener("change", () => {
+    state.renderedTensorMemoryKey = null;
+    scheduleRender(["tensor-memory", "memory-details"]);
+    App.workspaceChanged?.();
+  });
 
   // These callbacks are used by modules whose handlers are initialized below.
   Object.assign(App, {
     selectionChanged,
+    selectTensor,
+    selectPe,
+    selectMemory,
+    selectGraphTensor,
+    selectCompute,
+    selectComputeGroup,
+    selectGraphLayer,
+    selectLayer,
     filtersChanged,
-    applyViewConfig,
-    setViewPreset,
+    markViewsDirty: markPanelsDirty,
+    markAllViewsDirty: () => markPanelsDirty(allPanelNames),
+    scheduleVisibleViews: () => scheduleRender([]),
   });
+  state.activeEntity = state.selectedTensor
+    ? { kind: "tensor", id: state.selectedTensor.id }
+    : null;
   initializeFilterControls();
   initializePeOverviewControls();
   updateRelationshipMeasureOptions();
-  const restoredWorkspace = initializeWorkspace();
-  if (restoredWorkspace) {
-    applyViewConfig();
-  } else {
-    setViewPreset("summary");
-  }
+  initializeWorkspace(panelRenderers, selectionDependencies);
   renderWarnings();
 })();

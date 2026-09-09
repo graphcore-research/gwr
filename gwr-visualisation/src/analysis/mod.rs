@@ -13,15 +13,19 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use compute::{apply_compute_allocations, compute_node_machine_ops, summarize_layers};
-use graph::compute_graph_layers;
+use graph::{compute_graph_layers, summarize_graph};
+use gwr_models::processing_element::MachineOpCounts;
 use gwr_models::processing_element::task::ComputeOp;
 use gwr_platform::types::PlatformConfig;
 use gwr_timetable::timetable_file::{
-    MemoryConfigSection, NodeSection, TensorConfigSection, TensorViewSection, TimetableFile,
+    NodeSection, TensorConfigSection, TensorViewSection, TimetableFile,
 };
 use memory::summarize_memory;
 pub(crate) use model::OverlayInput;
-use model::{PeSummary, Summary, TensorSummary, VisualisationData, machine_op_metadata};
+use model::{
+    ComputeNodeSummary, MachineOpSummary, PeSummary, Summary, TensorSummary, VisualisationData,
+    machine_op_metadata,
+};
 use platform::{apply_platform, pe_coords, summarize_platform};
 use tensors::{
     TensorViewSlots, apply_pe_tensor_traffic, apply_tensor_edges, summarize_tensor_traffic,
@@ -34,7 +38,7 @@ struct TimetableIndex {
     node_pes: BTreeMap<String, Option<String>>,
     node_input_views: BTreeMap<String, Vec<Option<TensorViewSection>>>,
     node_output_views: BTreeMap<String, Vec<Option<TensorViewSection>>>,
-    node_memory_configs: BTreeMap<String, MemoryConfigSection>,
+    node_ops: BTreeMap<String, String>,
 }
 
 #[derive(Default)]
@@ -73,9 +77,6 @@ impl IndexedTimetable {
                 ..
             } => self.add_compute_node(id, op, pe.as_ref(), input_views, output_views),
             NodeSection::Tensor { id, config } => self.add_tensor_node(id, config),
-            NodeSection::Memory { id, pe, config, .. } => {
-                self.add_memory_node(id, pe.as_ref(), config);
-            }
         }
     }
 
@@ -90,6 +91,7 @@ impl IndexedTimetable {
         self.counts.compute_nodes += 1;
         let op_name = op.trace_name().to_string();
         self.index.node_pes.insert(id.to_string(), pe.cloned());
+        self.index.node_ops.insert(id.to_string(), op_name.clone());
         self.index
             .node_input_views
             .insert(id.to_string(), input_views.to_vec());
@@ -109,23 +111,6 @@ impl IndexedTimetable {
         *summary.by_op.entry(op_name).or_default() += 1;
     }
 
-    fn add_memory_node(&mut self, id: &str, pe: Option<&String>, config: &MemoryConfigSection) {
-        self.counts.memory_nodes += 1;
-        self.index.node_pes.insert(id.to_string(), pe.cloned());
-        self.index
-            .node_memory_configs
-            .insert(id.to_string(), config.clone());
-
-        let pe_name = pe.cloned().unwrap_or_else(|| "unassigned".to_string());
-        let (col, row) = pe_coords(&pe_name).unwrap_or((0, 0));
-        let summary = self
-            .pes_by_name
-            .entry(pe_name.clone())
-            .or_insert_with(|| PeSummary::new(pe_name, col, row));
-        summary.present_in_timetable = true;
-        summary.total_nodes += 1;
-    }
-
     fn add_tensor_node(&mut self, id: &str, config: &TensorConfigSection) {
         self.counts.tensor_nodes += 1;
         self.index
@@ -136,14 +121,29 @@ impl IndexedTimetable {
             TensorSummary {
                 id: id.to_string(),
                 addr: config.addr,
-                num_bytes: config.num_bytes() as u64,
+                num_bytes: tensor_config_bytes(config),
                 dtype: format!("{:?}", config.dtype).to_lowercase(),
+                element_bits: config.dtype.num_bits(),
                 shape: config.shape.clone(),
+                views: Vec::new(),
+                accesses: Vec::new(),
                 production_by_pe: Vec::new(),
                 consumption_by_pe: Vec::new(),
             },
         );
     }
+}
+
+fn tensor_config_bytes(config: &TensorConfigSection) -> u64 {
+    let elements = config
+        .shape
+        .iter()
+        .try_fold(1_u128, |total, dim| total.checked_mul(*dim as u128));
+    let Some(elements) = elements else {
+        return u64::MAX;
+    };
+    let bits = elements.saturating_mul(config.dtype.num_bits() as u128);
+    u64::try_from(bits.div_ceil(8)).unwrap_or(u64::MAX)
 }
 
 #[must_use]
@@ -165,9 +165,22 @@ pub(crate) fn summarize(
     let node_layers = compute_graph_layers(timetable);
     let node_machine_ops =
         compute_node_machine_ops(timetable, &index.tensor_configs, &mut warnings);
+    let compute_nodes = summarize_compute_nodes(&index, &node_layers, &node_machine_ops);
+    let compute_node_indices = compute_nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (node.id.clone(), index))
+        .collect();
+    let graph = summarize_graph(timetable, &compute_nodes, &compute_node_indices);
     apply_compute_allocations(&mut pes_by_name, &index, &node_layers, &node_machine_ops);
 
-    apply_tensor_edges(&timetable.edges, &mut tensors_by_id, &index, &node_layers);
+    apply_tensor_edges(
+        &timetable.edges,
+        &mut tensors_by_id,
+        &index,
+        &node_layers,
+        &compute_node_indices,
+    );
     let layer_summaries = summarize_layers(
         timetable,
         &tensors_by_id,
@@ -214,6 +227,8 @@ pub(crate) fn summarize(
             active_pes,
         },
         layers: layer_summaries,
+        compute_nodes,
+        graph,
         ops: ops.into_iter().collect(),
         machine_ops: machine_op_metadata(),
         memory,
@@ -225,6 +240,50 @@ pub(crate) fn summarize(
         platform: platform_summary,
         warnings,
     }
+}
+
+fn summarize_compute_nodes(
+    index: &TimetableIndex,
+    node_layers: &BTreeMap<String, usize>,
+    node_machine_ops: &BTreeMap<String, MachineOpCounts>,
+) -> Vec<ComputeNodeSummary> {
+    index
+        .node_ops
+        .iter()
+        .map(|(id, op)| {
+            let counts = node_machine_ops.get(id).copied().unwrap_or_default();
+            ComputeNodeSummary {
+                id: id.clone(),
+                pe: index
+                    .node_pes
+                    .get(id)
+                    .and_then(Clone::clone)
+                    .unwrap_or_else(|| "unassigned".to_string()),
+                layer: node_layers
+                    .get(id)
+                    .copied()
+                    .map(graph::layer_name)
+                    .unwrap_or_default(),
+                op: op.clone(),
+                machine_ops: MachineOpSummary::from_counts(counts).total,
+                dominant_machine_op: dominant_machine_op(counts).map(str::to_string),
+            }
+        })
+        .collect()
+}
+
+fn dominant_machine_op(counts: MachineOpCounts) -> Option<&'static str> {
+    let mut dominant = None;
+    for (name, count) in [
+        ("adds", counts.adds),
+        ("compares", counts.compares),
+        ("muls", counts.muls),
+    ] {
+        if count > dominant.map_or(0, |(_, maximum)| maximum) {
+            dominant = Some((name, count));
+        }
+    }
+    dominant.map(|(name, _)| name)
 }
 
 fn apply_overlay(
