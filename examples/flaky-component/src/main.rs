@@ -16,44 +16,51 @@
 //! Sink received 4934/10000
 //! ```
 
-use clap::Parser;
 use flaky_component::Flaky;
 use gwr_components::sink::Sink;
 use gwr_components::source::Source;
 use gwr_components::{connect_port, option_box_repeat};
+use gwr_config::multi_source_config;
 use gwr_engine::engine::Engine;
 use gwr_engine::run_simulation;
 use gwr_engine::types::SimResult;
 
 /// Command-line arguments.
-#[derive(Parser)]
+#[multi_source_config]
 #[command(about = "Example application using the Flaky component")]
 struct Cli {
     /// Set the random seed
-    #[arg(long, default_value = "123")]
-    seed: u64,
+    #[arg(long, default_value_t = 123)]
+    seed: Option<u64>,
 
     /// The ratio of data to be dropped (should be in the range [0, 1])
-    #[arg(long, default_value = "0.2")]
-    drop: f64,
+    #[arg(long, default_value_t = 0.2)]
+    drop: Option<f64>,
 
     /// The number of packets to send through the component
-    #[arg(long, default_value = "100")]
-    num_packets: usize,
+    #[arg(long, default_value_t = 100)]
+    num_packets: Option<usize>,
 }
 
 fn main() -> SimResult {
-    let args = Cli::parse();
+    let args = Cli::parse_all_sources();
 
     let mut engine = Engine::default();
     let clock = engine.default_clock();
 
-    let num_puts = args.num_packets;
+    let num_puts = args.num_packets.unwrap();
 
     let top = engine.top();
     let source =
         Source::new_and_register(&engine, top, "source", option_box_repeat!(0x123 ; num_puts));
-    let flaky = Flaky::new_and_register(&engine, &clock, top, "flaky", args.drop, args.seed);
+    let flaky = Flaky::new_and_register(
+        &engine,
+        &clock,
+        top,
+        "flaky",
+        args.drop.unwrap(),
+        args.seed.unwrap(),
+    );
     let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 
     connect_port!(source, tx => flaky, rx)?;
