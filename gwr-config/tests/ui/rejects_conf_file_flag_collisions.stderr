@@ -1,0 +1,41 @@
+error: unsupported gwr-config attribute or shape; see multi_source_config's supported subset
+  --> tests/ui/rejects_conf_file_flag_collisions.rs:48:11
+   |
+48 |     #[arg(long = concat!("set", "tings"))]
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0080]: evaluation panicked: conf_file_flag `--conf-file` conflicts with an existing long option or reserved --help
+ --> tests/ui/rejects_conf_file_flag_collisions.rs:5:1
+  |
+5 | #[multi_source_config(conf_file_flag = "conf-file")]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed here
+
+error[E0080]: evaluation panicked: conf_file_flag `--settings` conflicts with an existing long option or reserved --help
+  --> tests/ui/rejects_conf_file_flag_collisions.rs:11:1
+   |
+11 | #[multi_source_config(conf_file_flag = "--settings")]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed here
+
+error[E0080]: evaluation panicked: conf_file_flag `--help` conflicts with an existing long option or reserved --help
+  --> tests/ui/rejects_conf_file_flag_collisions.rs:17:1
+   |
+17 | #[multi_source_config(conf_file_flag = "help")]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed here
+
+error[E0080]: evaluation panicked: conf_file_flag `--type` conflicts with an existing long option or reserved --help
+  --> tests/ui/rejects_conf_file_flag_collisions.rs:20:1
+   |
+20 | #[multi_source_config(conf_file_flag = "type")]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed here
+
+error[E0080]: evaluation panicked: conf_file_flag `--http-config` conflicts with an existing long option or reserved --help
+  --> tests/ui/rejects_conf_file_flag_collisions.rs:26:1
+   |
+26 | #[multi_source_config(conf_file_flag = "http-config")]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed here
+
+error[E0080]: evaluation panicked: conf_file_flag `--settings` conflicts with an existing long option or reserved --help
+  --> tests/ui/rejects_conf_file_flag_collisions.rs:39:1
+   |
+39 | #[multi_source_config(conf_file_flag = "settings")]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed here
