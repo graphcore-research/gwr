@@ -1,0 +1,5 @@
+error: unsupported gwr-config attribute or shape; see multi_source_config's supported subset
+ --> tests/ui/rejects_conditional_default.rs:7:17
+  |
+7 |     #[arg(long, default_value_if("mode", "special", "output"))]
+  |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

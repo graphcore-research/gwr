@@ -1,0 +1,5 @@
+error: unsupported gwr-config attribute or shape; see multi_source_config's supported subset
+ --> tests/ui/rejects_serde_alias.rs:8:13
+  |
+8 |     #[serde(alias = "old")]
+  |             ^^^^^^^^^^^^^
