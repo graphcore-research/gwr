@@ -4,25 +4,25 @@
 //!
 //! See `lib.rs` for details.
 
-use clap::Parser;
 use gwr_components::sink::Sink;
 use gwr_components::source::Source;
 use gwr_components::{connect_port, option_box_repeat};
+use gwr_config::multi_source_config;
 use gwr_engine::engine::Engine;
 use gwr_engine::run_simulation;
 use gwr_engine::types::SimResult;
 use scrambler::Scrambler;
 
 /// Command-line arguments.
-#[derive(Parser)]
+#[multi_source_config]
 #[command(about = "Example application using the Scrambler component")]
 struct Cli {
-    #[arg(long, short)]
+    #[arg(long, short, default_value_t = false)]
     scramble: bool,
 }
 
 fn main() -> SimResult {
-    let args = Cli::parse();
+    let args = Cli::parse_all_sources();
 
     let mut engine = Engine::default();
     let clock = engine.default_clock();

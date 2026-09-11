@@ -6,12 +6,12 @@
 use std::rc::Rc;
 
 use byte_unit::{AdjustedByte, Byte, UnitType};
-use clap::Parser;
-use gwr_components::cli::parse_bytes_string;
+use gwr_components::cli::{deserialize_bytes, parse_bytes_string};
 use gwr_components::flow_controls::limiter::Limiter;
 use gwr_components::sink::Sink;
 use gwr_components::source::Source;
 use gwr_components::{connect_port, rc_limiter};
+use gwr_config::multi_source_config;
 use gwr_engine::engine::Engine;
 use gwr_engine::executor::Spawner;
 use gwr_engine::time::clock::Clock;
@@ -19,66 +19,81 @@ use gwr_engine::types::SimError;
 use gwr_engine::{run_simulation, sim_error};
 use gwr_models::fc_pipeline::{FcPipeline, FcPipelineConfig};
 use gwr_models::memory::memory_access::MemoryAccess;
-use gwr_track::builder::{TrackerArgs, setup_trackers};
+use gwr_track::builder::{TrackerArgs, TrackerArgsPartial, setup_trackers};
 use gwr_track::entity::Entity;
 use gwr_track::{Track, error, info};
 use indicatif::ProgressBar;
 use sim_pipe::frame_gen::FrameGen;
 
+const DEFAULT_PROGRESS_TICKS: usize = 1000;
+const DEFAULT_FINISH_TICK: usize = 0;
+const DEFAULT_FRAME_OVERHEAD_BYTES: usize = 8;
+const DEFAULT_FRAME_PAYLOAD_BYTES: usize = 8;
+const DEFAULT_PIPE_RX_BITS_PER_TICK: usize = 128;
+const DEFAULT_PIPE_TX_BITS_PER_TICK: usize = 128;
+const DEFAULT_PIPE_BUFFER_ENTRIES: usize = 10;
+const DEFAULT_PIPE_DATA_DELAY: usize = 5;
+const DEFAULT_PIPE_CREDIT_DELAY: usize = 5;
+
 /// Command-line arguments.
-#[derive(Parser)]
+#[multi_source_config(default_conf_file = "sim-pipe.toml", conf_file_flag = "conf-file")]
+#[derive(PartialEq)]
 #[command(about = "Flow controlled evaluation application")]
 struct Cli {
     #[command(flatten)]
+    #[serde(flatten)]
     tracker: TrackerArgs,
 
     /// Show a progress bar for the received frame count (updated at the rate
     /// defined by `progress_ticks`).
-    #[arg(long)]
+    #[arg(long, default_value_t = false)]
     progress: bool,
 
     /// Number of ticks between updates to the progress bar. Only used when
     /// `progress` is enabled.
-    #[arg(long, default_value = "1000")]
+    #[arg(long, default_value_t = DEFAULT_PROGRESS_TICKS)]
     progress_ticks: usize,
 
     /// Configure a clock tick on which to terminate the simulation. Use 0 to
     /// run until completion.
-    #[arg(long, default_value = "0")]
+    #[arg(long, default_value_t = DEFAULT_FINISH_TICK)]
     finish_tick: usize,
 
     /// The number of bytes to send from each source.
-    #[arg(long, default_value = "100KiB", value_parser = parse_bytes_string)]
+    #[arg(long, value_parser = parse_bytes_string, default_value_t = parse_bytes_string("100KiB").unwrap())]
+    #[serde(default, deserialize_with = "deserialize_bytes")]
     bytes_to_send: usize,
 
     /// Set the frame overhead (protocol) bytes.
-    #[arg(long, default_value = "8", value_parser = parse_bytes_string)]
+    #[arg(long, value_parser = parse_bytes_string, default_value_t = DEFAULT_FRAME_OVERHEAD_BYTES)]
+    #[serde(default, deserialize_with = "deserialize_bytes")]
     frame_overhead_bytes: usize,
 
     /// Set the frame payload bytes.
-    #[arg(long, default_value = "8", value_parser = parse_bytes_string)]
+    #[arg(long, value_parser = parse_bytes_string, default_value_t = DEFAULT_FRAME_PAYLOAD_BYTES)]
+    #[serde(default, deserialize_with = "deserialize_bytes")]
     frame_payload_bytes: usize,
 
     /// Set many bits per clock tick the RX port can accept.
-    #[arg(long, default_value = "128")]
+    #[arg(long, default_value_t = DEFAULT_PIPE_RX_BITS_PER_TICK)]
     pipe_rx_bits_per_tick: usize,
 
     /// Set many bits per clock tick the TX port will send.
-    #[arg(long, default_value = "128")]
+    #[arg(long, default_value_t = DEFAULT_PIPE_TX_BITS_PER_TICK)]
     pipe_tx_bits_per_tick: usize,
 
     /// Set the number of frames the pipe buffer can hold
-    #[arg(long, default_value = "10")]
+    #[arg(long, default_value_t = DEFAULT_PIPE_BUFFER_ENTRIES)]
     pipe_buffer_entries: usize,
 
     /// Set the number of ticks it takes for data to travel through the
     /// pipeline
-    #[arg(long, default_value = "5")]
+    #[arg(long, default_value_t = DEFAULT_PIPE_DATA_DELAY)]
     pipe_data_delay: usize,
 
     /// Set the number of ticks it takes for credit to be returned to the start
     /// of the pipe
-    #[arg(long, default_value = "5")]
+    #[arg(long, default_value_t = DEFAULT_PIPE_CREDIT_DELAY)]
     pipe_credit_delay: usize,
 }
 
@@ -118,21 +133,24 @@ fn start_frame_dump(
 }
 
 fn main() -> Result<(), SimError> {
-    let args = Cli::parse();
+    let args = Cli::parse_all_sources();
     let tracker: Rc<dyn Track> = setup_trackers(&args.tracker.trackers_config()).unwrap();
 
     let mut engine = Engine::new(&tracker);
     let clock = engine.default_clock();
     let spawner = engine.spawner();
 
-    let num_send_frames = args.bytes_to_send / args.frame_payload_bytes;
+    let bytes_to_send = args.bytes_to_send;
+    let frame_overhead_bytes = args.frame_overhead_bytes;
+    let frame_payload_bytes = args.frame_payload_bytes;
+    let num_send_frames = bytes_to_send / frame_payload_bytes;
     let total_expected_frames = num_send_frames;
 
     let top = engine.top().clone();
     info!(top ;
         "Sending {} frames ({} bytes) through pipe with: data delay={}, credit delay={}, buffer entries={}, rx={}bps, tx={}bps.",
         num_send_frames,
-        args.bytes_to_send,
+        bytes_to_send,
         args.pipe_data_delay,
         args.pipe_credit_delay,
         args.pipe_buffer_entries,
@@ -142,8 +160,8 @@ fn main() -> Result<(), SimError> {
 
     let frame_gen = FrameGen::new(
         &top,
-        args.frame_overhead_bytes,
-        args.frame_payload_bytes,
+        frame_overhead_bytes,
+        frame_payload_bytes,
         num_send_frames,
     );
     let source = Source::new_and_register(&engine, &top, "source", Some(Box::new(frame_gen)));
@@ -181,8 +199,9 @@ fn main() -> Result<(), SimError> {
         );
     }
 
-    if args.finish_tick != 0 {
-        finish_at(&spawner, clock.clone(), args.finish_tick);
+    let finish_tick = args.finish_tick;
+    if finish_tick != 0 {
+        finish_at(&spawner, clock.clone(), finish_tick);
     }
 
     run_simulation!(engine);
@@ -204,8 +223,8 @@ fn main() -> Result<(), SimError> {
         &top,
         clock.time_now_ns(),
         total_sunk_frames,
-        args.frame_overhead_bytes,
-        args.frame_payload_bytes,
+        frame_overhead_bytes,
+        frame_payload_bytes,
     );
     Ok(())
 }
@@ -239,4 +258,22 @@ fn compute_adjusted_value_and_rate(
     let per_second = Byte::from_f64(num_bytes as f64 / time_now_s).unwrap();
     let count_per_second = per_second.get_appropriate_unit(UnitType::Binary);
     (count, count_per_second)
+}
+
+#[cfg(test)]
+mod tests {
+    use figment::Figment;
+    use figment::providers::{Format, Toml};
+
+    use super::Cli;
+
+    #[test]
+    fn byte_unit_strings_merge_with_scalar_defaults() {
+        let source = Figment::from(Toml::string("bytes_to_send = '2KiB'"));
+        let args = Cli::partial_to_config(Cli::figment_extract(source));
+
+        assert_eq!(args.bytes_to_send, 2048);
+        assert_eq!(args.frame_payload_bytes, 8);
+        assert!(!args.progress);
+    }
 }
