@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use clap::Parser;
+use gwr_config::multi_source_config;
 use gwr_engine::engine::Engine;
 use gwr_engine::executor::ExecutorStats;
 use gwr_engine::time::clock::Clock;
@@ -17,26 +17,28 @@ use gwr_platform::Platform;
 use gwr_timetable::Timetable;
 use gwr_timetable::timetable_file::TimetableFile;
 use gwr_track::Track;
-use gwr_track::builder::{TrackerArgs, setup_trackers};
+use gwr_track::builder::{TrackerArgs, TrackerArgsPartial, setup_trackers};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 
 fn main() -> Result<()> {
-    let mut args = Cli::parse();
+    let mut args = Cli::parse_all_sources();
+    let dump_stats = args.dump_stats.unwrap();
     args.tracker
-        .ensure_visiblity(args.dump_stats, "--dump-stats", log::Level::Info);
+        .ensure_visiblity(dump_stats, "--dump-stats", log::Level::Info);
 
     let tracker: Rc<dyn Track> = setup_trackers(&args.tracker.trackers_config()).unwrap();
     let mut engine = Engine::new(&tracker);
     let clock = engine.default_clock();
+    let platform_path = args.platform.unwrap();
     let platform = Rc::new(Platform::from_file(
         &engine,
         &clock,
-        Path::new(&args.platform),
+        Path::new(&platform_path),
     )?);
 
     println!("Loaded platform:\n{platform}");
 
-    let timetable_file = TimetableFile::from_file(&args.timetable)?;
+    let timetable_file = TimetableFile::from_file(&args.timetable.unwrap())?;
     let num_nodes = timetable_file.nodes.len();
     let num_edges = timetable_file.edges.len();
     let graph = timetable_file.into_graph()?;
@@ -48,7 +50,7 @@ fn main() -> Result<()> {
     println!("Loaded timetable with {num_nodes} nodes, {num_edges} edges.");
 
     let mut progress_bars = None;
-    if args.progress {
+    if args.progress.unwrap() {
         let workload = timetable.workload_totals()?;
         timetable.enable_completed_workload_tracking()?;
         let bars = ProgressBars::new(workload);
@@ -57,7 +59,7 @@ fn main() -> Result<()> {
 
     let run_started = Instant::now();
     let run_result = if let Some(progress_bars) = &progress_bars {
-        engine.run_with_executor_observer(refresh_interval(args.progress_hz), |snapshot| {
+        engine.run_with_executor_observer(refresh_interval(args.progress_hz.unwrap()), |snapshot| {
             progress_bars.update(
                 &timetable,
                 &clock,
@@ -78,7 +80,7 @@ fn main() -> Result<()> {
     }
 
     if run_result.is_err() {
-        write_error_mermaid(&timetable, &args.error_mermaid);
+        write_error_mermaid(&timetable, &args.error_mermaid.clone().unwrap());
     }
     run_result?;
 
@@ -89,11 +91,11 @@ fn main() -> Result<()> {
     );
 
     if let Err(err) = timetable.check_tasks_complete() {
-        write_error_mermaid(&timetable, &args.error_mermaid);
+        write_error_mermaid(&timetable, &args.error_mermaid.unwrap());
         return Err(err.into());
     }
 
-    if args.dump_stats {
+    if dump_stats {
         timetable.dump_stats()?;
         platform.try_dump_stats(clock.time_now_ns())?;
     }
@@ -108,40 +110,42 @@ fn refresh_interval(progress_hz: NonZeroU32) -> Duration {
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 /// Command-line arguments.
-#[derive(Parser)]
+#[multi_source_config]
+#[derive(PartialEq)]
 #[command(about = "Run a timetable on a platform and optionally emit traces and summary stats")]
 struct Cli {
     #[command(flatten)]
+    #[serde(flatten)]
     tracker: TrackerArgs,
 
     /// Show runtime progress for completed nodes, memory traffic, compute,
     /// active timetable nodes and executor activity. Executor task counts do
     /// not include futures parked on clocks, ports, or events.
     /// Updated at the rate defined by `progress_hz`.
-    #[arg(long)]
-    progress: bool,
+    #[arg(long, default_value_t = false)]
+    progress: Option<bool>,
 
     /// Maximum refreshes per wall-clock second (1 to 100). Only used when
     /// `progress` is enabled.
-    #[arg(long, default_value = "10", value_parser = parse_progress_hz)]
-    progress_hz: NonZeroU32,
+    #[arg(long, default_value_t = NonZeroU32::new(10).unwrap(), value_parser = parse_progress_hz)]
+    progress_hz: Option<NonZeroU32>,
 
     /// Timetable YAML file
-    #[arg(long, default_value = "timetable.yaml")]
-    timetable: PathBuf,
+    #[arg(long, default_value_t = PathBuf::from("timetable.yaml"))]
+    timetable: Option<PathBuf>,
 
     /// Platform YAML file
-    #[arg(long, default_value = "platform.yaml")]
-    platform: PathBuf,
+    #[arg(long, default_value_t = PathBuf::from("platform.yaml"))]
+    platform: Option<PathBuf>,
 
     /// Enable dumping of summary statistics
-    #[arg(long, default_value = "false")]
-    dump_stats: bool,
+    #[arg(long, default_value_t = false)]
+    dump_stats: Option<bool>,
 
     /// Write a Mermaid diagram of the timetable state to this file if execution
     /// fails.
-    #[arg(long, default_value = "error.mmd")]
-    error_mermaid: PathBuf,
+    #[arg(long, default_value_t = PathBuf::from("error.mmd"))]
+    error_mermaid: Option<PathBuf>,
 }
 
 fn parse_progress_hz(value: &str) -> std::result::Result<NonZeroU32, String> {
@@ -327,32 +331,33 @@ fn futures_per_second(futures_completed: usize, elapsed: Duration) -> f64 {
 mod tests {
     use std::time::Duration;
 
+    use clap::Parser;
     use gwr_engine::executor::ExecutorStats;
 
     use super::*;
 
     #[test]
     fn progress_hz_defaults_to_ten() {
-        let args = Cli::try_parse_from(["gwr-timetable"]).unwrap();
+        let args = Cli::partial_to_config(CliPartial::try_parse_from(["gwr-timetable"]).unwrap());
 
-        assert_eq!(args.progress_hz.get(), 10);
+        assert_eq!(args.progress_hz.unwrap().get(), 10);
     }
 
     #[test]
     fn progress_hz_rejects_zero() {
-        assert!(Cli::try_parse_from(["gwr-timetable", "--progress-hz", "0"]).is_err());
+        assert!(CliPartial::try_parse_from(["gwr-timetable", "--progress-hz", "0"]).is_err());
     }
 
     #[test]
     fn progress_hz_accepts_maximum_rate() {
-        let args = Cli::try_parse_from(["gwr-timetable", "--progress-hz", "100"]).unwrap();
+        let args = CliPartial::try_parse_from(["gwr-timetable", "--progress-hz", "100"]).unwrap();
 
-        assert_eq!(args.progress_hz.get(), 100);
+        assert_eq!(args.progress_hz.unwrap().get(), 100);
     }
 
     #[test]
     fn progress_hz_rejects_rate_above_maximum() {
-        assert!(Cli::try_parse_from(["gwr-timetable", "--progress-hz", "101"]).is_err());
+        assert!(CliPartial::try_parse_from(["gwr-timetable", "--progress-hz", "101"]).is_err());
     }
 
     #[test]
@@ -365,27 +370,30 @@ mod tests {
 
     #[test]
     fn progress_hz_accepts_custom_rate() {
-        let args = Cli::try_parse_from(["gwr-timetable", "--progress-hz", "4"]).unwrap();
+        let args = CliPartial::try_parse_from(["gwr-timetable", "--progress-hz", "4"]).unwrap();
 
-        assert_eq!(args.progress_hz.get(), 4);
+        assert_eq!(args.progress_hz.unwrap().get(), 4);
     }
 
     #[test]
     fn ordinary_run_does_not_enable_info_tracking() {
-        let mut args = Cli::try_parse_from(["gwr-timetable"]).unwrap();
+        let mut args =
+            Cli::partial_to_config(CliPartial::try_parse_from(["gwr-timetable"]).unwrap());
 
         args.tracker
-            .ensure_visiblity(args.dump_stats, "--dump-stats", log::Level::Info);
+            .ensure_visiblity(args.dump_stats.unwrap(), "--dump-stats", log::Level::Info);
 
         assert!(!args.tracker.level_enabled(log::Level::Info));
     }
 
     #[test]
     fn dump_stats_enables_info_tracking() {
-        let mut args = Cli::try_parse_from(["gwr-timetable", "--dump-stats"]).unwrap();
+        let mut args = Cli::partial_to_config(
+            CliPartial::try_parse_from(["gwr-timetable", "--dump-stats"]).unwrap(),
+        );
 
         args.tracker
-            .ensure_visiblity(args.dump_stats, "--dump-stats", log::Level::Info);
+            .ensure_visiblity(args.dump_stats.unwrap(), "--dump-stats", log::Level::Info);
 
         assert!(args.tracker.level_enabled(log::Level::Info));
     }

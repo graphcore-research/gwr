@@ -1,0 +1,24 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+description:
+  Explore sim-pipe throughput across under-sized, balanced, and over-sized
+  flow-control buffer configurations.
+arguments: []
+ingredients:
+  - comment:
+      Run sim-pipe with a single-entry pipe buffer to show throughput limited by
+      credit round-trip latency.
+    command:
+      cargo run --release --bin sim-pipe -- --conf-file
+      examples/sim-pipe/configs/under_sized_buffers.toml
+  - comment:
+      Run sim-pipe with a buffer sized to cover the credit/data delay at the
+      configured frame size and link rate.
+    command:
+      cargo run --release --bin sim-pipe -- --conf-file
+      examples/sim-pipe/configs/ideal_sized_buffers.toml
+  - comment:
+      Run sim-pipe with a much larger buffer to show that extra buffering does
+      not materially improve this balanced case.
+    command:
+      cargo run --release --bin sim-pipe -- --conf-file
+      examples/sim-pipe/configs/oversized_buffers.toml

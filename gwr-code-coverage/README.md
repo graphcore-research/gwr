@@ -32,14 +32,14 @@ coverage reports. This tool compares `llvm-cov` JSON output files.
 Summary reports show just the overall summary and per-file summaries:
 
 ```bash
-cargo run --bin diff-coverage -- [BEFORE_PATH]/summary.json [AFTER_PATH]/summary.json > diff.md
+cargo run --bin diff-coverage -- --before [BEFORE_PATH]/summary.json --after [AFTER_PATH]/summary.json > diff.md
 ```
 
 Full reports add details of how the line coverage has changed within each of the
 source files with annotated code listings:
 
 ```bash
-cargo run --bin diff-coverage -- [BEFORE_PATH]/details.json [AFTER_PATH]/details.json > full_diff.md
+cargo run --bin diff-coverage -- --before [BEFORE_PATH]/details.json --after [AFTER_PATH]/details.json > full_diff.md
 ```
 
 Within the full reports the line coverage changes are shown with a context of
