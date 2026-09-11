@@ -54,8 +54,8 @@ ingredients:
     command: |-
       rm -rf "$REPORT_DIR/source-snapshot"
       cargo run --bin gather-files -- \
-        "$REPORT_DIR/details.json" \
-        "$REPORT_DIR/source-snapshot"
+        --report "$REPORT_DIR/details.json" \
+        --output-dir "$REPORT_DIR/source-snapshot"
   - comment: Print the location of the generated coverage artefacts.
     command: |-
       echo "Coverage report generated in $REPORT_DIR/index.html"

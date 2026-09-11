@@ -9,8 +9,9 @@ Proto binary traces produced by [gwr-track].
 
 ## Launching
 
-Run the following commands from the workspace root. Exactly one of `--log` or
-`--bin` must be provided.
+Run the following commands from the workspace root. Exactly one `log` or `bin`
+setting must be supplied through command-line arguments, `GWR_` environment
+variables, or the TOML configuration file.
 
 To open a binary trace:
 
