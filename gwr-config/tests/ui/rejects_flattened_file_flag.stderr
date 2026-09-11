@@ -1,0 +1,5 @@
+error[E0080]: evaluation panicked: flattened configuration types must not declare conf_file_flag
+  --> tests/ui/rejects_flattened_file_flag.rs:11:1
+   |
+11 | #[multi_source_config]
+   | ^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed here
