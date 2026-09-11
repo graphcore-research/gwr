@@ -31,7 +31,7 @@ rand = { workspace = true, optional = true }
 regex.workspace = true
 serde.workspace = true
 simplelog = "0.12.1"
-gwr-config = { path = "../gwr-config", version = "0.1.0" }
+gwr-config = { path = "../gwr-config", version = "0.2.0" }
 gwr-perfetto = { path = "../gwr-perfetto", optional = true, version = "0.3.0" }
 
 [build-dependencies]
