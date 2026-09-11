@@ -22,6 +22,8 @@ publish.workspace = true
 async-trait.workspace = true
 byte-unit.workspace = true
 clap.workspace = true
+figment.workspace = true
+gwr-config = { path = "../gwr-config", version = "0.2.0" }
 gwr-engine = { path = "../gwr-engine", version = "0.14.0" }
 gwr-model-builder = { path = "../gwr-model-builder", version = "0.2.0" }
 gwr-models = { path = "../gwr-models", version = "0.25.0" }

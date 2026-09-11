@@ -4,41 +4,50 @@
 //!
 //! See `lib.rs` for details.
 
-use clap::{CommandFactory, Parser};
+use clap::CommandFactory;
+use gwr_config::multi_source_config;
 use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
-use gwr_track::builder::{TrackerArgs, setup_trackers};
+use gwr_track::builder::{TrackerArgs, TrackerArgsPartial, setup_trackers};
 use gwr_track::tracker::dev_null_tracker;
-use sim_restaurant::config::{RestaurantArgs, RestaurantConfig, long_arg_name};
+use sim_restaurant::config::{
+    RestaurantArgs, RestaurantArgsPartial, RestaurantConfig, long_arg_name,
+};
 use sim_restaurant::sim::{RunSummary, run_sweep};
 
-#[derive(Parser, Debug, Clone)]
+#[multi_source_config(
+    default_conf_file = "sim-restaurant.toml",
+    conf_file_flag = "conf-file"
+)]
+#[derive(Debug, Clone, PartialEq)]
 #[command(about = "Fast food restaurant profitability simulation")]
 pub struct CliArgs {
     /// Minimum number of till workers to evaluate.
-    #[arg(long, default_value = "1")]
-    pub min_till_staff: usize,
+    #[arg(long, default_value_t = 1)]
+    pub min_till_staff: Option<usize>,
 
     /// Maximum number of till workers to evaluate.
-    #[arg(long, default_value = "4")]
-    pub max_till_staff: usize,
+    #[arg(long, default_value_t = 4)]
+    pub max_till_staff: Option<usize>,
 
     /// Minimum number of kitchen workers to evaluate.
-    #[arg(long, default_value = "1")]
-    pub min_kitchen_staff: usize,
+    #[arg(long, default_value_t = 1)]
+    pub min_kitchen_staff: Option<usize>,
 
     /// Maximum number of kitchen workers to evaluate.
-    #[arg(long, default_value = "5")]
-    pub max_kitchen_staff: usize,
+    #[arg(long, default_value_t = 5)]
+    pub max_kitchen_staff: Option<usize>,
 
     /// How many top staffing combinations to print.
-    #[arg(long, default_value = "8")]
-    pub top_results: usize,
+    #[arg(long, default_value_t = 8)]
+    pub top_results: Option<usize>,
 
     #[command(flatten)]
+    #[serde(flatten)]
     pub tracker: TrackerArgs,
 
     #[command(flatten)]
+    #[serde(flatten)]
     pub sim: RestaurantArgs,
 }
 
@@ -50,10 +59,10 @@ impl CliArgs {
         let min_kitchen_staff = long_arg_name(&command, "min_kitchen_staff");
         let max_kitchen_staff = long_arg_name(&command, "max_kitchen_staff");
 
-        if self.min_till_staff > self.max_till_staff {
+        if self.min_till_staff.unwrap() > self.max_till_staff.unwrap() {
             return sim_error!("`{min_till_staff}` must be <= `{max_till_staff}`");
         }
-        if self.min_kitchen_staff > self.max_kitchen_staff {
+        if self.min_kitchen_staff.unwrap() > self.max_kitchen_staff.unwrap() {
             return sim_error!("`{min_kitchen_staff}` must be <= `{max_kitchen_staff}`");
         }
         if self.tracking_requested()
@@ -79,7 +88,7 @@ impl CliArgs {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cli = CliArgs::parse();
+    let cli = CliArgs::parse_all_sources();
     cli.validate()?;
 
     let config = cli.sim_config();
@@ -93,8 +102,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (demand, results) = run_sweep(
         &config,
-        cli.min_till_staff..=cli.max_till_staff,
-        cli.min_kitchen_staff..=cli.max_kitchen_staff,
+        cli.min_till_staff.unwrap()..=cli.max_till_staff.unwrap(),
+        cli.min_kitchen_staff.unwrap()..=cli.max_kitchen_staff.unwrap(),
         &tracker,
     )?;
 
@@ -109,7 +118,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!();
     RunSummary::print_table_header();
-    for summary in results.iter().take(cli.top_results) {
+    for summary in results.iter().take(cli.top_results.unwrap()) {
         summary.print_table_row();
     }
 

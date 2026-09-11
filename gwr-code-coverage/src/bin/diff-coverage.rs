@@ -5,31 +5,35 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::{error, fs, io};
 
-use clap::{Parser, ValueEnum};
+use clap::ValueEnum;
 use gwr_code_coverage::{
     CoverageReport, DEFAULT_CONTEXT_LINES, RenderOptions, coverage_did_not_decrease,
     render_markdown_with_options,
 };
-use serde::Deserialize;
+use gwr_config::multi_source_config;
+use serde::{Deserialize, Serialize};
 
 const MANIFEST_FILE: &str = "manifest.json";
 
-#[derive(Debug, Parser)]
+#[multi_source_config]
+#[derive(Debug)]
 #[command(about = "Compare two llvm-cov JSON files")]
 struct Args {
     /// Baseline llvm-cov JSON file.
+    #[arg(long)]
     before: PathBuf,
 
     /// Comparison llvm-cov JSON file.
+    #[arg(long)]
     after: PathBuf,
 
     /// Include unchanged files in the file-level table.
     #[arg(long, value_enum, default_value_t = Files::Changed)]
-    files: Files,
+    files: Option<Files>,
 
     /// Number of unchanged surrounding lines to show in line coverage diffs.
     #[arg(short = 'C', long, default_value_t = DEFAULT_CONTEXT_LINES)]
-    context: usize,
+    context: Option<usize>,
 
     /// Folder prefix to remove from filenames in the baseline report.
     #[arg(long)]
@@ -48,21 +52,24 @@ struct Args {
     after_snapshot: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize, ValueEnum)]
+#[serde(rename_all = "lowercase")]
 enum Files {
     Changed,
     All,
 }
 
 fn main() -> Result<ExitCode, Box<dyn error::Error>> {
-    let args = Args::parse();
-    let before_path = args.before.display().to_string();
-    let after_path = args.after.display().to_string();
-    let before = CoverageReport::from_path(&args.before)?;
-    let after = CoverageReport::from_path(&args.after)?;
-    let before = apply_source_snapshot(before, args.before_snapshot.as_deref(), &args.before)?;
-    let after = apply_source_snapshot(after, args.after_snapshot.as_deref(), &args.after)?;
-    let show_all_files = match args.files {
+    let args = Args::parse_all_sources();
+    let before_report = args.before;
+    let after_report = args.after;
+    let before_path = before_report.display().to_string();
+    let after_path = after_report.display().to_string();
+    let before = CoverageReport::from_path(&before_report)?;
+    let after = CoverageReport::from_path(&after_report)?;
+    let before = apply_source_snapshot(before, args.before_snapshot.as_deref(), &before_report)?;
+    let after = apply_source_snapshot(after, args.after_snapshot.as_deref(), &after_report)?;
+    let show_all_files = match args.files.unwrap() {
         Files::Changed => false,
         Files::All => true,
     };
@@ -78,7 +85,7 @@ fn main() -> Result<ExitCode, Box<dyn error::Error>> {
                 after_path: Some(after_path),
                 before_prefix: args.before_prefix,
                 after_prefix: args.after_prefix,
-                context: args.context,
+                context: args.context.unwrap(),
             },
         )
     );
@@ -192,9 +199,34 @@ struct SourceSnapshotFile {
 
 #[cfg(test)]
 mod tests {
+    use figment::Figment;
+    use figment::providers::Serialized;
+
     use super::*;
 
     const SRC_FILE: &str = "src/lib.rs";
+
+    #[test]
+    fn files_deserializes_the_same_spelling_as_the_cli() {
+        let config = Args::figment_extract(Figment::from(Serialized::default("files", "changed")));
+
+        assert_eq!(config.files, Some(Files::Changed));
+    }
+
+    #[test]
+    #[should_panic(expected = "missing required configuration value `before`")]
+    fn baseline_report_path_is_required() {
+        Args::partial_to_config(ArgsPartial::default());
+    }
+
+    #[test]
+    #[should_panic(expected = "missing required configuration value `after`")]
+    fn comparison_report_path_is_required() {
+        Args::partial_to_config(ArgsPartial {
+            before: Some(PathBuf::from("before.json")),
+            ..ArgsPartial::default()
+        });
+    }
 
     #[test]
     fn applies_source_snapshots_next_to_json_reports_before_rendering() {
