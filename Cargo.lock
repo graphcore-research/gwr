@@ -1209,16 +1209,15 @@ dependencies = [
 
 [[package]]
 name = "gwr-config"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "figment",
  "gwr-build",
+ "heck",
  "proc-macro2",
  "quote",
- "regex",
  "serde",
- "serial_test",
  "syn 3.0.4",
  "trybuild",
 ]

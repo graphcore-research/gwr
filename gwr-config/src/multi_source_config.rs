@@ -1,514 +1,416 @@
 // Copyright (c) 2024 Graphcore Ltd. All rights reserved.
 
-//! The implementation of the [macro@crate::multi_source_config] macro.
-//!
-//! Within this file [proc_macro2] types are used, with [syn] providing the
-//! required parsing functionality and [mod@quote] allowing new AST to be
-//! created as if writing Rust as normal.
+//! Sparse source values, merged before applying typed Rust defaults.
 
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use regex::Regex;
-use syn::{Attribute, Expr, Fields, Ident, ItemStruct, Lit, Meta, Path, parse_quote, parse_str};
+use syn::ext::IdentExt;
+use syn::punctuated::Punctuated;
+use syn::{Attribute, Expr, Field, Fields, ItemStruct, Meta, Token, Type, parse_quote};
 
-const CLAP: &str = "clap";
-const CLAP_PARSER: &str = "Parser";
-const FIGMENT: &str = "figment";
-const FIGMENT_PROVIDERS: &str = "providers";
-const FIGMENT_PROVIDERS_FORMAT: &str = "Format";
-const SERDE: &str = "serde";
-const SERDE_DESERIALIZE: &str = "Deserialize";
-const SERDE_SERIALIZE: &str = "Serialize";
+use crate::contract;
 
-pub(crate) fn multi_source_config_impl(alt_conf_file: &str, mut item: ItemStruct) -> TokenStream {
-    let mut result = Vec::new();
-
-    let struct_type = &item.ident;
-
-    let renamed_clap_parser = format_ident!("{}_{}_{}", struct_type, CLAP, CLAP_PARSER);
-    let renamed_figment_providers_format = format_ident!(
-        "{}_{}_{}_{}",
-        struct_type,
-        FIGMENT,
-        FIGMENT_PROVIDERS,
-        FIGMENT_PROVIDERS_FORMAT
-    );
-    let renamed_serde_deserialize =
-        format_ident!("{}_{}_{}", struct_type, SERDE, SERDE_DESERIALIZE);
-    let renamed_serde_serialize = format_ident!("{}_{}_{}", struct_type, SERDE, SERDE_SERIALIZE);
-
-    result.push(generate_use_statements(
-        &renamed_clap_parser,
-        &renamed_figment_providers_format,
-        &renamed_serde_deserialize,
-        &renamed_serde_serialize,
-    ));
-
-    update_struct_attrs(
-        &mut item.attrs,
-        &renamed_clap_parser,
-        &renamed_serde_deserialize,
-        &renamed_serde_serialize,
-    );
-    update_field_attrs(struct_type, &mut item.fields);
-    result.push(quote! {#item});
-
-    result.push(generate_impl_block(
-        struct_type,
-        &item.fields,
-        alt_conf_file,
-    ));
-
-    quote! {
-        #(#result)*
-    }
-}
-
-fn generate_use_statements(
-    renamed_clap_parser: &Ident,
-    renamed_figment_providers_format: &Ident,
-    renamed_serde_deserialize: &Ident,
-    renamed_serde_serialize: &Ident,
+pub(crate) fn multi_source_config_impl(
+    default_conf_file: &str,
+    conf_file_flag: Option<&str>,
+    item: ItemStruct,
 ) -> TokenStream {
-    let clap_parser = parse_str::<Path>(&format!("{CLAP}::{CLAP_PARSER}")).unwrap();
-    let figment_providers_format = parse_str::<Path>(&format!(
-        "{FIGMENT}::{FIGMENT_PROVIDERS}::{FIGMENT_PROVIDERS_FORMAT}"
-    ))
-    .unwrap();
-    let serde_deserialize = parse_str::<Path>(&format!("{SERDE}::{SERDE_DESERIALIZE}")).unwrap();
-    let serde_serialize = parse_str::<Path>(&format!("{SERDE}::{SERDE_SERIALIZE}")).unwrap();
-
-    quote! {
-        use #clap_parser as #renamed_clap_parser;
-        use #figment_providers_format as #renamed_figment_providers_format;
-        use #serde_deserialize as #renamed_serde_deserialize;
-        use #serde_serialize as #renamed_serde_serialize;
-    }
+    expand(default_conf_file, conf_file_flag, item).unwrap_or_else(syn::Error::into_compile_error)
 }
 
-fn update_struct_attrs(
-    attrs: &mut Vec<Attribute>,
-    renamed_clap_parser: &Ident,
-    renamed_serde_deserialize: &Ident,
-    renamed_serde_serialize: &Ident,
-) {
-    check_derive_attrs(attrs);
-    let new_derives = generate_derive_attrs(
-        renamed_clap_parser,
-        renamed_serde_deserialize,
-        renamed_serde_serialize,
+// Keep the generated API together: most of this function is quoted Rust.
+#[allow(clippy::too_many_lines)]
+fn expand(
+    default_conf_file: &str,
+    conf_file_flag: Option<&str>,
+    mut item: ItemStruct,
+) -> syn::Result<TokenStream> {
+    contract::validate(&item, conf_file_flag)?;
+    let name = item.ident.clone();
+    let partial = format_ident!("{}Partial", name);
+    let fields = item.fields.clone();
+    let exclusive = contract::exclusive_group(&item.attrs)?;
+    let has_conf_file_flag = conf_file_flag.is_some();
+    let mut sparse = item.clone();
+    sparse.ident = partial.clone();
+    sparse.attrs.insert(
+        0,
+        parse_quote!(#[derive(clap::Parser, serde::Serialize, serde::Deserialize, Default)]),
     );
-
-    // Ensure that generated attributes are prepended to avoid hitting the
-    // legacy_derive_helpers lint.
-    // See https://github.com/rust-lang/rust/issues/79202 for further details.
-    //
-    // The range given to splice is to avoid any of the existing attributes
-    // being replaced.
-    attrs.splice(0..0, new_derives);
-}
-
-fn check_derive_attrs(attrs: &[Attribute]) {
-    let clap_parser = Ident::new(CLAP_PARSER, Span::call_site());
-    let clap_parser_full = parse_str::<Path>(&format!("{CLAP}::{CLAP_PARSER}")).unwrap();
-    let serde_deserialize = Ident::new(SERDE_DESERIALIZE, Span::call_site());
-    let serde_deserialize_full =
-        parse_str::<Path>(&format!("{SERDE}::{SERDE_DESERIALIZE}")).unwrap();
-    let serde_serialize = Ident::new(SERDE_SERIALIZE, Span::call_site());
-    let serde_serialize_full = parse_str::<Path>(&format!("{SERDE}::{SERDE_SERIALIZE}")).unwrap();
-
-    let error_msg = "This struct is annotated with #[multi_source_config] so cannot derive";
-
-    for attr in attrs {
-        if attr.path().is_ident("derive") {
-            let _ = attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident(&clap_parser) {
-                    panic!("{error_msg} {CLAP_PARSER}");
-                } else if meta.path == clap_parser_full {
-                    panic!("{error_msg} {CLAP}::{CLAP_PARSER}");
-                } else if meta.path.is_ident(&serde_deserialize) {
-                    panic!("{error_msg} {SERDE_DESERIALIZE}");
-                } else if meta.path == serde_deserialize_full {
-                    panic!("{error_msg} {SERDE}::{SERDE_DESERIALIZE}");
-                } else if meta.path.is_ident(&serde_serialize) {
-                    panic!("{error_msg} {SERDE_SERIALIZE}");
-                } else if meta.path == serde_serialize_full {
-                    panic!("{error_msg} {SERDE}::{SERDE_SERIALIZE}");
-                }
-                Ok(())
-            });
-        }
+    if !sparse.attrs.iter().any(|a| a.path().is_ident("group")) {
+        let id = name.unraw().to_string();
+        sparse.attrs.push(parse_quote!(#[group(id = #id)]));
     }
-}
-
-fn generate_derive_attrs(
-    renamed_clap_parser: &Ident,
-    renamed_serde_deserialize: &Ident,
-    renamed_serde_serialize: &Ident,
-) -> Vec<Attribute> {
-    parse_quote! {
-        #[derive(#renamed_clap_parser)]
-        #[derive(#renamed_serde_deserialize)]
-        #[derive(#renamed_serde_serialize)]
-    }
-}
-
-fn update_field_attrs(struct_type: &Ident, struct_fields: &mut Fields) {
-    for field in struct_fields.iter_mut() {
-        field.attrs = replace_doc_comment_with_clap_attr(
-            struct_type,
-            &field.ident.clone().unwrap(),
-            &field.attrs,
-        );
-    }
-}
-
-fn replace_doc_comment_with_clap_attr(
-    struct_type: &Ident,
-    field: &Ident,
-    attrs: &[Attribute],
-) -> Vec<Attribute> {
-    let mut result = Vec::new();
-    let mut help_lines = String::new();
-    for attr in attrs {
-        if let Some(exiting_attr) = handle_existing_clap_attr(attr) {
-            result.push(exiting_attr);
-        } else if let Some(doc_comment) = handle_doc_comment(attr) {
-            help_lines.push_str(&doc_comment);
+    for field in &mut sparse.fields {
+        if flattened(field) {
+            if let Type::Path(path) = &mut field.ty {
+                let segment = path.path.segments.last_mut().unwrap();
+                segment.ident = format_ident!("{}Partial", segment.ident);
+            }
         } else {
-            result.push(attr.clone());
+            let ty = &field.ty;
+            if inner_type(ty, "Option").is_none() {
+                field.ty = parse_quote!(Option<#ty>);
+            }
+            configure_field(field)?;
         }
     }
-    if !help_lines.is_empty() {
-        result.push(generate_clap_arg_help_attr(struct_type, field, &help_lines));
-        result.push(generate_clap_arg_long_help_attr(
-            struct_type,
-            field,
-            &help_lines,
-        ));
-    }
-
-    result
-}
-
-fn handle_existing_clap_attr(attr: &Attribute) -> Option<Attribute> {
-    if attr.path().is_ident("arg") {
-        let _ = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("help") {
-                unimplemented!("support for help attributes, please use doc comments");
-            } else if meta.path.is_ident("long_help") {
-                unimplemented!("support for long_help attributes, please use doc comments");
-            }
-            Ok(())
-        });
-        return Some(attr.clone());
-    }
-
-    None
-}
-
-fn handle_doc_comment(attr: &Attribute) -> Option<String> {
-    if attr.path().is_ident("doc") {
-        let doc_comment: Option<String> = match attr.meta {
-            Meta::NameValue(ref name_value) => match name_value.value {
-                Expr::Lit(ref lit) => match lit.lit {
-                    Lit::Str(ref str) => Some(str.value() + "\n"),
-                    _ => None,
-                },
-                _ => None,
-            },
-            _ => None,
+    if let Some(flag) = conf_file_flag {
+        let flag = flag.trim_start_matches("--");
+        let Fields::Named(named) = &mut sparse.fields else {
+            unreachable!()
         };
+        named.named.push(parse_quote! {
+            /// Path to a TOML configuration file; an empty path disables the file.
+            #[serde(skip)]
+            #[arg(long = #flag, value_name = "CONF_FILE", default_value_os_t = <#name>::static_conf_file_path(),
+                value_parser = {
+                    use clap::builder::TypedValueParser as _;
+                    clap::builder::OsStringValueParser::new().map(std::path::PathBuf::from)
+                })]
+            __gwr_config_conf_file: std::path::PathBuf
+        });
+    }
+    // Retain Args/Default for reusable leaf configurations. Layered parsing
+    // always uses the sparse representation, never this direct parser.
+    let defaultable = fields
+        .iter()
+        .all(|f| !flattened(f) && (inner_type(&f.ty, "Option").is_some() || fallback(f).is_some()));
+    let factory = if defaultable {
+        item.attrs.insert(
+            0,
+            parse_quote!(#[derive(clap::Parser, serde::Serialize, serde::Deserialize)]),
+        );
+        for field in &mut item.fields {
+            configure_field(field)?;
+        }
+        quote! { impl Default for #name { fn default() -> Self { Self::partial_to_config(#partial::default()) } } }
+    } else {
+        item.attrs.retain(|a| !config_attr(a));
+        for field in &mut item.fields {
+            field.attrs.retain(|a| !config_attr(a));
+        }
+        quote! {
+            impl clap::CommandFactory for #name {
+                fn command() -> clap::Command { <#partial as clap::CommandFactory>::command() }
+                fn command_for_update() -> clap::Command { <#partial as clap::CommandFactory>::command_for_update() }
+            }
+        }
+    };
+    let mut merge = Vec::new();
+    let mut clear = Vec::new();
+    let mut count = Vec::new();
+    let mut strip = Vec::new();
+    let mut prune = Vec::new();
+    let mut finish = Vec::new();
+    let mut required = Vec::new();
+    let mut conflicts = Vec::new();
+    let mut flatten_checks = Vec::new();
+    let mut long_checks = Vec::new();
+    for field in &fields {
+        let id = field.ident.as_ref().unwrap();
+        let key = id.unraw().to_string();
+        let cfg: Vec<_> = field
+            .attrs
+            .iter()
+            .filter(|a| a.path().is_ident("cfg"))
+            .collect();
+        let ty = &field.ty;
+        if flattened(field) {
+            long_checks.push(
+                quote! { #(#cfg)* if <#ty>::__gwr_config_has_long_option(flag) { return true; } },
+            );
+            flatten_checks.push(quote! {
+                #(#cfg)*
+                const _: () = assert!(!<#ty>::__GWR_CONFIG_HAS_CONF_FILE_FLAG,
+                    "flattened configuration types must not declare conf_file_flag");
+            });
+            merge.push(quote! { #(#cfg)* { lower.#id = <#ty>::__gwr_config_merge_nested(lower.#id, higher.#id); } });
+            strip.push(quote! { #(#cfg)* { config.#id = <#ty>::__gwr_config_strip_non_cli_values(config.#id, matches); } });
+            prune.push(quote! { #(#cfg)* <#ty>::__gwr_config_prune_overridden_source_values(raw, &higher.#id); });
+            finish.push(quote! { #(#cfg)* #id: <#ty>::partial_to_config(config.#id) });
+        } else {
+            if let Some(long) = contract::long_name(field)? {
+                let bytes = syn::LitByteStr::new(long.as_bytes(), id.span());
+                long_checks.push(
+                    quote! { #(#cfg)* if matches!(flag.as_bytes(), #bytes) { return true; } },
+                );
+            }
+            merge.push(quote! { #(#cfg)* { if higher.#id.is_some() { lower.#id = higher.#id; } } });
+            clear.push(quote! { #(#cfg)* { lower.#id = None; } });
+            count.push(quote! { #(#cfg)* { count += usize::from(config.#id.is_some()); } });
+            conflicts.push(quote! { #(#cfg)* {
+                if config.#id.is_some() {
+                    let arg = command.get_arguments().find(|arg| arg.get_id().as_str() == #key).unwrap();
+                    selected.push(arg.get_long().map_or_else(|| #key.to_owned(), |long| format!("--{long}")));
+                }
+            } });
+            strip.push(quote! { #(#cfg)* {
+                if matches.value_source(#key) != Some(clap::parser::ValueSource::CommandLine) { config.#id = None; }
+            } });
+            prune.push(quote! { #(#cfg)* {
+                if (#exclusive && Self::__gwr_config_present_count(higher) != 0) || higher.#id.is_some() {
+                    if let figment::value::Value::Dict(_, dict) = raw { dict.remove(#key); }
+                }
+            } });
+            let value = match (inner_type(ty, "Option").is_some(), fallback(field)) {
+                (true, Some(expr)) => quote!(config.#id.or_else(|| Some(#expr))),
+                (false, Some(expr)) => quote!(config.#id.unwrap_or_else(|| #expr)),
+                (true, None) => quote!(config.#id),
+                (false, None) => {
+                    quote!(config.#id.unwrap_or_else(|| panic!("missing required configuration value `{}`", #key)))
+                }
+            };
+            finish.push(quote!(#(#cfg)* #id: #value));
+            if contract::required(field)? {
+                let missing = if inner_type(ty, "Vec").is_some() {
+                    quote!(config.#id.as_ref().is_none_or(|value| value.is_empty()))
+                } else {
+                    quote!(config.#id.is_none())
+                };
+                required.push(quote! { #(#cfg)* if #missing { panic!("missing required configuration value `{}`", #key); } });
+            }
+        }
+    }
+    let path = if default_conf_file.is_empty() {
+        quote! { path.set_extension("toml"); }
+    } else {
+        quote! { path.set_file_name(#default_conf_file); }
+    };
+    let selected_path = if conf_file_flag.is_some() {
+        quote! {
+            let explicit = matches.value_source("__gwr_config_conf_file") == Some(clap::parser::ValueSource::CommandLine);
+            let path = if explicit { matches.get_one::<std::path::PathBuf>("__gwr_config_conf_file").unwrap().clone() }
+                else { Self::static_conf_file_path() };
+        }
+    } else {
+        quote! { let explicit = false; let path = Self::static_conf_file_path(); }
+    };
+    let flag_check = conf_file_flag.map(|flag| {
+        let flag = flag.trim_start_matches("--");
+        let message = format!(
+            "conf_file_flag `--{flag}` conflicts with an existing long option or reserved --help"
+        );
+        quote! { const _: () = assert!(!<#name>::__gwr_config_has_long_option(#flag), #message); }
+    });
+    Ok(quote! {
+        #item
+        #sparse
+        #factory
+        #(#flatten_checks)*
+        #flag_check
+        #[allow(dead_code)]
+        impl #name {
+            #[doc(hidden)]
+            pub const __GWR_CONFIG_HAS_CONF_FILE_FLAG: bool = #has_conf_file_flag;
 
-        return Some(
-            doc_comment
-                .unwrap()
-                .strip_prefix(" ")
-                .unwrap_or("\n")
-                .to_string(),
+            // Byte-string patterns allow const checks without duplicating Clap's
+            // command construction or rejecting cfg-disabled fields.
+            #[doc(hidden)]
+            pub const fn __gwr_config_has_long_option(flag: &str) -> bool {
+                #(#long_checks)*
+                matches!(flag.as_bytes(), b"help")
+            }
+
+            fn parse_all_sources() -> Self {
+                let matches = <#partial as clap::CommandFactory>::command().get_matches();
+                Self::parse_all_sources_with_matches(&matches)
+            }
+            fn parse_all_sources_with_matches(matches: &clap::ArgMatches) -> Self {
+                let cli = <#partial as clap::FromArgMatches>::from_arg_matches(matches).unwrap();
+                let cli = Self::__gwr_config_strip_non_cli_values(cli, matches);
+                #selected_path
+                let lower = Self::__gwr_config_read_sources(&path, explicit, &cli);
+                Self::partial_to_config(Self::clap_merge(lower, cli))
+            }
+            fn static_conf_file_path() -> std::path::PathBuf {
+                let mut path = std::path::PathBuf::from(file!());
+                #path
+                path
+            }
+            fn figment_extract(source: figment::Figment) -> #partial { source.extract().unwrap() }
+            fn figment_to_config(path: &std::path::Path, explicit: bool) -> #partial {
+                Self::__gwr_config_read_sources(path, explicit, &#partial::default())
+            }
+            fn __gwr_config_read_sources(path: &std::path::Path, explicit: bool, cli: &#partial) -> #partial {
+                use figment::providers::Format as _;
+                if explicit && !path.as_os_str().is_empty() {
+                    assert!(!path.is_dir(), "{} is not a file path", path.display());
+                    assert!(path.exists(), "{} not found", path.display());
+                }
+                let env = figment::Figment::from(figment::providers::Env::prefixed("GWR_"));
+                let env = Self::__gwr_config_extract_below(env, cli);
+                let file = if path.as_os_str().is_empty() { #partial::default() } else {
+                    let source = figment::Figment::from(figment::providers::Toml::file(path));
+                    let mut raw: figment::value::Value = source.extract().unwrap();
+                    // Discard overwritten fields before typed deserialization.
+                    Self::__gwr_config_prune_overridden_source_values(&mut raw, cli);
+                    Self::__gwr_config_prune_overridden_source_values(&mut raw, &env);
+                    Self::__gwr_config_deserialize(&source, raw)
+                };
+                Self::__gwr_config_merge_nested(file, env)
+            }
+            fn __gwr_config_extract_below(source: figment::Figment, higher: &#partial) -> #partial {
+                let mut raw = source.extract().unwrap();
+                Self::__gwr_config_prune_overridden_source_values(&mut raw, higher);
+                Self::__gwr_config_deserialize(&source, raw)
+            }
+            fn __gwr_config_deserialize(source: &figment::Figment, raw: figment::value::Value) -> #partial {
+                raw.deserialize().map_err(|mut error| {
+                    error.metadata = source.find_metadata(&error.path.join(".")).cloned();
+                    error.profile = Some(source.profile().clone());
+                    error
+                }).unwrap()
+            }
+            #[doc(hidden)]
+            pub fn __gwr_config_prune_overridden_source_values(raw: &mut figment::value::Value, higher: &#partial) { #(#prune)* }
+            fn __gwr_config_present_count(config: &#partial) -> usize {
+                let mut count = 0;
+                #(#count)*
+                count
+            }
+            #[doc(hidden)]
+            pub fn __gwr_config_merge_nested(mut lower: #partial, higher: #partial) -> #partial {
+                // A higher-priority selection replaces the whole exclusive group.
+                if #exclusive && Self::__gwr_config_present_count(&higher) != 0 { #(#clear)* }
+                #(#merge)*
+                lower
+            }
+            #[doc(hidden)]
+            pub fn __gwr_config_strip_non_cli_values(mut config: #partial, matches: &clap::ArgMatches) -> #partial {
+                #(#strip)*
+                config
+            }
+            fn clap_merge(lower: #partial, higher: #partial) -> #partial { Self::__gwr_config_merge_nested(lower, higher) }
+            #[doc(hidden)]
+            pub fn partial_to_config(config: #partial) -> Self {
+                if #exclusive && Self::__gwr_config_present_count(&config) > 1 {
+                    let command = <#partial as clap::CommandFactory>::command();
+                    let mut selected: Vec<String> = Vec::new();
+                    #(#conflicts)*
+                    panic!("configuration values {} cannot be used with one another", selected.join(", "));
+                }
+                #(#required)*
+                Self { #(#finish,)* }
+            }
+        }
+    })
+}
+
+fn configure_field(field: &mut Field) -> syn::Result<()> {
+    let default = fallback(field);
+    let value_enum = properties(&field.attrs, &["arg", "clap"])?
+        .iter()
+        .any(|m| m.path().is_ident("value_enum"));
+    for attr in &mut field.attrs {
+        if attr.path().is_ident("arg") || attr.path().is_ident("clap") {
+            let props = attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
+            let props: Vec<_> = props
+                .into_iter()
+                .filter(|m| !m.path().is_ident("default_value_t") && !m.path().is_ident("required"))
+                .collect();
+            *attr = parse_quote!(#[arg(#(#props),*)]);
+        }
+    }
+    if !properties(&field.attrs, &["serde"])?
+        .iter()
+        .any(|m| m.path().is_ident("default"))
+    {
+        field.attrs.push(parse_quote!(#[serde(default)]));
+    }
+    let ty = inner_type(&field.ty, "Option").unwrap_or(&field.ty);
+    if is_type(ty, "bool") {
+        field.attrs.push(
+            parse_quote!(#[arg(action = clap::ArgAction::Set, num_args = 0..=1,
+            default_missing_value = "true", require_equals = true)]),
         );
     }
-
-    None
-}
-
-fn generate_clap_arg_help_attr(struct_type: &Ident, field: &Ident, help_lines: &str) -> Attribute {
-    let help_string = help_lines
-        .split_terminator('\n')
-        .next()
-        .unwrap()
-        .to_string()
-        + " [default: {:#?}]";
-
-    parse_quote! {
-        #[arg(help = format!(#help_string, <#struct_type>::default().#field.unwrap()))]
+    // Describe typed fallbacks without invoking CLI value parsers.
+    if let Some(expr) = default {
+        let description: Expr = if value_enum {
+            parse_quote!({ let value: #ty = #expr;
+                clap::ValueEnum::to_possible_value(&value).map_or_else(
+                    || String::from("[default: non-CLI value]"),
+                    |possible| format!("[default: {}]", possible.get_name())) })
+        } else {
+            parse_quote!({ let value: #ty = #expr; format!("[default: {:?}]", value) })
+        };
+        let docs: Vec<_> = field
+            .attrs
+            .iter()
+            .filter_map(|a| {
+                if !a.path().is_ident("doc") {
+                    return None;
+                }
+                let Meta::NameValue(v) = &a.meta else {
+                    return None;
+                };
+                Some(v.value.clone())
+            })
+            .collect();
+        field.attrs.push(parse_quote!(#[arg(help = {
+            let lines: &[&str] = &[#(#docs),*];
+            let mut text = lines.iter().map(|line| line.trim()).collect::<Vec<_>>().join(" ");
+            if !text.is_empty() { text.push(' '); }
+            text.push_str(&#description);
+            text
+        })]));
     }
+    Ok(())
 }
 
-fn generate_clap_arg_long_help_attr(
-    struct_type: &Ident,
-    field: &Ident,
-    help_lines: &str,
-) -> Attribute {
-    let single_newline_re = Regex::new(
-        r"(?<last_word_char_before_newline>\w)(\n{1})(?<first_word_char_after_newline>\w)",
-    )
-    .unwrap();
-    let help_text = single_newline_re.replace_all(
-        help_lines,
-        "$last_word_char_before_newline $first_word_char_after_newline",
-    );
-    let help_string = help_text.trim_end_matches('\n').to_string() + "\n\n[default: {:#?}]";
-
-    parse_quote! {
-        #[arg(long_help = format!(#help_string, <#struct_type>::default().#field.unwrap()))]
-    }
-}
-
-fn generate_impl_block(
-    struct_type: &Ident,
-    struct_fields: &Fields,
-    alt_conf_file: &str,
-) -> TokenStream {
+pub(crate) fn properties(attrs: &[Attribute], names: &[&str]) -> syn::Result<Vec<Meta>> {
     let mut result = Vec::new();
-    result.push(generate_parse_all_sources_fn(struct_type));
-    result.push(generate_static_conf_file_path_fn(alt_conf_file));
-    result.push(generate_figment_to_config_fn(struct_type));
-    result.push(generate_figment_with_defaults_fn(struct_type));
-    result.push(generate_figment_new_fn());
-    result.push(generate_figment_defaults_merge_fn(struct_type));
-    result.push(generate_figment_conf_file_merge_fn());
-    result.push(generate_figment_env_var_merge_fn());
-    result.push(generate_figment_extract_fn(struct_type));
-    result.push(generate_clap_to_config_fn(struct_type));
-    result.push(generate_clap_parse_fn(struct_type));
-    result.push(generate_clap_merge_fn(struct_type, struct_fields));
-    result.push(generate_parse_extra_conf_file_fn(struct_type));
-    result.push(generate_figment_to_config_with_extra_conf_file_fn(
-        struct_type,
-    ));
-    result.push(generate_clap_to_existing_config_fn(struct_type));
-    result.push(generate_clap_merge_existing_fn(struct_type, struct_fields));
-
-    quote! {
-        impl #struct_type {
-            #(#result)*
-        }
+    for attr in attrs
+        .iter()
+        .filter(|a| names.iter().any(|n| a.path().is_ident(n)))
+    {
+        result.extend(attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?);
     }
+    Ok(result)
 }
 
-fn generate_parse_all_sources_fn(struct_type: &Ident) -> TokenStream {
-    quote! {
-        fn parse_all_sources() -> #struct_type {
-            let config = <#struct_type>::figment_to_config();
-            <#struct_type>::clap_to_config(config)
-        }
-    }
-}
-
-fn generate_figment_to_config_fn(struct_type: &Ident) -> TokenStream {
-    quote! {
-        fn figment_to_config() -> #struct_type {
-            let mut config = <#struct_type>::figment_with_defaults();
-            config = <#struct_type>::figment_conf_file_merge(
-                config,
-                &<#struct_type>::static_conf_file_path()
-            );
-            config = <#struct_type>::figment_env_var_merge(config);
-            <#struct_type>::figment_extract(config)
-        }
-    }
-}
-
-fn generate_static_conf_file_path_fn(alt_conf_file: &str) -> TokenStream {
-    let mut result = Vec::new();
-    if alt_conf_file.is_empty() {
-        result.push(quote! {
-            conf_file.set_extension("toml");
-        });
-    } else {
-        result.push(quote! {
-            conf_file.set_file_name(#alt_conf_file);
-        });
-    }
-
-    quote! {
-        fn static_conf_file_path() -> std::path::PathBuf {
-            let mut conf_file = std::path::PathBuf::from(file!());
-            #(#result)*
-
-            conf_file
-        }
-    }
-}
-
-fn generate_figment_with_defaults_fn(struct_type: &Ident) -> TokenStream {
-    quote! {
-        fn figment_with_defaults() -> figment::Figment {
-            let config = <#struct_type>::figment_new();
-            <#struct_type>::figment_defaults_merge(config)
-        }
-    }
-}
-
-fn generate_figment_new_fn() -> TokenStream {
-    quote! {
-        fn figment_new() -> figment::Figment {
-            figment::Figment::new()
-        }
-    }
-}
-
-fn generate_figment_defaults_merge_fn(struct_type: &Ident) -> TokenStream {
-    quote! {
-        fn figment_defaults_merge(config: figment::Figment) -> figment::Figment {
-            config.merge(figment::providers::Serialized::defaults(<#struct_type>::default()))
-        }
-    }
-}
-
-fn generate_figment_conf_file_merge_fn() -> TokenStream {
-    quote! {
-        fn figment_conf_file_merge(
-            mut config: figment::Figment,
-            conf_file: &std::path::PathBuf
-        ) -> figment::Figment {
-            config = config.merge(figment::providers::Toml::file(conf_file));
-
-            config
-        }
-    }
-}
-
-fn generate_figment_env_var_merge_fn() -> TokenStream {
-    quote! {
-        fn figment_env_var_merge(config: figment::Figment) -> figment::Figment {
-            config.merge(figment::providers::Env::prefixed("GWR_"))
-        }
-    }
-}
-
-fn generate_figment_extract_fn(struct_type: &Ident) -> TokenStream {
-    quote! {
-        fn figment_extract(config: figment::Figment) -> #struct_type {
-            config.extract().unwrap()
-        }
-    }
-}
-
-fn generate_clap_to_config_fn(struct_type: &Ident) -> TokenStream {
-    quote! {
-        fn clap_to_config(config: #struct_type) -> #struct_type {
-            let cli: #struct_type = <#struct_type>::clap_parse();
-            <#struct_type>::clap_merge(config, cli)
-        }
-    }
-}
-
-fn generate_clap_parse_fn(struct_type: &Ident) -> TokenStream {
-    quote! {
-        fn clap_parse() -> #struct_type {
-            <#struct_type>::parse()
-        }
-    }
-}
-
-fn generate_clap_merge_fn(struct_type: &Ident, struct_fields: &Fields) -> TokenStream {
-    let mut result = Vec::new();
-    for field in struct_fields {
-        let field = format_ident!("{}", field.ident.clone().unwrap().to_string());
-        result.push(quote! {
-            if cli.#field.is_some() {
-                config.#field = cli.#field;
+fn fallback(field: &Field) -> Option<Expr> {
+    properties(&field.attrs, &["arg", "clap"])
+        .ok()?
+        .into_iter()
+        .find_map(|m| {
+            if let Meta::NameValue(v) = m
+                && v.path.is_ident("default_value_t")
+            {
+                return Some(v.value);
             }
-        });
-    }
-
-    quote! {
-        fn clap_merge(mut config: #struct_type, cli: #struct_type) -> #struct_type {
-            #(#result)*
-
-            config
-        }
-    }
+            None
+        })
 }
 
-fn generate_parse_extra_conf_file_fn(struct_type: &Ident) -> TokenStream {
-    quote! {
-        fn parse_extra_conf_file(
-            &mut self,
-            conf_file: &std::path::PathBuf
-        ) -> Result<(), std::io::Error> {
-            if conf_file.as_os_str() == "" {
-                return Ok(())
-            }
-
-            if conf_file.is_dir() {
-                return Err(
-                    std::io::Error::new(
-                        std::io::ErrorKind::IsADirectory,
-                        format!("{} is not a file path", conf_file.display())
-                    )
-                );
-            }
-
-            if !conf_file.exists() {
-                return Err(
-                    std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        format!("{} not found", conf_file.display())
-                    )
-                );
-            }
-
-            let mut config = <#struct_type>::figment_to_config_with_extra_conf_file(conf_file);
-            self.clap_to_existing_config(config);
-
-            Ok(())
-        }
-    }
+pub(crate) fn flattened(field: &Field) -> bool {
+    properties(&field.attrs, &["command"])
+        .is_ok_and(|p| p.iter().any(|m| m.path().is_ident("flatten")))
 }
 
-fn generate_figment_to_config_with_extra_conf_file_fn(struct_type: &Ident) -> TokenStream {
-    quote! {
-        fn figment_to_config_with_extra_conf_file(conf_file: &std::path::PathBuf) -> #struct_type {
-            let mut figment = <#struct_type>::figment_with_defaults();
-            figment = <#struct_type>::figment_conf_file_merge(
-                figment,
-                &<#struct_type>::static_conf_file_path()
-            );
-            figment = <#struct_type>::figment_conf_file_merge(figment, conf_file);
-            figment = <#struct_type>::figment_env_var_merge(figment);
-            <#struct_type>::figment_extract(figment)
-        }
-    }
+fn config_attr(attr: &Attribute) -> bool {
+    ["arg", "clap", "command", "serde", "group"]
+        .iter()
+        .any(|n| attr.path().is_ident(n))
 }
 
-fn generate_clap_to_existing_config_fn(struct_type: &Ident) -> TokenStream {
-    quote! {
-        fn clap_to_existing_config(&mut self, config: #struct_type) {
-            let cli: #struct_type = <#struct_type>::clap_parse();
-            self.clap_merge_existing(config, cli);
-        }
-    }
+fn is_type(ty: &Type, name: &str) -> bool {
+    matches!(ty, Type::Path(p) if p.qself.is_none() && p.path.segments.last().is_some_and(|s| s.ident == name))
 }
 
-fn generate_clap_merge_existing_fn(struct_type: &Ident, struct_fields: &Fields) -> TokenStream {
-    let mut result = Vec::new();
-    for field in struct_fields {
-        let field = format_ident!("{}", field.ident.clone().unwrap().to_string());
-        result.push(quote! {
-            if cli.#field.is_some() {
-                self.#field = cli.#field;
-            } else if config.#field != #struct_type::default().#field {
-                self.#field = config.#field;
-            }
-        });
+pub(crate) fn inner_type<'a>(ty: &'a Type, name: &str) -> Option<&'a Type> {
+    if !is_type(ty, name) {
+        return None;
     }
-
-    quote! {
-        fn clap_merge_existing(&mut self, config: #struct_type, cli: #struct_type) {
-            #(#result)*
-        }
+    let Type::Path(p) = ty else {
+        return None;
+    };
+    let syn::PathArguments::AngleBracketed(args) = &p.path.segments.last()?.arguments else {
+        return None;
+    };
+    match args.args.first()? {
+        syn::GenericArgument::Type(ty) => Some(ty),
+        _ => None,
     }
 }
