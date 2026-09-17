@@ -471,6 +471,44 @@ fn interactive_shell_command() -> ProcessCommand {
     command
 }
 
+/// Strip Operating System Command escape sequences
+///
+/// These can be in the following forms:
+/// - ESC ] ... BEL
+/// - ESC ] ... ESC \
+fn strip_osc_sequences(input: &str) -> String {
+    const ESC: u8 = b'\x1b';
+    const BEL: u8 = b'\x07';
+    const CLOSING_BRACKET: Option<&u8> = Some(&b']');
+    const BACK_SLASH: Option<&u8> = Some(&b'\\');
+
+    let bytes = input.as_bytes();
+    let mut stripped = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+
+    while index < bytes.len() {
+        if bytes[index] == ESC && bytes.get(index + 1) == CLOSING_BRACKET {
+            index += 2;
+            while index < bytes.len() {
+                if bytes[index] == BEL {
+                    index += 1;
+                    break;
+                }
+                if bytes[index] == ESC && bytes.get(index + 1) == BACK_SLASH {
+                    index += 2;
+                    break;
+                }
+                index += 1;
+            }
+        } else {
+            stripped.push(bytes[index]);
+            index += 1;
+        }
+    }
+
+    String::from_utf8(stripped).expect("removing ASCII control sequences preserves UTF-8")
+}
+
 fn log_child_output(
     command: &str,
     output: &Output,
@@ -478,20 +516,20 @@ fn log_child_output(
     show_output_on_pass: bool,
 ) -> io::Result<()> {
     if !output.status.success() {
-        let info_str = str::from_utf8(&output.stdout).unwrap();
+        let info_str = strip_osc_sequences(str::from_utf8(&output.stdout).unwrap());
         logger.info(&format!("STDOUT:\n{TAG}{info_str}{TAG}"));
 
-        let error_str = str::from_utf8(&output.stderr).unwrap();
+        let error_str = strip_osc_sequences(str::from_utf8(&output.stderr).unwrap());
         logger.error(&format!("STDERR:\n{TAG}{error_str}{TAG}"));
 
         return Err(non_zero_exit_error(command, output.status));
     }
 
     if show_output_on_pass {
-        let info_str = str::from_utf8(&output.stdout).unwrap();
+        let info_str = strip_osc_sequences(str::from_utf8(&output.stdout).unwrap());
         logger.info(&format!("STDOUT:\n{TAG}{info_str}{TAG}"));
 
-        let error_str = str::from_utf8(&output.stderr).unwrap().to_string();
+        let error_str = strip_osc_sequences(str::from_utf8(&output.stderr).unwrap());
         logger.info(&format!("STDERR:\n{TAG}{error_str}{TAG}"));
     }
     logger.info("SUCCESS");
@@ -530,7 +568,7 @@ mod tests {
     use std::sync::Barrier;
     use std::thread;
 
-    use super::{Ingredient, Recipe};
+    use super::{Ingredient, Recipe, strip_osc_sequences};
     use crate::Logger;
 
     #[derive(Default)]
@@ -546,6 +584,63 @@ mod tests {
         fn info(&mut self, message: &str) {
             self.messages.push_str(message);
         }
+    }
+
+    #[test]
+    fn strips_bel_terminated_osc_sequences() {
+        assert_eq!(
+            strip_osc_sequences("before\x1b]0;title\x07after"),
+            "beforeafter"
+        );
+    }
+
+    #[test]
+    fn strips_st_terminated_osc_sequences() {
+        assert_eq!(
+            strip_osc_sequences("before\x1b]2;title\x1b\\after"),
+            "beforeafter"
+        );
+    }
+
+    #[test]
+    fn strips_multiple_osc_sequences() {
+        assert_eq!(
+            strip_osc_sequences("\x1b]0;one\x07middle\x1b]2;two\x1b\\end"),
+            "middleend"
+        );
+    }
+
+    #[test]
+    fn drops_unterminated_osc_sequence() {
+        assert_eq!(strip_osc_sequences("before\x1b]0;unterminated"), "before");
+    }
+
+    #[test]
+    fn preserves_non_osc_escape_sequences() {
+        assert_eq!(
+            strip_osc_sequences("\x1b[31mred\x1b[0m"),
+            "\x1b[31mred\x1b[0m"
+        );
+    }
+
+    #[test]
+    fn strips_osc_sequences_from_recipe_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let tmp_root = dir.path().join(".tmp");
+        let marker = "recipe-output";
+        let mut recipe = Recipe {
+            description: String::new(),
+            arguments: Vec::new(),
+            ingredients: vec![Ingredient {
+                comment: String::new(),
+                command: format!("builtin printf '\\n\\033]0;terminus-test\\007{marker}\\n'"),
+            }],
+        };
+        let mut logger = TestLogger::default();
+
+        recipe.execute(&tmp_root, false, true, &mut logger).unwrap();
+
+        assert!(logger.messages.lines().any(|line| line == marker));
     }
 
     #[test]
