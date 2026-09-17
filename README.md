@@ -355,7 +355,7 @@ updated package, and automatically publishes the updated packages using
 [Conventional Commits]: https://www.conventionalcommits.org/en/v1.0.0
 [lychee]: https://lychee.cli.rs
 [prek]: https://prek.j178.dev/
-[builtin hooks]: https://prek.j178.dev/builtin/#supported-hooks_1
+[builtin hooks]: https://prek.j178.dev/built-in-hooks/
 [Prettier]: https://prettier.io
 [Release-plz]: https://release-plz.dev
 
