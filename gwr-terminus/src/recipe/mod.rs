@@ -660,7 +660,7 @@ mod tests {
                             arguments: Vec::new(),
                             ingredients: vec![Ingredient {
                                 comment: String::new(),
-                                command: format!("printf '{marker}\\n'"),
+                                command: format!("builtin printf '\\n{marker}\\n'"),
                             }],
                         };
                         let mut logger = TestLogger::default();
