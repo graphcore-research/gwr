@@ -3,6 +3,7 @@
 use std::cell::RefCell;
 use std::future::Future;
 use std::rc::Rc;
+use std::time::Duration;
 
 use gwr_track::entity::{Entity, toplevel};
 use gwr_track::tracker::stdout_tracker;
@@ -99,18 +100,18 @@ impl Engine {
         self.executor.run()
     }
 
-    /// Run the simulation while reporting executor activity approximately
-    /// after each configured number of future polls.
+    /// Run the simulation while reporting executor activity after each
+    /// wall-clock interval at completed executor step boundaries.
     ///
     /// Queued task entries in each snapshot do not include futures parked on
-    /// clocks, ports, or events. Returns an error when `poll_interval` is zero.
+    /// clocks, ports, or events. Returns an error when `interval` is zero.
     pub fn run_with_executor_observer(
         &mut self,
-        poll_interval: usize,
+        interval: Duration,
         observer: impl FnMut(ExecutorSnapshot) -> SimResult,
     ) -> SimResult {
         self.registry.spawn_components(&self.spawner);
-        self.executor.run_with_observer(poll_interval, observer)
+        self.executor.run_with_observer(interval, observer)
     }
 
     #[must_use]

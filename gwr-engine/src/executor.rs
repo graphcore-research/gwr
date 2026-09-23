@@ -2,10 +2,14 @@
 
 use std::cell::{Cell, RefCell};
 use std::future::Future;
-use std::mem;
 use std::pin::Pin;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+use std::time::Duration;
+use std::{mem, thread};
 
 use gwr_track::entity::Entity;
 use rand::SeedableRng;
@@ -97,7 +101,7 @@ pub struct ExecutorStats {
     pub futures_completed: usize,
 }
 
-/// Executor activity reported at a configured future-poll interval.
+/// Executor activity reported at a configured wall-clock interval.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ExecutorSnapshot {
     /// Cumulative future activity so far in this run.
@@ -144,43 +148,59 @@ pub struct Executor {
 impl Executor {
     /// Run the executor without observing activity.
     pub(crate) fn run(&self) -> SimResult {
-        self.run_internal(usize::MAX, |_| Ok(()))
+        self.run_internal(None, |_| Ok(()))
     }
 
-    /// Run the executor while reporting activity approximately after each
-    /// configured number of future polls has passed. This is not exact but
-    /// occurs at completed step boundaries.
+    /// Run the executor while reporting activity after each wall-clock
+    /// interval has passed. Observations occur at completed step boundaries.
     pub(crate) fn run_with_observer(
         &self,
-        minimum_poll_interval: usize,
+        minimum_interval: Duration,
         observer: impl FnMut(ExecutorSnapshot) -> SimResult,
     ) -> SimResult {
-        if minimum_poll_interval == 0 {
+        if minimum_interval.is_zero() {
             return Err(crate::types::SimError(
                 "executor observer interval must be positive".to_string(),
             ));
         }
 
-        self.run_internal(minimum_poll_interval, observer)
+        let refresh_due = Arc::new(AtomicBool::new(false));
+        let timer_refresh_due = Arc::clone(&refresh_due);
+        let (stop_timer, timer_stop) = mpsc::channel::<()>();
+        let timer = thread::spawn(move || {
+            // Use the timeout mechanism on the channel to give us time
+            // intervals. Will break out when the main thread
+            // disconnects the channel.
+            while let Err(RecvTimeoutError::Timeout) = timer_stop.recv_timeout(minimum_interval) {
+                timer_refresh_due.store(true, Ordering::Relaxed);
+            }
+        });
+
+        let result = self.run_internal(Some(&refresh_due), observer);
+        drop(stop_timer);
+        timer
+            .join()
+            .expect("executor observer timer thread panicked");
+        result
     }
 
     fn run_internal(
         &self,
-        minimum_poll_interval: usize,
+        refresh_due: Option<&AtomicBool>,
         mut observer: impl FnMut(ExecutorSnapshot) -> SimResult,
     ) -> SimResult {
         let mut stats = ExecutorStats::default();
-        let mut next_observation = minimum_poll_interval;
         let result = (|| {
             loop {
                 self.step(&mut stats)?;
 
-                if stats.futures_polled >= next_observation {
+                if refresh_due.is_some_and(|due| {
+                    due.load(Ordering::Relaxed) && due.swap(false, Ordering::Relaxed)
+                }) {
                     observer(ExecutorSnapshot {
                         stats,
                         active_task_count: self.state.new_tasks.borrow().len(),
                     })?;
-                    next_observation = stats.futures_polled.saturating_add(minimum_poll_interval);
                 }
 
                 if self.state.new_tasks.borrow().is_empty() {
@@ -292,7 +312,9 @@ mod tests {
     use std::future::Future;
     use std::pin::Pin;
     use std::rc::Rc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::task::{Context, Poll};
+    use std::time::Duration;
 
     use futures::task::noop_waker;
     use gwr_track::entity::toplevel;
@@ -341,7 +363,7 @@ mod tests {
     }
 
     #[test]
-    fn executor_observer_reports_once_after_a_step_crosses_the_poll_interval() {
+    fn executor_observer_reports_once_when_refresh_is_due() {
         let tracker = dev_null_tracker();
         let top = toplevel(&tracker, "top");
         let (executor, spawner) = new_executor_and_spawner(&top);
@@ -351,12 +373,15 @@ mod tests {
         }
 
         let mut snapshots = Vec::new();
+        let refresh_due = AtomicBool::new(true);
         executor
-            .run_internal(2, |snapshot| {
+            .run_internal(Some(&refresh_due), |snapshot| {
                 snapshots.push(snapshot);
                 Ok(())
             })
             .unwrap();
+
+        assert!(!refresh_due.load(Ordering::Relaxed));
 
         assert_eq!(
             snapshots,
@@ -375,6 +400,25 @@ mod tests {
                 futures_completed: 5,
             }
         );
+    }
+
+    #[test]
+    fn executor_observer_skips_steps_without_a_refresh_signal() {
+        let tracker = dev_null_tracker();
+        let top = toplevel(&tracker, "top");
+        let (executor, spawner) = new_executor_and_spawner(&top);
+        spawner.spawn(async { Ok(()) });
+
+        let refresh_due = AtomicBool::new(false);
+        let mut snapshots = Vec::new();
+        executor
+            .run_internal(Some(&refresh_due), |snapshot| {
+                snapshots.push(snapshot);
+                Ok(())
+            })
+            .unwrap();
+
+        assert!(snapshots.is_empty());
     }
 
     #[test]
@@ -422,8 +466,9 @@ mod tests {
         spawner.spawn(async { Err(crate::types::SimError("task failed".to_string())) });
 
         let mut snapshots = Vec::new();
+        let refresh_due = AtomicBool::new(true);
         let error = executor
-            .run_internal(1, |snapshot| {
+            .run_internal(Some(&refresh_due), |snapshot| {
                 snapshots.push(snapshot);
                 Err(crate::types::SimError("observer failed".to_string()))
             })
@@ -454,8 +499,9 @@ mod tests {
             });
         }
 
+        let refresh_due = AtomicBool::new(true);
         let first_error = executor
-            .run_internal(1, |_| {
+            .run_internal(Some(&refresh_due), |_| {
                 Err(crate::types::SimError("observer failed".to_string()))
             })
             .unwrap_err();
@@ -471,11 +517,13 @@ mod tests {
     }
 
     #[test]
-    fn executor_observer_rejects_a_zero_poll_interval() {
+    fn executor_observer_rejects_a_zero_wall_clock_interval() {
         let tracker = dev_null_tracker();
         let top = toplevel(&tracker, "top");
         let (executor, _spawner) = new_executor_and_spawner(&top);
-        let error = executor.run_with_observer(0, |_| Ok(())).unwrap_err();
+        let error = executor
+            .run_with_observer(Duration::ZERO, |_| Ok(()))
+            .unwrap_err();
 
         assert_eq!(
             error.to_string(),

@@ -11,8 +11,8 @@ use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::operators::HasShape;
 use gwr_models::processing_element::task::{ComputeOp, Task};
 use gwr_platform::Platform;
-use gwr_timetable::Timetable;
 use gwr_timetable::timetable_file::{NodeSection, TimetableFile};
+use gwr_timetable::{Timetable, Workload};
 use tempfile::tempdir;
 
 const PLATFORM_YAML: &str = "
@@ -128,6 +128,68 @@ fn create_timetable(yaml: &str) -> Timetable {
         &platform,
     )
     .unwrap()
+}
+
+#[test]
+fn timetable_reports_workload_totals() {
+    let timetable = create_timetable(CUSTOM_TIMETABLE_YAML);
+    let workload = timetable.workload_totals().unwrap();
+
+    assert_eq!(workload.nodes, 5);
+    assert_eq!(workload.read_bytes, 32);
+    assert_eq!(workload.written_bytes, 36);
+    assert_eq!(workload.machine_operations, 60);
+}
+
+#[test]
+fn timetable_reports_completed_workload() {
+    let timetable = create_timetable(CUSTOM_TIMETABLE_YAML);
+    timetable.enable_completed_workload_tracking().unwrap();
+
+    let initial: Workload = timetable.completed_workload().unwrap();
+    assert_eq!(
+        initial,
+        Workload {
+            nodes: 2,
+            ..Workload::default()
+        }
+    );
+
+    timetable.set_task_active(2).unwrap();
+    assert_eq!(timetable.completed_workload(), Some(initial));
+    timetable.set_task_completed(2).unwrap();
+
+    let expected = Workload {
+        nodes: 5,
+        read_bytes: 32,
+        written_bytes: 36,
+        machine_operations: 60,
+    };
+    assert_eq!(timetable.completed_workload(), Some(expected));
+
+    timetable.set_task_completed(2).unwrap();
+    assert_eq!(timetable.completed_workload(), Some(expected));
+}
+
+#[test]
+fn completed_workload_tracking_can_be_enabled_after_completion() {
+    let timetable = create_timetable(CUSTOM_TIMETABLE_YAML);
+    assert_eq!(timetable.completed_workload(), None);
+
+    timetable.set_task_active(2).unwrap();
+    timetable.set_task_completed(2).unwrap();
+    assert_eq!(timetable.completed_workload(), None);
+
+    timetable.enable_completed_workload_tracking().unwrap();
+    assert_eq!(
+        timetable.completed_workload(),
+        Some(Workload {
+            nodes: 5,
+            read_bytes: 32,
+            written_bytes: 36,
+            machine_operations: 60,
+        })
+    );
 }
 
 #[test]
