@@ -15,6 +15,20 @@ fn validates_without_a_platform() {
 }
 
 #[test]
+fn reports_active_node_count() {
+    let (top, platform, timetable_file) = create_default_timetable_file();
+    let timetable = build_timetable(&top, timetable_file, &platform).unwrap();
+
+    assert_eq!(timetable.num_graph_nodes_active(), 0);
+
+    timetable.set_task_active(2).unwrap();
+    assert_eq!(timetable.num_graph_nodes_active(), 1);
+
+    timetable.set_task_completed(2).unwrap();
+    assert_eq!(timetable.num_graph_nodes_active(), 0);
+}
+
+#[test]
 fn control_edges_are_ignored_by_scheduler() {
     let (top, platform, mut timetable_file) = create_default_timetable_file();
     timetable_file.edges.push(EdgeSection {

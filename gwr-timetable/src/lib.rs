@@ -31,6 +31,19 @@ pub use graph::{
 
 use crate::mermaid::{MermaidNodeStatus, render_mermaid};
 
+/// Expected work described by a timetable.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct WorkloadTotals {
+    /// Number of graph nodes in the timetable.
+    pub total_tasks: usize,
+    /// Bytes requested by compute-node inputs.
+    pub read_bytes: usize,
+    /// Bytes requested by compute-node outputs.
+    pub written_bytes: usize,
+    /// Machine operations requested by compute nodes.
+    pub machine_operations: usize,
+}
+
 #[derive(EntityGet)]
 /// A validated workload graph that can dispatch tasks onto a [`Platform`].
 ///
@@ -214,9 +227,27 @@ impl Timetable {
         self.graph.nodes().len()
     }
 
+    /// Calculate the expected memory and compute work described by this
+    /// timetable.
+    pub fn workload_totals(&self) -> Result<WorkloadTotals, SimError> {
+        calculate_workload_totals(&self.graph, 0..self.graph.nodes().len())
+    }
+
+    /// Calculate the memory and compute work for completed graph nodes.
+    pub fn completed_workload_totals(&self) -> Result<WorkloadTotals, SimError> {
+        let completed = self.completed_node_indices.borrow();
+        calculate_workload_totals(&self.graph, completed.iter().copied())
+    }
+
     #[must_use]
     pub fn num_graph_nodes_completed(&self) -> usize {
         self.completed_node_indices.borrow().len()
+    }
+
+    /// Return the number of graph nodes currently executing.
+    #[must_use]
+    pub fn num_graph_nodes_active(&self) -> usize {
+        self.active_node_indices.borrow().len()
     }
 
     fn compute_views(&self, node_idx: usize) -> Result<ComputeTensorViews, SimError> {
@@ -246,8 +277,7 @@ impl Timetable {
     }
 
     pub fn dump_stats(&self) -> SimResult {
-        let mut total_load_bytes = 0usize;
-        let mut total_store_bytes = 0usize;
+        let workload_totals = self.workload_totals()?;
         let mut machine_ops = MachineOpCounts::default();
         let mut num_compute_nodes = 0;
         let mut num_tensor_nodes = 0;
@@ -258,20 +288,6 @@ impl Timetable {
                     machine_ops = machine_ops
                         .checked_add(op.compute_machine_ops(views.inputs(), views.outputs())?)
                         .map_err(|error| SimError(format!("{}: {error}", node.id())))?;
-                    for input_view in views.inputs().iter().flatten() {
-                        add_to_byte_total(
-                            &mut total_load_bytes,
-                            input_view.layout().num_access_bytes(),
-                            "load",
-                        )?;
-                    }
-                    for output_view in views.outputs().iter().flatten() {
-                        add_to_byte_total(
-                            &mut total_store_bytes,
-                            output_view.layout().num_access_bytes(),
-                            "store",
-                        )?;
-                    }
                     num_compute_nodes += 1;
                 }
                 None => num_tensor_nodes += 1,
@@ -282,7 +298,11 @@ impl Timetable {
         info!(self.entity ;
             "  {num_compute_nodes} compute nodes, {num_tensor_nodes} tensor nodes"
         );
-        info!(self.entity ; "  loads {total_load_bytes} bytes, stores {total_store_bytes} bytes");
+        info!(self.entity ;
+            "  loads {} bytes, stores {} bytes",
+            workload_totals.read_bytes,
+            workload_totals.written_bytes
+        );
         info!(self.entity ;
             "  machine ops {} total, {} add, {} mul, {} compare",
             machine_ops.checked_total()?,
@@ -322,6 +342,46 @@ impl Timetable {
     pub fn render_mermaid(&self) -> String {
         render_mermaid(&self.graph, &self.mermaid_node_statuses())
     }
+}
+
+fn calculate_workload_totals(
+    graph: &TimetableGraph,
+    node_indices: impl IntoIterator<Item = usize>,
+) -> Result<WorkloadTotals, SimError> {
+    let mut totals = WorkloadTotals::default();
+    for node_idx in node_indices {
+        totals.total_tasks += 1;
+        let node = &graph.nodes()[node_idx];
+        let Some(operation) = node.operation() else {
+            continue;
+        };
+        let views = graph
+            .compute_views(node_idx)
+            .ok_or_else(|| SimError(format!("node {} is not a compute node", node.id())))?;
+
+        for input_view in views.inputs().iter().flatten() {
+            add_to_byte_total(
+                &mut totals.read_bytes,
+                input_view.layout().num_access_bytes(),
+                "load",
+            )?;
+        }
+        for output_view in views.outputs().iter().flatten() {
+            add_to_byte_total(
+                &mut totals.written_bytes,
+                output_view.layout().num_access_bytes(),
+                "store",
+            )?;
+        }
+        let machine_operations = operation
+            .compute_machine_ops(views.inputs(), views.outputs())?
+            .checked_total()?;
+        totals.machine_operations = totals
+            .machine_operations
+            .checked_add(machine_operations)
+            .ok_or_else(|| SimError("Timetable machine operation total overflows".to_string()))?;
+    }
+    Ok(totals)
 }
 
 fn build_compute_task(
