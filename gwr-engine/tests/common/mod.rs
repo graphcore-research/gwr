@@ -35,17 +35,6 @@ pub fn wake_count(wakes: &Arc<AtomicUsize>) -> usize {
     wakes.load(Ordering::SeqCst)
 }
 
-/// Spawn an activity loop that runs continually
-pub fn spawn_activity(engine: &mut Engine) {
-    let clock = engine.default_clock();
-    engine.spawn(async move {
-        loop {
-            clock.wait_ticks(1).await;
-            println!("Running {}", clock.tick_now());
-        }
-    });
-}
-
 // Helper function to create an event and spawn a task that will trigger it
 // after the specified time.
 pub fn create_once_event_at_delay<T>(engine: &mut Engine, delay: u64, value: T) -> Box<Once<T>>

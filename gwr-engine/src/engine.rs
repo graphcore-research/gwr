@@ -8,9 +8,9 @@ use gwr_track::entity::{Entity, toplevel};
 use gwr_track::tracker::stdout_tracker;
 use gwr_track::{Tracker, trace};
 
-use crate::executor::{self, Executor, Spawner};
+use crate::executor::{self, Executor, ExecutorSnapshot, ExecutorStats, Spawner};
 use crate::time::clock::Clock;
-use crate::types::{Component, Eventable, SimResult};
+use crate::types::{Component, SimResult};
 
 /// Use a default clock frequency of 1GHz.
 const DEFAULT_CLOCK_MHZ: f64 = 1000.0;
@@ -18,9 +18,9 @@ const DEFAULT_CLOCK_MHZ: f64 = 1000.0;
 /// Components registered to be spawned when the simulation starts.
 ///
 /// Constructors for active components usually call [`Engine::register`] before
-/// returning their `Rc<Self>`. The registry is drained by [`Engine::run`] or
-/// [`Engine::run_until`], so all construction and required port connections
-/// should be complete before either method is called.
+/// returning their `Rc<Self>`. The registry is drained by [`Engine::run`],
+/// so all construction and required port connections should be complete
+/// before it is called.
 pub struct Registry {
     entity: Rc<Entity>,
     components: RefCell<Vec<Component>>,
@@ -54,8 +54,8 @@ impl Registry {
 ///
 /// An application normally creates an `Engine`, obtains one or more clocks,
 /// constructs components or models with `new_and_register` constructors,
-/// connects their ports, and then calls [`run`](Self::run) or
-/// [`run_until`](Self::run_until). Connections are intentionally part of setup:
+/// connects their ports, and then calls [`run`](Self::run).
+/// Connections are intentionally part of setup:
 /// a port that is still unconnected when a task tries to use it represents a
 /// model-topology error.
 ///
@@ -96,27 +96,21 @@ impl Engine {
 
     pub fn run(&mut self) -> SimResult {
         self.registry.spawn_components(&self.spawner);
-
-        // Pass an atomic bool that will never be set to true
-        let finished = Rc::new(RefCell::new(false));
-        self.executor.run(&finished)
+        self.executor.run()
     }
 
-    pub fn run_until<T: Default + Copy + 'static>(&mut self, event: Eventable<T>) -> SimResult {
+    /// Run the simulation while reporting executor activity approximately
+    /// after each configured number of future polls.
+    ///
+    /// Queued task entries in each snapshot do not include futures parked on
+    /// clocks, ports, or events. Returns an error when `poll_interval` is zero.
+    pub fn run_with_executor_observer(
+        &mut self,
+        poll_interval: usize,
+        observer: impl FnMut(ExecutorSnapshot) -> SimResult,
+    ) -> SimResult {
         self.registry.spawn_components(&self.spawner);
-
-        // Create an atomic bool that is set to true as soon as the event fires.
-        let finished = Rc::new(RefCell::new(false));
-        {
-            let finished = finished.clone();
-            self.spawner.spawn(async move {
-                event.listen().await;
-                *finished.borrow_mut() = true;
-                Ok(())
-            });
-        }
-
-        self.executor.run(&finished)
+        self.executor.run_with_observer(poll_interval, observer)
     }
 
     #[must_use]
@@ -164,6 +158,12 @@ impl Engine {
     #[must_use]
     pub fn time_now_ns(&self) -> f64 {
         self.executor.time_now_ns()
+    }
+
+    /// Return cumulative future activity from the most recent run.
+    #[must_use]
+    pub fn executor_stats(&self) -> ExecutorStats {
+        self.executor.stats()
     }
 
     #[must_use]
