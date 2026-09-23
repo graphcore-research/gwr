@@ -22,7 +22,7 @@ publish.workspace = true
 async-trait.workspace = true
 byte-unit.workspace = true
 clap.workspace = true
-gwr-engine = { path = "../gwr-engine", version = "0.14.0" }
+gwr-engine = { path = "../gwr-engine", version = "0.15.0" }
 gwr-model-builder = { path = "../gwr-model-builder", version = "0.2.0" }
 gwr-models = { path = "../gwr-models", version = "0.25.0" }
 gwr-track = { path = "../gwr-track", version = "0.13.0" }

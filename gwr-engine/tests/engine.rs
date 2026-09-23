@@ -64,6 +64,30 @@ fn default_engine_runs() {
 }
 
 #[test]
+fn task_error_ends_the_current_run() {
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
+    let later_task_ran = Rc::new(Cell::new(false));
+
+    engine.spawn(async move {
+        clock.wait_ticks(3).await;
+        gwr_engine::sim_error!("simulation stopped")
+    });
+
+    let clock = engine.default_clock();
+    let later_task_ran_in_future = later_task_ran.clone();
+    engine.spawn(async move {
+        clock.wait_ticks(10).await;
+        later_task_ran_in_future.set(true);
+        Ok(())
+    });
+
+    assert_eq!(engine.run().unwrap_err().0, "simulation stopped");
+    assert_eq!(engine.time_now_ns(), 3.0);
+    assert!(!later_task_ran.get());
+}
+
+#[test]
 fn clock_khz_sets_clock_frequency() {
     let mut engine = start_test(file!());
     let clock = engine.clock_khz(1.0);
