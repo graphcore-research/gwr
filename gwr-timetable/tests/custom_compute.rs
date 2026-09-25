@@ -131,6 +131,38 @@ fn create_timetable(yaml: &str) -> Timetable {
 }
 
 #[test]
+fn timetable_reports_expected_work_totals() {
+    let timetable = create_timetable(CUSTOM_TIMETABLE_YAML);
+    let totals = timetable.workload_totals().unwrap();
+
+    assert_eq!(totals.total_tasks, 5);
+    assert_eq!(totals.read_bytes, 32);
+    assert_eq!(totals.written_bytes, 36);
+    assert_eq!(totals.machine_operations, 60);
+}
+
+#[test]
+fn timetable_reports_completed_workload_totals() {
+    let timetable = create_timetable(CUSTOM_TIMETABLE_YAML);
+
+    assert_eq!(
+        timetable.completed_workload_totals().unwrap(),
+        gwr_timetable::WorkloadTotals {
+            total_tasks: 2,
+            ..gwr_timetable::WorkloadTotals::default()
+        }
+    );
+
+    timetable.set_task_active(2).unwrap();
+    timetable.set_task_completed(2).unwrap();
+
+    assert_eq!(
+        timetable.completed_workload_totals().unwrap(),
+        timetable.workload_totals().unwrap()
+    );
+}
+
+#[test]
 fn custom_compute_accepts_multiple_inputs_and_outputs() {
     let timetable = create_timetable(CUSTOM_TIMETABLE_YAML);
     let task = timetable.task_by_id(2).unwrap();

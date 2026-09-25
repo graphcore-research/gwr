@@ -42,4 +42,5 @@ serde_yaml.workspace = true
 gwr-build = { path = "../gwr-build", version = "0.2.0" }
 
 [dev-dependencies]
+indicatif = { workspace = true, features = ["in_memory"] }
 tempfile.workspace = true
