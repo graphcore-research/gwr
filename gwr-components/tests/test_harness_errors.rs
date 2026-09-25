@@ -175,6 +175,22 @@ mod delay_errors {
             "test harness did not complete",
         );
     }
+
+    #[test]
+    fn harness_rejects_an_unexpected_simulation_error() {
+        assert_panic_contains(
+            || {
+                let mut engine = start_test(file!());
+                engine.spawn(async { gwr_engine::sim_error!("unexpected failure") });
+                let clock = engine.default_clock();
+                let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
+                let mut harness = DelayHarness::<i32>::new(engine, delay);
+
+                harness.run_steps([delay!(1)]);
+            },
+            "unexpected simulation error",
+        );
+    }
 }
 
 mod arbiter_errors {

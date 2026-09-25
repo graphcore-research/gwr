@@ -1499,10 +1499,6 @@ macro_rules! build_component_harness {
                     $item_ty: 'static,
                     $expected_ty: 'static,
                 {
-                    let harness_complete = gwr_engine::events::once::Once::default();
-                    let notify_harness_complete = harness_complete.clone();
-                    let harness_completed = std::rc::Rc::new(std::cell::RefCell::new(false));
-                    let mark_harness_completed = harness_completed.clone();
                     let clock = self.clock.clone();
                     let spawner = self.engine.spawner();
                     let runner_ports = [<$harness Ports>]::<$item_ty> {
@@ -1536,15 +1532,16 @@ macro_rules! build_component_harness {
                                 .run_steps(vec![step], clock.clone(), spawner.clone())
                                 .await?;
                         }
-                        *mark_harness_completed.borrow_mut() = true;
-                        notify_harness_complete.notify()?;
-                        Ok::<(), gwr_engine::types::SimError>(())
+                        gwr_engine::sim_error!("test harness completed")
                     });
 
-                    let engine = &mut self.engine;
-                    engine.run_until(Box::new(harness_complete)).unwrap();
-                    if !*harness_completed.borrow() {
-                        panic!("test harness did not complete");
+                    match self.engine.run() {
+                        Ok(()) => panic!("test harness did not complete"),
+                        Err(error) => assert_eq!(
+                            error.0,
+                            "test harness completed",
+                            "unexpected simulation error"
+                        ),
                     }
                 }
 

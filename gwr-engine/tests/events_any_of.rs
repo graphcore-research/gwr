@@ -5,7 +5,7 @@ use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::Event;
 
 pub mod common;
-use common::{create_once_event_at_delay, spawn_activity};
+use common::create_once_event_at_delay;
 
 #[derive(Clone, Copy)]
 enum EventResults {
@@ -23,10 +23,15 @@ fn anyof_once_and_anyof_once() {
     let ev_2 = create_once_event_at_delay(&mut engine, 10, 2);
     let anyof_2 = Box::new(AnyOf::new(vec![anyof_1, ev_2]));
 
-    spawn_activity(&mut engine);
-    engine.run_until(anyof_2).unwrap();
+    let clock = engine.default_clock();
+    engine.spawn(async move {
+        anyof_2.listen().await;
+        assert_eq!(clock.time_now_ns(), 10.0);
+        Ok(())
+    });
+    engine.run().unwrap();
 
-    assert_eq!(engine.time_now_ns(), 10.0);
+    assert_eq!(engine.time_now_ns(), 20.0);
 }
 
 #[test]

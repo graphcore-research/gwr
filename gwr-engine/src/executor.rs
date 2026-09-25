@@ -75,19 +75,35 @@ impl Task {
         }
     }
 
-    fn poll(&self, context: &mut Context) -> Poll<SimResult> {
+    fn poll(&self, context: &mut Context) -> Option<Poll<SimResult>> {
         let mut future_slot = self.future.borrow_mut();
-        let Some(future) = future_slot.as_mut() else {
-            return Poll::Ready(Ok(()));
-        };
+        let future = future_slot.as_mut()?;
 
         let poll_result = future.as_mut().poll(context);
         if poll_result.is_ready() {
             future_slot.take();
         }
 
-        poll_result
+        Some(poll_result)
     }
+}
+
+/// Cumulative future activity from the most recent executor run.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ExecutorStats {
+    /// Number of calls made to an async future's `poll` method.
+    pub futures_polled: usize,
+    /// Number of async futures that returned `Poll::Ready`.
+    pub futures_completed: usize,
+}
+
+/// Executor activity reported at a configured future-poll interval.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExecutorSnapshot {
+    /// Cumulative future activity so far in this run.
+    pub stats: ExecutorStats,
+    /// Number of tasks currently active in the executor.
+    pub active_task_count: usize,
 }
 
 struct ExecutorState {
@@ -96,6 +112,7 @@ struct ExecutorState {
     time: RefCell<SimTime>,
     randomize_task_order: Cell<bool>,
     task_order_rng: RefCell<StdRng>,
+    stats: Cell<ExecutorStats>,
 }
 
 impl ExecutorState {
@@ -106,6 +123,7 @@ impl ExecutorState {
             time: RefCell::new(SimTime::new(top)),
             randomize_task_order: Cell::new(false),
             task_order_rng: RefCell::new(StdRng::seed_from_u64(rand::random())),
+            stats: Cell::new(ExecutorStats::default()),
         }
     }
 }
@@ -124,32 +142,69 @@ pub struct Executor {
 }
 
 impl Executor {
-    pub fn run(&self, finished: &Rc<RefCell<bool>>) -> SimResult {
-        loop {
-            self.step(finished)?;
-            if *finished.borrow() {
-                break;
-            }
-
-            if self.state.new_tasks.borrow().is_empty() {
-                if self.state.time.borrow().can_exit() {
-                    break;
-                }
-
-                if let Some(wakers) = self.state.time.borrow_mut().advance_time() {
-                    // No events left, advance time
-                    for task_waker in wakers.into_iter() {
-                        task_waker.waker.wake();
-                    }
-                } else {
-                    break;
-                }
-            }
-        }
-        Ok(())
+    /// Run the executor without observing activity.
+    pub(crate) fn run(&self) -> SimResult {
+        self.run_internal(usize::MAX, |_| Ok(()))
     }
 
-    pub fn step(&self, finished: &Rc<RefCell<bool>>) -> SimResult {
+    /// Run the executor while reporting activity approximately after each
+    /// configured number of future polls has passed. This is not exact but
+    /// occurs at completed step boundaries.
+    pub(crate) fn run_with_observer(
+        &self,
+        minimum_poll_interval: usize,
+        observer: impl FnMut(ExecutorSnapshot) -> SimResult,
+    ) -> SimResult {
+        if minimum_poll_interval == 0 {
+            return Err(crate::types::SimError(
+                "executor observer interval must be positive".to_string(),
+            ));
+        }
+
+        self.run_internal(minimum_poll_interval, observer)
+    }
+
+    fn run_internal(
+        &self,
+        minimum_poll_interval: usize,
+        mut observer: impl FnMut(ExecutorSnapshot) -> SimResult,
+    ) -> SimResult {
+        let mut stats = ExecutorStats::default();
+        let mut next_observation = minimum_poll_interval;
+        let result = (|| {
+            loop {
+                self.step(&mut stats)?;
+
+                if stats.futures_polled >= next_observation {
+                    observer(ExecutorSnapshot {
+                        stats,
+                        active_task_count: self.state.new_tasks.borrow().len(),
+                    })?;
+                    next_observation = stats.futures_polled.saturating_add(minimum_poll_interval);
+                }
+
+                if self.state.new_tasks.borrow().is_empty() {
+                    if self.state.time.borrow().can_exit() {
+                        break;
+                    }
+
+                    if let Some(wakers) = self.state.time.borrow_mut().advance_time() {
+                        // No events left, advance time
+                        for task_waker in wakers.into_iter() {
+                            task_waker.waker.wake();
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+            Ok(())
+        })();
+        self.state.stats.set(stats);
+        result
+    }
+
+    fn step(&self, stats: &mut ExecutorStats) -> SimResult {
         // Append new tasks created since the last step into the task queue
         let mut task_queue = self.state.task_queue.borrow_mut();
         task_queue.append(&mut self.state.new_tasks.borrow_mut());
@@ -160,28 +215,31 @@ impl Executor {
         // Loop over all tasks, polling them. If a task is not ready, add it to
         // the pending tasks.
         for task in task_queue.drain(..) {
-            if *finished.borrow() {
-                break;
-            }
-
             // Dummy waker and context (not used as we poll all tasks)
             let waker = waker_for_task(task.clone());
             let mut context = Context::from_waker(&waker);
 
-            match task.poll(&mut context) {
-                Poll::Ready(Err(e)) => {
-                    // Error - return early
-                    return Err(e);
-                }
-                Poll::Ready(Ok(())) => {
-                    // Otherwise, drop task as it is complete
-                }
-                Poll::Pending => {
-                    // Task will have parked itself waiting somewhere
+            if let Some(poll_result) = task.poll(&mut context) {
+                stats.futures_polled += 1;
+                match poll_result {
+                    Poll::Ready(Err(e)) => {
+                        stats.futures_completed += 1;
+                        return Err(e);
+                    }
+                    Poll::Ready(Ok(())) => {
+                        stats.futures_completed += 1;
+                    }
+                    Poll::Pending => {}
                 }
             }
         }
         Ok(())
+    }
+
+    /// Return cumulative future activity from the most recent executor run.
+    #[must_use]
+    pub fn stats(&self) -> ExecutorStats {
+        self.state.stats.get()
     }
 
     #[must_use]
@@ -231,7 +289,6 @@ pub fn new_executor_and_spawner(top: &Rc<Entity>) -> (Executor, Spawner) {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
     use std::future::Future;
     use std::pin::Pin;
     use std::rc::Rc;
@@ -244,24 +301,23 @@ mod tests {
     use super::*;
     use crate::time::clock::TaskWaker;
 
-    struct PanicIfPolled;
-
-    impl Future for PanicIfPolled {
-        type Output = SimResult;
-
-        fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
-            panic!("finished executor step polled a task");
-        }
+    struct PendingOnce {
+        was_polled: bool,
     }
 
-    #[test]
-    #[should_panic(expected = "finished executor step polled a task")]
-    fn panic_if_polled_panics_when_polled() {
-        let mut future = Box::pin(PanicIfPolled);
-        let waker = noop_waker();
-        let mut cx = Context::from_waker(&waker);
+    impl Future for PendingOnce {
+        type Output = SimResult;
 
-        let _ = future.as_mut().poll(&mut cx);
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            if self.was_polled {
+                Poll::Ready(Ok(()))
+            } else {
+                self.was_polled = true;
+                #[expect(clippy::waker_clone_wake)]
+                cx.waker().clone().wake();
+                Poll::Pending
+            }
+        }
     }
 
     #[test]
@@ -281,21 +337,149 @@ mod tests {
                 can_exit: false,
             }]);
 
-        let finished = Rc::new(RefCell::new(false));
-
-        executor.run(&finished).unwrap();
+        executor.run().unwrap();
     }
 
     #[test]
-    fn step_stops_polling_when_finished_is_set() {
+    fn executor_observer_reports_once_after_a_step_crosses_the_poll_interval() {
         let tracker = dev_null_tracker();
         let top = toplevel(&tracker, "top");
         let (executor, spawner) = new_executor_and_spawner(&top);
 
-        spawner.spawn(PanicIfPolled);
+        for _ in 0..5 {
+            spawner.spawn(async { Ok(()) });
+        }
 
-        let finished = Rc::new(RefCell::new(true));
+        let mut snapshots = Vec::new();
+        executor
+            .run_internal(2, |snapshot| {
+                snapshots.push(snapshot);
+                Ok(())
+            })
+            .unwrap();
 
-        executor.step(&finished).unwrap();
+        assert_eq!(
+            snapshots,
+            vec![ExecutorSnapshot {
+                stats: ExecutorStats {
+                    futures_polled: 5,
+                    futures_completed: 5,
+                },
+                active_task_count: 0,
+            }]
+        );
+        assert_eq!(
+            executor.stats(),
+            ExecutorStats {
+                futures_polled: 5,
+                futures_completed: 5,
+            }
+        );
+    }
+
+    #[test]
+    fn executor_stats_count_pending_future_polls_separately_from_completion() {
+        let tracker = dev_null_tracker();
+        let top = toplevel(&tracker, "top");
+        let (executor, spawner) = new_executor_and_spawner(&top);
+        spawner.spawn(PendingOnce { was_polled: false });
+
+        executor.run().unwrap();
+
+        assert_eq!(
+            executor.stats(),
+            ExecutorStats {
+                futures_polled: 2,
+                futures_completed: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn executor_stats_include_futures_that_complete_with_an_error() {
+        let tracker = dev_null_tracker();
+        let top = toplevel(&tracker, "top");
+        let (executor, spawner) = new_executor_and_spawner(&top);
+        spawner.spawn(async { Err(crate::types::SimError("failed".to_string())) });
+
+        let result = executor.run();
+
+        assert!(result.is_err());
+        assert_eq!(
+            executor.stats(),
+            ExecutorStats {
+                futures_polled: 1,
+                futures_completed: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn executor_observer_is_not_called_from_a_step_that_returns_a_task_error() {
+        let tracker = dev_null_tracker();
+        let top = toplevel(&tracker, "top");
+        let (executor, spawner) = new_executor_and_spawner(&top);
+        spawner.spawn(async { Err(crate::types::SimError("task failed".to_string())) });
+
+        let mut snapshots = Vec::new();
+        let error = executor
+            .run_internal(1, |snapshot| {
+                snapshots.push(snapshot);
+                Err(crate::types::SimError("observer failed".to_string()))
+            })
+            .unwrap_err();
+
+        assert_eq!(error.to_string(), "task failed");
+        assert!(snapshots.is_empty());
+        assert_eq!(
+            executor.stats(),
+            ExecutorStats {
+                futures_polled: 1,
+                futures_completed: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn observer_error_occurs_after_the_entire_step_batch() {
+        let tracker = dev_null_tracker();
+        let top = toplevel(&tracker, "top");
+        let (executor, spawner) = new_executor_and_spawner(&top);
+        let completions = Rc::new(Cell::new(0));
+        for _ in 0..3 {
+            let completions = completions.clone();
+            spawner.spawn(async move {
+                completions.set(completions.get() + 1);
+                Ok(())
+            });
+        }
+
+        let first_error = executor
+            .run_internal(1, |_| {
+                Err(crate::types::SimError("observer failed".to_string()))
+            })
+            .unwrap_err();
+        assert_eq!(first_error.to_string(), "observer failed");
+        assert_eq!(completions.get(), 3);
+        assert_eq!(
+            executor.stats(),
+            ExecutorStats {
+                futures_polled: 3,
+                futures_completed: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn executor_observer_rejects_a_zero_poll_interval() {
+        let tracker = dev_null_tracker();
+        let top = toplevel(&tracker, "top");
+        let (executor, _spawner) = new_executor_and_spawner(&top);
+        let error = executor.run_with_observer(0, |_| Ok(())).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "executor observer interval must be positive"
+        );
     }
 }
