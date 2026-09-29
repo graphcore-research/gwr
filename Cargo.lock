@@ -1191,7 +1191,6 @@ version = "0.12.0"
 dependencies = [
  "async-trait",
  "byte-unit",
- "cfg-if",
  "clap",
  "criterion",
  "futures",
@@ -1291,7 +1290,6 @@ name = "gwr-models"
 version = "0.25.0"
 dependencies = [
  "async-trait",
- "cfg-if",
  "clap",
  "criterion",
  "futures",

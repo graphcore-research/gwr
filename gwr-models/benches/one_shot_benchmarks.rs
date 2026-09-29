@@ -24,12 +24,11 @@ where
 
 library_benchmark_group!(name = bench_group, benchmarks = run_bench);
 
-cfg_if::cfg_if! {
-    if #[cfg(target_os = "linux")] {
-        main!(
-            library_benchmark_groups = bench_group
-        );
-    } else {
+cfg_select! {
+    target_os = "linux" => {
+        main!(library_benchmark_groups = bench_group);
+    }
+    _ => {
         fn main() {
             println!("One-shot benchmarks are only supported on Linux");
         }
