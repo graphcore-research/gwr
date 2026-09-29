@@ -42,7 +42,6 @@ rand_xoshiro = "0.8.1"
 serde.workspace = true
 
 [dev-dependencies]
-cfg-if.workspace = true
 criterion.workspace = true
 gungraun.workspace = true
 

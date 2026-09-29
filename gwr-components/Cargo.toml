@@ -38,7 +38,6 @@ log.workspace = true
 paste.workspace = true
 
 [dev-dependencies]
-cfg-if.workspace = true
 clap.workspace = true
 criterion.workspace = true
 gungraun.workspace = true
