@@ -6,9 +6,9 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use clap::Parser;
-use gwr_components::cli::parse_bytes_string;
+use gwr_components::cli::{deserialize_optional_bytes, parse_bytes_string};
 use gwr_components::connect_port;
+use gwr_config::multi_source_config;
 use gwr_engine::engine::Engine;
 use gwr_engine::executor::Spawner;
 use gwr_engine::time::clock::Clock;
@@ -20,7 +20,7 @@ use gwr_models::fabric::node::FabricRoutingAlgorithm;
 use gwr_models::fabric::routed::RoutedFabric;
 use gwr_models::fabric::{Fabric, FabricConfig, FabricGeometry, FabricPortConfig};
 use gwr_models::memory::memory_access::MemoryAccess;
-use gwr_track::builder::{TrackerArgs, setup_trackers};
+use gwr_track::builder::{TrackerArgs, TrackerArgsPartial, setup_trackers};
 use gwr_track::entity::Entity;
 use gwr_track::{Track, error, info};
 use indicatif::ProgressBar;
@@ -28,90 +28,97 @@ use sim_fabric::access_gen::TrafficPattern;
 use sim_fabric::source_sink_builder::{Sinks, build_source_sinks};
 
 /// Command-line arguments.
-#[derive(Parser)]
+#[multi_source_config(default_conf_file = "sim-fabric.toml", conf_file_flag = "conf-file")]
+#[derive(PartialEq)]
 #[command(about = "Fabric evaluation application")]
 struct Cli {
     #[command(flatten)]
+    #[serde(flatten)]
     tracker: TrackerArgs,
 
     /// Show a progress bar for the received frame count (updated at the rate
     /// defined by `progress_ticks`).
-    #[arg(long)]
-    progress: bool,
+    #[arg(long, default_value_t = false)]
+    progress: Option<bool>,
 
     /// Number of ticks between updates to the progress bar. Only used when
     /// `progress` is enabled.
-    #[arg(long, default_value = "1000")]
-    progress_ticks: usize,
+    #[arg(long, default_value_t = 1000)]
+    progress_ticks: Option<usize>,
 
     /// Configure a clock tick on which to terminate the simulation. Use 0 to
     /// run until completion.
-    #[arg(long, default_value = "0")]
-    finish_tick: usize,
+    #[arg(long, default_value_t = 0)]
+    finish_tick: Option<usize>,
 
     /// The number of columns in the fabric.
-    #[arg(long, default_value = "4")]
-    fabric_columns: usize,
+    #[arg(long, default_value_t = 4)]
+    fabric_columns: Option<usize>,
 
     /// The number of rows in the fabric.
-    #[arg(long, default_value = "3")]
-    fabric_rows: usize,
+    #[arg(long, default_value_t = 3)]
+    fabric_rows: Option<usize>,
 
     /// The number of ports at each node of the fabric.
-    #[arg(long, default_value = "2")]
-    fabric_ports_per_node: usize,
+    #[arg(long, default_value_t = 2)]
+    fabric_ports_per_node: Option<usize>,
 
     /// The number of bytes to send from each source.
-    #[arg(long, default_value = "100KiB", value_parser = parse_bytes_string)]
-    bytes_to_send: usize,
+    #[arg(long, value_parser = parse_bytes_string, default_value_t = parse_bytes_string("100KiB").unwrap())]
+    #[serde(default, deserialize_with = "deserialize_optional_bytes")]
+    bytes_to_send: Option<usize>,
 
     /// Set the number of bytes each fabric TX port can hold.
-    #[arg(long, default_value = "32KiB", value_parser = parse_bytes_string)]
-    tx_buffer_bytes: usize,
+    #[arg(long, value_parser = parse_bytes_string, default_value_t = parse_bytes_string("32KiB").unwrap())]
+    #[serde(default, deserialize_with = "deserialize_optional_bytes")]
+    tx_buffer_bytes: Option<usize>,
 
     /// Set the number of bytes each fabric RX port can hold.
-    #[arg(long, default_value = "32KiB", value_parser = parse_bytes_string)]
-    rx_buffer_bytes: usize,
+    #[arg(long, value_parser = parse_bytes_string, default_value_t = parse_bytes_string("32KiB").unwrap())]
+    #[serde(default, deserialize_with = "deserialize_optional_bytes")]
+    rx_buffer_bytes: Option<usize>,
 
     /// Set many bits per clock tick the fabric TX/RX ports move.
-    #[arg(long, default_value = "128")]
-    port_bits_per_tick: usize,
+    #[arg(long, default_value_t = 128)]
+    port_bits_per_tick: Option<usize>,
 
     /// Set the frame overhead (protocol) bytes.
-    #[arg(long, default_value = "8", value_parser = parse_bytes_string)]
-    frame_overhead_bytes: usize,
+    #[arg(long, value_parser = parse_bytes_string, default_value_t = 8)]
+    #[serde(default, deserialize_with = "deserialize_optional_bytes")]
+    frame_overhead_bytes: Option<usize>,
 
     /// Set the default frame payload bytes.
-    #[arg(long, default_value = "32", value_parser = parse_bytes_string)]
-    frame_payload_bytes: usize,
+    #[arg(long, value_parser = parse_bytes_string, default_value_t = 32)]
+    #[serde(default, deserialize_with = "deserialize_optional_bytes")]
+    frame_payload_bytes: Option<usize>,
 
     /// Set the clock ticks required to move one hop in the fabric.
-    #[arg(long, default_value = "1")]
-    ticks_per_hop: usize,
+    #[arg(long, default_value_t = 1)]
+    ticks_per_hop: Option<usize>,
 
     /// An extra overhead for every frame passing through the fabric.
-    #[arg(long, default_value = "1")]
-    ticks_overhead: usize,
+    #[arg(long, default_value_t = 1)]
+    ticks_overhead: Option<usize>,
 
     /// What traffic pattern to use.
-    #[clap(long, default_value_t, value_enum)]
-    traffic_pattern: TrafficPattern,
+    #[arg(long, value_enum, default_value_t = TrafficPattern::default())]
+    traffic_pattern: Option<TrafficPattern>,
 
     /// Number of active sources (chosen at random from possible sources).
-    #[clap(long)]
+    #[arg(long)]
     active_sources: Option<usize>,
 
     /// Seed for random number generator.
-    #[clap(long, default_value = "1")]
-    seed: u64,
+    #[arg(long, default_value_t = 1)]
+    seed: Option<u64>,
 
     /// Whether or not to use the routed model
-    #[clap(long, default_value = "false")]
-    routed: bool,
+    #[arg(long, default_value_t = false)]
+    routed: Option<bool>,
 
     /// Seed for random number generator.
-    #[clap(long, default_value_t, value_enum)]
-    fabric_routing: FabricRoutingAlgorithm,
+    #[arg(long, value_enum, default_value_t = FabricRoutingAlgorithm::default())]
+    fabric_routing: Option<FabricRoutingAlgorithm>,
 }
 
 /// Install an event to terminate the simulation at the clock tick defined.
@@ -153,26 +160,26 @@ fn create_config(engine: &Engine, args: &Cli) -> Result<(Rc<FabricConfig>, usize
     let num_fabric_ports = max_fabric_port_count(args)?;
     let config = FabricConfig::new(
         FabricGeometry {
-            num_columns: args.fabric_columns,
-            num_rows: args.fabric_rows,
-            num_ports_per_node: args.fabric_ports_per_node,
+            num_columns: args.fabric_columns.unwrap(),
+            num_rows: args.fabric_rows.unwrap(),
+            num_ports_per_node: args.fabric_ports_per_node.unwrap(),
             ports_per_node_limit: None,
         },
         FabricPortConfig {
-            ticks_per_hop: args.ticks_per_hop,
-            ticks_overhead: args.ticks_overhead,
-            rx_buffer_bytes: args.rx_buffer_bytes,
-            tx_buffer_bytes: args.tx_buffer_bytes,
-            port_bits_per_tick: args.port_bits_per_tick,
+            ticks_per_hop: args.ticks_per_hop.unwrap(),
+            ticks_overhead: args.ticks_overhead.unwrap(),
+            rx_buffer_bytes: args.rx_buffer_bytes.unwrap(),
+            tx_buffer_bytes: args.tx_buffer_bytes.unwrap(),
+            port_bits_per_tick: args.port_bits_per_tick.unwrap(),
         },
         identity_destination_port_map(num_fabric_ports),
     )?;
     let config = Rc::new(config);
 
-    let num_payload_bytes_to_send = args.bytes_to_send;
+    let num_payload_bytes_to_send = args.bytes_to_send.unwrap();
 
     // Size of max-sized frames
-    let num_send_frames = num_payload_bytes_to_send / args.frame_payload_bytes;
+    let num_send_frames = num_payload_bytes_to_send / args.frame_payload_bytes.unwrap();
 
     let top = engine.top();
     info!(top ;
@@ -181,19 +188,20 @@ fn create_config(engine: &Engine, args: &Cli) -> Result<(Rc<FabricConfig>, usize
         config.num_rows(),
         config.num_ports_per_node(),
         num_send_frames,
-        args.bytes_to_send,
-        args.rx_buffer_bytes,
-        args.tx_buffer_bytes,
+        args.bytes_to_send.unwrap(),
+        args.rx_buffer_bytes.unwrap(),
+        args.tx_buffer_bytes.unwrap(),
     );
-    info!(top ; "Using traffic pattern {}. Random seed {}", args.traffic_pattern, args.seed);
+    info!(top ; "Using traffic pattern {}. Random seed {}", args.traffic_pattern.unwrap(), args.seed.unwrap());
 
     Ok((config, num_send_frames))
 }
 
 fn max_fabric_port_count(args: &Cli) -> Result<usize, SimError> {
     args.fabric_columns
-        .checked_mul(args.fabric_rows)
-        .and_then(|nodes| nodes.checked_mul(args.fabric_ports_per_node))
+        .unwrap()
+        .checked_mul(args.fabric_rows.unwrap())
+        .and_then(|nodes| nodes.checked_mul(args.fabric_ports_per_node.unwrap()))
         .ok_or_else(|| SimError("maximum port count overflows".to_string()))
 }
 
@@ -204,7 +212,7 @@ fn identity_destination_port_map(num_ports: usize) -> HashMap<u64, Vec<usize>> {
 }
 
 fn main() -> Result<(), SimError> {
-    let args = Cli::parse();
+    let args = Cli::parse_all_sources();
     let tracker: Rc<dyn Track> = setup_trackers(&args.tracker.trackers_config()).unwrap();
 
     let mut engine = Engine::new(&tracker);
@@ -214,14 +222,14 @@ fn main() -> Result<(), SimError> {
     let (config, num_send_frames) = create_config(&engine, &args)?;
     let num_ports = config.num_ports();
     let top = engine.top().clone();
-    let fabric: Rc<dyn Fabric<MemoryAccess>> = if args.routed {
+    let fabric: Rc<dyn Fabric<MemoryAccess>> = if args.routed.unwrap() {
         RoutedFabric::new_and_register(
             &engine,
             &clock,
             &top,
             "fabric",
             config.clone(),
-            args.fabric_routing,
+            args.fabric_routing.unwrap(),
         )?
     } else {
         FunctionalFabric::new_and_register(&engine, &clock, &top, "fabric", config.clone())?
@@ -238,11 +246,11 @@ fn main() -> Result<(), SimError> {
         &mut engine,
         &clock,
         &config,
-        args.traffic_pattern,
-        args.frame_overhead_bytes,
-        args.frame_payload_bytes,
+        args.traffic_pattern.unwrap(),
+        args.frame_overhead_bytes.unwrap(),
+        args.frame_payload_bytes.unwrap(),
         num_send_frames,
-        args.seed,
+        args.seed.unwrap(),
         num_active_sources,
     );
 
@@ -254,21 +262,22 @@ fn main() -> Result<(), SimError> {
     info!(top ; "Platform built and connected");
 
     let mut progress_bar = None;
-    if args.progress {
+    if args.progress.unwrap() {
         progress_bar = Some(ProgressBar::new(total_expected_frames as u64));
         let sinks = sinks.to_owned();
         start_frame_dump(
             &spawner,
             clock.clone(),
-            args.progress_ticks,
+            args.progress_ticks.unwrap(),
             total_expected_frames,
             sinks,
             progress_bar.clone().unwrap(),
         );
     }
 
-    if args.finish_tick != 0 {
-        finish_at(&spawner, clock.clone(), args.finish_tick);
+    let finish_tick = args.finish_tick.unwrap();
+    if finish_tick != 0 {
+        finish_at(&spawner, clock.clone(), finish_tick);
     }
 
     run_simulation!(engine);
@@ -294,8 +303,8 @@ fn main() -> Result<(), SimError> {
         &top,
         clock.time_now_ns(),
         total_sunk_frames,
-        args.frame_overhead_bytes,
-        args.frame_payload_bytes,
+        args.frame_overhead_bytes.unwrap(),
+        args.frame_payload_bytes.unwrap(),
     );
     Ok(())
 }
@@ -320,13 +329,13 @@ fn print_summary(
 
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
+    use clap::CommandFactory;
 
     use super::{Cli, max_fabric_port_count};
 
     #[test]
     fn fabric_port_count_overflow_is_recoverable() {
-        let args = Cli::parse_from([
+        let matches = Cli::command().get_matches_from([
             "sim-fabric",
             "--fabric-columns",
             &usize::MAX.to_string(),
@@ -335,6 +344,7 @@ mod tests {
             "--fabric-ports-per-node",
             "1",
         ]);
+        let args = Cli::parse_all_sources_with_matches(&matches);
 
         let error = max_fabric_port_count(&args).expect_err("overflow should return an error");
 

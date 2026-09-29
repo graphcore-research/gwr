@@ -5,15 +5,15 @@
 //! See `lib.rs` for details.
 use std::rc::Rc;
 
-use clap::Parser;
-use gwr_components::cli::parse_bytes_string;
+use gwr_components::cli::{deserialize_optional_bytes, parse_bytes_string};
 use gwr_components::connect_port;
+use gwr_config::multi_source_config;
 use gwr_engine::engine::Engine;
 use gwr_engine::executor::Spawner;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::types::SimError;
 use gwr_engine::{run_simulation, sim_error};
-use gwr_track::builder::{TrackerArgs, setup_trackers};
+use gwr_track::builder::{TrackerArgs, TrackerArgsPartial, setup_trackers};
 use gwr_track::{Track, error, info};
 use indicatif::ProgressBar;
 use sim_ring::ring_builder::{
@@ -24,50 +24,56 @@ use sim_ring::ring_builder::{
 const ETHERNET_GBPS: usize = 100;
 
 /// Command-line arguments.
-#[derive(Parser)]
+#[multi_source_config(default_conf_file = "sim-ring.toml", conf_file_flag = "conf-file")]
+#[derive(PartialEq)]
 #[command(about = "Ring deadlock application")]
 struct Cli {
     #[command(flatten)]
+    #[serde(flatten)]
     tracker: TrackerArgs,
 
     /// Show a progress bar for the received frame count (updated at the rate
     /// defined by `progress_ticks`).
-    #[arg(long)]
-    progress: bool,
+    #[arg(long, default_value_t = false)]
+    progress: Option<bool>,
 
     /// Number of ticks between updates to the progress bar. Only used when
     /// `progress` is enabled.
-    #[arg(long, default_value = "1000")]
-    progress_ticks: usize,
+    #[arg(long, default_value_t = 1000)]
+    progress_ticks: Option<usize>,
 
     /// Configure a clock tick on which to terminate the simulation. Use 0 to
     /// run until completion.
-    #[arg(long, default_value = "0")]
-    finish_tick: usize,
+    #[arg(long, default_value_t = 0)]
+    finish_tick: Option<usize>,
 
     /// The number of nodes in the ring.
-    #[arg(long, default_value = "8")]
-    ring_size: usize,
+    #[arg(long, default_value_t = 8)]
+    ring_size: Option<usize>,
 
     /// The number of bytes to send from each source.
-    #[arg(long, default_value = "100KiB", value_parser = parse_bytes_string)]
-    bytes_to_send: usize,
+    #[arg(long, value_parser = parse_bytes_string, default_value_t = parse_bytes_string("100KiB").unwrap())]
+    #[serde(default, deserialize_with = "deserialize_optional_bytes")]
+    bytes_to_send: Option<usize>,
 
     /// The priority of ring traffic over local traffic in the arbiter.
-    #[arg(long, default_value = "1")]
-    ring_priority: usize,
+    #[arg(long, default_value_t = 1)]
+    ring_priority: Option<usize>,
 
     /// Override the default number of bytes in the Tx buffer.
-    #[arg(long, default_value = "32KiB", value_parser = parse_bytes_string)]
-    tx_buffer_bytes: usize,
+    #[arg(long, value_parser = parse_bytes_string, default_value_t = parse_bytes_string("32KiB").unwrap())]
+    #[serde(default, deserialize_with = "deserialize_optional_bytes")]
+    tx_buffer_bytes: Option<usize>,
 
     /// Override the default number of bytes in the Rx buffer.
-    #[arg(long, default_value = "32KiB", value_parser = parse_bytes_string)]
-    rx_buffer_bytes: usize,
+    #[arg(long, value_parser = parse_bytes_string, default_value_t = parse_bytes_string("32KiB").unwrap())]
+    #[serde(default, deserialize_with = "deserialize_optional_bytes")]
+    rx_buffer_bytes: Option<usize>,
 
     /// Override the default frame payload bytes.
-    #[arg(long, default_value = "256", value_parser = parse_bytes_string)]
-    frame_payload_bytes: usize,
+    #[arg(long, value_parser = parse_bytes_string, default_value_t = 256)]
+    #[serde(default, deserialize_with = "deserialize_optional_bytes")]
+    frame_payload_bytes: Option<usize>,
 }
 
 /// Install an event to terminate the simulation at the clock tick defined.
@@ -106,7 +112,7 @@ fn start_frame_dump(
 }
 
 fn main() -> Result<(), SimError> {
-    let args = Cli::parse();
+    let args = Cli::parse_all_sources();
     let tracker: Rc<dyn Track> = setup_trackers(&args.tracker.trackers_config()).unwrap();
 
     let mut engine = Engine::new(&tracker);
@@ -114,12 +120,12 @@ fn main() -> Result<(), SimError> {
     let clock = engine.default_clock();
 
     let config = Config {
-        ring_size: args.ring_size,
-        ring_priority: args.ring_priority,
-        rx_buffer_bytes: args.rx_buffer_bytes,
-        tx_buffer_bytes: args.tx_buffer_bytes,
-        frame_payload_bytes: args.frame_payload_bytes,
-        num_send_frames: args.bytes_to_send / args.frame_payload_bytes,
+        ring_size: args.ring_size.unwrap(),
+        ring_priority: args.ring_priority.unwrap(),
+        rx_buffer_bytes: args.rx_buffer_bytes.unwrap(),
+        tx_buffer_bytes: args.tx_buffer_bytes.unwrap(),
+        frame_payload_bytes: args.frame_payload_bytes.unwrap(),
+        num_send_frames: args.bytes_to_send.unwrap() / args.frame_payload_bytes.unwrap(),
     };
 
     let top = engine.top().clone();
@@ -128,9 +134,9 @@ fn main() -> Result<(), SimError> {
         config.ring_size,
         config.ring_priority,
         config.num_send_frames,
-        args.bytes_to_send,
-        args.rx_buffer_bytes,
-        args.tx_buffer_bytes
+        args.bytes_to_send.unwrap(),
+        args.rx_buffer_bytes.unwrap(),
+        args.tx_buffer_bytes.unwrap()
     );
 
     let ring_nodes = build_ring_nodes(&mut engine, &clock, &config);
@@ -163,21 +169,22 @@ fn main() -> Result<(), SimError> {
 
     let total_expected_frames = config.num_send_frames * config.ring_size;
     let mut progress_bar = None;
-    if args.progress {
+    if args.progress.unwrap() {
         progress_bar = Some(ProgressBar::new(total_expected_frames as u64));
         let sinks = sinks.to_owned();
         start_frame_dump(
             &spawner,
             clock.clone(),
-            args.progress_ticks,
+            args.progress_ticks.unwrap(),
             total_expected_frames,
             sinks,
             progress_bar.clone().unwrap(),
         );
     }
 
-    if args.finish_tick != 0 {
-        finish_at(&spawner, clock.clone(), args.finish_tick);
+    let finish_tick = args.finish_tick.unwrap();
+    if finish_tick != 0 {
+        finish_at(&spawner, clock.clone(), finish_tick);
     }
 
     run_simulation!(engine);

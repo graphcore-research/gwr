@@ -18,3 +18,4 @@ error[E0599]: no method named `finish` found for struct `JobMachineTypestate<Job
            candidate #1: `Hasher`
            candidate #2: `regex_syntax::ast::visitor::Visitor`
            candidate #3: `regex_syntax::hir::visitor::Visitor`
+           candidate #4: `winnow::stream::Stream`

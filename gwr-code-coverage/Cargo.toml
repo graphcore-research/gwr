@@ -18,6 +18,8 @@ publish.workspace = true
 
 [dependencies]
 clap.workspace = true
+figment.workspace = true
+gwr-config = { path = "../gwr-config", version = "0.2.0" }
 serde.workspace = true
 serde_json.workspace = true
 

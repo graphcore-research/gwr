@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::exit;
 use std::{fs, io};
 
-use clap::Parser;
+use gwr_config::multi_source_config;
 use regex::Regex;
 
 const GENERAL_PATTERN: &str = r"Copyright \(c\) 202[0-9] Graphcore Ltd\. All rights reserved\.";
@@ -15,7 +15,8 @@ const LICENSE_FILENAME: &str = "LICENSE";
 const FAILURE_STATUS: i32 = 1;
 
 /// Command-line arguments.
-#[derive(Parser)]
+#[multi_source_config]
+#[derive(PartialEq)]
 #[command(about = "Check files contains the correct copyright notice")]
 struct Cli {
     /// Paths to the files to be checked
@@ -24,7 +25,7 @@ struct Cli {
 }
 
 fn main() -> io::Result<()> {
-    let args = Cli::parse();
+    let args = Cli::parse_all_sources();
     let gen_re = Regex::new(GENERAL_PATTERN).expect("`GENERAL_PATTERN` should be a valid regex");
     let lic_re = Regex::new(LICENSE_PATTERN).expect("`LICENSE_PATTERN` should be a valid regex");
 
