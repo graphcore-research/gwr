@@ -77,6 +77,14 @@ connections:
 # }
 ```
 
+Connect an unused fabric endpoint to `null` so its ingress and egress ports are
+deliberately left idle without causing an unconnected-port error when the
+simulator starts. For example: `connect: ['null', "fabric.fabric0@(11,16)"]`.
+Cache device and memory ports can also connect to `null`; processing elements
+and memories cannot. Quote `null` in YAML so it is parsed as a string. See
+`gwr-platform/examples/platform_null_connection.yaml` for a complete
+configuration.
+
 ## Example
 
 Load a platform from YAML and inspect the resulting structure:
