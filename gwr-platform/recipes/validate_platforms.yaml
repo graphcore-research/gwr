@@ -12,6 +12,11 @@ ingredients:
     command:
       cargo run --bin validate-platform -p gwr-platform -- --platform
       gwr-platform/examples/platform.yaml
+  - comment:
+      Validate the platform with an unused fabric endpoint connected to null.
+    command:
+      cargo run --bin validate-platform -p gwr-platform -- --platform
+      gwr-platform/examples/platform_null_connection.yaml
   - comment: Validate the 4x4 platform example.
     command:
       cargo run --bin validate-platform -p gwr-platform -- --platform
