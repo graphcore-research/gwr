@@ -214,6 +214,7 @@ impl PlatformValidationLookup<'_> {
         effective: &EffectiveConfigs,
     ) -> SimResult {
         match endpoint {
+            ConnectionEndpointId::Null => Ok(()),
             ConnectionEndpointId::Pe { name } => {
                 if !self.processing_element_exists(name) {
                     return sim_error!("No PE '{name}'");
@@ -302,10 +303,13 @@ fn validate_ports_available(
 }
 
 fn connection_ports(from: &ConnectionEndpointId, to: &ConnectionEndpointId) -> Vec<String> {
-    vec![
-        endpoint_port(from, to, true),
-        endpoint_port(to, from, false),
+    [
+        (!matches!(from, ConnectionEndpointId::Null)).then(|| endpoint_port(from, to, true)),
+        (!matches!(to, ConnectionEndpointId::Null)).then(|| endpoint_port(to, from, false)),
     ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 fn endpoint_port(
@@ -314,6 +318,7 @@ fn endpoint_port(
     is_from: bool,
 ) -> String {
     match endpoint {
+        ConnectionEndpointId::Null => unreachable!("null has no port to reserve"),
         ConnectionEndpointId::Pe { name } => format!("pe.{name}"),
         ConnectionEndpointId::Mem { name } => format!("mem.{name}"),
         ConnectionEndpointId::FabricPort {
@@ -338,6 +343,7 @@ fn cache_connection_port(
         return port.as_str();
     }
     match other {
+        ConnectionEndpointId::Null => "mem",
         ConnectionEndpointId::Pe { .. } => "dev",
         ConnectionEndpointId::Cache { .. } if is_from => "mem",
         ConnectionEndpointId::Cache { .. } => "dev",
@@ -350,6 +356,13 @@ fn validate_port_endpoint_pair(
     to: &ConnectionEndpointId,
 ) -> SimResult {
     match (from, to) {
+        (ConnectionEndpointId::Null, ConnectionEndpointId::FabricPort { .. })
+        | (ConnectionEndpointId::FabricPort { .. }, ConnectionEndpointId::Null)
+        | (ConnectionEndpointId::Null, ConnectionEndpointId::Cache { .. })
+        | (ConnectionEndpointId::Cache { .. }, ConnectionEndpointId::Null) => Ok(()),
+        (ConnectionEndpointId::Null, _) | (_, ConnectionEndpointId::Null) => {
+            sim_error!("Null can only connect to a Fabric or Cache port")
+        }
         (ConnectionEndpointId::Pe { .. }, ConnectionEndpointId::Pe { .. }) => {
             sim_error!("Cannot connect a PE directly to a PE")
         }

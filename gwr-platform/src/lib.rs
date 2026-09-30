@@ -136,7 +136,7 @@ impl Platform {
             memories_idx_by_id,
             device_names_by_id,
         };
-        connect_ports(&platform, cfg)?;
+        connect_ports(engine, clock, &platform, cfg)?;
         Ok(platform)
     }
 
