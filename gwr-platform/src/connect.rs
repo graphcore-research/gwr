@@ -2,7 +2,10 @@
 
 use std::rc::Rc;
 
+use gwr_engine::engine::Engine;
+use gwr_engine::port::{InPort, OutPort};
 use gwr_engine::sim_error;
+use gwr_engine::time::clock::Clock;
 use gwr_engine::types::{SimError, SimResult};
 use gwr_models::fabric::Fabric;
 use gwr_models::memory::Memory;
@@ -17,6 +20,7 @@ use crate::connection_id::{CachePortId, ConnectionEndpointId, parse_connection_e
 use crate::types::PlatformConfig;
 
 pub enum PortId<'a> {
+    Null,
     Pe {
         pe: &'a Rc<ProcessingElement>,
     },
@@ -43,6 +47,7 @@ fn resolve_port_id<'a>(
     endpoint: &ConnectionEndpointId,
 ) -> Result<PortId<'a>, SimError> {
     Ok(match endpoint {
+        ConnectionEndpointId::Null => PortId::Null,
         ConnectionEndpointId::Pe { name } => PortId::Pe {
             pe: platform.pe(name)?,
         },
@@ -66,7 +71,12 @@ fn resolve_port_id<'a>(
     })
 }
 
-pub fn connect_ports(platform: &Platform, cfg: &PlatformConfig) -> SimResult {
+pub fn connect_ports(
+    engine: &Engine,
+    clock: &Clock,
+    platform: &Platform,
+    cfg: &PlatformConfig,
+) -> SimResult {
     if let Some(connections) = &cfg.connections {
         for c in connections {
             if c.connect.len() != 2 {
@@ -78,14 +88,35 @@ pub fn connect_ports(platform: &Platform, cfg: &PlatformConfig) -> SimResult {
 
             let from = parse_port_id(platform, &c.connect[0])?;
             let to = parse_port_id(platform, &c.connect[1])?;
-            connect_port(platform, &from, &to)?;
+            connect_port(engine, clock, platform, &from, &to)?;
         }
     }
     Ok(())
 }
 
-fn connect_port(platform: &Platform, from: &PortId, to: &PortId) -> SimResult {
+fn connect_port(
+    engine: &Engine,
+    clock: &Clock,
+    platform: &Platform,
+    from: &PortId,
+    to: &PortId,
+) -> SimResult {
+    match (from, to) {
+        (PortId::Null, PortId::FabricTile { fabric, port_idx })
+        | (PortId::FabricTile { fabric, port_idx }, PortId::Null) => {
+            return connect_fabric_to_null(engine, clock, fabric, *port_idx);
+        }
+        (PortId::Null, PortId::Cache { cache, port })
+        | (PortId::Cache { cache, port }, PortId::Null) => {
+            return connect_cache_to_null(engine, clock, cache, port.as_ref());
+        }
+        (PortId::Null, _) | (_, PortId::Null) => {
+            return sim_error!("Null can only connect to a Fabric or Cache port");
+        }
+        _ => {}
+    }
     match from {
+        PortId::Null => unreachable!("null connections handled above"),
         PortId::Pe { pe } => connect_pe_to(platform, pe, to),
         PortId::Cache { cache, port } => connect_cache_to(platform, cache, port.as_ref(), to),
         PortId::FabricTile { fabric, port_idx } => {
@@ -95,8 +126,48 @@ fn connect_port(platform: &Platform, from: &PortId, to: &PortId) -> SimResult {
     }
 }
 
+fn connect_cache_to_null(
+    engine: &Engine,
+    clock: &Clock,
+    cache: &Rc<Cache<MemoryAccess>>,
+    port: Option<&CachePortId>,
+) -> SimResult {
+    match port {
+        Some(CachePortId::Dev) => {
+            let mut tx = OutPort::new(cache.entity(), "null_dev_tx");
+            tx.connect(cache.port_dev_rx())?;
+            let rx = InPort::new(engine, clock, cache.entity(), "null_dev_rx");
+            cache.connect_port_dev_tx(rx.state())
+        }
+        Some(CachePortId::Mem) | None => {
+            let mut tx = OutPort::new(cache.entity(), "null_mem_tx");
+            tx.connect(cache.port_mem_rx())?;
+            let rx = InPort::new(engine, clock, cache.entity(), "null_mem_rx");
+            cache.connect_port_mem_tx(rx.state())
+        }
+    }
+}
+
+fn connect_fabric_to_null(
+    engine: &Engine,
+    clock: &Clock,
+    fabric: &Rc<dyn Fabric<MemoryAccess>>,
+    port_idx: usize,
+) -> SimResult {
+    let mut tx = OutPort::new(fabric.entity(), &format!("null_tx_{port_idx}"));
+    tx.connect(fabric.port_ingress_i(port_idx))?;
+    let rx = InPort::new(
+        engine,
+        clock,
+        fabric.entity(),
+        &format!("null_rx_{port_idx}"),
+    );
+    fabric.connect_port_egress_i(port_idx, rx.state())
+}
+
 fn connect_pe_to(platform: &Platform, pe: &Rc<ProcessingElement>, to: &PortId) -> SimResult {
     match to {
+        PortId::Null => unreachable!("null connections handled above"),
         PortId::Pe { .. } => {
             sim_error!("Cannot connect a PE directly to a PE")
         }
@@ -115,6 +186,7 @@ fn connect_cache_to(
     to: &PortId,
 ) -> SimResult {
     match to {
+        PortId::Null => unreachable!("null connections handled above"),
         PortId::Pe { pe } => connect_pe_to_cache(platform, pe, cache, cache_port),
         PortId::Cache {
             cache: to_cache,
@@ -134,6 +206,7 @@ fn connect_fabric_to(
     to: &PortId,
 ) -> SimResult {
     match to {
+        PortId::Null => unreachable!("null connections handled above"),
         PortId::Pe { pe } => connect_pe_to_fabric(platform, pe, fabric, fabric_port_idx),
         PortId::Cache { cache, port } => {
             connect_cache_to_fabric(platform, cache, port.as_ref(), fabric, fabric_port_idx)
@@ -154,6 +227,7 @@ fn connect_memory_to(
     to: &PortId,
 ) -> SimResult {
     match to {
+        PortId::Null => unreachable!("null connections handled above"),
         PortId::Pe { pe } => connect_pe_to_memory(platform, pe, memory),
         PortId::Cache { cache, port } => {
             connect_cache_to_memory(platform, cache, port.as_ref(), memory)

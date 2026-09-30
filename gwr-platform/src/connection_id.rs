@@ -8,6 +8,7 @@
 //! - `cache.<name>[.dev|.mem]`
 //! - `mem.<name>`
 //! - `fabric.<name>@(<column>,<row>)[.<port>]`
+//! - `null` for an unused fabric or cache port
 //!
 //! Fabric endpoints omit `.0` when formatted because port 0 is the default.
 
@@ -87,11 +88,15 @@ pub enum ConnectionEndpointId {
         /// formatted.
         port: usize,
     },
+
+    /// A deliberately unused fabric or cache port.
+    Null,
 }
 
 impl fmt::Display for ConnectionEndpointId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Null => f.write_str("null"),
             Self::Pe { name } => write!(f, "pe.{name}"),
             Self::Cache { name, port } => {
                 write!(f, "cache.{name}")?;
@@ -120,9 +125,12 @@ impl fmt::Display for ConnectionEndpointId {
 /// Parses a platform connection endpoint ID.
 ///
 /// Supported forms are `pe.<name>`, `cache.<name>[.dev|.mem]`,
-/// `mem.<name>`, and `fabric.<name>@(<column>,<row>)[.<port>]`. Fabric ports
-/// default to port 0 when the suffix is omitted.
+/// `mem.<name>`, `fabric.<name>@(<column>,<row>)[.<port>]`, and `null`. Fabric
+/// ports default to port 0 when the suffix is omitted.
 pub fn parse_connection_endpoint_id(s: &str) -> Result<ConnectionEndpointId, SimError> {
+    if s == "null" {
+        return Ok(ConnectionEndpointId::Null);
+    }
     if s.starts_with("fabric.") {
         return parse_fabric_port_id(s);
     }
