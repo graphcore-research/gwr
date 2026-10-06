@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
 use std::fs;
-use std::io::Write;
-use std::process::Command;
+use std::path::PathBuf;
+use std::process::{Command, Output};
 
-use tempfile::{Builder, NamedTempFile, tempdir};
+use tempfile::{TempDir, tempdir};
 
 const SUCCESS_STATUS: i32 = 0;
 const FAILURE_STATUS: i32 = 1;
@@ -38,12 +38,36 @@ const LICENSE_INCORRECT_2: &str = "MIT License
 
 Permission is hereby granted...";
 
+fn check_files(files: &[(&str, &str)]) -> Output {
+    let directory = create_files(files);
+    check_copyright()
+        .args(
+            files
+                .iter()
+                .map(|(filename, _)| directory.path().join(filename)),
+        )
+        .output()
+        .expect("failed to execute process")
+}
+
+fn create_files(files: &[(&str, &str)]) -> TempDir {
+    let directory = tempdir().expect("test should be able to create a tempdir");
+    for (filename, contents) in files {
+        fs::write(directory.path().join(filename), contents)
+            .expect("test should be able to write a fixture");
+    }
+    directory
+}
+
+fn check_copyright() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_check-copyright"))
+}
+
 #[test]
 fn no_arg() {
-    let run = Command::new(env!("CARGO_BIN_EXE_check-copyright"))
+    let run = check_copyright()
         .output()
         .expect("failed to execute process");
-
     assert_ne!(
         run.status.code().expect("exit code not signal"),
         SUCCESS_STATUS
@@ -52,216 +76,97 @@ fn no_arg() {
 
 #[test]
 fn invalid_filename() {
-    let run = Command::new(env!("CARGO_BIN_EXE_check-copyright"))
+    let run = check_copyright()
         .arg("")
         .output()
         .expect("failed to execute process");
-
-    assert_eq!(
-        run.status.code().expect("exit code not signal"),
-        FAILURE_STATUS
-    );
+    assert_eq!(run.status.code(), Some(FAILURE_STATUS));
 }
 
 #[test]
 fn directory() {
-    let tmp_dir = tempdir().expect("test should be able to create a tempdir");
-    let run = Command::new(env!("CARGO_BIN_EXE_check-copyright"))
-        .arg(tmp_dir.path())
+    let directory = tempdir().expect("test should be able to create a tempdir");
+    let run = check_copyright()
+        .arg(directory.path())
         .output()
         .expect("failed to execute process");
-
-    assert_eq!(
-        run.status.code().expect("exit code not signal"),
-        FAILURE_STATUS
-    );
+    assert_eq!(run.status.code(), Some(FAILURE_STATUS));
 }
 
 #[test]
-fn single_correct_file() {
-    let mut file = NamedTempFile::new().expect("test should be able to create a tempfile");
-    writeln!(file, "{GENERAL_CORRECT}").expect("test should be able to write to tempfile");
-
-    let run = Command::new(env!("CARGO_BIN_EXE_check-copyright"))
-        .arg(file.path())
-        .output()
-        .expect("failed to execute process");
-
-    assert_eq!(
-        run.status.code().expect("exit code not signal"),
-        SUCCESS_STATUS
-    );
+fn single_correct_file_accepts_absolute_and_relative_paths() {
+    let directory = create_files(&[("example.rs", GENERAL_CORRECT)]);
+    for path in [
+        directory.path().join("example.rs"),
+        PathBuf::from("example.rs"),
+    ] {
+        let run = check_copyright()
+            .current_dir(directory.path())
+            .arg(&path)
+            .output()
+            .expect("failed to execute process");
+        assert_eq!(
+            run.status.code(),
+            Some(SUCCESS_STATUS),
+            "failed for {}",
+            path.display()
+        );
+    }
 }
 
 #[test]
 fn single_correct_license() {
-    let tmp_dir = tempdir().expect("test should be able to create a tempdir");
-    let mut file = Builder::new()
-        .prefix(LICENSE_FILENAME)
-        .rand_bytes(0)
-        .suffix("")
-        .tempfile_in(&tmp_dir)
-        .expect("test should be able to create to tempfile");
-    writeln!(file, "{LICENSE_CORRECT}").expect("test should be able to write to tempfile");
-
-    let run = Command::new(env!("CARGO_BIN_EXE_check-copyright"))
-        .arg(file.path())
-        .output()
-        .expect("failed to execute process");
-
-    assert_eq!(
-        run.status.code().expect("exit code not signal"),
-        SUCCESS_STATUS
-    );
+    let run = check_files(&[(LICENSE_FILENAME, LICENSE_CORRECT)]);
+    assert_eq!(run.status.code(), Some(SUCCESS_STATUS));
 }
 
 #[test]
 fn multiple_correct_files() {
-    let mut file_a = NamedTempFile::new().expect("test should be able to create a tempfile");
-    writeln!(file_a, "{GENERAL_CORRECT}").expect("test should be able to write to tempfile");
-
-    let mut file_b = NamedTempFile::new().expect("test should be able to create a tempfile");
-    writeln!(file_b, "{GENERAL_CORRECT}").expect("test should be able to write to tempfile");
-
-    let run = Command::new(env!("CARGO_BIN_EXE_check-copyright"))
-        .args([file_a.path(), file_b.path()])
-        .output()
-        .expect("failed to execute process");
-
-    assert_eq!(
-        run.status.code().expect("exit code not signal"),
-        SUCCESS_STATUS
-    );
+    let run = check_files(&[
+        ("first.rs", GENERAL_CORRECT),
+        ("second.rs", GENERAL_CORRECT),
+    ]);
+    assert_eq!(run.status.code(), Some(SUCCESS_STATUS));
 }
 
 #[test]
 fn single_incorrect_file_1() {
-    let mut file = NamedTempFile::new().expect("test should be able to create a tempfile");
-    writeln!(file, "{GENERAL_INCORRECT_1}").expect("test should be able to write to tempfile");
-
-    let run = Command::new(env!("CARGO_BIN_EXE_check-copyright"))
-        .arg(file.path())
-        .output()
-        .expect("failed to execute process");
-
-    assert_eq!(
-        run.status.code().expect("exit code not signal"),
-        FAILURE_STATUS
-    );
+    let run = check_files(&[("example.rs", GENERAL_INCORRECT_1)]);
+    assert_eq!(run.status.code(), Some(FAILURE_STATUS));
 }
 
 #[test]
 fn single_incorrect_file_2() {
-    let mut file = NamedTempFile::new().expect("test should be able to create a tempfile");
-    writeln!(file, "{GENERAL_INCORRECT_2}").expect("test should be able to write to tempfile");
-
-    let run = Command::new(env!("CARGO_BIN_EXE_check-copyright"))
-        .arg(file.path())
-        .output()
-        .expect("failed to execute process");
-
-    assert_eq!(
-        run.status.code().expect("exit code not signal"),
-        FAILURE_STATUS
-    );
+    let run = check_files(&[("example.rs", GENERAL_INCORRECT_2)]);
+    assert_eq!(run.status.code(), Some(FAILURE_STATUS));
 }
 
 #[test]
 fn single_incorrect_license_1() {
-    let tmp_dir = tempdir().expect("test should be able to create a tempdir");
-    let mut file = Builder::new()
-        .prefix(LICENSE_FILENAME)
-        .rand_bytes(0)
-        .suffix("")
-        .tempfile_in(&tmp_dir)
-        .expect("test should be able to create to tempfile");
-    writeln!(file, "{LICENSE_INCORRECT_1}").expect("test should be able to write to tempfile");
-
-    let run = Command::new(env!("CARGO_BIN_EXE_check-copyright"))
-        .arg(file.path())
-        .output()
-        .expect("failed to execute process");
-
-    assert_eq!(
-        run.status.code().expect("exit code not signal"),
-        FAILURE_STATUS
-    );
+    let run = check_files(&[(LICENSE_FILENAME, LICENSE_INCORRECT_1)]);
+    assert_eq!(run.status.code(), Some(FAILURE_STATUS));
 }
 
 #[test]
 fn single_incorrect_license_2() {
-    let tmp_dir = tempdir().expect("test should be able to create a tempdir");
-    let mut file = Builder::new()
-        .prefix(LICENSE_FILENAME)
-        .rand_bytes(0)
-        .suffix("")
-        .tempfile_in(&tmp_dir)
-        .expect("test should be able to create to tempfile");
-    writeln!(file, "{LICENSE_INCORRECT_2}").expect("test should be able to write to tempfile");
-
-    let run = Command::new(env!("CARGO_BIN_EXE_check-copyright"))
-        .arg(file.path())
-        .output()
-        .expect("failed to execute process");
-
-    assert_eq!(
-        run.status.code().expect("exit code not signal"),
-        FAILURE_STATUS
-    );
+    let run = check_files(&[(LICENSE_FILENAME, LICENSE_INCORRECT_2)]);
+    assert_eq!(run.status.code(), Some(FAILURE_STATUS));
 }
 
 #[test]
 fn correct_and_incorrect_files() {
-    let mut file_a = NamedTempFile::new().expect("test should be able to create a tempfile");
-    writeln!(file_a, "{GENERAL_CORRECT}").expect("test should be able to write to tempfile");
-
-    let mut file_b = NamedTempFile::new().expect("test should be able to create a tempfile");
-    writeln!(file_b, "{GENERAL_INCORRECT_1}").expect("test should be able to write to tempfile");
-
-    let run = Command::new(env!("CARGO_BIN_EXE_check-copyright"))
-        .args([file_a.path(), file_b.path()])
-        .output()
-        .expect("failed to execute process");
-
-    assert_eq!(
-        run.status.code().expect("exit code not signal"),
-        FAILURE_STATUS
-    );
+    let run = check_files(&[
+        ("first.rs", GENERAL_CORRECT),
+        ("second.rs", GENERAL_INCORRECT_1),
+    ]);
+    assert_eq!(run.status.code(), Some(FAILURE_STATUS));
 }
 
 #[test]
 fn incorrect_and_correct_files() {
-    let mut file_a = NamedTempFile::new().expect("test should be able to create a tempfile");
-    writeln!(file_a, "{GENERAL_INCORRECT_2}").expect("test should be able to write to tempfile");
-
-    let mut file_b = NamedTempFile::new().expect("test should be able to create a tempfile");
-    writeln!(file_b, "{GENERAL_CORRECT}").expect("test should be able to write to tempfile");
-
-    let run = Command::new(env!("CARGO_BIN_EXE_check-copyright"))
-        .args([file_a.path(), file_b.path()])
-        .output()
-        .expect("failed to execute process");
-
-    assert_eq!(
-        run.status.code().expect("exit code not signal"),
-        FAILURE_STATUS
-    );
-}
-
-#[test]
-fn relative_file_from_another_directory() {
-    let tmp_dir = tempdir().expect("test should be able to create a tempdir");
-    let file = tmp_dir.path().join("example.rs");
-    fs::write(&file, GENERAL_CORRECT).expect("test should be able to write to tempfile");
-
-    let run = Command::new(env!("CARGO_BIN_EXE_check-copyright"))
-        .current_dir(tmp_dir.path())
-        .arg("example.rs")
-        .output()
-        .expect("failed to execute process");
-
-    assert_eq!(
-        run.status.code().expect("exit code not signal"),
-        SUCCESS_STATUS
-    );
+    let run = check_files(&[
+        ("first.rs", GENERAL_INCORRECT_2),
+        ("second.rs", GENERAL_CORRECT),
+    ]);
+    assert_eq!(run.status.code(), Some(FAILURE_STATUS));
 }
