@@ -324,7 +324,11 @@ fn emit_connections(
     for connection in connections {
         emit_line(&mut out, "- connect:", 1)?;
         for endpoint in &connection.connect {
-            emit_line(&mut out, format_args!("- {endpoint}"), 3)?;
+            if endpoint == "null" {
+                emit_line(&mut out, "- 'null'", 3)?;
+            } else {
+                emit_line(&mut out, format_args!("- {endpoint}"), 3)?;
+            }
         }
     }
     Ok(Some(out))
@@ -372,6 +376,31 @@ mod tests {
                 name: "hbm0".to_string(),
             }],
         }
+    }
+
+    #[test]
+    fn emitted_null_endpoint_is_a_yaml_string_and_round_trips() {
+        let platform = PlatformConfig {
+            memory_maps: vec![test_memory_map()],
+            defaults: None,
+            processing_elements: None,
+            caches: None,
+            fabrics: None,
+            memories: None,
+            connections: Some(vec![ConnectSection {
+                connect: vec!["null".to_string(), "cache.l1.dev".to_string()],
+            }]),
+        };
+
+        let yaml = platform_to_yaml_str(&platform).unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(
+            parsed["connections"][0]["connect"][0].as_str(),
+            Some("null")
+        );
+
+        let round_trip: PlatformConfig = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(round_trip.connections.unwrap()[0].connect[0], "null");
     }
 
     #[test]

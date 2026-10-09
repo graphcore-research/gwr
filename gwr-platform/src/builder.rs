@@ -585,6 +585,9 @@ impl FabricTopology {
                         c.connect.len()
                     )));
                 }
+                if c.connect.iter().any(|endpoint| endpoint == "null") {
+                    continue;
+                }
                 let (a, b) = self.parse_topology_connection(&c.connect[0], &c.connect[1])?;
                 self.add_edge(a, b);
             }
@@ -665,6 +668,9 @@ impl FabricTopology {
         is_from: bool,
     ) -> Result<ResolvedEndpoint, SimError> {
         match node {
+            ConnectionEndpointId::Null => {
+                unreachable!("null connections do not participate in fabric routing")
+            }
             ConnectionEndpointId::Pe { name } => Ok(ResolvedEndpoint::Pe(name.clone())),
             ConnectionEndpointId::Mem { name } => Ok(ResolvedEndpoint::Mem(name.clone())),
             ConnectionEndpointId::FabricPort {
@@ -680,6 +686,7 @@ impl FabricTopology {
                 Some(CachePortId::Dev) => Ok(ResolvedEndpoint::CacheDev(name.clone())),
                 Some(CachePortId::Mem) => Ok(ResolvedEndpoint::CacheMem(name.clone())),
                 None => match other {
+                    ConnectionEndpointId::Null => unreachable!("null connections are skipped"),
                     ConnectionEndpointId::Pe { .. } => Ok(ResolvedEndpoint::CacheDev(name.clone())),
                     ConnectionEndpointId::Cache { .. } if is_from => {
                         Ok(ResolvedEndpoint::CacheMem(name.clone()))
