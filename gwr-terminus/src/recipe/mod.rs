@@ -97,7 +97,7 @@ impl Recipe {
             io::Error::other(format!("Failed to read {}: {e}", recipe_path.display()))
         });
         let mut recipe_result = match file_contents {
-            Ok(file_contents) => serde_yaml_ng::from_str::<Recipe>(&file_contents).map_err(|e| {
+            Ok(file_contents) => yaml_serde::from_str::<Recipe>(&file_contents).map_err(|e| {
                 io::Error::other(format!(
                     "Failed to parse contents of {}: {e}",
                     recipe_path.display()
@@ -688,7 +688,7 @@ ingredients:
       echo two
 ";
 
-        let recipe = serde_yaml_ng::from_str::<Recipe>(yaml).unwrap();
+        let recipe = yaml_serde::from_str::<Recipe>(yaml).unwrap();
         assert_eq!(recipe.ingredients()[0].command(), "echo one\necho two");
     }
 
@@ -704,7 +704,7 @@ ingredients:
       - echo two
 ";
 
-        let recipe = serde_yaml_ng::from_str::<Recipe>(yaml).unwrap();
+        let recipe = yaml_serde::from_str::<Recipe>(yaml).unwrap();
         assert_eq!(recipe.ingredients()[0].command(), "echo one\necho two");
     }
 
@@ -719,7 +719,7 @@ arguments:
 ingredients: []
 "#;
 
-        let mut recipe = serde_yaml_ng::from_str::<Recipe>(yaml).unwrap();
+        let mut recipe = yaml_serde::from_str::<Recipe>(yaml).unwrap();
         let args = vec!["--EXTRA_ARGS".to_string(), "--routed".to_string()];
         recipe.parse_cli_args(&args).unwrap();
 
@@ -737,7 +737,7 @@ arguments:
 ingredients: []
 ";
 
-        let mut recipe = serde_yaml_ng::from_str::<Recipe>(yaml).unwrap();
+        let mut recipe = yaml_serde::from_str::<Recipe>(yaml).unwrap();
         let args = vec!["--TIMETABLE=timetable.yaml".to_string()];
         recipe.parse_cli_args(&args).unwrap();
 
@@ -758,7 +758,7 @@ arguments:
 ingredients: []
 ";
 
-        let mut recipe = serde_yaml_ng::from_str::<Recipe>(yaml).unwrap();
+        let mut recipe = yaml_serde::from_str::<Recipe>(yaml).unwrap();
         let args = vec!["--UNKNOWN=timetable.yaml".to_string()];
 
         assert!(recipe.parse_cli_args(&args).is_err());

@@ -29,7 +29,7 @@ gwr-track = { path = "../gwr-track", version = "0.13.0" }
 log.workspace = true
 regex.workspace = true
 serde.workspace = true
-serde_yaml.workspace = true
+yaml_serde.workspace = true
 
 [build-dependencies]
 gwr-build = { path = "../gwr-build", version = "0.2.0" }

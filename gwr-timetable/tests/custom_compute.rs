@@ -232,7 +232,7 @@ fn custom_compute_accepts_multiple_inputs_and_outputs() {
 #[test]
 fn custom_compute_serializes_name() {
     let timetable_file = TimetableFile::from_string(CUSTOM_TIMETABLE_YAML).unwrap();
-    let yaml = serde_yaml::to_string(&timetable_file).unwrap();
+    let yaml = yaml_serde::to_string(&timetable_file).unwrap();
 
     assert!(
         yaml.contains("name: fft_stage"),

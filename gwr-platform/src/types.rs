@@ -5,7 +5,7 @@ use clap::ValueEnum;
 use gwr_models::fabric::FabricPortSelection;
 use gwr_models::fabric::node::FabricRoutingAlgorithm;
 use serde::{Deserialize, Serialize, de};
-use serde_yaml::Value;
+use yaml_serde::Value;
 
 /// Parse a value which could be an integer or a string and return u64 value
 ///

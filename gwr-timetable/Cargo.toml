@@ -36,7 +36,7 @@ indicatif.workspace = true
 log.workspace = true
 rand.workspace = true
 serde.workspace = true
-serde_yaml.workspace = true
+yaml_serde.workspace = true
 
 [build-dependencies]
 gwr-build = { path = "../gwr-build", version = "0.2.0" }

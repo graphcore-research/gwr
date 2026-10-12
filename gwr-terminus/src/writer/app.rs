@@ -149,7 +149,7 @@ impl App {
         let file_path = Path::new(filename.as_str());
 
         let recipe = Recipe::new(self.recipe_description.value(), self.command_history.rows());
-        let yaml = serde_yaml_ng::to_string(&recipe).unwrap();
+        let yaml = yaml_serde::to_string(&recipe).unwrap();
         if fs::write(file_path, yaml).is_err() {
             self.error(&format!("Failed to write to `{}`", file_path.display()));
         } else {

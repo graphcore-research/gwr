@@ -796,7 +796,7 @@ mod tests {
 
     #[test]
     fn derives_fabric_port_maps_from_direct_connections() {
-        let cfg: PlatformConfig = serde_yaml::from_str(
+        let cfg: PlatformConfig = yaml_serde::from_str(
             "
 memory_maps:
   - name: mm0
@@ -843,7 +843,7 @@ connections:
 
     #[test]
     fn derives_fabric_port_maps_through_cache() {
-        let cfg: PlatformConfig = serde_yaml::from_str(
+        let cfg: PlatformConfig = yaml_serde::from_str(
             "
 memory_maps:
   - name: mm0
@@ -896,7 +896,7 @@ connections:
 
     #[test]
     fn derives_multiple_candidate_ports_for_same_device() {
-        let cfg: PlatformConfig = serde_yaml::from_str(
+        let cfg: PlatformConfig = yaml_serde::from_str(
             "
 memory_maps:
   - name: mm0
@@ -936,7 +936,7 @@ connections:
 
     #[test]
     fn derives_fabric_port_maps_through_single_fabric_link() {
-        let cfg: PlatformConfig = serde_yaml::from_str(
+        let cfg: PlatformConfig = yaml_serde::from_str(
             "
 memory_maps:
   - name: mm0
@@ -990,7 +990,7 @@ connections:
 
     #[test]
     fn derives_fabric_port_maps_through_two_fabric_links() {
-        let cfg: PlatformConfig = serde_yaml::from_str(
+        let cfg: PlatformConfig = yaml_serde::from_str(
             "
 memory_maps:
   - name: mm0
@@ -1047,7 +1047,7 @@ connections:
 
     #[test]
     fn derives_only_shortest_fabric_port_maps_through_cycle() {
-        let cfg: PlatformConfig = serde_yaml::from_str(
+        let cfg: PlatformConfig = yaml_serde::from_str(
             "
 memory_maps:
   - name: mm0

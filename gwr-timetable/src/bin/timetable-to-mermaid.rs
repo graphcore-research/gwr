@@ -27,7 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output = args.mermaid;
 
     let yaml = fs::read_to_string(&input)?;
-    let timetable: TimetableFile = serde_yaml::from_str(&yaml)?;
+    let timetable: TimetableFile = yaml_serde::from_str(&yaml)?;
     let graph = timetable.into_graph()?;
     let mermaid = render_mermaid(&graph, &HashMap::new());
 

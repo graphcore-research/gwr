@@ -90,8 +90,8 @@ impl Platform {
         clock: &Clock,
         platform_config: &str,
     ) -> Result<Self, SimError> {
-        let cfg: PlatformConfig = serde_yaml::from_str(platform_config)
-            .map_err(|e| SimError(format!("serde_yaml::from_str failed: {e}")))?;
+        let cfg: PlatformConfig = yaml_serde::from_str(platform_config)
+            .map_err(|e| SimError(format!("yaml_serde::from_str failed: {e}")))?;
         Platform::build(engine, clock, &cfg)
     }
 
