@@ -433,6 +433,11 @@ where
 
             Poll::Ready(value)
         } else {
+            // Publish receiver readiness to a producer parked in try_put.
+            // This is not the packet ACK: only finish_get releases the put.
+            if let Some(waker) = self.state.waiting_put.borrow_mut().take() {
+                waker.wake();
+            }
             *self.state.waiting_get.borrow_mut() = Some(cx.waker().clone());
             Poll::Pending
         }
@@ -779,6 +784,46 @@ mod tests {
         assert!(start_get.is_terminated());
         assert!(state.waiting_get.borrow().is_none());
         assert_eq!(waiting_put_wakes.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn late_start_get_wakes_try_put_readiness_without_acknowledging_payload() {
+        let state = test_state::<i32>();
+        let (producer_wakes, producer_waker) = counting_waker();
+        let mut producer_cx = Context::from_waker(&producer_waker);
+        let receiver_waker = noop_waker();
+        let mut receiver_cx = Context::from_waker(&receiver_waker);
+        let mut ready = Box::pin(PortTryPut {
+            state: state.clone(),
+            done: false,
+        });
+        assert_eq!(ready.as_mut().poll(&mut producer_cx), Poll::Pending);
+        let mut get = Box::pin(PortStartGet {
+            state: state.clone(),
+            done: false,
+        });
+        assert_eq!(get.as_mut().poll(&mut receiver_cx), Poll::Pending);
+        assert_eq!(
+            producer_wakes.load(Ordering::SeqCst),
+            1,
+            "late getter must publish readiness"
+        );
+        assert_eq!(ready.as_mut().poll(&mut producer_cx), Poll::Ready(()));
+        let mut put = Box::pin(PortPut {
+            state: state.clone(),
+            value: Some(37),
+            done: false,
+        });
+        assert_eq!(put.as_mut().poll(&mut producer_cx), Poll::Pending);
+        assert_eq!(get.as_mut().poll(&mut receiver_cx), Poll::Ready(37));
+        assert!(!*state.put_released.borrow());
+        assert_eq!(
+            put.as_mut().poll(&mut producer_cx),
+            Poll::Pending,
+            "readiness and taking the payload are not its ACK"
+        );
+        *state.put_released.borrow_mut() = true;
+        assert_eq!(put.as_mut().poll(&mut producer_cx), Poll::Ready(()));
     }
 
     #[test]
