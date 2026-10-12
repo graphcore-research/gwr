@@ -158,7 +158,7 @@ fn input_order() {
     );
     let total_count = inputs.iter().map(|i| i.count).sum();
 
-    let write_limiter = rc_limiter!(&clock, 1);
+    let write_limiter = rc_limiter!(&clock, 1).unwrap();
     let store_limiter = Limiter::new_and_register(&engine, &clock, top, "limit_wr", write_limiter);
     let store = ObjectStore::new_and_register(&engine, &clock, top, "store", total_count).unwrap();
 
@@ -261,7 +261,7 @@ fn weighted_policy() {
         "source_b",
         option_box_repeat!(inputs[1].val; inputs[1].count),
     );
-    let write_limiter = rc_limiter!(&clock, 1);
+    let write_limiter = rc_limiter!(&clock, 1).unwrap();
     let store_limiter = Limiter::new_and_register(&engine, &clock, top, "limit_wr", write_limiter);
     let store = ObjectStore::new_and_register(&engine, &clock, top, "store", total_count).unwrap();
 

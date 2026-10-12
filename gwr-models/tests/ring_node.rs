@@ -42,7 +42,7 @@ fn run_test(
     let clock = engine.clock_ghz(1.0);
     let top = engine.top();
 
-    let limiter_128b_per_tick = rc_limiter!(&clock, 128);
+    let limiter_128b_per_tick = rc_limiter!(&clock, 128).unwrap();
 
     let config = RingConfig::new(rx_buffer_bytes, tx_buffer_bytes, limiter_128b_per_tick);
     let ring_node = RingNode::new_and_register(

@@ -46,7 +46,7 @@ where
         let clock = engine.default_clock();
         let event = event.clone();
         engine.spawn(async move {
-            clock.wait_ticks(delay).await;
+            clock.wait_ticks(delay)?.await;
             event.notify()?;
             Ok(())
         });

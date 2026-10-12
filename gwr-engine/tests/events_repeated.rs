@@ -36,7 +36,7 @@ fn notify_one_listener() {
     {
         let clock = clock.clone();
         engine.spawn(async move {
-            clock.wait_ticks(10).await;
+            clock.wait_ticks(10)?.await;
             repeated.notify();
             Ok(())
         });
@@ -71,7 +71,7 @@ fn notify_one_listener_result() {
     {
         let clock = clock.clone();
         engine.spawn(async move {
-            clock.wait_ticks(10).await;
+            clock.wait_ticks(10)?.await;
             repeated.notify_result(result);
             Ok(())
         });
@@ -93,7 +93,7 @@ fn notify_before_listen() {
         let repeated = repeated.clone();
         let clock = clock.clone();
         engine.spawn(async move {
-            clock.wait_ticks(10).await;
+            clock.wait_ticks(10)?.await;
             let _ = repeated.listen().await;
             panic!("I should not be awoken");
         });
@@ -140,7 +140,7 @@ fn notify_multiple_listeners() {
         engine.spawn(async move {
             // Should be 0 to start with
             assert_eq!(*count.borrow(), 0);
-            clock.wait_ticks(10).await;
+            clock.wait_ticks(10)?.await;
 
             // Should still be 0 after delay
             assert_eq!(*count.borrow(), 0);
@@ -185,9 +185,9 @@ fn notify_listen_twice() {
     {
         let clock = clock.clone();
         engine.spawn(async move {
-            clock.wait_ticks(10).await;
+            clock.wait_ticks(10)?.await;
             repeated.notify();
-            clock.wait_ticks(10).await;
+            clock.wait_ticks(10)?.await;
             repeated.notify();
             Ok(())
         });
@@ -224,7 +224,7 @@ fn notify_listen_loop() {
         let clock = clock.clone();
         engine.spawn(async move {
             for i in 0..COUNTER {
-                clock.wait_ticks(10).await;
+                clock.wait_ticks(10)?.await;
                 repeated.notify_result(i + 1);
             }
             Ok(())
@@ -261,7 +261,7 @@ fn notify_once_listen_twice() {
     {
         let clock = clock.clone();
         engine.spawn(async move {
-            clock.wait_ticks(10).await;
+            clock.wait_ticks(10)?.await;
             repeated.notify();
             Ok(())
         });
@@ -296,7 +296,7 @@ fn notify_repeated_two_listeners() {
         let repeated = repeated.clone();
         let clock = clock.clone();
         engine.spawn(async move {
-            clock.wait_ticks(11).await;
+            clock.wait_ticks(11)?.await;
             let _ = repeated.listen().await;
             panic!("I should not be awoken");
         });
@@ -305,7 +305,7 @@ fn notify_repeated_two_listeners() {
     {
         let clock = clock.clone();
         engine.spawn(async move {
-            clock.wait_ticks(10).await;
+            clock.wait_ticks(10)?.await;
             repeated.notify();
             Ok(())
         });
@@ -350,7 +350,7 @@ fn cancelled_listener_is_removed() {
         engine.spawn(async move {
             {
                 let mut listener = repeated.listen().fuse();
-                let mut timeout = clock.wait_ticks(5).fuse();
+                let mut timeout = clock.wait_ticks(5)?.fuse();
 
                 select! {
                     _ = listener => panic!("listener should have been cancelled"),
@@ -358,7 +358,7 @@ fn cancelled_listener_is_removed() {
                 }
             }
 
-            clock.wait_ticks(5).await;
+            clock.wait_ticks(5)?.await;
             Ok(())
         });
     }
@@ -367,7 +367,7 @@ fn cancelled_listener_is_removed() {
         let repeated = repeated.clone();
         let clock = clock.clone();
         engine.spawn(async move {
-            clock.wait_ticks(10).await;
+            clock.wait_ticks(10)?.await;
             repeated.notify();
             Ok(())
         });

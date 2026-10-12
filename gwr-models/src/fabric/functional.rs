@@ -98,7 +98,7 @@ where
         let mut tx_buffers = Vec::with_capacity(num_ports);
         let mut internal_tx = Vec::with_capacity(num_ports);
 
-        let port_limiter = rc_limiter!(clock, config.port_bits_per_tick);
+        let port_limiter = rc_limiter!(clock, config.port_bits_per_tick)?;
 
         for i in 0..num_ports {
             // Build a buffer per input
@@ -358,7 +358,7 @@ where
                 let tick_now = clock.tick_now();
                 if tick_now.tick() < tick.tick() {
                     // Need to send in the future, delay
-                    clock.wait_ticks(tick.tick() - tick_now.tick()).await;
+                    clock.wait_ticks(tick.tick() - tick_now.tick())?.await;
                 }
 
                 entity.track_exit(value.id());

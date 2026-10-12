@@ -107,7 +107,7 @@ fn reserve_waits_until_capacity_is_released() {
         let reservation_done = reservation_done.clone();
         let clock = clock.clone();
         engine.spawn(async move {
-            clock.wait_ticks(1).await;
+            clock.wait_ticks(1)?.await;
             assert!(!reservation_done.get());
             assert_eq!(allocator.used(), 4);
             allocator.release(4);
@@ -138,7 +138,7 @@ fn reserve_rechecks_capacity_after_shared_wakeup() {
         engine.spawn(async move {
             let _reservation = allocator.reserve(3).await?;
             reservations_done.set(reservations_done.get() + 1);
-            clock.wait_ticks(10).await;
+            clock.wait_ticks(10)?.await;
             Ok(())
         });
     }
@@ -148,10 +148,10 @@ fn reserve_rechecks_capacity_after_shared_wakeup() {
         let reservations_done = reservations_done.clone();
         let clock = clock.clone();
         engine.spawn(async move {
-            clock.wait_ticks(1).await;
+            clock.wait_ticks(1)?.await;
             allocator.release(3);
 
-            clock.wait_ticks(1).await;
+            clock.wait_ticks(1)?.await;
             assert_eq!(reservations_done.get(), 1);
             assert_eq!(allocator.used(), 4);
 

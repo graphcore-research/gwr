@@ -99,7 +99,7 @@ fn test_fc_pipeline_throughput(
 
     // Set the rate limit such that each packet sent will take one tick
     let bits_per_tick = 128;
-    let rate_limiter = rc_limiter!(&clock, bits_per_tick);
+    let rate_limiter = rc_limiter!(&clock, bits_per_tick).unwrap();
     let limiter = Limiter::new_and_register(&engine, &clock, top, "limiter", rate_limiter);
 
     // Create a pair of tasks that use a pipeline

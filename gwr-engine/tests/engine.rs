@@ -54,7 +54,7 @@ fn default_engine_runs() {
     let clock = engine.default_clock();
 
     engine.spawn(async move {
-        clock.wait_ticks(1).await;
+        clock.wait_ticks(1)?.await;
         Ok(())
     });
 
@@ -70,14 +70,14 @@ fn task_error_ends_the_current_run() {
     let later_task_ran = Rc::new(Cell::new(false));
 
     engine.spawn(async move {
-        clock.wait_ticks(3).await;
+        clock.wait_ticks(3)?.await;
         gwr_engine::sim_error!("simulation stopped")
     });
 
     let clock = engine.default_clock();
     let later_task_ran_in_future = later_task_ran.clone();
     engine.spawn(async move {
-        clock.wait_ticks(10).await;
+        clock.wait_ticks(10)?.await;
         later_task_ran_in_future.set(true);
         Ok(())
     });
@@ -93,7 +93,7 @@ fn clock_khz_sets_clock_frequency() {
     let clock = engine.clock_khz(1.0);
 
     engine.spawn(async move {
-        clock.wait_ticks(1).await;
+        clock.wait_ticks(1)?.await;
         Ok(())
     });
 
@@ -108,7 +108,7 @@ fn clock_ghz_sets_clock_frequency() {
     let clock = engine.clock_ghz(2.0);
 
     engine.spawn(async move {
-        clock.wait_ticks(1).await;
+        clock.wait_ticks(1)?.await;
         Ok(())
     });
 

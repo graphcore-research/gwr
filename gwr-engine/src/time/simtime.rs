@@ -152,10 +152,10 @@ mod tests {
         let mut cx = Context::from_waker(&waker);
 
         let mut delays = [
-            clock_1ghz.wait_ticks(1),
-            clock_1ghz.wait_ticks(2),
-            clock_2ghz.wait_ticks(2),
-            clock_2ghz.wait_ticks(4),
+            clock_1ghz.wait_ticks(1).unwrap(),
+            clock_1ghz.wait_ticks(2).unwrap(),
+            clock_2ghz.wait_ticks(2).unwrap(),
+            clock_2ghz.wait_ticks(4).unwrap(),
         ];
 
         for delay in &mut delays {

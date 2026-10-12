@@ -54,7 +54,7 @@ pub fn spawn_till_worker(
                     + config.order_overhead_ticks
                     + config.payment_ticks
                     + order_ordering_ticks(customer.order_index());
-                clock.wait_ticks(order_ticks).await;
+                clock.wait_ticks(order_ticks)?.await;
 
                 let payment_tick = restaurant.tick_now();
                 customer.mark_payment_done(payment_tick);
@@ -94,7 +94,7 @@ pub fn spawn_kitchen_worker(
                 restaurant.begin_kitchen_service(customer_id, worker_id, customer.order_index());
 
                 let prep_ticks = config.pack_order_ticks + order_prep_ticks(customer.order_index());
-                clock.wait_ticks(prep_ticks).await;
+                clock.wait_ticks(prep_ticks)?.await;
 
                 let ready_tick = restaurant.tick_now();
                 customer.mark_food_ready(ready_tick);

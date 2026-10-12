@@ -34,7 +34,7 @@
 //! // Spawn a task that will trigger the timeout
 //! # let clock = engine.default_clock();
 //! engine.spawn(async move {
-//!     clock.wait_ticks(10000).await;
+//!     clock.wait_ticks(10000)?.await;
 //!     timeout.notify()?;
 //!     Ok(())
 //! });
@@ -42,7 +42,7 @@
 //! // Spawn a task that will say all is ok
 //! # let clock = engine.default_clock();
 //! engine.spawn(async move {
-//!     clock.wait_ticks(1000).await;
+//!     clock.wait_ticks(1000)?.await;
 //!     ok.notify()?;
 //!     Ok(())
 //! });

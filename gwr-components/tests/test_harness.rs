@@ -220,7 +220,7 @@ mod limiter_harness {
             &clock,
             engine.top(),
             "limiter",
-            Rc::new(RateLimiter::new(&clock, 32)),
+            Rc::new(RateLimiter::new(&clock, 32).unwrap()),
         );
         let mut harness = LimiterHarness::new(engine, limiter);
 
@@ -236,7 +236,7 @@ mod limiter_harness {
             &clock,
             engine.top(),
             "limiter",
-            Rc::new(RateLimiter::new(&clock, 32)),
+            Rc::new(RateLimiter::new(&clock, 32).unwrap()),
         );
         let mut harness = LimiterHarness::new(engine, limiter);
 

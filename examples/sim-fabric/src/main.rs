@@ -117,7 +117,7 @@ struct Cli {
 /// Install an event to terminate the simulation at the clock tick defined.
 fn finish_at(spawner: &Spawner, clock: Clock, run_ticks: usize) {
     spawner.spawn(async move {
-        clock.wait_ticks(run_ticks as u64).await;
+        clock.wait_ticks(run_ticks as u64)?.await;
         sim_error!("Finish")
     });
 }
@@ -137,7 +137,7 @@ fn start_frame_dump(
         loop {
             // Use the `background` wait to indicate that the simulation can end
             // if this is the only task still active.
-            clock.wait_ticks_or_exit(progress_ticks as u64).await;
+            clock.wait_ticks_or_exit(progress_ticks as u64)?.await;
             let num_frames: usize = sinks.iter().map(|s| s.num_sunk()).sum();
             progress_bar.inc((num_frames - seen_frames) as u64);
             seen_frames = num_frames;

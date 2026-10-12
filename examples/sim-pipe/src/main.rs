@@ -85,7 +85,7 @@ struct Cli {
 /// Install an event to terminate the simulation at the clock tick defined.
 fn finish_at(spawner: &Spawner, clock: Clock, run_ticks: usize) {
     spawner.spawn(async move {
-        clock.wait_ticks(run_ticks as u64).await;
+        clock.wait_ticks(run_ticks as u64)?.await;
         sim_error!("Finish")
     });
 }
@@ -105,7 +105,7 @@ fn start_frame_dump(
         loop {
             // Use the `background` wait to indicate that the simulation can end
             // if this is the only task still active.
-            clock.wait_ticks_or_exit(progress_ticks as u64).await;
+            clock.wait_ticks_or_exit(progress_ticks as u64)?.await;
             let num_frames = sink.num_sunk();
             progress_bar.inc((num_frames - seen_frames) as u64);
             seen_frames = num_frames;
@@ -147,7 +147,7 @@ fn main() -> Result<(), SimError> {
         num_send_frames,
     );
     let source = Source::new_and_register(&engine, &top, "source", Some(Box::new(frame_gen)));
-    let rx_limiter = rc_limiter!(&clock, args.pipe_rx_bits_per_tick);
+    let rx_limiter = rc_limiter!(&clock, args.pipe_rx_bits_per_tick)?;
     let source_limiter = Limiter::new_and_register(&engine, &clock, &top, "rx_limiter", rx_limiter);
 
     let pipe_config = FcPipelineConfig::new(
@@ -156,7 +156,7 @@ fn main() -> Result<(), SimError> {
         args.pipe_credit_delay,
     );
     let pipe = FcPipeline::new_and_register(&engine, &clock, &top, "pipe", &pipe_config)?;
-    let tx_limiter = rc_limiter!(&clock, args.pipe_tx_bits_per_tick);
+    let tx_limiter = rc_limiter!(&clock, args.pipe_tx_bits_per_tick)?;
     let sink_limiter = Limiter::new_and_register(&engine, &clock, &top, "tx_limiter", tx_limiter);
     let sink = Sink::new_and_register(&engine, &clock, &top, "sink");
 

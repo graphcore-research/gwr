@@ -46,7 +46,7 @@ fn notify_one_listener() {
     {
         let clock = clock.clone();
         engine.spawn(async move {
-            clock.wait_ticks(10).await;
+            clock.wait_ticks(10)?.await;
             once.notify()?;
             Ok(())
         });
@@ -68,7 +68,7 @@ fn notify_before_listener() {
         let once = once.clone();
         let clock = clock.clone();
         engine.spawn(async move {
-            clock.wait_ticks(10).await;
+            clock.wait_ticks(10)?.await;
             once.listen().await;
             // Ensure this hasn't completed early
             assert_eq!(clock.time_now_ns(), 10.0);
@@ -112,7 +112,7 @@ fn notify_multiple_listeners() {
     {
         let clock = clock.clone();
         engine.spawn(async move {
-            clock.wait_ticks(10).await;
+            clock.wait_ticks(10)?.await;
             once.notify()?;
             Ok(())
         });

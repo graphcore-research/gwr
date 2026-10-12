@@ -371,7 +371,7 @@ where
     let mut ingress_buffer_limiters = Vec::with_capacity(num_ingress_egress_ports);
     let mut egress_buffers = Vec::with_capacity(num_ingress_egress_ports);
 
-    let port_limiter = rc_limiter!(clock, config.port_bits_per_tick);
+    let port_limiter = rc_limiter!(clock, config.port_bits_per_tick)?;
     for i in 0..num_ingress_egress_ports {
         let ingress_egress_index = Port::Ingress as usize + i;
         // Build a buffer per input

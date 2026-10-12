@@ -24,7 +24,7 @@ fn dual_clock() {
     let values = all_values.clone();
     engine.spawn(async move {
         for _ in 0..5 {
-            clk1.wait_ticks(1).await;
+            clk1.wait_ticks(1)?.await;
             values.borrow_mut().push((1, clk1.time_now_ns()));
         }
         Ok(())
@@ -33,7 +33,7 @@ fn dual_clock() {
     let values = all_values.clone();
     engine.spawn(async move {
         for _ in 0..5 {
-            clk2.wait_ticks(1).await;
+            clk2.wait_ticks(1)?.await;
             values.borrow_mut().push((2, clk2.time_now_ns()));
         }
         Ok(())
@@ -70,7 +70,7 @@ fn wait_ticks_or_exit() {
         let clk = engine.default_clock();
         engine.spawn(async move {
             for _ in 0..5 {
-                clk.wait_ticks(1).await;
+                clk.wait_ticks(1)?.await;
             }
             Ok(())
         });
@@ -80,7 +80,7 @@ fn wait_ticks_or_exit() {
         let clk = engine.default_clock();
         engine.spawn(async move {
             for _ in 0..50 {
-                clk.wait_ticks_or_exit(10).await;
+                clk.wait_ticks_or_exit(10)?.await;
             }
             Ok(())
         });
@@ -130,7 +130,7 @@ fn same_tick_waits_resolve_queued_updates_between_waiters() {
         let clock = engine.default_clock();
         let state = state.clone();
         engine.spawn(async move {
-            clock.wait_ticks(1).await;
+            clock.wait_ticks(1)?.await;
             state.queue(&clock, 1, state.clone());
             Ok(())
         });
@@ -140,9 +140,9 @@ fn same_tick_waits_resolve_queued_updates_between_waiters() {
         let clock = engine.default_clock();
         let state = state.clone();
         engine.spawn(async move {
-            clock.wait_ticks(1).await;
+            clock.wait_ticks(1)?.await;
             assert_eq!(state.value.get(), 0);
-            clock.wait_ticks(1).await;
+            clock.wait_ticks(1)?.await;
             assert_eq!(state.value.get(), 1);
             Ok(())
         });
@@ -172,15 +172,15 @@ fn cancelled_wait_ticks_does_not_leave_stale_schedule() {
     {
         let clock = engine.default_clock();
         engine.spawn(async move {
-            let mut short_wait = clock.wait_ticks(5).fuse();
-            let mut long_wait = clock.wait_ticks(50).fuse();
+            let mut short_wait = clock.wait_ticks(5)?.fuse();
+            let mut long_wait = clock.wait_ticks(50)?.fuse();
 
             select! {
                 () = short_wait => {}
                 () = long_wait => panic!("long wait should have been cancelled"),
             }
 
-            clock.wait_ticks(5).await;
+            clock.wait_ticks(5)?.await;
             assert_eq!(clock.time_now_ns(), 10.0);
             Ok(())
         });

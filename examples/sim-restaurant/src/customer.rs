@@ -129,11 +129,11 @@ impl Customer {
         restaurant: Rc<Restaurant>,
     ) -> SimResult {
         let mut outcome = pin!(self.outcome.listen().fuse());
-        let mut timeout = pin!(clock.wait_ticks(config.max_queue_wait_ticks).fuse());
+        let mut timeout = pin!(clock.wait_ticks(config.max_queue_wait_ticks)?.fuse());
 
         select! {
             outcome = outcome => {
-                self.handle_outcome(outcome, config, &clock, &restaurant).await;
+                self.handle_outcome(outcome, config, &clock, &restaurant).await?;
             }
             _ = timeout => {
                 if self.till_start_tick.get().is_none()
@@ -144,7 +144,7 @@ impl Customer {
                     restaurant.customer_gave_up_in_queue(self.id());
                 } else {
                     self.handle_outcome(outcome.await, config, &clock, &restaurant)
-                        .await;
+                        .await?;
                 }
             }
         }
@@ -158,12 +158,12 @@ impl Customer {
         config: RestaurantConfig,
         clock: &Clock,
         restaurant: &Restaurant,
-    ) {
+    ) -> SimResult {
         match outcome {
             CustomerOutcome::Served => {
                 restaurant.customer_collecting_food(self.id());
-                clock.wait_ticks(config.take_food_ticks).await;
-                clock.wait_ticks(config.leave_ticks).await;
+                clock.wait_ticks(config.take_food_ticks)?.await;
+                clock.wait_ticks(config.leave_ticks)?.await;
                 self.departed_tick.set(Some(restaurant.tick_now()));
                 restaurant.customer_served(self.id(), self.joined_queue_tick.get());
             }
@@ -171,6 +171,7 @@ impl Customer {
                 restaurant.customer_abandoned_after_order(self.id());
             }
         }
+        Ok(())
     }
 }
 
@@ -214,7 +215,7 @@ pub fn spawn_arrivals(
         let mut last_tick = 0_u64;
         for customer_plan in demand.iter() {
             clock
-                .wait_ticks(customer_plan.arrival_tick - last_tick)
+                .wait_ticks(customer_plan.arrival_tick - last_tick)?
                 .await;
             last_tick = customer_plan.arrival_tick;
 

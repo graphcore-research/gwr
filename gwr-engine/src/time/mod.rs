@@ -65,7 +65,7 @@ snippet below the `println!` will be called when the time has advanced to
 # let spawner = engine.spawner();
 let clock = engine.clock_ghz(1.0);
 # spawner.spawn(async move {
-clock.wait_ticks(1).await;
+clock.wait_ticks(1)?.await;
 println!("Time now {:.2}", clock.time_now_ns());
 # Ok(())
 #  });
@@ -128,7 +128,7 @@ running:
 let clock = engine.clock_ghz(1.0);
 spawner.spawn(async move {
   loop {
-    clock.wait_ticks_or_exit(1000).await;
+    clock.wait_ticks_or_exit(1000)?.await;
     println!("Time now {:.2}", clock.time_now_ns());
   }
 });

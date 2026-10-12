@@ -52,7 +52,7 @@ fn notify_one_listener() {
     {
         let clock = clock.clone();
         engine.spawn(async move {
-            clock.wait_ticks(10).await;
+            clock.wait_ticks(10)?.await;
             once.notify()?;
             Ok(())
         });
@@ -74,7 +74,7 @@ fn notify_before_listener() {
         let once = once.clone();
         let clock = clock.clone();
         engine.spawn(async move {
-            clock.wait_ticks(10).await;
+            clock.wait_ticks(10)?.await;
             let res = once.listen().await;
             assert_eq!(res, 1234);
 
@@ -125,7 +125,7 @@ fn notify_multiple_listeners() {
         engine.spawn(async move {
             // Should be 0 to start with
             assert_eq!(*count.borrow(), 0);
-            clock.wait_ticks(10).await;
+            clock.wait_ticks(10)?.await;
 
             // Should still be 0 after delay
             assert_eq!(*count.borrow(), 0);

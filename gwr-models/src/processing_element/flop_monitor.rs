@@ -99,7 +99,7 @@ impl Drop for FlopMonitor {
 impl Runnable for FlopMonitor {
     async fn run(&self) -> SimResult {
         loop {
-            self.clock.wait_ticks_or_exit(self.window_size_ticks).await;
+            self.clock.wait_ticks_or_exit(self.window_size_ticks)?.await;
             let window_idx = *self.next_window_idx.borrow();
             self.emit_window(window_idx, self.window_size_ticks);
             *self.next_window_idx.borrow_mut() += 1;

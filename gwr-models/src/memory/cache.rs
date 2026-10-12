@@ -576,7 +576,7 @@ where
         let total_bytes = request.total_bytes();
         handle_request(&state, &mut req, &mut rsp_arb_1, request).await?;
         let ticks = total_bytes.div_ceil(state.bw_bytes_per_tick);
-        state.clock.wait_ticks(ticks as u64).await;
+        state.clock.wait_ticks(ticks as u64)?.await;
     }
 }
 
@@ -648,7 +648,7 @@ where
         let total_bytes = response.total_bytes();
         handle_response(&state, &mut rsp_arb_0, response).await?;
         let ticks = total_bytes.div_ceil(state.bw_bytes_per_tick);
-        state.clock.wait_ticks(ticks as u64).await;
+        state.clock.wait_ticks(ticks as u64)?.await;
     }
 }
 

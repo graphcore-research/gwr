@@ -19,7 +19,7 @@ fn resource_empty() {
         engine.spawn(async move {
             println!("RESOURCE REQUEST {i} start @ {}", clock.tick_now());
             resource.request().await;
-            clock.wait_ticks(10).await;
+            clock.wait_ticks(10)?.await;
             println!("RESOURCE REQUEST {i} done @ {}", clock.tick_now());
             resource.release().await?;
             println!("RESOURCE RELEASE {i} @ {}", clock.tick_now());
@@ -51,7 +51,7 @@ fn resource_more_releases() {
         engine.spawn(async move {
             println!("RESOURCE REQUEST {i} start @ {}", clock.tick_now());
             resource.request().await;
-            clock.wait_ticks(10).await;
+            clock.wait_ticks(10)?.await;
             println!("RESOURCE REQUEST {i} done @ {}", clock.tick_now());
             resource.release().await?;
             println!("RESOURCE RELEASE {i} @ {}", clock.tick_now());
@@ -79,7 +79,7 @@ fn resource_no_release() {
         engine.spawn(async move {
             println!("RESOURCE REQUEST {i} start @ {}", clock.tick_now());
             resource.request().await;
-            clock.wait_ticks(10).await;
+            clock.wait_ticks(10)?.await;
             println!("RESOURCE REQUEST {i} done @ {}", clock.tick_now());
             Ok(())
         });
@@ -106,7 +106,7 @@ fn resource_guard() {
         engine.spawn(async move {
             println!("RESOURCE GUARD {i} start @ {}", clock.tick_now());
             ResourceGuard::new(resource).await;
-            clock.wait_ticks(10).await;
+            clock.wait_ticks(10)?.await;
             println!("RESOURCE GUARD {i} done @ {}", clock.tick_now());
             Ok(())
         });

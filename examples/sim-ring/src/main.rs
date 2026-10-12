@@ -73,7 +73,7 @@ struct Cli {
 /// Install an event to terminate the simulation at the clock tick defined.
 fn finish_at(spawner: &Spawner, clock: Clock, run_ticks: usize) {
     spawner.spawn(async move {
-        clock.wait_ticks(run_ticks as u64).await;
+        clock.wait_ticks(run_ticks as u64)?.await;
         sim_error!("Finish")
     });
 }
@@ -93,7 +93,7 @@ fn start_frame_dump(
         loop {
             // Use the `background` wait to indicate that the simulation can end
             // if this is the only task still active.
-            clock.wait_ticks_or_exit(progress_ticks as u64).await;
+            clock.wait_ticks_or_exit(progress_ticks as u64)?.await;
             let num_frames: usize = sinks.iter().map(|s| s.num_sunk()).sum();
             progress_bar.inc((num_frames - seen_frames) as u64);
             seen_frames = num_frames;
@@ -133,11 +133,11 @@ fn main() -> Result<(), SimError> {
         args.tx_buffer_bytes
     );
 
-    let ring_nodes = build_ring_nodes(&mut engine, &clock, &config);
+    let ring_nodes = build_ring_nodes(&mut engine, &clock, &config)?;
     let (sources, sinks) = build_source_sinks(&mut engine, &clock, &config);
-    let (ingress_pipes, ring_pipes) = build_pipes(&mut engine, &clock, &config);
+    let (ingress_pipes, ring_pipes) = build_pipes(&mut engine, &clock, &config)?;
     let (source_limiters, ring_limiters, sink_limiters) =
-        build_limiters(&mut engine, &clock, &config, ETHERNET_GBPS);
+        build_limiters(&mut engine, &clock, &config, ETHERNET_GBPS)?;
 
     for i in 0..config.ring_size {
         let right = (i + 1) % config.ring_size;
