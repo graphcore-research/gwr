@@ -1077,7 +1077,7 @@ fn main() -> Result<()> {
 
     let platform_yaml = fs::read_to_string(&args.platform)
         .map_err(|e| error_from_str(format!("failed to read {}: {e}", args.platform.display())))?;
-    let platform: PlatformConfig = serde_yaml::from_str(&platform_yaml).map_err(|e| {
+    let platform: PlatformConfig = yaml_serde::from_str(&platform_yaml).map_err(|e| {
         error_from_str(format!(
             "failed to parse platform YAML using gwr_platform::types::PlatformConfig: {e}"
         ))
@@ -1086,7 +1086,7 @@ fn main() -> Result<()> {
     let out_path = args.out.clone();
     let generator = Generator::new(args, &platform)?;
     let timetable = generate(generator)?;
-    let yaml = serde_yaml::to_string(&timetable)
+    let yaml = yaml_serde::to_string(&timetable)
         .map_err(|e| error_from_str(format!("failed to serialise timetable YAML: {e}")))?;
     fs::write(&out_path, yaml)
         .map_err(|e| error_from_str(format!("failed to write {}: {e}", out_path.display())))?;
@@ -1121,7 +1121,7 @@ mod tests {
     }
 
     fn generator_platform() -> PlatformConfig {
-        serde_yaml::from_str(
+        yaml_serde::from_str(
             r"
 memory_maps:
   - name: default

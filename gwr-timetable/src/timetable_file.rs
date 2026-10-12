@@ -27,8 +27,8 @@ impl TimetableFile {
     }
 
     pub fn from_string(graph_str: &str) -> Result<Self, SimError> {
-        serde_yaml::from_str(graph_str)
-            .map_err(|e| SimError(format!("serde_yaml::from_str failed: {e}")))
+        yaml_serde::from_str(graph_str)
+            .map_err(|e| SimError(format!("yaml_serde::from_str failed: {e}")))
     }
 
     /// Validate graph structure, node connections, and tensor views.

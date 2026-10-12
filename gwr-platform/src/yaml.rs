@@ -7,7 +7,7 @@
 use std::fmt::Write as _;
 
 use serde::Serialize;
-use serde_yaml::Value;
+use yaml_serde::Value;
 
 use crate::types::{CacheConfigSection, PlatformConfig, ProcessingElementConfigSection};
 
@@ -72,7 +72,7 @@ fn emit_optional_kv<T: std::fmt::Display>(
 }
 
 fn serializable_to_str<T: Serialize>(value: &T) -> Result<String, Box<dyn std::error::Error>> {
-    match serde_yaml::to_value(value)? {
+    match yaml_serde::to_value(value)? {
         Value::String(s) => Ok(s),
         other => Err(format!("expected type to serialize a string, got: {other:?}").into()),
     }
@@ -428,7 +428,7 @@ mod tests {
         assert!(!yaml.contains("*pe_config_1\n  - name: pe2"));
 
         let round_trip: PlatformConfig =
-            serde_yaml::from_str(&yaml).expect("generated yaml should deserialize");
+            yaml_serde::from_str(&yaml).expect("generated yaml should deserialize");
         let pes = round_trip
             .processing_elements
             .expect("processing elements should be present");
@@ -494,7 +494,7 @@ mod tests {
         assert!(yaml.contains("config: *cache_config_0"));
 
         let round_trip: PlatformConfig =
-            serde_yaml::from_str(&yaml).expect("generated yaml should deserialize");
+            yaml_serde::from_str(&yaml).expect("generated yaml should deserialize");
         let pe = &round_trip
             .processing_elements
             .expect("processing elements should be present")[0];
@@ -547,7 +547,7 @@ mod tests {
         let yaml = platform_to_yaml_str(&platform).expect("yaml generation should succeed");
 
         let round_trip: PlatformConfig =
-            serde_yaml::from_str(&yaml).expect("generated yaml should deserialize");
+            yaml_serde::from_str(&yaml).expect("generated yaml should deserialize");
         let fabric = &round_trip.fabrics.expect("fabric should be present")[0];
         let memory = &round_trip.memories.expect("memory should be present")[0];
         assert_eq!(fabric.columns, 2);
@@ -608,7 +608,7 @@ mod tests {
         ));
 
         let round_trip: PlatformConfig =
-            serde_yaml::from_str(&yaml).expect("generated yaml should deserialize");
+            yaml_serde::from_str(&yaml).expect("generated yaml should deserialize");
         let fabrics = round_trip.fabrics.expect("fabrics should be present");
         assert_eq!(fabrics[0].config, only_port_selection);
         assert_eq!(fabrics[1].config, mixed_config);
