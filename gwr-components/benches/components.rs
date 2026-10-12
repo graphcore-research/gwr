@@ -101,7 +101,7 @@ pub fn spawn_arbiter_fixedpriority_policy() -> Engine {
 pub fn spawn_larger_simulation() -> Engine {
     let mut engine = create_engine();
     let clock = engine.default_clock();
-    let rate_limiter = rc_limiter!(&clock, 1);
+    let rate_limiter = rc_limiter!(&clock, 1).unwrap();
 
     let num_puts = 20;
 

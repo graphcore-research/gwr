@@ -81,7 +81,7 @@ impl Runnable for Monitor {
     async fn run(&self) -> SimResult {
         // Drive the output
         loop {
-            self.clock.wait_ticks_or_exit(self.window_size_ticks).await;
+            self.clock.wait_ticks_or_exit(self.window_size_ticks)?.await;
             let bytes_in_window = *self.bytes_in_window.borrow();
             *self.bytes_in_window.borrow_mut() = 0;
             *self.bytes_total.borrow_mut() += bytes_in_window;
@@ -132,7 +132,7 @@ mod tests {
         {
             let clock = clock.clone();
             engine.spawn(async move {
-                clock.wait_ticks(4).await;
+                clock.wait_ticks(4)?.await;
                 Ok(())
             });
         }

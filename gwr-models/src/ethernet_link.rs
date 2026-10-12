@@ -54,7 +54,7 @@ where
         aka: Option<&Aka>,
     ) -> Result<Rc<Self>, SimError> {
         let entity = Rc::new(Entity::new(parent, name));
-        let limiter = rc_limiter!(clock, BITS_PER_TICK);
+        let limiter = rc_limiter!(clock, BITS_PER_TICK)?;
         let limiter_a_aka = build_aka!(aka, &entity, &[("rx_a", "rx")]);
         let limiter_a = Limiter::new_and_register_with_renames(
             engine,

@@ -14,6 +14,7 @@ use std::task::{Context, Poll, Waker};
 use futures::future::FusedFuture;
 
 use crate::traits::{Resolve, Resolver};
+use crate::types::{SimError, SimResult};
 
 pub mod phase {
     pub const BEGIN: u32 = 0;
@@ -276,52 +277,42 @@ impl Clock {
     }
 
     /// Returns a [ClockDelay] future which must be `await`ed to delay the
-    /// specified number of ticks.
+    /// specified number of ticks, rejecting a deadline that overflows.
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
-    pub fn wait_ticks(&self, ticks: u64) -> ClockDelay {
+    pub fn wait_ticks(&self, ticks: u64) -> Result<ClockDelay, SimError> {
         let mut until = self.tick_now();
-        until.tick += ticks;
+        until.tick = until
+            .tick
+            .checked_add(ticks)
+            .ok_or_else(|| SimError("clock wait deadline overflows".into()))?;
         until.phase = phase::BEGIN;
-        ClockDelay {
+        Ok(ClockDelay {
             shared_state: self.shared_state.clone(),
             until,
             can_exit: false,
             waiter_id: None,
             done: false,
-        }
+        })
     }
 
     /// Returns a [ClockDelay] future which must be `await`ed to delay the
     /// specified number of ticks. However, if the remainder of the simulation
     /// completes then this future is allowed to not complete. This allows the
     /// user to create tasks that can run continuously as long as the rest of
-    /// the simulation continues to run.
+    /// the simulation continues to run. Returns an error if the deadline
+    /// overflows.
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
-    pub fn wait_ticks_or_exit(&self, ticks: u64) -> ClockDelay {
-        let mut until = self.tick_now();
-        until.tick += ticks;
-        until.phase = phase::BEGIN;
-        ClockDelay {
-            shared_state: self.shared_state.clone(),
-            until,
-            can_exit: true,
-            waiter_id: None,
-            done: false,
-        }
+    pub fn wait_ticks_or_exit(&self, ticks: u64) -> Result<ClockDelay, SimError> {
+        let mut delay = self.wait_ticks(ticks)?;
+        delay.can_exit = true;
+        Ok(delay)
     }
 
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
-    pub fn next_tick_and_phase(&self, phase: u32) -> ClockDelay {
-        let mut until = self.tick_now();
-        until.tick += 1;
-        until.phase = phase;
-        ClockDelay {
-            shared_state: self.shared_state.clone(),
-            until,
-            can_exit: false,
-            waiter_id: None,
-            done: false,
-        }
+    pub fn next_tick_and_phase(&self, phase: u32) -> Result<ClockDelay, SimError> {
+        let mut delay = self.wait_ticks(1)?;
+        delay.until.phase = phase;
+        Ok(delay)
     }
 
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
@@ -338,18 +329,29 @@ impl Clock {
         }
     }
 
-    /// Advance to the next tick after the specified time.
-    pub fn advance_to(&self, time_ns: f64) {
+    /// Advance to the next tick after the specified time, rejecting
+    /// unrepresentable durations and tick overflow.
+    pub fn advance_to(&self, time_ns: f64) -> SimResult {
         let now_ns = self.time_now_ns();
         assert!(now_ns < time_ns);
         let diff_ns = time_ns - now_ns;
         let ticks = (diff_ns * (self.freq_mhz / 1000.0)).ceil();
+        // u64::MAX rounds up to 2^64 as f64, so the upper bound is exclusive.
+        if !ticks.is_finite() || !(0.0..u64::MAX as f64).contains(&ticks) {
+            return Err(SimError(
+                "clock advance duration is outside u64 range".into(),
+            ));
+        }
 
         let mut until = self.tick_now();
-        until.tick += ticks as u64;
+        until.tick = until
+            .tick
+            .checked_add(ticks as u64)
+            .ok_or_else(|| SimError("clock advance deadline overflows".into()))?;
         until.phase = phase::BEGIN;
 
         self.shared_state.advance_time(until);
+        Ok(())
     }
 }
 
@@ -445,6 +447,84 @@ mod tests {
     use super::*;
 
     #[test]
+    fn wait_ticks_or_exit_rejects_overflow_and_accepts_maximum_deadline() {
+        let clock = Clock::default();
+        clock.advance_time(ClockTick::new().set_tick(u64::MAX - 1));
+        assert!(clock.wait_ticks_or_exit(2).is_err());
+        let delay = clock.wait_ticks_or_exit(1).unwrap();
+        assert_eq!(delay.until.tick(), u64::MAX);
+        assert_eq!(delay.until.phase(), phase::BEGIN);
+        assert!(delay.can_exit);
+        assert!(clock.shared_state.waiting_times.borrow().is_empty());
+    }
+
+    #[test]
+    fn next_tick_and_phase_rejects_overflow_and_preserves_phase() {
+        let clock = Clock::default();
+        clock.advance_time(ClockTick::new().set_tick(u64::MAX - 1));
+        let delay = clock.next_tick_and_phase(3).unwrap();
+        assert_eq!(delay.until.tick(), u64::MAX);
+        assert_eq!(delay.until.phase(), 3);
+        clock.advance_time(ClockTick::new().set_tick(u64::MAX));
+        assert!(clock.next_tick_and_phase(3).is_err());
+        assert!(clock.shared_state.waiting_times.borrow().is_empty());
+    }
+
+    #[test]
+    fn advance_to_rejects_tick_overflow_without_advancing_time() {
+        let clock = Clock::default();
+        // The duration is a representable 2048 ticks, but its deadline is 2^64.
+        let start_tick = u64::MAX - 2047;
+        clock.advance_time(ClockTick::new().set_tick(start_tick));
+        assert!(clock.advance_to(u64::MAX as f64).is_err());
+        assert_eq!(clock.tick_now().tick(), start_tick);
+    }
+
+    #[test]
+    fn advance_to_rejects_duration_at_u64_upper_bound() {
+        let clock = Clock::default();
+        assert!(clock.advance_to(u64::MAX as f64).is_err());
+        assert_eq!(clock.tick_now(), ClockTick::default());
+    }
+
+    #[test]
+    fn advance_to_rejects_infinite_duration() {
+        let clock = Clock::default();
+        assert!(clock.advance_to(f64::INFINITY).is_err());
+        assert_eq!(clock.tick_now(), ClockTick::default());
+    }
+
+    #[test]
+    fn advance_to_accepts_largest_f64_duration_below_u64_upper_bound() {
+        let clock = Clock::default();
+        // The largest f64 below 2^64 is 2^64 - 2048.
+        let ticks = 18_446_744_073_709_549_568_u64;
+        clock.advance_to(ticks as f64).unwrap();
+        assert_eq!(clock.tick_now().tick(), ticks);
+        assert_eq!(clock.tick_now().phase(), phase::BEGIN);
+    }
+
+    #[test]
+    fn wait_ticks_rejects_deadline_overflow() {
+        let clock = Clock::default();
+        clock.advance_time(ClockTick::new().set_tick(u64::MAX - 1));
+        assert!(clock.wait_ticks(2).is_err());
+        assert!(clock.shared_state.waiting_times.borrow().is_empty());
+        assert!(clock.shared_state.waiting.borrow().is_empty());
+    }
+
+    #[test]
+    fn wait_ticks_accepts_maximum_deadline_and_zero_wait() {
+        let clock = Clock::default();
+        clock.advance_time(ClockTick::new().set_tick(u64::MAX - 1));
+        let delay = clock.wait_ticks(1).unwrap();
+        assert_eq!(delay.until.tick(), u64::MAX);
+        clock.advance_time(ClockTick::new().set_tick(u64::MAX));
+        let delay = clock.wait_ticks(0).unwrap();
+        assert_eq!(delay.until.tick(), u64::MAX);
+    }
+
+    #[test]
     fn convert_to_ns() {
         let clk_ghz = Clock::new(1000.0);
         assert_eq!(1.0, clk_ghz.to_ns(&ClockTick::new().set_tick(1)));
@@ -484,15 +564,15 @@ mod tests {
         let clock = Clock::default();
         assert_eq!(clock.freq_mhz(), 1000.0);
 
-        clock.advance_to(2.1);
+        clock.advance_to(2.1).unwrap();
         assert_eq!(clock.tick_now().tick(), 3);
         assert_eq!(clock.tick_now().phase(), phase::BEGIN);
         assert_eq!(clock.time_now_ns(), 3.0);
 
         let earlier = Clock::new(1000.0);
         let later = Clock::new(1000.0);
-        drop(earlier.wait_ticks(1));
-        drop(later.wait_ticks(2));
+        drop(earlier.wait_ticks(1).unwrap());
+        drop(later.wait_ticks(2).unwrap());
 
         assert!(earlier == later);
         assert_eq!(earlier.partial_cmp(&later), Some(Ordering::Equal));
@@ -544,7 +624,7 @@ mod tests {
         let clock = Clock::new(1000.0);
         let waker = noop_waker();
         let mut cx = Context::from_waker(&waker);
-        let mut delay = clock.wait_ticks(1);
+        let mut delay = clock.wait_ticks(1).unwrap();
 
         assert!(!delay.is_terminated());
         assert_eq!(Pin::new(&mut delay).poll(&mut cx), Poll::Pending);
@@ -561,7 +641,7 @@ mod tests {
     fn phase_wait_helpers_schedule_phase_delays() {
         let clock = Clock::new(1000.0);
 
-        let next_tick = clock.next_tick_and_phase(3);
+        let next_tick = clock.next_tick_and_phase(3).unwrap();
         assert_eq!(next_tick.until.tick(), 1);
         assert_eq!(next_tick.until.phase(), 3);
 
@@ -580,7 +660,7 @@ mod tests {
 
         clock.advance_time(ClockTick::new().set_phase(phase::END));
 
-        let delay = clock.wait_ticks(1);
+        let delay = clock.wait_ticks(1).unwrap();
         assert_eq!(delay.until.tick(), 1);
         assert_eq!(delay.until.phase(), phase::BEGIN);
     }

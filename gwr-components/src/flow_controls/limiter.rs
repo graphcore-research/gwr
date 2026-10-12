@@ -98,11 +98,11 @@ where
             let value = rx.start_get()?.await;
 
             let value_id = value.id();
-            let ticks = limiter.ticks(&value);
+            let ticks = limiter.ticks(&value)?;
             self.entity.track_enter(value_id);
 
             tx.put(value)?.await;
-            limiter.delay_ticks(ticks).await;
+            limiter.delay_ticks(ticks).await?;
             self.entity.track_exit(value_id);
 
             // Allow the OutPort to complete

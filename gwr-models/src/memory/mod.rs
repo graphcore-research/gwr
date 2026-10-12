@@ -323,7 +323,7 @@ where
             }
 
             let ticks = payload_bytes.div_ceil(self.config.bw_bytes_per_tick) as u64;
-            self.clock.wait_ticks(ticks).await;
+            self.clock.wait_ticks(ticks)?.await;
         }
     }
 }

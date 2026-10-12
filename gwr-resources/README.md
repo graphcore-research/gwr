@@ -41,7 +41,7 @@ fn main() {
   // Release credit
   spawner.spawn(async move {
     for _ in 0..10 {
-        clock.wait_ticks(1).await;
+        clock.wait_ticks(1)?.await;
         grant.release().await?;
     }
     Ok(())

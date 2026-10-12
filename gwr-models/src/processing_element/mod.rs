@@ -571,7 +571,7 @@ impl TaskRunner {
                     &format!("{activity_name} compute"),
                     &group,
                 );
-                self.clock.wait_ticks(compute_ticks as u64).await;
+                self.clock.wait_ticks(compute_ticks as u64)?.await;
             }
             let total_machine_ops = self
                 .stats

@@ -141,7 +141,7 @@ where
             let value = rx.get()?.await;
             let now = clock.tick_now();
             println!("Pipeline received {value} @{now}");
-            clock.wait_ticks(10).await;
+            clock.wait_ticks(10)?.await;
         }
     });
 }

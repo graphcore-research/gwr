@@ -54,7 +54,7 @@
 //! {
 //!     let clock = engine.default_clock();
 //!     engine.spawn(async move {
-//!         clock.wait_ticks(10).await;
+//!         clock.wait_ticks(10)?.await;
 //!         println!("Trigger event");
 //!         event.notify()?;
 //!         Ok(())

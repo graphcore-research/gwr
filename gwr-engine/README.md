@@ -67,7 +67,7 @@ fn main() {
   let spawner = engine.spawner();
   spawner.spawn(async move {
     for i in 0..10 {
-      clock.wait_ticks(1).await;
+      clock.wait_ticks(1)?.await;
       println!("Waiting {i}");
     }
     Ok(())

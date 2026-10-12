@@ -712,7 +712,7 @@ pub fn run_configuration(
 fn spawn_close_kitchen(engine: &Engine, clock: &Clock, day_ticks: u64, restaurant: Rc<Restaurant>) {
     let clock = clock.clone();
     engine.spawn(async move {
-        clock.wait_ticks(day_ticks).await;
+        clock.wait_ticks(day_ticks)?.await;
         restaurant.mark_closed()?;
         finish_till_queue_at_close(&restaurant);
 

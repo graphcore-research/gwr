@@ -109,7 +109,7 @@ fn bounded_queue_push_waits_until_space_is_available() {
         let push_done = push_done.clone();
         let queue = queue.clone();
         engine.spawn(async move {
-            clock.wait_ticks(1).await;
+            clock.wait_ticks(1)?.await;
             assert!(push_started.get());
             assert!(!push_done.get());
             assert_eq!(queue.values(), vec![1]);
@@ -149,16 +149,16 @@ fn queue_changed_event_fires_for_mutations() {
         let clock = clock.clone();
         let queue = queue.clone();
         engine.spawn(async move {
-            clock.wait_ticks(1).await;
+            clock.wait_ticks(1)?.await;
             queue.push(10).await?;
 
-            clock.wait_ticks(1).await;
+            clock.wait_ticks(1)?.await;
             queue.push(20).await?;
 
-            clock.wait_ticks(1).await;
+            clock.wait_ticks(1)?.await;
             assert_eq!(queue.pop_front(), Some(10));
 
-            clock.wait_ticks(1).await;
+            clock.wait_ticks(1)?.await;
             assert_eq!(queue.remove_where(|value| *value == 20), Some(20));
 
             Ok(())

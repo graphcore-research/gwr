@@ -33,7 +33,7 @@ fn put_get_synced() {
     {
         let clock = engine.default_clock();
         engine.spawn(async move {
-            clock.wait_ticks(1).await;
+            clock.wait_ticks(1)?.await;
             let i = rx_port.get()?.await;
             assert_eq!(i, 1);
             let i = rx_port.get()?.await;
@@ -68,7 +68,7 @@ fn select_on_ports() {
     {
         let clock = engine.default_clock();
         engine.spawn(async move {
-            clock.wait_ticks(1).await;
+            clock.wait_ticks(1)?.await;
             tx_port1.put(1)?.await;
 
             // Time will depend on order of select
@@ -77,7 +77,7 @@ fn select_on_ports() {
 
             // Wait to ensure that data from port2 will be received before we
             // send again
-            clock.wait_ticks(3).await;
+            clock.wait_ticks(3)?.await;
             tx_port1.put(3)?.await;
             assert_eq!(clock.time_now_ns(), 5.0);
             Ok(())
@@ -86,16 +86,16 @@ fn select_on_ports() {
     {
         let clock = engine.default_clock();
         engine.spawn(async move {
-            clock.wait_ticks(1).await;
+            clock.wait_ticks(1)?.await;
             tx_port2.put(2)?.await;
 
             // Time will depend on order of select
             let ns = clock.time_now_ns();
             if ns == 1.0 {
-                clock.wait_ticks(10).await;
+                clock.wait_ticks(10)?.await;
             } else {
                 assert_eq!(ns, 3.0);
-                clock.wait_ticks(8).await;
+                clock.wait_ticks(8)?.await;
             }
             tx_port2.put(4)?.await;
             Ok(())
@@ -128,7 +128,7 @@ fn select_on_ports() {
                     break;
                 }
 
-                clock.wait_ticks(2).await;
+                clock.wait_ticks(2)?.await;
             }
             // The second value from rx2 should be last
             assert_eq!(received[3], 4);

@@ -109,7 +109,7 @@ pub fn priority_policy_test_core(engine: &mut Engine, inputs: &[ArbiterInputData
         ));
     }
 
-    let write_limiter = rc_limiter!(&clock, 1);
+    let write_limiter = rc_limiter!(&clock, 1).unwrap();
     let store_limiter =
         Limiter::new_and_register(engine, &clock, engine.top(), "limit_wr", write_limiter);
     let store =
@@ -164,7 +164,7 @@ pub async fn expect_no_traffic(
     ticks: u64,
     receivers: Vec<(&'static str, &dyn NoTrafficPort)>,
 ) -> SimResult {
-    clock.wait_ticks(ticks).await;
+    clock.wait_ticks(ticks)?.await;
     for (port_name, receiver) in receivers {
         if receiver.has_traffic() {
             panic!("{location}: unexpected {port_name} traffic");
@@ -180,10 +180,11 @@ pub async fn expect_pending_send<T>(
     port: impl std::fmt::Debug,
     mut send: PortPut<T>,
     ticks: u64,
-) where
+) -> SimResult
+where
     T: SimObject,
 {
-    let mut timeout = clock.wait_ticks(ticks);
+    let mut timeout = clock.wait_ticks(ticks)?;
 
     futures::select! {
         _ = send => {
@@ -193,6 +194,7 @@ pub async fn expect_pending_send<T>(
     }
 
     send.await;
+    Ok(())
 }
 
 pub trait ValueCheck<T> {
@@ -1186,7 +1188,7 @@ macro_rules! build_component_harness {
                                         send,
                                         ticks,
                                     )
-                                    .await;
+                                    .await?;
                                 }
                                 )*
                                 $(
@@ -1236,7 +1238,7 @@ macro_rules! build_component_harness {
                                         send,
                                         ticks,
                                     )
-                                    .await;
+                                    .await?;
                                 }
                                 )*
                                 $(
@@ -1296,7 +1298,7 @@ macro_rules! build_component_harness {
                                     if !ports.is_empty() {
                                         panic!("{location}: delay does not take ports");
                                     }
-                                    clock.wait_ticks(ticks).await;
+                                    clock.wait_ticks(ticks)?.await;
                                 }
                                 Step::<$item_ty, $expected_ty>::__Expected(_) => {
                                     unreachable!("marker variant is not a harness step");

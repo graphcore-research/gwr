@@ -39,7 +39,7 @@
 //! # {
 //! loop {
 //!     let value = rx.get()?.await;
-//!     clock.wait_ticks(delay_ticks).await;
+//!     clock.wait_ticks(delay_ticks)?.await;
 //!     tx.put(value)?.await;
 //! }
 //! # }
@@ -127,7 +127,7 @@
 //!     if let Some((value, tick)) = pending.borrow_mut().pop_front() {
 //!         // Wait for correct time
 //!         let tick_now = clock.tick_now();
-//!         clock.wait_ticks(tick.tick() - tick_now.tick()).await;
+//!         clock.wait_ticks(tick.tick() - tick_now.tick())?.await;
 //!
 //!         // Send value
 //!         tx.put(value)?.await;
@@ -364,7 +364,7 @@ where
                 let tick_now = clock.tick_now();
                 match tick.cmp(&tick_now) {
                     Ordering::Greater => {
-                        clock.wait_ticks(tick.tick() - tick_now.tick()).await;
+                        clock.wait_ticks(tick.tick() - tick_now.tick())?.await;
                     }
                     Ordering::Less => {
                         if error_on_output_stall {

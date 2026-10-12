@@ -20,8 +20,9 @@
 //! # Creating a Rate Limiter
 //!
 //! [RateLimiter]s should normally be constructed using the
-//! [rc_limiter!](crate::rc_limiter) macro. This returns an `Rc<RateLimiter>`
-//! because that is what components normally accept as a rate limiter argument.
+//! [rc_limiter!](crate::rc_limiter) macro. This returns a
+//! `Result<Rc<RateLimiter>, SimError>`, rejecting a zero rate. Components
+//! normally accept an `Rc<RateLimiter>` as a rate limiter argument.
 //! They are `Rc`ed because they are used immutably and as a result the same
 //! rate limiter can be shared by all components that have the same bandwidth.
 //!
@@ -55,7 +56,7 @@
 //! let clock = engine.clock_ghz(1.0);
 //!
 //! // And build a 16 bits-per-tick rate limiter.
-//! let rate_limiter = rc_limiter!(&clock, 16);
+//! let rate_limiter = rc_limiter!(&clock, 16).unwrap();
 //!
 //! // Build the source (initially with no generator).
 //! let source = Source::new_and_register(&engine, engine.top(), "source", None);
@@ -89,8 +90,10 @@ use std::marker::PhantomData;
 
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::TotalBytes;
+use gwr_engine::types::{SimError, SimResult};
 
-/// Create a [RateLimiter] wrapped in an [Rc](std::rc::Rc).
+/// Create a [RateLimiter] wrapped in an [Rc](std::rc::Rc), returning a
+/// [`SimError`] if the rate is zero.
 ///
 /// This is the most common form of [RateLimiter] used because all of its
 /// methods can be used immutably and therefore it can be shared by any number
@@ -98,19 +101,15 @@ use gwr_engine::traits::TotalBytes;
 #[macro_export]
 macro_rules! rc_limiter {
     ($clock:expr, $bits_per_tick:expr) => {
-        std::rc::Rc::new($crate::flow_controls::rate_limiter::RateLimiter::new(
-            $clock,
-            $bits_per_tick,
-        ))
+        $crate::flow_controls::rate_limiter::RateLimiter::new($clock, $bits_per_tick)
+            .map(std::rc::Rc::new)
     };
 }
 
 #[macro_export]
 macro_rules! option_rc_limiter {
     ($clock:expr, $bits_per_tick:expr) => {
-        Some(std::rc::Rc::new(
-            $crate::flow_controls::rate_limiter::RateLimiter::new($clock, $bits_per_tick),
-        ))
+        $crate::rc_limiter!($clock, $bits_per_tick).map(Some)
     };
 }
 
@@ -132,32 +131,41 @@ impl<T> RateLimiter<T>
 where
     T: TotalBytes,
 {
-    #[must_use]
-    pub fn new(clock: &Clock, bits_per_tick: usize) -> Self {
-        Self {
+    /// Create a rate limiter, rejecting a zero rate.
+    pub fn new(clock: &Clock, bits_per_tick: usize) -> Result<Self, SimError> {
+        if bits_per_tick == 0 {
+            return Err(SimError("rate limiter rate must be positive".into()));
+        }
+        Ok(Self {
             clock: clock.clone(),
             bits_per_tick,
             phantom: PhantomData,
-        }
+        })
     }
 
-    pub async fn delay(&self, value: &T) {
-        let delay_ticks = self.ticks(value);
-        self.clock.wait_ticks(delay_ticks as u64).await;
+    /// Wait for the packet's service duration, rejecting invalid arithmetic.
+    pub async fn delay(&self, value: &T) -> SimResult {
+        self.delay_ticks(self.ticks(value)?).await
     }
 
-    pub async fn delay_ticks(&self, ticks: usize) {
-        self.clock.wait_ticks(ticks as u64).await;
+    /// Wait for a service duration, checking the deadline at the wait point.
+    pub async fn delay_ticks(&self, ticks: u64) -> SimResult {
+        self.clock.wait_ticks(ticks)?.await;
+        Ok(())
     }
 
-    pub fn ticks(&self, value: &T) -> usize {
-        let payload_bytes = value.total_bytes();
-        let payload_bits = payload_bytes * 8;
-        self.ticks_from_bits(payload_bits)
+    /// Calculate a packet's service duration without overflowing its bit count.
+    pub fn ticks(&self, value: &T) -> Result<u64, SimError> {
+        let bits = value
+            .total_bytes()
+            .checked_mul(8)
+            .ok_or_else(|| SimError("rate limiter packet bit count overflows".into()))?;
+        self.ticks_from_bits(bits)
     }
 
-    #[must_use]
-    pub fn ticks_from_bits(&self, bits: usize) -> usize {
-        bits.div_ceil(self.bits_per_tick)
+    /// Round up to whole ticks, rejecting an unrepresentable duration.
+    pub fn ticks_from_bits(&self, bits: usize) -> Result<u64, SimError> {
+        u64::try_from(bits.div_ceil(self.bits_per_tick))
+            .map_err(|_| SimError("rate limiter duration exceeds u64".into()))
     }
 }
