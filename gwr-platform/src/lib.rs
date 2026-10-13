@@ -223,10 +223,10 @@ impl Platform {
     }
 
     pub fn try_dump_stats(&self, time_now_ns: f64) -> SimResult {
-        let machine_ops = self.processing_element_totals()?;
+        let (machine_ops, bytes_consumed, bytes_produced) = self.processing_element_totals()?;
         self.dump_memory_totals(time_now_ns);
         self.dump_cache_totals(time_now_ns);
-        self.dump_pe_totals(time_now_ns, machine_ops);
+        self.dump_pe_totals(time_now_ns, machine_ops, bytes_consumed, bytes_produced);
         for mem in &self.memories {
             mem.dump_stats(time_now_ns);
         }
@@ -317,22 +317,40 @@ impl Platform {
         );
     }
 
-    fn processing_element_totals(&self) -> Result<MachineOpCounts, SimError> {
-        self.processing_elements
-            .iter()
-            .try_fold(MachineOpCounts::default(), |total, pe| {
-                total.checked_add(pe.machine_ops())
-            })
+    fn processing_element_totals(&self) -> Result<(MachineOpCounts, usize, usize), SimError> {
+        self.processing_elements.iter().try_fold(
+            (MachineOpCounts::default(), 0usize, 0usize),
+            |total, pe| {
+                Ok((
+                    total.0.checked_add(pe.machine_ops())?,
+                    total
+                        .1
+                        .checked_add(pe.bytes_consumed())
+                        .ok_or_else(|| SimError("PE consumed byte total overflows".to_string()))?,
+                    total
+                        .2
+                        .checked_add(pe.bytes_produced())
+                        .ok_or_else(|| SimError("PE produced byte total overflows".to_string()))?,
+                ))
+            },
+        )
     }
 
-    fn dump_pe_totals(&self, time_now_ns: f64, machine_ops: MachineOpCounts) {
+    fn dump_pe_totals(
+        &self,
+        time_now_ns: f64,
+        machine_ops: MachineOpCounts,
+        bytes_consumed: usize,
+        bytes_produced: usize,
+    ) {
         log_stats(
             &self.entity,
             ProcessingElementStatsDisplay::new(
                 "ProcessingElement totals",
                 time_now_ns,
                 machine_ops,
-            ),
+            )
+            .with_data(bytes_consumed, bytes_produced),
         );
     }
 }
