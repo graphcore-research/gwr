@@ -15,7 +15,7 @@ const PLATFORM_YAML: &str = "
 memory_maps:
   - name: default
     devices:
-      - name: hbm0
+      - hbm0
 
 processing_elements:
   - name: pe0

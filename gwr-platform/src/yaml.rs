@@ -90,8 +90,8 @@ fn emit_memory_maps(
     for memory_map in &platform.memory_maps {
         emit_line(&mut out, format_args!("- name: {}", memory_map.name), 1)?;
         emit_line(&mut out, "devices:", 2)?;
-        for range in &memory_map.devices {
-            emit_line(&mut out, format_args!("- name: {}", range.name), 3)?;
+        for device in &memory_map.devices {
+            emit_line(&mut out, format_args!("- {device}"), 3)?;
         }
     }
     Ok(Some(out))
@@ -372,16 +372,14 @@ mod tests {
     use super::platform_to_yaml_str;
     use crate::types::{
         CacheConfigSection, CacheSection, ConnectSection, FabricConfigSection, FabricKind,
-        FabricSection, MemoryConfigSection, MemoryDeviceSection, MemoryKind, MemoryMapSection,
-        MemorySection, PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
+        FabricSection, MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
+        PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
     };
 
     fn test_memory_map() -> MemoryMapSection {
         MemoryMapSection {
             name: "memory_map".to_string(),
-            devices: vec![MemoryDeviceSection {
-                name: "hbm0".to_string(),
-            }],
+            devices: vec!["hbm0".to_string()],
         }
     }
 
@@ -471,7 +469,7 @@ mod tests {
         assert_eq!(round_trip.memory_maps.len(), 1);
         assert_eq!(round_trip.memory_maps[0].name, "memory_map");
         assert_eq!(round_trip.memory_maps[0].devices.len(), 1);
-        assert_eq!(round_trip.memory_maps[0].devices[0].name, "hbm0");
+        assert_eq!(round_trip.memory_maps[0].devices[0], "hbm0");
         assert_eq!(pes[0].memory_map, "memory_map");
         assert_eq!(pes[1].memory_map, "memory_map");
         assert_eq!(pes[2].memory_map, "memory_map");

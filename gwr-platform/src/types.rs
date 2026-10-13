@@ -99,13 +99,8 @@ pub struct DefaultsSection {
 #[serde(deny_unknown_fields)]
 pub struct MemoryMapSection {
     pub name: String,
-    pub devices: Vec<MemoryDeviceSection>,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
-pub struct MemoryDeviceSection {
-    pub name: String,
+    /// Names of memories included in this map.
+    pub devices: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

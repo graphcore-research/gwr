@@ -18,8 +18,8 @@ use gwr_platform::connection_id::{
 };
 use gwr_platform::types::{
     CacheConfigSection, CacheSection, ConnectSection, FabricConfigSection, FabricKind,
-    FabricSection, MemoryConfigSection, MemoryDeviceSection, MemoryKind, MemoryMapSection,
-    MemorySection, PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
+    FabricSection, MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
+    PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
 };
 use gwr_platform::yaml::platform_to_yaml_str;
 
@@ -324,12 +324,8 @@ fn build_pe_config(args: &Args) -> ProcessingElementConfigSection {
     }
 }
 
-fn build_memory_map_ranges(args: &Args) -> Vec<MemoryDeviceSection> {
-    (0..args.num_hbms)
-        .map(|mm| MemoryDeviceSection {
-            name: format!("hbm{mm}"),
-        })
-        .collect()
+fn build_memory_map_devices(args: &Args) -> Vec<String> {
+    (0..args.num_hbms).map(|mm| format!("hbm{mm}")).collect()
 }
 
 fn build_processing_elements(
@@ -348,7 +344,7 @@ fn build_processing_elements(
 fn build_platform(args: &Args) -> Result<PlatformConfig, String> {
     let memory_map = MemoryMapSection {
         name: PE_MEMORY_MAP_NAME.to_string(),
-        devices: build_memory_map_ranges(args),
+        devices: build_memory_map_devices(args),
     };
     let pe_config = build_pe_config(args);
 

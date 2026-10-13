@@ -42,7 +42,7 @@ For example:
 memory_maps:
   - name: pe_memory_map
     devices:
-      - name: mem0
+      - mem0
 
 processing_elements:
   - name: pe0

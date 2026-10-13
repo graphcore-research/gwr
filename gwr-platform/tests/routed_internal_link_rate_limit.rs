@@ -102,7 +102,7 @@ fn yaml(kind: &str, columns: usize, policy: &str) -> String {
         r"memory_maps:
   - name: map
     devices:
-      - name: hbm0
+      - hbm0
 memories:
   - name: hbm0
     kind: hbm

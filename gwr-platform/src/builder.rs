@@ -37,12 +37,12 @@ pub fn build_memory_map(
     let mut memory_map = MemoryMap::new();
     for device in &cfg.devices {
         let memory_idx = memories_idx_by_id
-            .get(device.name.as_str())
-            .ok_or_else(|| SimError(format!("Unknown memory '{}'", device.name)))?;
+            .get(device.as_str())
+            .ok_or_else(|| SimError(format!("Unknown memory '{device}'")))?;
         let memory = &memories[*memory_idx];
         let device_id = *device_ids
-            .get(&device.name)
-            .ok_or_else(|| SimError(format!("Unknown device '{}'", device.name)))?;
+            .get(device)
+            .ok_or_else(|| SimError(format!("Unknown device '{device}'")))?;
         memory_map.insert(
             memory.base_address(),
             memory.capacity_bytes() as u64,
@@ -765,8 +765,7 @@ mod tests {
     use super::{build_fabric_destination_port_maps, build_memories, build_memory_maps};
     use crate::DeviceIds;
     use crate::types::{
-        MemoryConfigSection, MemoryDeviceSection, MemoryKind, MemoryMapSection, MemorySection,
-        PlatformConfig,
+        MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection, PlatformConfig,
     };
 
     #[test]
@@ -776,9 +775,7 @@ mod tests {
         let cfg = PlatformConfig {
             memory_maps: vec![MemoryMapSection {
                 name: "mm0".to_string(),
-                devices: vec![MemoryDeviceSection {
-                    name: "hbm0".to_string(),
-                }],
+                devices: vec!["hbm0".to_string()],
             }],
             defaults: None,
             processing_elements: None,
@@ -817,7 +814,7 @@ mod tests {
 memory_maps:
   - name: mm0
     devices:
-      - name: hbm0
+      - hbm0
 processing_elements:
   - name: pe0
     memory_map: mm0
@@ -864,7 +861,7 @@ connections:
 memory_maps:
   - name: mm0
     devices:
-      - name: hbm0
+      - hbm0
 processing_elements:
   - name: pe0
     memory_map: mm0
@@ -917,7 +914,7 @@ connections:
 memory_maps:
   - name: mm0
     devices:
-      - name: hbm0
+      - hbm0
 fabrics:
   - name: fabric0
     kind: functional
