@@ -198,6 +198,7 @@ fn build_fabrics(args: &Args) -> Vec<FabricSection> {
             rx_buffer_bytes: Some(DEFAULT_FABRIC_RX_BUFFER_BYTES),
             tx_buffer_bytes: Some(DEFAULT_FABRIC_TX_BUFFER_BYTES),
             port_bits_per_tick: Some(DEFAULT_FABRIC_PORT_BITS_PER_TICK),
+            internal_link_bits_per_tick: None,
             routing: Some(args.fabric_routing),
             port_selection: None,
         },

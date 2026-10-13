@@ -190,6 +190,7 @@ fn emit_fabrics(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std
             && config.rx_buffer_bytes.is_none()
             && config.tx_buffer_bytes.is_none()
             && config.port_bits_per_tick.is_none()
+            && config.internal_link_bits_per_tick.is_none()
             && config.routing.is_none()
             && config.port_selection.is_none()
         {
@@ -208,6 +209,12 @@ fn emit_fabrics(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std
         emit_optional_kv(&mut out, "rx_buffer_bytes", config.rx_buffer_bytes, 3)?;
         emit_optional_kv(&mut out, "tx_buffer_bytes", config.tx_buffer_bytes, 3)?;
         emit_optional_kv(&mut out, "port_bits_per_tick", config.port_bits_per_tick, 3)?;
+        emit_optional_kv(
+            &mut out,
+            "internal_link_bits_per_tick",
+            config.internal_link_bits_per_tick,
+            3,
+        )?;
         if let Some(routing) = config.routing {
             emit_line(
                 &mut out,
@@ -544,6 +551,7 @@ mod tests {
             rx_buffer_bytes: Some(5),
             tx_buffer_bytes: Some(6),
             port_bits_per_tick: Some(7),
+            internal_link_bits_per_tick: None,
             routing: Some(gwr_models::fabric::node::FabricRoutingAlgorithm::RowFirst),
             port_selection: None,
         };
@@ -595,6 +603,7 @@ mod tests {
             rx_buffer_bytes: None,
             tx_buffer_bytes: None,
             port_bits_per_tick: None,
+            internal_link_bits_per_tick: None,
             routing: None,
             port_selection: Some(FabricPortSelection::SourceIdModulo),
         };

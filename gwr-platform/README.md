@@ -118,3 +118,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 <!-- ANCHOR_END: overview -->
+
+## Internal routed-link bandwidth
+
+A routed fabric may declare `internal_link_bits_per_tick` independently of its
+external `port_bits_per_tick`. This will give every node-to-node connection an
+independent limiter in each direction. Streams sharing one directed link compete
+for that bandwidth; opposite directions and disjoint links can overlap. Omitting
+the setting provides only a node-to-node hop delay.
+
+```yaml
+config:
+  port_bits_per_tick: 65536
+  internal_link_bits_per_tick: 256
+```
+
+The rate must be positive and functional fabrics reject this setting. It does
+not change routing, external port rates, buffers, or hop delays. YAML output
+preserves explicit values and omits absent ones; `gen-fabric` continues to omit
+the setting by default.
+
+The limiter charges `ceil(total_packet_bytes * 8 / bits_per_tick)` ticks,
+including the packet type's declared overhead. It forwards before waiting for
+this rate limit interval and delays the upstream acknowledgement after
+downstream acceptance. The first packet can therefore arrive before the interval
+ends; subsequent traffic on the same link is spaced by that interval. This
+models throughput rather than waiting for physical serialization before
+delivery.
+
+Downstream stalls propagate back-pressure once the finite packet pipeline and
+configured ingress/egress byte buffers fill. Each positive hop delay allows at
+most `ticks_per_hop` pending packets plus one packet held by its output task.
+`ticks_per_hop` must be positive; zero-tick hops are rejected. Routers and
+arbiters also hold a finite number of packets while forwarding. These are
+packet-count pipeline limits, separate from the configured byte-buffer
+capacities.

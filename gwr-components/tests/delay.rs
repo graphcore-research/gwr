@@ -15,6 +15,53 @@ use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::SimObject;
 
 #[test]
+fn downstream_stall_bounds_in_flight_packets() {
+    const PACKETS: i32 = 32;
+    const RECEIVE_AFTER: u64 = 100;
+
+    for delay_ticks in [1, 4] {
+        let mut engine = Engine::default();
+        let clock = engine.default_clock();
+        let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", delay_ticks);
+        let mut tx = OutPort::new(engine.top(), "source");
+        tx.connect(delay.port_rx()).unwrap();
+        let mut rx = InPort::new(&engine, &clock, engine.top(), "sink");
+        delay.connect_port_tx(rx.state()).unwrap();
+
+        let acks = Rc::new(RefCell::new(Vec::new()));
+        let producer_acks = acks.clone();
+        let producer_clock = clock.clone();
+        engine.spawn(async move {
+            for value in 0..PACKETS {
+                tx.put(value)?.await;
+                producer_acks
+                    .borrow_mut()
+                    .push(producer_clock.tick_now().tick());
+            }
+            Ok(())
+        });
+        let receiver_clock = clock.clone();
+        engine.spawn(async move {
+            receiver_clock.wait_ticks(RECEIVE_AFTER)?.await;
+            for expected in 0..PACKETS {
+                assert_eq!(rx.get()?.await, expected);
+            }
+            Ok(())
+        });
+        engine.run().unwrap();
+
+        let acks = acks.borrow();
+        assert_eq!(acks.len(), PACKETS as usize);
+        let early_acks = acks.iter().filter(|&&tick| tick < RECEIVE_AFTER).count();
+        assert!(
+            early_acks <= delay_ticks + 1,
+            "delay {delay_ticks} accepted {early_acks} packets while its output was blocked",
+        );
+        assert!(acks.last().unwrap() >= &RECEIVE_AFTER);
+    }
+}
+
+#[test]
 fn put_get() {
     const NUM_PUTS: i32 = 100;
 
