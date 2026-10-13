@@ -76,7 +76,7 @@ name = "check links"
 description = "check validity of links in Markdown and HTML"
 language = "system"
 types_or = ["html", "markdown"]
-entry = "lychee ."
+entry = "sh -c 'lychee . || { sleep 20; lychee .; }'"
 pass_filenames = false
 priority = 5
 
