@@ -4,8 +4,8 @@ pub(crate) use gwr_engine::test_helpers::start_test;
 pub(crate) use gwr_platform::Platform;
 pub(crate) use gwr_platform::types::{
     CacheConfigSection, CacheSection, ConnectSection, FabricConfigSection, FabricKind,
-    FabricSection, MemoryConfigSection, MemoryDeviceSection, MemoryKind, MemoryMapSection,
-    MemorySection, PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
+    FabricSection, MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
+    PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
 };
 
 pub(crate) fn platform() -> PlatformConfig {
@@ -36,12 +36,7 @@ pub(crate) fn memory(name: &str, base_address: u64, capacity_bytes: u64) -> Memo
 pub(crate) fn memory_map(name: &str, devices: &[&str]) -> MemoryMapSection {
     MemoryMapSection {
         name: name.to_string(),
-        devices: devices
-            .iter()
-            .map(|name| MemoryDeviceSection {
-                name: (*name).to_string(),
-            })
-            .collect(),
+        devices: devices.iter().map(|name| (*name).to_string()).collect(),
     }
 }
 

@@ -29,7 +29,7 @@ pub(crate) fn create_default_timetable_file() -> (Rc<Entity>, Rc<Platform>, Time
 memory_maps:
   - name: default
     devices:
-      - name: hbm0
+      - hbm0
 
 processing_elements:
   - name: pe0

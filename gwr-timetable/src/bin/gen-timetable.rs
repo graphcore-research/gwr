@@ -1125,7 +1125,7 @@ mod tests {
             r"
 memory_maps:
   - name: default
-    devices: [{ name: hbm0 }]
+    devices: [hbm0]
 processing_elements:
   - name: pe0
     memory_map: default

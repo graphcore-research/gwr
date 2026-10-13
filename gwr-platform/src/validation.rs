@@ -84,17 +84,17 @@ impl PlatformConfig {
         for memory_map in &self.memory_maps {
             let mut devices = HashSet::new();
             for device in &memory_map.devices {
-                if lookup.memory(device.name.as_str()).is_none() {
+                if lookup.memory(device.as_str()).is_none() {
                     return sim_error!(
                         "Unknown memory '{}' in memory map '{}'",
-                        device.name,
+                        device,
                         memory_map.name
                     );
                 }
-                if !devices.insert(device.name.as_str()) {
+                if !devices.insert(device.as_str()) {
                     return sim_error!(
                         "Duplicate memory '{}' in memory map '{}'",
-                        device.name,
+                        device,
                         memory_map.name
                     );
                 }
@@ -128,7 +128,7 @@ impl PlatformConfig {
             let memory_map = lookup.memory_maps[pe.memory_map.as_str()];
             for device in &memory_map.devices {
                 let memory = lookup
-                    .memory(&device.name)
+                    .memory(device.as_str())
                     .expect("memory references are validated before LSU alignment");
                 // Whole blocks must fit within this region at both boundaries.
                 if !memory.base_address.is_multiple_of(access_bytes) {

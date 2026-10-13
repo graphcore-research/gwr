@@ -128,7 +128,7 @@ macro_rules! pe_mem_config {
 memory_maps:
   - name: mm0
     devices:
-      - name: hbm0
+      - hbm0
 
 processing_elements:
   - name: pe0
@@ -185,7 +185,7 @@ fn run_pe_fabric_mem(num_active_requests: usize) -> (Engine, Clock) {
 memory_maps:
   - name: mm0
     devices:
-      - name: hbm0
+      - hbm0
 
 processing_elements:
   - name: pe0
@@ -299,7 +299,7 @@ fn strided_platform(
 memory_maps:
   - name: mm0
     devices:
-      - name: hbm0
+      - hbm0
 
 processing_elements:
   - name: pe0
@@ -428,7 +428,7 @@ fn simple_pe_cache_mem() {
 memory_maps:
   - name: mm0
     devices:
-      - name: hbm0
+      - hbm0
 
 processing_elements:
   - name: pe0

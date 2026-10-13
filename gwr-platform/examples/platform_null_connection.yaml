@@ -4,7 +4,7 @@ memory_maps:
   # The default memory map for Processing Elements
   - name: pe_memory_map
     devices:
-      - name: hbm0
+      - hbm0
 
 fabrics:
   - name: fabric0

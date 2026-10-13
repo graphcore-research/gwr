@@ -108,7 +108,7 @@ fn processing_element_requires_a_dispatcher() {
 memory_maps:
   - name: mm0
     devices:
-      - name: hbm0
+      - hbm0
 processing_elements:
   - name: pe0
     memory_map: mm0
