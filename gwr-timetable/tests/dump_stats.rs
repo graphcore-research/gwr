@@ -99,4 +99,8 @@ edges:
         stdout.contains("loads 4 bytes, stores 2 bytes"),
         "stdout:\n{stdout}"
     );
+    assert!(
+        stdout.contains("Data: 4 bytes consumed, 2 bytes produced"),
+        "stdout:\n{stdout}"
+    );
 }

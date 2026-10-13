@@ -285,7 +285,12 @@ fn access_dispatcher(strided: bool) -> Rc<dyn Dispatch> {
     ))
 }
 
-fn strided_platform(engine: &Engine, clock: &Clock, sram_bytes: usize) -> Platform {
+fn strided_platform(
+    engine: &Engine,
+    clock: &Clock,
+    sram_bytes: usize,
+    lsu_access_bytes: usize,
+) -> Platform {
     Platform::from_string(
         engine,
         clock,
@@ -301,7 +306,7 @@ processing_elements:
     memory_map: mm0
     config:
       num_active_requests: 8
-      lsu_access_bytes: 1
+      lsu_access_bytes: {lsu_access_bytes}
       sram_bytes: {sram_bytes}
 
 memories:
@@ -327,10 +332,13 @@ fn strided_ranges_share_active_requests() {
     let run = |strided| {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
-        let platform = strided_platform(&engine, &clock, 8);
+        let platform = strided_platform(&engine, &clock, 8, 1);
         platform.attach_dispatcher(&access_dispatcher(strided));
 
         engine.run().unwrap();
+        let pe = platform.pe("pe0").unwrap();
+        assert_eq!(pe.bytes_consumed(), 8);
+        assert_eq!(pe.bytes_produced(), 0);
         clock.time_now_ns()
     };
 
@@ -338,10 +346,59 @@ fn strided_ranges_share_active_requests() {
 }
 
 #[test]
+fn lsu_services_full_access_chunks_for_partial_reads_and_writes() {
+    for (read_address, requested_read_bytes, serviced_read_bytes, write_address) in [
+        (0x1_0000_0000, 1, 32, 0x1_0000_0100),
+        (0x1_0000_0000, 33, 64, 0x1_0000_0100),
+        (0x4_ffff_ffff, 1, 32, 0x4_ffff_ffff),
+        (0x4_ffff_ffdf, 33, 64, 0x4_ffff_ffff),
+        (0x1_0000_001f, 2, 64, 0x1_0000_011f),
+        (0x1_0000_0001, 32, 64, 0x1_0000_0101),
+    ] {
+        let mut engine = start_test(file!());
+        let clock = engine.default_clock();
+        let platform = strided_platform(&engine, &clock, 64, 32);
+        let input = TensorView::new_full(
+            Tensor::new(&[requested_read_bytes], &DataType::Int8, read_address).unwrap(),
+        );
+        let output =
+            TensorView::new_full(Tensor::new(&[1], &DataType::Int8, write_address).unwrap());
+        let task = Task::ComputeTask {
+            config: ComputeTaskConfig {
+                id: "partial_transfer".to_string(),
+                op: ComputeOp::Custom(OperatorCustom {
+                    name: None,
+                    machine_ops: MachineOpCounts::default(),
+                }),
+                inputs: vec![Some(input)],
+                outputs: vec![Some(output)],
+            },
+        };
+        let dispatcher: Rc<dyn Dispatch> = Rc::new(TestDispatcher::new(
+            HashMap::from([(0, task)]),
+            HashMap::from([("pe0".to_string(), VecDeque::from([0]))]),
+        ));
+        platform.attach_dispatcher(&dispatcher);
+
+        let pe = platform.pe("pe0").unwrap();
+        assert_eq!(pe.bytes_consumed(), 0);
+        assert_eq!(pe.bytes_produced(), 0);
+
+        engine.run().unwrap();
+
+        let memory = platform.memory("hbm0").unwrap();
+        assert_eq!(memory.bytes_read(), serviced_read_bytes);
+        assert_eq!(memory.bytes_written(), 32);
+        assert_eq!(pe.bytes_consumed(), requested_read_bytes);
+        assert_eq!(pe.bytes_produced(), 1);
+    }
+}
+
+#[test]
 fn strided_partition_checks_the_complete_working_set() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
-    let platform = strided_platform(&engine, &clock, 1);
+    let platform = strided_platform(&engine, &clock, 1, 1);
     platform.attach_dispatcher(&access_dispatcher(true));
 
     let error = engine.run().unwrap_err();

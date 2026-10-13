@@ -102,6 +102,8 @@ pub struct ProcessingElementStatsDisplay {
     prefix: String,
     time_now_ns: f64,
     machine_ops: MachineOpCounts,
+    bytes_consumed: usize,
+    bytes_produced: usize,
 }
 
 impl ProcessingElementStatsDisplay {
@@ -111,7 +113,16 @@ impl ProcessingElementStatsDisplay {
             prefix: prefix.into(),
             time_now_ns,
             machine_ops,
+            bytes_consumed: 0,
+            bytes_produced: 0,
         }
+    }
+
+    #[must_use]
+    pub fn with_data(mut self, bytes_consumed: usize, bytes_produced: usize) -> Self {
+        self.bytes_consumed = bytes_consumed;
+        self.bytes_produced = bytes_produced;
+        self
     }
 }
 
@@ -133,10 +144,15 @@ impl Display for ProcessingElementStatsDisplay {
             f,
             "  FLOPs: {total_flops}, {total_gflops:.2} GFLOPs, {average_gflops_per_second:.2} GFLOP/s"
         )?;
-        write!(
+        writeln!(
             f,
             "  Machine ops: {} total, {} add, {} mul, {} compare",
             total_flops, self.machine_ops.adds, self.machine_ops.muls, self.machine_ops.compares
+        )?;
+        write!(
+            f,
+            "  Data: {} bytes consumed, {} bytes produced",
+            self.bytes_consumed, self.bytes_produced
         )
     }
 }
@@ -147,7 +163,7 @@ pub struct ProcessingElementConfig {
     /// The number of outstanding requests can the LSU handle at once
     pub num_active_requests: usize,
 
-    /// The maximum number of bytes in each memory access
+    /// The number of bytes fetched or written by each LSU memory access
     pub lsu_access_bytes: usize,
 
     /// The number of bytes of protocol overhead for each memory transaction
@@ -223,6 +239,8 @@ impl ComputeCapabilities {
 #[derive(Default)]
 struct ProcessingElementStats {
     machine_ops: MachineOpCounts,
+    bytes_consumed: usize,
+    bytes_produced: usize,
 }
 
 struct Lane {
@@ -431,6 +449,20 @@ impl ProcessingElement {
         self.stats.borrow().machine_ops
     }
 
+    /// Tensor bytes read by this PE, excluding any extra bytes fetched by
+    /// memory accesses.
+    #[must_use]
+    pub fn bytes_consumed(&self) -> usize {
+        self.stats.borrow().bytes_consumed
+    }
+
+    /// Tensor bytes written by this PE, excluding any extra bytes in memory
+    /// accesses.
+    #[must_use]
+    pub fn bytes_produced(&self) -> usize {
+        self.stats.borrow().bytes_produced
+    }
+
     pub fn dump_stats(&self, time_now_ns: f64) {
         let stats = self.stats.borrow();
         log_stats(
@@ -439,7 +471,8 @@ impl ProcessingElement {
                 format!("ProcessingElement {}", self.entity.full_name()),
                 time_now_ns,
                 stats.machine_ops,
-            ),
+            )
+            .with_data(stats.bytes_consumed, stats.bytes_produced),
         );
     }
 }
@@ -535,7 +568,8 @@ impl TaskRunner {
                 let Some(view) = view else {
                     continue;
                 };
-                self.lsu
+                let covered_bytes = self
+                    .lsu
                     .access_ranges(
                         AccessType::ReadRequest,
                         view.address_ranges(),
@@ -544,6 +578,14 @@ impl TaskRunner {
                         &group,
                     )
                     .await?;
+                let mut stats = self.stats.borrow_mut();
+                stats.bytes_consumed =
+                    stats
+                        .bytes_consumed
+                        .checked_add(covered_bytes)
+                        .ok_or_else(|| {
+                            SimError(format!("{} consumed byte count overflows", config.id))
+                        })?;
             }
 
             let compute_ticks = config.op.compute_delay_ticks(
@@ -585,7 +627,8 @@ impl TaskRunner {
                 let Some(view) = view else {
                     continue;
                 };
-                self.lsu
+                let covered_bytes = self
+                    .lsu
                     .access_ranges(
                         AccessType::WriteNonPostedRequest,
                         view.address_ranges(),
@@ -594,6 +637,14 @@ impl TaskRunner {
                         &group,
                     )
                     .await?;
+                let mut stats = self.stats.borrow_mut();
+                stats.bytes_produced =
+                    stats
+                        .bytes_produced
+                        .checked_add(covered_bytes)
+                        .ok_or_else(|| {
+                            SimError(format!("{} produced byte count overflows", config.id))
+                        })?;
             }
         }
 

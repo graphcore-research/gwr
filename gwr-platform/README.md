@@ -77,6 +77,11 @@ connections:
 # }
 ```
 
+Each memory in a processing element's memory map must have a base address and
+capacity that are multiples of that PE's `lsu_access_bytes` (32 by default).
+This keeps each aligned LSU access entirely within one mapped memory region.
+When PEs share a memory map, its memories must satisfy every PE's access size.
+
 Connect an unused fabric endpoint to `null` so its ingress and egress ports are
 deliberately left idle without causing an unconnected-port error when the
 simulator starts. For example: `connect: ['null', "fabric.fabric0@(11,16)"]`.

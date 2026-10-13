@@ -232,8 +232,8 @@ pub struct LoadStoreUnit {
     spawner: Spawner,
     clock: Clock,
 
-    /// Max bytes the LSU can request at once
-    max_access_size_bytes: usize,
+    /// Bytes requested by each LSU memory access.
+    access_size_bytes: usize,
 
     rx: RefCell<Option<InPort<MemoryAccess>>>,
     tx: RefCell<Option<OutPort<MemoryAccess>>>,
@@ -264,7 +264,7 @@ impl LoadStoreUnit {
         let rx = InPort::new_with_renames(engine, clock, &entity, "rx", aka);
 
         let num_active_requests = pe_config.num_active_requests;
-        let max_access_size_bytes = pe_config.lsu_access_bytes;
+        let access_size_bytes = pe_config.lsu_access_bytes;
         let overhead_size_bytes = pe_config.overhead_size_bytes;
         let mut requests = Vec::with_capacity(num_active_requests);
         for _ in 0..num_active_requests {
@@ -287,7 +287,7 @@ impl LoadStoreUnit {
             entity,
             spawner,
             clock: clock.clone(),
-            max_access_size_bytes,
+            access_size_bytes,
             rx: RefCell::new(Some(rx)),
             tx: RefCell::new(Some(tx)),
             state: Rc::new(state),
@@ -304,7 +304,8 @@ impl LoadStoreUnit {
         port_rx!(self.rx, state)
     }
 
-    /// Transfer a set of validated physical address ranges.
+    /// Transfer validated physical address ranges in aligned, fixed-size memory
+    /// accesses.
     pub(crate) async fn access_ranges(
         &self,
         access_type: AccessType,
@@ -312,8 +313,9 @@ impl LoadStoreUnit {
         activity_lanes: &Rc<RefCell<ActivityLanes>>,
         activity_name: &str,
         group: &Rc<EntityGroup>,
-    ) -> SimResult {
+    ) -> Result<usize, SimError> {
         let completion = Rc::new(TransferCompletion::new());
+        let mut total_covered_bytes = 0usize;
 
         // Ensure only one compute tensor transfer uses the LSU request issue
         // path at a time.
@@ -321,10 +323,13 @@ impl LoadStoreUnit {
         let mut activity_guard = None;
 
         for range in ranges {
-            let mut access_address = u64::try_from(range.start)
+            let mut tensor_address = u64::try_from(range.start)
                 .expect("tensor construction guarantees range starts fit in u64");
             let mut bytes_remaining = usize::try_from(range.end - range.start)
                 .expect("tensor construction guarantees range lengths fit in usize");
+            total_covered_bytes = total_covered_bytes
+                .checked_add(bytes_remaining)
+                .ok_or_else(|| SimError("LSU covered byte count overflows".to_string()))?;
 
             while bytes_remaining > 0 {
                 let request_slot_idx = self.state.allocate_request_slot().await;
@@ -338,10 +343,13 @@ impl LoadStoreUnit {
                     ));
                 }
 
-                let access_size_bytes = min(self.max_access_size_bytes, bytes_remaining);
+                let offset = (tensor_address % self.access_size_bytes as u64) as usize;
+                let access_address = tensor_address - offset as u64;
+                // Only the tensor bytes within this aligned block are covered.
+                let covered_bytes = min(self.access_size_bytes - offset, bytes_remaining);
                 let access = self.state.create_memory_access(
                     access_type,
-                    access_size_bytes,
+                    self.access_size_bytes,
                     access_address,
                     request_slot_idx,
                 )?;
@@ -362,10 +370,10 @@ impl LoadStoreUnit {
                     });
                 }
 
-                bytes_remaining -= access_size_bytes;
+                bytes_remaining -= covered_bytes;
                 if bytes_remaining != 0 {
-                    access_address = access_address
-                        .checked_add(access_size_bytes as u64)
+                    tensor_address = tensor_address
+                        .checked_add(covered_bytes as u64)
                         .expect("validated tensor access remains in the address space");
                 }
             }
@@ -377,7 +385,7 @@ impl LoadStoreUnit {
         completion.finish_issuing()?;
         completion.complete.listen().await;
 
-        Ok(())
+        Ok(total_covered_bytes)
     }
 }
 

@@ -61,3 +61,85 @@ fn rejects_overlapping_physical_memories() {
     assert!(error.contains("'hbm0' (0x0..=0x3ff)"));
     assert!(error.contains("'hbm1' (0x200..=0x5ff)"));
 }
+
+#[test]
+fn rejects_lsu_mappings_with_unaligned_bases() {
+    for (base, capacity, access_bytes) in [(1, 64, None), (25, 48, Some(24))] {
+        let mut pe = processing_element("pe0", "mm0");
+        pe.config.lsu_access_bytes = access_bytes;
+        let mut config = platform();
+        config.memory_maps = vec![memory_map("mm0", &["hbm0"])];
+        config.memories = Some(vec![memory("hbm0", base, capacity)]);
+        config.processing_elements = Some(vec![pe]);
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("Processing element 'pe0'"), "{error}");
+        assert!(error.contains("memory map 'mm0'"), "{error}");
+        assert!(error.contains("Memory 'hbm0': base address"), "{error}");
+        assert!(error.contains("LSU access size"), "{error}");
+    }
+}
+
+#[test]
+fn rejects_lsu_mappings_with_partial_final_blocks() {
+    for (base, capacity, access_bytes) in [(0, 33, None), (48, 25, Some(24))] {
+        let mut pe = processing_element("pe0", "mm0");
+        pe.config.lsu_access_bytes = access_bytes;
+        let mut config = platform();
+        config.memory_maps = vec![memory_map("mm0", &["hbm0"])];
+        config.memories = Some(vec![memory("hbm0", base, capacity)]);
+        config.processing_elements = Some(vec![pe]);
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("Memory 'hbm0': capacity"), "{error}");
+        assert!(error.contains("LSU access size"), "{error}");
+    }
+}
+
+#[test]
+fn accepts_lsu_mappings_containing_whole_blocks() {
+    for (base, capacity, access_bytes) in [
+        (0, 64, 32),
+        (24, 48, 24),
+        (u64::MAX - 31, 32, 32),
+        (u64::MAX, 1, 1),
+    ] {
+        let mut pe = processing_element("pe0", "mm0");
+        pe.config.lsu_access_bytes = Some(access_bytes);
+        let mut config = platform();
+        config.memory_maps = vec![memory_map("mm0", &["hbm0"])];
+        config.memories = Some(vec![memory("hbm0", base, capacity)]);
+        config.processing_elements = Some(vec![pe]);
+
+        config.validate().unwrap();
+    }
+}
+
+#[test]
+fn validates_lsu_alignment_for_every_pe_sharing_a_map() {
+    let mut small_pe = processing_element("small", "mm0");
+    small_pe.config.lsu_access_bytes = Some(16);
+    let mut large_pe = processing_element("large", "mm0");
+    large_pe.config.lsu_access_bytes = Some(32);
+    let mut config = platform();
+    config.memory_maps = vec![memory_map("mm0", &["hbm0"])];
+    config.memories = Some(vec![memory("hbm0", 16, 48)]);
+    config.processing_elements = Some(vec![small_pe, large_pe]);
+
+    let error = config.validate().unwrap_err().to_string();
+    assert!(error.contains("Processing element 'large'"), "{error}");
+    assert!(error.contains("LSU access size 32"), "{error}");
+}
+
+#[test]
+fn lsu_alignment_only_applies_to_memories_in_the_pe_map() {
+    let mut config = platform();
+    config.memory_maps = vec![
+        memory_map("mm0", &["hbm0"]),
+        memory_map("unused", &["other"]),
+    ];
+    config.memories = Some(vec![memory("hbm0", 0, 64), memory("other", 65, 1)]);
+    config.processing_elements = Some(vec![processing_element("pe0", "mm0")]);
+
+    config.validate().unwrap();
+}
