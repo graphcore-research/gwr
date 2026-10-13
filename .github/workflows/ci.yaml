@@ -78,7 +78,8 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: .lycheecache
-          key: lycheecache-${{ hashFiles('lychee.toml') }}
+          key: lycheecache-${{ hashFiles('lychee.toml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: lycheecache-${{ hashFiles('lychee.toml') }}-
       - uses: ./.github/actions/install-build-dependencies
       - uses: ./.github/actions/install-dev-dependencies
 
