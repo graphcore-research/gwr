@@ -24,14 +24,15 @@ use std::rc::Rc;
 
 use async_trait::async_trait;
 use gwr_components::delay::Delay;
-use gwr_components::{connect_dummy_rx, connect_dummy_tx, connect_port};
+use gwr_components::flow_controls::limiter::Limiter;
+use gwr_components::{connect_dummy_rx, connect_dummy_tx, connect_port, rc_limiter};
 use gwr_engine::engine::Engine;
 use gwr_engine::port::PortStateResult;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Routable, SimObject};
 use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet, Runnable};
-use gwr_track::entity::Entity;
+use gwr_track::entity::{Entity, GetEntity};
 use gwr_track::tracker::aka::{Aka, populate_aka_from_string};
 
 use crate::fabric::node::{FabricNode, FabricRoutingAlgorithm};
@@ -137,7 +138,8 @@ fn connect_columns<T>(
                 &format!("{c_m1}_{r}_to_{c}_{r}"),
                 delay_ticks,
             );
-            connect_port!(nodes[c_m1][r], col_plus => delay, rx)
+            nodes[c_m1][r]
+                .connect_port_col_plus(internal_link_ingress(engine, clock, entity, config, &delay))
                 .expect("Internal ports should connect without error");
             connect_port!(delay, tx => nodes[c][r], col_minus)
                 .expect("Internal ports should connect without error");
@@ -149,7 +151,10 @@ fn connect_columns<T>(
                 &format!("{c}_{r}_to_{c_m1}_{r}"),
                 delay_ticks,
             );
-            connect_port!(nodes[c][r], col_minus => delay, rx)
+            nodes[c][r]
+                .connect_port_col_minus(internal_link_ingress(
+                    engine, clock, entity, config, &delay,
+                ))
                 .expect("Internal ports should connect without error");
             connect_port!(delay, tx => nodes[c_m1][r], col_plus)
                 .expect("Internal ports should connect without error");
@@ -178,7 +183,8 @@ fn connect_rows<T>(
                 &format!("{c}_{r_m1}_to_{c}_{r}"),
                 delay_ticks,
             );
-            connect_port!(col[r_m1], row_plus => delay, rx)
+            col[r_m1]
+                .connect_port_row_plus(internal_link_ingress(engine, clock, entity, config, &delay))
                 .expect("Internal ports should connect without error");
             connect_port!(delay, tx => col[r], row_minus)
                 .expect("Internal ports should connect without error");
@@ -190,12 +196,41 @@ fn connect_rows<T>(
                 &format!("{c}_{r}_to_{c}_{r_m1}"),
                 delay_ticks,
             );
-            connect_port!(col[r], row_minus => delay, rx)
+            col[r]
+                .connect_port_row_minus(internal_link_ingress(
+                    engine, clock, entity, config, &delay,
+                ))
                 .expect("Internal ports should connect without error");
             connect_port!(delay, tx => col[r_m1], row_plus)
                 .expect("Internal ports should connect without error");
         }
     }
+}
+
+/// Keep the existing hop delay, optionally admitting packets through a
+/// separate bandwidth limiter for this directed edge.
+fn internal_link_ingress<T>(
+    engine: &Engine,
+    clock: &Clock,
+    entity: &Rc<Entity>,
+    config: &FabricConfig,
+    delay: &Delay<T>,
+) -> PortStateResult<T>
+where
+    T: SimObject,
+{
+    let Some(rate) = config.internal_link_bits_per_tick() else {
+        return delay.port_rx();
+    };
+    let limiter = Limiter::new_and_register(
+        engine,
+        clock,
+        entity,
+        &format!("{}_rate_limit", delay.entity().name),
+        rc_limiter!(clock, rate)?,
+    );
+    limiter.connect_port_tx(delay.port_rx())?;
+    limiter.port_rx()
 }
 
 /// Connect up the edge ports that will otherwise be left dangling

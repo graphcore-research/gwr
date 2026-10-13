@@ -165,6 +165,9 @@ pub struct FabricConfigSection {
     pub rx_buffer_bytes: Option<usize>,
     pub tx_buffer_bytes: Option<usize>,
     pub port_bits_per_tick: Option<usize>,
+    /// Independent bandwidth of each directed routed neighbor link; omitted
+    /// links retain their existing hop-delay-only behaviour.
+    pub internal_link_bits_per_tick: Option<usize>,
     pub routing: Option<FabricRoutingAlgorithm>,
     pub port_selection: Option<FabricPortSelection>,
 }

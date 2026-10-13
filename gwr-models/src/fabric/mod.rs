@@ -88,6 +88,9 @@ pub struct FabricConfig {
     /// Set the throughput limit on each port (in bits per tick)
     port_bits_per_tick: usize,
 
+    /// Optional bandwidth per directed routed neighbor link.
+    internal_link_bits_per_tick: Option<usize>,
+
     /// Number of populated ingress/egress ports.
     num_ports: usize,
 
@@ -120,7 +123,7 @@ pub struct FabricGeometry {
 /// Transfer timing and buffering for each fabric port.
 #[derive(Clone, Copy, Debug)]
 pub struct FabricPortConfig {
-    /// Ticks added for each routed hop.
+    /// Positive number of ticks added for each routed hop.
     pub ticks_per_hop: usize,
     /// Fixed ticks added to each transfer.
     pub ticks_overhead: usize,
@@ -183,6 +186,9 @@ impl FabricConfig {
             let noun = if num_ports == 1 { "port" } else { "ports" };
             return sim_error!("has {num_ports} populated {noun}; at least 2 are required");
         }
+        if ticks_per_hop == 0 {
+            return sim_error!("hop delay must be positive");
+        }
         if rx_buffer_bytes == 0 {
             return sim_error!("receive buffer size must be greater than zero");
         }
@@ -212,12 +218,34 @@ impl FabricConfig {
             rx_buffer_bytes,
             tx_buffer_bytes,
             port_bits_per_tick,
+            internal_link_bits_per_tick: None,
             num_ports,
             fabric_port_indices: OnceCell::new(),
             max_num_ports,
             destination_port_map,
             port_selection: FabricPortSelection::default(),
         })
+    }
+
+    /// Configure an independent data rate for each routed neighbor
+    /// direction. `Some` requires a positive rate. Functional fabric
+    /// rejects this option when the fabric is constructed.
+    pub fn with_internal_link_bits_per_tick(
+        mut self,
+        rate: Option<usize>,
+    ) -> Result<Self, SimError> {
+        if rate == Some(0) {
+            return sim_error!("internal link rate must be positive");
+        }
+        self.internal_link_bits_per_tick = rate;
+        Ok(self)
+    }
+
+    /// Return the caller-configured bits per tick for each internal direction.
+    /// This is independent of external port bandwidth.
+    #[must_use]
+    pub fn internal_link_bits_per_tick(&self) -> Option<usize> {
+        self.internal_link_bits_per_tick
     }
 
     #[must_use]
@@ -488,6 +516,31 @@ pub mod node;
 pub mod routed;
 
 #[test]
+fn zero_hop_delay_is_rejected() {
+    let result = FabricConfig::new(
+        FabricGeometry {
+            num_columns: 2,
+            num_rows: 1,
+            num_ports_per_node: 2,
+            ports_per_node_limit: None,
+        },
+        FabricPortConfig {
+            ticks_per_hop: 0,
+            ticks_overhead: 0,
+            rx_buffer_bytes: 64,
+            tx_buffer_bytes: 64,
+            port_bits_per_tick: 64,
+        },
+        HashMap::new(),
+    );
+    let error = match result {
+        Err(error) => error,
+        Ok(_) => panic!("zero-tick hop was accepted"),
+    };
+    assert!(error.to_string().contains("hop delay must be positive"));
+}
+
+#[test]
 fn port_index() {
     let config = FabricConfig::new(
         FabricGeometry {
@@ -539,7 +592,7 @@ fn counts_populated_ports_without_materialising_indices() {
             ports_per_node_limit: None,
         },
         FabricPortConfig {
-            ticks_per_hop: 0,
+            ticks_per_hop: 1,
             ticks_overhead: 0,
             rx_buffer_bytes: 1,
             tx_buffer_bytes: 1,
@@ -567,7 +620,7 @@ fn populated_port_indices_match_count_and_bounds() {
                             ports_per_node_limit,
                         },
                         FabricPortConfig {
-                            ticks_per_hop: 0,
+                            ticks_per_hop: 1,
                             ticks_overhead: 0,
                             rx_buffer_bytes: 1,
                             tx_buffer_bytes: 1,

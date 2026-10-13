@@ -400,7 +400,8 @@ impl FabricConfigSection {
             },
             destination_port_map,
         )?
-        .with_port_selection(self.port_selection.unwrap_or(DEFAULT_FABRIC_PORT_SELECTION));
+        .with_port_selection(self.port_selection.unwrap_or(DEFAULT_FABRIC_PORT_SELECTION))
+        .with_internal_link_bits_per_tick(self.internal_link_bits_per_tick)?;
         Ok((config, self.routing.unwrap_or(DEFAULT_FABRIC_ROUTING)))
     }
 }
@@ -410,6 +411,14 @@ impl FabricSection {
         &self,
         destination_port_map: FabricDestinationPortMap,
     ) -> Result<(FabricConfig, FabricRoutingAlgorithm), SimError> {
+        if self.config.internal_link_bits_per_tick.is_some()
+            && matches!(&self.kind, FabricKind::Functional)
+        {
+            return Err(SimError(format!(
+                "Fabric '{}': internal link rate limit requires routed fabric",
+                self.name
+            )));
+        }
         self.config
             .model_config(self.columns, self.rows, destination_port_map)
             .map_err(|error| SimError(format!("Fabric '{}': {error}", self.name)))
