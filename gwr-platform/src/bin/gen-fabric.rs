@@ -367,6 +367,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let platform = build_platform(&args)?;
     let yaml = platform_to_yaml_str(&platform)?;
+    if let Some(parent) = args.out.parent() {
+        fs::create_dir_all(parent)?;
+    }
     fs::write(&args.out, yaml)?;
 
     Ok(())
