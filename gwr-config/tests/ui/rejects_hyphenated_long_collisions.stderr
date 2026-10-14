@@ -1,0 +1,17 @@
+error[E0080]: evaluation panicked: conf_file_flag `--settings` conflicts with an existing long option or reserved --help
+ --> tests/ui/rejects_hyphenated_long_collisions.rs:5:1
+  |
+5 | #[multi_source_config(conf_file_flag = "settings")]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed here
+
+error[E0080]: evaluation panicked: conf_file_flag `--settings` conflicts with an existing long option or reserved --help
+  --> tests/ui/rejects_hyphenated_long_collisions.rs:11:1
+   |
+11 | #[multi_source_config(conf_file_flag = "--settings")]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed here
+
+error[E0080]: evaluation panicked: conf_file_flag `--settings` conflicts with an existing long option or reserved --help
+  --> tests/ui/rejects_hyphenated_long_collisions.rs:23:1
+   |
+23 | #[multi_source_config(conf_file_flag = "settings")]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed here
