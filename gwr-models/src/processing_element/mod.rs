@@ -606,7 +606,7 @@ impl TaskRunner {
                 // Lanes cannot support overlapping activity. Wait until the
                 // end of the current tick so a lane released during it can be
                 // reused.
-                self.clock.wait_phase(phase::END).await;
+                self.clock.wait_phase(phase::END)?.await;
 
                 let _activity = ActivityLanes::begin_in_group(
                     &self.activity_lanes.compute,

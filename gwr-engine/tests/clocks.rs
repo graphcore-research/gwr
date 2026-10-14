@@ -4,8 +4,11 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use futures::{FutureExt, select};
+use gwr_engine::events::once::Once;
+use gwr_engine::events::repeated::Repeated;
 use gwr_engine::test_helpers::start_test;
-use gwr_engine::traits::{Resolve, Resolver};
+use gwr_engine::time::clock::phase;
+use gwr_engine::traits::{Event, Resolve, Resolver};
 
 /// Test that runs different clocks that add to a shared vector and then checks
 /// that everything has been done in the correct order and at the right times.
@@ -188,4 +191,232 @@ fn cancelled_wait_ticks_does_not_leave_stale_schedule() {
 
     engine.run().unwrap();
     assert_eq!(engine.time_now_ns(), 10.0);
+}
+
+/// Test waiting ticks after an event from another clock, including events
+/// between ticks.
+#[test]
+fn wait_ticks_after_event_from_another_clock() {
+    let fast_freq_mhz = 1000.0;
+    let slow_freq_mhz = 500.0;
+
+    for (fast_clock_ticks, slow_clock_ticks, expected_time_ns) in &[
+        // Advance to a slow clock tick and then trigger the event.
+        (10, 1, 12.0),
+        // Advance to a point between slow clock ticks and then trigger the event.
+        (9, 1, 10.0),
+        (9, 2, 12.0),
+    ] {
+        let mut engine = start_test("clocks");
+        let fast = engine.clock_mhz(fast_freq_mhz);
+        let slow = engine.clock_mhz(slow_freq_mhz);
+        let once = Once::default();
+
+        {
+            let once = once.clone();
+            engine.spawn(async move {
+                fast.wait_ticks(*fast_clock_ticks)?.await;
+                once.notify()?;
+                Ok(())
+            });
+        }
+
+        engine.spawn(async move {
+            once.listen().await;
+            slow.wait_ticks(*slow_clock_ticks)?.await;
+            Ok(())
+        });
+
+        engine.run().unwrap();
+        assert_eq!(engine.time_now_ns(), *expected_time_ns);
+    }
+}
+
+/// Test waiting for a phase after an event from another clock, including events
+/// between ticks.
+#[test]
+fn wait_phase_after_event_from_another_clock() {
+    for requested_phase in [phase::BEGIN, phase::END] {
+        let mut engine = start_test("clocks");
+        let fast = engine.clock_mhz(1000.0);
+        let slow = engine.clock_mhz(500.0);
+        let event = Once::default();
+        let observed = Rc::new(Cell::new(None));
+
+        {
+            let event = event.clone();
+            engine.spawn(async move {
+                fast.wait_ticks(9)?.await;
+                event.notify()?;
+                Ok(())
+            });
+        }
+
+        {
+            let observed = observed.clone();
+            engine.spawn(async move {
+                event.listen().await;
+                slow.wait_phase(requested_phase)?.await;
+
+                let now = slow.tick_now();
+                observed.set(Some((now.tick(), now.phase())));
+                Ok(())
+            });
+        }
+
+        engine.run().unwrap();
+
+        assert_eq!(observed.get(), Some((5, requested_phase)));
+        assert_eq!(engine.time_now_ns(), 10.0);
+    }
+}
+
+/// Test to ensure that resolves are handled when time is advanced by via
+/// another clock.
+#[test]
+fn pending_updates_resolve_after_event_from_another_clock() {
+    let fast_freq_mhz = 1000.0;
+    let slow_freq_mhz = 500.0;
+
+    for (fast_ticks_before, fast_ticks_after, expected_time_ns) in
+        &[(0, 1, 1.0), (0, 2, 2.0), (1, 2, 3.0)]
+    {
+        let mut engine = start_test("clocks");
+        let fast = engine.clock_mhz(fast_freq_mhz);
+        let slow = engine.clock_mhz(slow_freq_mhz);
+        let event = Repeated::default();
+        let state = Rc::new(PendingUpdate::new(0));
+        let receiver_completed = Rc::new(Cell::new(false));
+
+        // Ensure the first event listener is created before any notifications
+        // are sent.
+        let first_event = event.listen();
+
+        {
+            let event = event.clone();
+            engine.spawn(async move {
+                fast.wait_ticks(*fast_ticks_before)?.await;
+                event.notify();
+
+                fast.wait_ticks(*fast_ticks_after)?.await;
+                event.notify();
+                Ok(())
+            });
+        }
+
+        {
+            let receiver_completed = receiver_completed.clone();
+            engine.spawn(async move {
+                first_event.await;
+                state.queue(&slow, 1, state.clone());
+                assert_eq!(state.value.get(), 0);
+
+                event.listen().await;
+                assert_eq!(state.value.get(), 1);
+
+                receiver_completed.set(true);
+                Ok(())
+            });
+        }
+
+        engine.run().unwrap();
+        assert_eq!(engine.time_now_ns(), *expected_time_ns);
+        assert!(receiver_completed.get());
+    }
+}
+
+/// Test that pending updates are resolved before the simulation exits.
+#[test]
+fn pending_resolves_complete_before_simulation_exits() {
+    let mut engine = start_test("clocks");
+    let state = Rc::new(PendingUpdate::new(0));
+
+    {
+        let clock = engine.default_clock();
+        let state = state.clone();
+        engine.spawn(async move {
+            state.queue(&clock, 1, state.clone());
+            assert_eq!(state.value.get(), 0);
+            Ok(())
+        });
+    }
+
+    engine.run().unwrap();
+
+    assert_eq!(state.value.get(), 1);
+    assert_eq!(engine.time_now_ns(), 0.0);
+}
+
+/// Test that pending updates are resolved after the end phase.
+#[test]
+fn pending_updates_resolve_after_end_phase() {
+    use gwr_engine::time::clock::phase;
+
+    let mut engine = start_test("clocks");
+    let state = Rc::new(PendingUpdate::new(0));
+    let value_at_end = Rc::new(Cell::new(None));
+
+    {
+        let clock = engine.default_clock();
+        let state = state.clone();
+        let value_at_end = value_at_end.clone();
+
+        engine.spawn(async move {
+            clock.wait_ticks(1)?.await;
+            state.queue(&clock, 1, state.clone());
+
+            clock.wait_phase(phase::END)?.await;
+            assert_eq!(clock.tick_now().phase(), phase::END);
+            value_at_end.set(Some(state.value.get()));
+            Ok(())
+        });
+    }
+
+    engine.run().unwrap();
+
+    assert_eq!(value_at_end.get(), Some(0));
+    assert_eq!(state.value.get(), 1);
+    assert_eq!(engine.time_now_ns(), 1.0);
+}
+
+#[derive(Default)]
+struct CountingResolve {
+    calls: Cell<u64>,
+}
+
+impl Resolve for CountingResolve {
+    fn resolve(&self) {
+        self.calls.set(self.calls.get() + 1);
+    }
+}
+
+/// Test that confirms resolves run only once per registration.
+#[test]
+fn resolves_run_once_per_registration() {
+    let mut engine = start_test("clocks");
+    let first = Rc::new(CountingResolve::default());
+    let second = Rc::new(CountingResolve::default());
+
+    {
+        let clock = engine.default_clock();
+        let first = first.clone();
+        let second = second.clone();
+
+        engine.spawn(async move {
+            clock.add_resolve(first.clone());
+            clock.add_resolve(second.clone());
+
+            clock.wait_ticks(1)?.await;
+            assert_eq!((first.calls.get(), second.calls.get()), (1, 1));
+
+            // Register another update in tick 1.
+            clock.add_resolve(first.clone());
+            Ok(())
+        });
+    }
+
+    engine.run().unwrap();
+
+    assert_eq!((first.calls.get(), second.calls.get()), (2, 1));
+    assert_eq!(engine.time_now_ns(), 1.0);
 }

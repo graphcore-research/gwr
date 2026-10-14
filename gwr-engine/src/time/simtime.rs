@@ -4,13 +4,14 @@
 //!
 //! Time is made up of a tick count and a phase.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use gwr_track::entity::Entity;
 use gwr_track::set_time;
 
 use super::clock::Clock;
-use crate::time::clock::TaskWaker;
+use crate::time::clock::{SimInstant, TaskWaker};
 
 /// The overall owner of time within a simulation.
 ///
@@ -19,7 +20,7 @@ use crate::time::clock::TaskWaker;
 pub struct SimTime {
     entity: Rc<Entity>,
 
-    current_ns: f64,
+    now: Rc<RefCell<SimInstant>>,
 
     /// Clocks are auto-created as required and kept in a HashMap.
     ///
@@ -33,7 +34,7 @@ impl SimTime {
     pub fn new(parent: &Rc<Entity>) -> Self {
         Self {
             entity: Rc::new(Entity::new(parent, "time")),
-            current_ns: 0.0,
+            now: Rc::new(RefCell::new(SimInstant::default())),
             clocks: Vec::new(),
         }
     }
@@ -44,7 +45,7 @@ impl SimTime {
                 return clock.clone();
             }
         }
-        let clock = Clock::new(freq_mhz);
+        let clock = Clock::new_with_sim_instant(freq_mhz, self.now.clone());
         self.clocks.push(clock.clone());
         clock
     }
@@ -52,11 +53,34 @@ impl SimTime {
     /// Choose the clock with the next time and return the associated Waker.
     pub fn advance_time(&mut self) -> Option<Vec<TaskWaker>> {
         if let Some(next_clock) = self.clocks.iter().min_by(|a, b| a.cmp(b)) {
-            if let Some(clock_time) = next_clock.shared_state.waiting_times.borrow_mut().pop() {
+            let clock_time = next_clock
+                .shared_state
+                .waiting_times
+                .borrow()
+                .last()
+                .copied();
+            if let Some(clock_time) = clock_time {
                 let next_ns = next_clock.to_ns(&clock_time);
-                if self.current_ns != next_ns {
-                    set_time!(self.entity ; next_ns);
-                    self.current_ns = next_ns;
+                {
+                    let now = self.now.borrow();
+                    assert!(next_ns >= now.ns, "Simulation time went backwards");
+                    assert!(
+                        next_ns != now.ns || clock_time.phase() >= now.phase,
+                        "Simulation phase went backwards at {next_ns} ns: {} -> {}",
+                        now.phase,
+                        clock_time.phase()
+                    );
+                }
+
+                let _ = next_clock.shared_state.waiting_times.borrow_mut().pop();
+
+                {
+                    let mut now = self.now.borrow_mut();
+                    if now.ns != next_ns {
+                        set_time!(self.entity ; next_ns);
+                        now.ns = next_ns;
+                    }
+                    now.phase = clock_time.phase();
                 }
                 next_clock.advance_time(clock_time);
                 next_clock.shared_state.waiting.borrow_mut().pop()
@@ -70,13 +94,16 @@ impl SimTime {
 
     #[must_use]
     pub fn time_now_ns(&self) -> f64 {
-        self.current_ns
+        self.now.borrow().ns
     }
 
     /// The simulation can exit if all scheduled tasks can exit.
     #[must_use]
     pub fn can_exit(&self) -> bool {
         for clock in &self.clocks {
+            if !clock.shared_state.to_resolve.borrow().is_empty() {
+                return false;
+            }
             for waiting in clock.shared_state.waiting.borrow().iter() {
                 for task_waker in waiting {
                     if !task_waker.can_exit {
