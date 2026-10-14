@@ -173,4 +173,32 @@ mod tests {
         assert_eq!(clock_2ghz.tick_now().tick(), 4);
         assert!(time.advance_time().is_none());
     }
+
+    #[test]
+    fn advance_time_returns_waiters_in_deadline_order_regardless_of_insertion_order_or_removals() {
+        let tracker = create_tracker(file!());
+        let top = toplevel(&tracker, "top");
+        let mut time = SimTime::new(&top);
+        let clock = time.get_clock(1000.0);
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let mut delays = Vec::new();
+
+        // Exercise inserts before, between and after existing deadlines,
+        // including multiple waiters at the earliest and latest deadlines.
+        for ticks in [31, 1, 16, 7, 31, 1, 8, 2, 30, 9] {
+            let mut delay = clock.wait_ticks(ticks).unwrap();
+            assert_eq!(Pin::new(&mut delay).poll(&mut cx), Poll::Pending);
+            delays.push(delay);
+        }
+        drop(delays.remove(2)); // Remove the only waiter at tick 16.
+        drop(delays.remove(0)); // Remove one waiter at tick 31.
+
+        for (ticks, count) in [(1, 2), (2, 1), (7, 1), (8, 1), (9, 1), (30, 1), (31, 1)] {
+            let wakers = time.advance_time().unwrap();
+            assert_eq!(clock.tick_now().tick(), ticks);
+            assert_eq!(wakers.len(), count);
+        }
+        assert!(time.advance_time().is_none());
+    }
 }

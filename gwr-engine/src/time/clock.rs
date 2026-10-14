@@ -127,7 +127,7 @@ pub struct ClockState {
     pub waiting: RefCell<Vec<Vec<TaskWaker>>>,
 
     /// Queue of times at which those futures are to be woken. This is kept
-    /// sorted by time so that the first entry is the next to be woken.
+    /// sorted by time so that the last entry is the next to be woken.
     pub waiting_times: RefCell<Vec<ClockTick>>,
 
     /// Registered [`Resolve`] functions.
@@ -141,37 +141,18 @@ impl ClockState {
 
         let mut waiting_times = self.waiting_times.borrow_mut();
         let mut waiting = self.waiting.borrow_mut();
-        if let Some(index) = waiting_times.iter().position(|&x| x == schedule_time) {
-            // Time already exists, add this task
-            waiting[index].push(TaskWaker {
-                id: waiter_id,
-                waker: cx.waker().clone(),
-                can_exit,
-            });
-        } else {
-            // Time not found, insert at the correct location
-            match waiting_times.iter().position(|x| *x < schedule_time) {
-                Some(index) => {
-                    // Insert at an arbitrary index
-                    waiting_times.insert(index, schedule_time);
-                    waiting.insert(
-                        index,
-                        vec![TaskWaker {
-                            id: waiter_id,
-                            waker: cx.waker().clone(),
-                            can_exit,
-                        }],
-                    );
-                }
-                None => {
-                    // Insert at the head
-                    waiting_times.push(schedule_time);
-                    waiting.push(vec![TaskWaker {
-                        id: waiter_id,
-                        waker: cx.waker().clone(),
-                        can_exit,
-                    }]);
-                }
+        let task_waker = TaskWaker {
+            id: waiter_id,
+            waker: cx.waker().clone(),
+            can_exit,
+        };
+        // Deadlines are descending so the earliest bucket can be popped fron
+        // the back.
+        match waiting_times.binary_search_by(|time| schedule_time.cmp(time)) {
+            Ok(index) => waiting[index].push(task_waker),
+            Err(index) => {
+                waiting_times.insert(index, schedule_time);
+                waiting.insert(index, vec![task_waker]);
             }
         }
 
@@ -182,7 +163,7 @@ impl ClockState {
         let mut waiting_times = self.waiting_times.borrow_mut();
         let mut waiting = self.waiting.borrow_mut();
 
-        if let Some(time_index) = waiting_times.iter().position(|&x| x == schedule_time)
+        if let Ok(time_index) = waiting_times.binary_search_by(|time| schedule_time.cmp(time))
             && let Some(waiter_index) = waiting[time_index].iter().position(|w| w.id == waiter_id)
         {
             waiting[time_index].remove(waiter_index);
