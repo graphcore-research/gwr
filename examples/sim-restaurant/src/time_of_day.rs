@@ -3,7 +3,9 @@
 use std::fmt;
 use std::str::FromStr;
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
 pub struct TimeOfDay {
     seconds_since_midnight: u64,
 }
@@ -49,6 +51,13 @@ impl fmt::Display for TimeOfDay {
     }
 }
 
+// Keep configuration diagnostics and gwr-config's default help in HH:MM form.
+impl fmt::Debug for TimeOfDay {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
 impl FromStr for TimeOfDay {
     type Err = String;
 
@@ -77,5 +86,25 @@ impl FromStr for TimeOfDay {
         }
 
         Ok(Self::from_hm(hour, minute))
+    }
+}
+
+impl Serialize for TimeOfDay {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for TimeOfDay {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(serde::de::Error::custom)
     }
 }
