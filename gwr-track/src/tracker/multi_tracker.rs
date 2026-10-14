@@ -22,7 +22,8 @@ impl MultiTracker {
 impl Default for MultiTracker {
     fn default() -> Self {
         Self {
-            // Create a local entity_manager that will just be used for handling IDs
+            // Create a local entity_manager that will just be used for handling
+            // IDs
             entity_manager: EntityManager::new(log::Level::Error),
             trackers: Vec::new(),
         }
