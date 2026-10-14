@@ -2,7 +2,7 @@
 
 use gwr_config::multi_source_config;
 
-#[multi_source_config(conf_file)]
+#[multi_source_config(default_conf_file)]
 #[derive(Debug)]
 struct Config {
     /// First

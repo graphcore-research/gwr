@@ -1,8 +1,8 @@
 error: expected `=`
  --> tests/ui/multi_source_config_rejects_missing_equals.rs:5:1
   |
-5 | #[multi_source_config(conf_file)]
-  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+5 | #[multi_source_config(default_conf_file)]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   |
   = note: this error originates in the attribute macro `multi_source_config` (in Nightly builds, run with -Z macro-backtrace for more info)
 
