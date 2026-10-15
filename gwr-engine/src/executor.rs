@@ -1,5 +1,43 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
+//! Single-threaded task polling and waker ownership.
+//!
+//! Spawning puts an `Rc<Task>` in `new_tasks`. Each executor step moves those
+//! handles into a caller-owned task buffer, drains it, and polls each task
+//! once. Moving a handle does not change its reference count. After polling,
+//! the local handle is dropped; a pending task must be kept alive by another
+//! owner, usually a waker saved by a clock or event registration. Pending tasks
+//! are not retained in a separate executor queue.
+//!
+//! The borrowed/owned distinction applies to wakers; both refer to the same
+//! heap-allocated task. There are two raw-waker representations:
+//!
+//! - The polling context uses `BORROWED_VTABLE`. Its data points to the local
+//!   `Rc<Task>` handle, not directly to the task. `waker_for_task` returns a
+//!   `WakerRef` whose lifetime is tied to that handle's borrow, preventing safe
+//!   code from retaining this representation after the handle goes away.
+//!   `ManuallyDrop` suppresses destruction of the temporary waker. Constructing
+//!   this context therefore needs no extra reference-count increment/decrement.
+//! - Cloning the context waker clones the borrowed `Rc` and passes that new
+//!   owner through `Rc::into_raw`. The result uses `VTABLE`, points directly to
+//!   the task, and owns one strong reference. It can outlive the poll. Further
+//!   clones each acquire another reference; dropping an owned waker releases
+//!   its reference. Consuming it with `wake()` transfers its reference into
+//!   `new_tasks`, ready for another poll, without cloning the task handle.
+//!
+//! The lifetimes enforce the borrowed context's scope, but choosing the correct
+//! data pointer and vtable is an unsafe-code invariant: only owned-waker
+//! callbacks may reconstruct an `Rc<Task>` with `Rc::from_raw`, and their input
+//! must originate from `Rc::into_raw`. A borrowed pointer cannot be treated as
+//! an owned reference merely by suppressing its destructor. Both vtables keep
+//! the existing no-op `wake_by_ref` behavior; requeuing requires consuming an
+//! owned waker with `wake()`.
+//!
+//! Completion removes the future from the task, so a later queued wake cannot
+//! poll it again. The task is destroyed when its last strong reference is
+//! released. These task references are separate from `Rc<ExecutorState>`, which
+//! keeps the shared executor state alive.
+
 use std::cell::{Cell, RefCell};
 use std::future::Future;
 use std::pin::Pin;
@@ -11,6 +49,7 @@ use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use std::time::Duration;
 use std::{mem, thread};
 
+use futures::task::WakerRef;
 use gwr_track::entity::Entity;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -29,25 +68,31 @@ unsafe fn drop_task(data: *const ()) {
 }
 
 static VTABLE: RawWakerVTable = RawWakerVTable::new(clone_raw_waker, wake_task, no_op, drop_task);
+static BORROWED_VTABLE: RawWakerVTable =
+    RawWakerVTable::new(clone_borrowed_waker, no_op, no_op, no_op);
 
-fn task_raw_waker(task: Rc<Task>) -> RawWaker {
-    let ptr = Rc::into_raw(task) as *const ();
-    RawWaker::new(ptr, &VTABLE)
+fn waker_for_task(task: &Rc<Task>) -> WakerRef<'_> {
+    let raw = RawWaker::new(std::ptr::from_ref(task).cast(), &BORROWED_VTABLE);
+    // SAFETY: the data points to the Rc handle, which remains borrowed for the
+    // lifetime of the returned WakerRef. Cloning produces an owned waker with
+    // its own Rc reference and vtable. Wake-by-reference remains a no-op.
+    let waker = mem::ManuallyDrop::new(unsafe { Waker::from_raw(raw) });
+    WakerRef::new_unowned(waker)
 }
 
-fn waker_for_task(task: Rc<Task>) -> Waker {
-    unsafe { Waker::from_raw(task_raw_waker(task)) }
+unsafe fn clone_borrowed_waker(data: *const ()) -> RawWaker {
+    // SAFETY: only BORROWED_VTABLE calls this function, and its data points to
+    // the live Rc handle borrowed by waker_for_task.
+    let task = unsafe { &*data.cast::<Rc<Task>>() };
+    RawWaker::new(Rc::into_raw(task.clone()).cast(), &VTABLE)
 }
 
 unsafe fn clone_raw_waker(data: *const ()) -> RawWaker {
     unsafe {
-        // Tasks are always wrapped in a reference counter to allow them to be
-        // shared read-only. The input `data` pointer is borrowed — we must not
-        // decrement its refcount, so we mem::forget the reconstructed Rc rather
-        // than letting it drop.
-        let rc_task = Rc::from_raw(data as *const Task);
-        let clone = rc_task.clone();
-        mem::forget(rc_task);
+        // SAFETY: VTABLE is used only for owned pointers from Rc::into_raw.
+        // Keep the original reference owned by the source waker.
+        let rc_task = mem::ManuallyDrop::new(Rc::from_raw(data as *const Task));
+        let clone = Rc::clone(&rc_task);
         let ptr = Rc::into_raw(clone) as *const ();
         RawWaker::new(ptr, &VTABLE)
     }
@@ -111,7 +156,6 @@ pub struct ExecutorSnapshot {
 }
 
 struct ExecutorState {
-    task_queue: RefCell<Vec<Rc<Task>>>,
     new_tasks: RefCell<Vec<Rc<Task>>>,
     time: RefCell<SimTime>,
     randomize_task_order: Cell<bool>,
@@ -122,7 +166,6 @@ struct ExecutorState {
 impl ExecutorState {
     pub fn new(top: &Rc<Entity>) -> Self {
         Self {
-            task_queue: RefCell::new(Vec::new()),
             new_tasks: RefCell::new(Vec::new()),
             time: RefCell::new(SimTime::new(top)),
             randomize_task_order: Cell::new(false),
@@ -190,9 +233,14 @@ impl Executor {
         mut observer: impl FnMut(ExecutorSnapshot) -> SimResult,
     ) -> SimResult {
         let mut stats = ExecutorStats::default();
+
+        // Reuse the polling buffer across steps. Start with room for 100 tasks
+        // to avoid allocating for typical batches; larger batches grow it.
+        let mut task_queue = Vec::with_capacity(100);
+
         let result = (|| {
             loop {
-                self.step(&mut stats)?;
+                self.step(&mut task_queue, &mut stats)?;
 
                 if refresh_due.is_some_and(|due| {
                     due.load(Ordering::Relaxed) && due.swap(false, Ordering::Relaxed)
@@ -224,19 +272,22 @@ impl Executor {
         result
     }
 
-    fn step(&self, stats: &mut ExecutorStats) -> SimResult {
+    // Run a simulation step.
+    //
+    // The caller passes in task_queue as scratch buffer so its allocation can
+    // be reused by each call to step. It is fully drained before step
+    // completes unless there is an error.
+    fn step(&self, task_queue: &mut Vec<Rc<Task>>, stats: &mut ExecutorStats) -> SimResult {
         // Append new tasks created since the last step into the task queue
-        let mut task_queue = self.state.task_queue.borrow_mut();
         task_queue.append(&mut self.state.new_tasks.borrow_mut());
         if self.state.randomize_task_order.get() {
             task_queue.shuffle(&mut *self.state.task_order_rng.borrow_mut());
         }
 
-        // Loop over all tasks, polling them. If a task is not ready, add it to
-        // the pending tasks.
+        // Poll each queued task once. Pending tasks must arrange to be queued
+        // again through a saved waker; they are not retained here.
         for task in task_queue.drain(..) {
-            // Dummy waker and context (not used as we poll all tasks)
-            let waker = waker_for_task(task.clone());
+            let waker = waker_for_task(&task);
             let mut context = Context::from_waker(&waker);
 
             if let Some(poll_result) = task.poll(&mut context) {
@@ -323,6 +374,12 @@ mod tests {
     use super::*;
     use crate::time::clock::TaskWaker;
 
+    fn new_executor(top: &Rc<Entity>) -> Executor {
+        Executor {
+            state: Rc::new(ExecutorState::new(top)),
+        }
+    }
+
     struct PendingOnce {
         was_polled: bool,
     }
@@ -343,10 +400,141 @@ mod tests {
     }
 
     #[test]
+    fn poll_context_does_not_hold_an_extra_task_reference() {
+        let tracker = dev_null_tracker();
+        let top = toplevel(&tracker, "top");
+        let executor = new_executor(&top);
+        let observed_references = Rc::new(Cell::new(0));
+        let task: Rc<Task> = Rc::new_cyclic(|weak| {
+            let weak = weak.clone();
+            let observed = observed_references.clone();
+            Task::new(
+                async move {
+                    observed.set(weak.strong_count());
+                    Ok(())
+                },
+                executor.state.clone(),
+            )
+        });
+        executor.state.new_tasks.borrow_mut().push(task.clone());
+
+        let mut task_queue = Vec::new();
+        executor
+            .step(&mut task_queue, &mut ExecutorStats::default())
+            .unwrap();
+
+        // The test handle and the executor's task handle
+        assert_eq!(observed_references.get(), 2);
+        assert_eq!(Rc::strong_count(&task), 1);
+    }
+
+    #[test]
+    fn cloned_context_waker_keeps_task_alive_after_poll() {
+        let tracker = dev_null_tracker();
+        let top = toplevel(&tracker, "top");
+        let executor = new_executor(&top);
+        let saved_waker = Rc::new(RefCell::new(None));
+        let saved = saved_waker.clone();
+        let mut was_polled = false;
+        let future = std::future::poll_fn(move |cx| {
+            if was_polled {
+                Poll::Ready(Ok(()))
+            } else {
+                was_polled = true;
+                *saved.borrow_mut() = Some(cx.waker().clone());
+                Poll::Pending
+            }
+        });
+        let task = Rc::new(Task::new(future, executor.state.clone()));
+        let weak = Rc::downgrade(&task);
+        executor.state.new_tasks.borrow_mut().push(task);
+        let mut stats = ExecutorStats::default();
+        let mut task_queue = Vec::new();
+
+        executor.step(&mut task_queue, &mut stats).unwrap();
+        assert_eq!(weak.strong_count(), 1);
+        assert!(executor.state.new_tasks.borrow().is_empty());
+
+        saved_waker.borrow_mut().take().unwrap().wake();
+        assert_eq!(executor.state.new_tasks.borrow().len(), 1);
+        executor.step(&mut task_queue, &mut stats).unwrap();
+
+        assert_eq!(weak.strong_count(), 0);
+        assert_eq!(stats.futures_polled, 2);
+        assert_eq!(stats.futures_completed, 1);
+    }
+
+    #[test]
+    fn owned_waker_clone_survives_borrowed_context_and_original_waker() {
+        let tracker = dev_null_tracker();
+        let top = toplevel(&tracker, "top");
+        let executor = new_executor(&top);
+        let task = Rc::new(Task::new(async { Ok(()) }, executor.state.clone()));
+        let weak = Rc::downgrade(&task);
+        let owned = {
+            let borrowed = waker_for_task(&task);
+            Waker::clone(&borrowed)
+        };
+        drop(task);
+
+        let cloned = owned.clone();
+        assert_eq!(weak.strong_count(), 2);
+        drop(owned);
+        assert_eq!(weak.strong_count(), 1);
+
+        cloned.wake();
+        assert_eq!(executor.state.new_tasks.borrow().len(), 1);
+        let mut task_queue = Vec::new();
+        executor
+            .step(&mut task_queue, &mut ExecutorStats::default())
+            .unwrap();
+        assert_eq!(weak.strong_count(), 0);
+    }
+
+    #[test]
+    fn waking_with_a_borrowed_queue_releases_the_consumed_waker() {
+        let tracker = dev_null_tracker();
+        let top = toplevel(&tracker, "top");
+        let executor = new_executor(&top);
+        let task = Rc::new(Task::new(async { Ok(()) }, executor.state.clone()));
+        let weak = Rc::downgrade(&task);
+        let waker = Waker::clone(&waker_for_task(&task));
+        drop(task);
+        let queue = executor.state.new_tasks.borrow_mut();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()));
+
+        assert!(result.is_err());
+        assert!(queue.is_empty());
+        assert_eq!(weak.strong_count(), 0);
+    }
+
+    #[test]
+    fn poll_panic_does_not_consume_the_callers_task_reference() {
+        let tracker = dev_null_tracker();
+        let top = toplevel(&tracker, "top");
+        let executor = new_executor(&top);
+        let task = Rc::new(Task::new(
+            async { panic!("poll failed") },
+            executor.state.clone(),
+        ));
+        executor.state.new_tasks.borrow_mut().push(task.clone());
+        let mut task_queue = Vec::new();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            executor.step(&mut task_queue, &mut ExecutorStats::default())
+        }));
+
+        assert!(result.is_err());
+        assert!(task_queue.is_empty());
+        assert_eq!(Rc::strong_count(&task), 1);
+    }
+
+    #[test]
     fn run_exits_when_time_cannot_advance() {
         let tracker = dev_null_tracker();
         let top = toplevel(&tracker, "top");
-        let (executor, _spawner) = new_executor_and_spawner(&top);
+        let executor = new_executor(&top);
         let clock = executor.get_clock(1000.0);
 
         clock
@@ -520,7 +708,7 @@ mod tests {
     fn executor_observer_rejects_a_zero_wall_clock_interval() {
         let tracker = dev_null_tracker();
         let top = toplevel(&tracker, "top");
-        let (executor, _spawner) = new_executor_and_spawner(&top);
+        let executor = new_executor(&top);
         let error = executor
             .run_with_observer(Duration::ZERO, |_| Ok(()))
             .unwrap_err();
