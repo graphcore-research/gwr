@@ -134,16 +134,20 @@ fn full_sweep_words() {
     assert_eq!(cache.payload_bytes_read(), num_reads * LINE_SIZE_BYTES);
     assert_eq!(cache.payload_bytes_written(), 0);
 
-    // Will sweep cache so every address accessed should miss at most once
-    let cache_lines_accessed = min(
-        (num_reads * stride_bytes).div_ceil(LINE_SIZE_BYTES),
-        NUM_SETS * NUM_WAYS,
+    // Each 32B parent starts 4B after the previous one and may span two
+    // lines. Joining a pending line fill counts as a parent miss without
+    // issuing another fill.
+    let physical = cache.traffic_snapshot();
+    // The last unaligned read touches the next line beyond the swept region;
+    // that line evicts the first line, which is filled again after wrapping.
+    assert_eq!(physical.fill_requests, NUM_SETS * NUM_WAYS + 2);
+    assert!(physical.coalesced_lines > 0);
+    assert_eq!(cache.num_hits() + cache.num_misses(), num_reads);
+    assert_eq!(
+        physical.fill_requests * LINE_SIZE_BYTES,
+        memory.bytes_read()
     );
-    assert_eq!(cache.num_misses(), cache_lines_accessed);
-    assert_eq!(cache.num_hits(), num_reads - cache_lines_accessed);
-
-    // Every cache line needs to be filled from memory
-    assert_eq!(memory.bytes_read(), cache_lines_accessed * LINE_SIZE_BYTES);
+    assert_eq!(physical.downstream_read_bytes, memory.bytes_read());
     assert_eq!(memory.bytes_written(), 0);
 
     assert_eq!(
