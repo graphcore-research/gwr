@@ -101,7 +101,7 @@ in order to guarantee that any completing activities have been processed first:
 let clock = engine.clock_ghz(1.0);
 # let spawner = engine.spawner();
 # spawner.spawn(async move {
-clock.wait_phase(phase::END).await;
+clock.wait_phase(phase::END)?.await;
 // Begin activity that should be ordered after same-tick completions.
 # Ok(())
 # });

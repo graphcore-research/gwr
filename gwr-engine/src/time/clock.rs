@@ -18,7 +18,25 @@ use crate::types::{SimError, SimResult};
 
 pub mod phase {
     pub const BEGIN: u32 = 0;
-    pub const END: u32 = u32::MAX;
+    pub const END: u32 = u32::MAX - 2;
+    /// Phase reserved for handling pending resolves.
+    pub(crate) const RESOLVE: u32 = u32::MAX - 1;
+    /// Between tick edges: all phases of the current tick have passed.
+    pub(crate) const NONE: u32 = u32::MAX;
+}
+
+pub struct SimInstant {
+    pub ns: f64,
+    pub phase: u32,
+}
+
+impl Default for SimInstant {
+    fn default() -> Self {
+        Self {
+            ns: 0.0,
+            phase: phase::BEGIN,
+        }
+    }
 }
 
 /// ClockTick structure for representing a number of Clock ticks and a phase.
@@ -97,10 +115,6 @@ impl std::fmt::Display for ClockTick {
 /// State representing a clock.
 #[derive(Clone)]
 pub struct Clock {
-    /// Frequency of the clock in MHz.
-    /// *Note*: Should never be changed as it is registered at this frequency.
-    freq_mhz: f64,
-
     pub shared_state: Rc<ClockState>,
 }
 
@@ -119,6 +133,12 @@ pub struct TaskWaker {
 
 /// Shared state between futures using a Clock and the Clock itself.
 pub struct ClockState {
+    /// Frequency of the clock in MHz.
+    /// *Note*: Should never be changed as it is registered at this frequency.
+    freq_mhz: f64,
+
+    sim_instant: Option<Rc<RefCell<SimInstant>>>,
+
     now: RefCell<ClockTick>,
 
     next_waiter_id: Cell<u64>,
@@ -135,47 +155,47 @@ pub struct ClockState {
 }
 
 impl ClockState {
+    fn add_resolve(&self, resolve: Rc<dyn Resolve + 'static>) {
+        self.to_resolve.borrow_mut().push(resolve);
+        if self.to_resolve.borrow().len() == 1 {
+            let schedule_time = self
+                .deadline_for_phase(phase::RESOLVE)
+                .expect("simulation clock cannot represent the required resolve deadline");
+
+            self.ensure_scheduled_time(schedule_time);
+        }
+    }
+
     fn schedule(&self, schedule_time: ClockTick, cx: &mut Context<'_>, can_exit: bool) -> u64 {
+        let waker = cx.waker().clone();
         let waiter_id = self.next_waiter_id.get();
         self.next_waiter_id.set(waiter_id + 1);
 
-        let mut waiting_times = self.waiting_times.borrow_mut();
-        let mut waiting = self.waiting.borrow_mut();
-        if let Some(index) = waiting_times.iter().position(|&x| x == schedule_time) {
-            // Time already exists, add this task
-            waiting[index].push(TaskWaker {
-                id: waiter_id,
-                waker: cx.waker().clone(),
-                can_exit,
-            });
-        } else {
-            // Time not found, insert at the correct location
-            match waiting_times.iter().position(|x| *x < schedule_time) {
-                Some(index) => {
-                    // Insert at an arbitrary index
-                    waiting_times.insert(index, schedule_time);
-                    waiting.insert(
-                        index,
-                        vec![TaskWaker {
-                            id: waiter_id,
-                            waker: cx.waker().clone(),
-                            can_exit,
-                        }],
-                    );
-                }
-                None => {
-                    // Insert at the head
-                    waiting_times.push(schedule_time);
-                    waiting.push(vec![TaskWaker {
-                        id: waiter_id,
-                        waker: cx.waker().clone(),
-                        can_exit,
-                    }]);
-                }
-            }
-        }
+        let index = self.ensure_scheduled_time(schedule_time);
+        self.waiting.borrow_mut()[index].push(TaskWaker {
+            id: waiter_id,
+            waker,
+            can_exit,
+        });
 
         waiter_id
+    }
+
+    fn ensure_scheduled_time(&self, schedule_time: ClockTick) -> usize {
+        let mut waiting_times = self.waiting_times.borrow_mut();
+        let mut waiting = self.waiting.borrow_mut();
+        if let Some(index) = waiting_times.iter().position(|&time| time == schedule_time) {
+            return index;
+        }
+
+        let index = waiting_times
+            .iter()
+            .position(|&time| time < schedule_time)
+            .unwrap_or(waiting_times.len());
+
+        waiting_times.insert(index, schedule_time);
+        waiting.insert(index, Vec::new());
+        index
     }
 
     fn unschedule(&self, schedule_time: ClockTick, waiter_id: u64) {
@@ -193,11 +213,31 @@ impl ClockState {
         }
     }
 
-    fn advance_time(&self, to_time: ClockTick) {
-        self.resolve();
+    fn assert_not_past_next_event(&self, to_time: ClockTick) {
+        if let Some(next_time) = self.waiting_times.borrow().last() {
+            assert!(
+                to_time <= *next_time,
+                "Clock cannot advance past its next scheduled event: requested {to_time}, next event {next_time}"
+            );
+        }
+    }
 
+    fn advance_time(&self, to_time: ClockTick) {
         assert!(to_time >= *self.now.borrow(), "Time moving backwards");
+        if let Some(sim_instant) = &self.sim_instant {
+            let sim_instant = sim_instant.borrow();
+            assert_eq!(
+                (self.tick_to_ns(to_time.tick), to_time.phase),
+                (sim_instant.ns, sim_instant.phase),
+                "Clock advancement must match the current simulation time and phase"
+            );
+        }
+        self.assert_not_past_next_event(to_time);
         *self.now.borrow_mut() = to_time;
+
+        if to_time.phase() == phase::RESOLVE {
+            self.resolve();
+        }
     }
 
     fn resolve(&self) {
@@ -205,13 +245,108 @@ impl ClockState {
             r.resolve();
         }
     }
+
+    fn deadline_for_phase(&self, phase: u32) -> Result<ClockTick, SimError> {
+        let mut until = self.synchronize();
+
+        if until.phase == phase::NONE {
+            // When between ticks, wait for the next tick
+            until.tick = until
+                .tick
+                .checked_add(1)
+                .ok_or_else(|| SimError("clock wait phase overflows".into()))?;
+        } else if phase < until.phase {
+            return Err(SimError(
+                "phase is before the current phase within the tick".into(),
+            ));
+        }
+
+        until.phase = phase;
+        Ok(until)
+    }
+
+    fn tick_to_ns(&self, tick: u64) -> f64 {
+        tick as f64 / self.freq_mhz * 1000.0
+    }
+
+    fn synchronize(&self) -> ClockTick {
+        let now = *self.now.borrow();
+        let Some(sim_instant) = &self.sim_instant else {
+            self.assert_not_past_next_event(now);
+            return now;
+        };
+
+        let sim_instant = sim_instant.borrow();
+
+        if self.tick_to_ns(now.tick) == sim_instant.ns {
+            let synchronized = ClockTick {
+                phase: sim_instant.phase,
+                ..now
+            };
+            self.assert_not_past_next_event(synchronized);
+            *self.now.borrow_mut() = synchronized;
+            return synchronized;
+        }
+
+        let tick_estimate = sim_instant.ns * self.freq_mhz / 1000.0;
+        assert!(
+            tick_estimate.is_finite() && (0.0..u64::MAX as f64).contains(&tick_estimate),
+            "simulation clock cannot represent the current tick"
+        );
+
+        let mut tick = tick_estimate as u64;
+        while tick > 0 && self.tick_to_ns(tick) > sim_instant.ns {
+            tick -= 1;
+        }
+        while tick < u64::MAX && self.tick_to_ns(tick + 1) <= sim_instant.ns {
+            tick += 1;
+        }
+
+        // A pending event identifies an exact tick when f64 timestamps alias.
+        if let Some(next_time) = self.waiting_times.borrow().last()
+            && self.tick_to_ns(next_time.tick) == sim_instant.ns
+        {
+            tick = tick.min(next_time.tick);
+        }
+
+        assert!(
+            now.tick <= tick,
+            "Clock is ahead of the simulation. Clock tick: {}, Simulation tick: {}",
+            now.tick,
+            tick
+        );
+
+        let synchronized = ClockTick {
+            tick,
+            phase: if self.tick_to_ns(tick) == sim_instant.ns {
+                sim_instant.phase
+            } else {
+                phase::NONE
+            },
+        };
+        self.assert_not_past_next_event(synchronized);
+        *self.now.borrow_mut() = synchronized;
+
+        synchronized
+    }
 }
 
 impl Clock {
     /// Create a new [Clock] at the specified frequency.
     #[must_use]
     pub fn new(freq_mhz: f64) -> Self {
+        Self::new_impl(freq_mhz, None)
+    }
+
+    #[must_use]
+    pub fn new_with_sim_instant(freq_mhz: f64, sim_instant: Rc<RefCell<SimInstant>>) -> Self {
+        Self::new_impl(freq_mhz, Some(sim_instant))
+    }
+
+    fn new_impl(freq_mhz: f64, sim_instant: Option<Rc<RefCell<SimInstant>>>) -> Self {
         let shared_state = Rc::new(ClockState {
+            freq_mhz,
+            sim_instant,
             now: RefCell::new(ClockTick {
                 tick: 0,
                 phase: phase::BEGIN,
@@ -222,13 +357,10 @@ impl Clock {
             to_resolve: RefCell::new(Vec::new()),
         });
 
-        Self {
-            freq_mhz,
-            shared_state,
-        }
+        Self { shared_state }
     }
 
-    /// Advance the time on this clock
+    /// Advance the time on this clock.
     pub fn advance_time(&self, to_time: ClockTick) {
         self.shared_state.advance_time(to_time);
     }
@@ -236,20 +368,22 @@ impl Clock {
     /// Returns the clocks frequency in MHz.
     #[must_use]
     pub fn freq_mhz(&self) -> f64 {
-        self.freq_mhz
+        self.shared_state.freq_mhz
     }
 
     /// Returns the current [ClockTick].
     #[must_use]
     pub fn tick_now(&self) -> ClockTick {
-        *self.shared_state.now.borrow()
+        self.shared_state.synchronize()
     }
 
     /// Returns the current time in `ns`.
     #[must_use]
     pub fn time_now_ns(&self) -> f64 {
-        let now = *self.shared_state.now.borrow();
-        self.to_ns(&now)
+        match &self.shared_state.sim_instant {
+            Some(sim_instant) => sim_instant.borrow().ns,
+            None => self.to_ns(&self.shared_state.now.borrow()),
+        }
     }
 
     /// Returns the time in `ns` of the next event registered with this clock.
@@ -273,7 +407,7 @@ impl Clock {
     /// Convert the given [ClockTick] to a time in `ns` for this clock.
     #[must_use]
     pub fn to_ns(&self, clock_time: &ClockTick) -> f64 {
-        clock_time.tick as f64 / self.freq_mhz * 1000.0
+        self.shared_state.tick_to_ns(clock_time.tick)
     }
 
     /// Returns a [ClockDelay] future which must be `await`ed to delay the
@@ -310,32 +444,39 @@ impl Clock {
 
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
     pub fn next_tick_and_phase(&self, phase: u32) -> Result<ClockDelay, SimError> {
+        if !(phase::BEGIN..=phase::END).contains(&phase) {
+            return Err(SimError("invalid phase".into()));
+        }
+
         let mut delay = self.wait_ticks(1)?;
         delay.until.phase = phase;
         Ok(delay)
     }
 
     #[must_use = "Futures do nothing unless you `.await` or otherwise use them"]
-    pub fn wait_phase(&self, phase: u32) -> ClockDelay {
-        let mut until = self.tick_now();
-        assert!(phase >= until.phase, "Time going backwards");
-        until.phase = phase;
-        ClockDelay {
+    pub fn wait_phase(&self, phase: u32) -> Result<ClockDelay, SimError> {
+        if !(phase::BEGIN..=phase::END).contains(&phase) {
+            return Err(SimError("invalid phase".into()));
+        }
+
+        let until = self.shared_state.deadline_for_phase(phase)?;
+        Ok(ClockDelay {
             shared_state: self.shared_state.clone(),
             until,
             can_exit: false,
             waiter_id: None,
             done: false,
-        }
+        })
     }
 
     /// Advance to the next tick after the specified time, rejecting
     /// unrepresentable durations and tick overflow.
     pub fn advance_to(&self, time_ns: f64) -> SimResult {
-        let now_ns = self.time_now_ns();
+        let now = self.shared_state.synchronize();
+        let now_ns = self.to_ns(&now);
         assert!(now_ns < time_ns);
         let diff_ns = time_ns - now_ns;
-        let ticks = (diff_ns * (self.freq_mhz / 1000.0)).ceil();
+        let ticks = (diff_ns * (self.shared_state.freq_mhz / 1000.0)).ceil();
         // u64::MAX rounds up to 2^64 as f64, so the upper bound is exclusive.
         if !ticks.is_finite() || !(0.0..u64::MAX as f64).contains(&ticks) {
             return Err(SimError(
@@ -343,7 +484,7 @@ impl Clock {
             ));
         }
 
-        let mut until = self.tick_now();
+        let mut until = now;
         until.tick = until
             .tick
             .checked_add(ticks as u64)
@@ -386,7 +527,7 @@ impl PartialOrd for Clock {
 
 impl Resolver for Clock {
     fn add_resolve(&self, resolve: Rc<dyn Resolve + 'static>) {
-        self.shared_state.to_resolve.borrow_mut().push(resolve);
+        self.shared_state.add_resolve(resolve);
     }
 }
 
@@ -406,7 +547,9 @@ impl Future for ClockDelay {
             return Poll::Ready(());
         }
 
-        if self.until > *self.shared_state.now.borrow() {
+        let now = self.shared_state.synchronize();
+
+        if self.until > now {
             if let Some(waiter_id) = self.waiter_id {
                 self.shared_state.unschedule(self.until, waiter_id);
             }
@@ -645,16 +788,64 @@ mod tests {
         assert_eq!(next_tick.until.tick(), 1);
         assert_eq!(next_tick.until.phase(), 3);
 
-        let same_tick = clock.wait_phase(1);
+        let same_tick = clock.wait_phase(1).unwrap();
         assert_eq!(same_tick.until.tick(), 0);
         assert_eq!(same_tick.until.phase(), 1);
+    }
+
+    #[test]
+    fn wait_phase_between_ticks_targets_next_tick() {
+        for (requested_phase, expected_at_begin) in
+            [(phase::BEGIN, Poll::Ready(())), (phase::END, Poll::Pending)]
+        {
+            let clock = Clock::new(500.0);
+            clock.advance_time(ClockTick::new().set_tick(4).set_phase(phase::NONE));
+            let mut delay = clock.wait_phase(requested_phase).unwrap();
+            let waker = noop_waker();
+            let mut cx = Context::from_waker(&waker);
+
+            assert_eq!(Pin::new(&mut delay).poll(&mut cx), Poll::Pending);
+
+            clock.advance_time(ClockTick::new().set_tick(5));
+            assert_eq!(Pin::new(&mut delay).poll(&mut cx), expected_at_begin);
+
+            if expected_at_begin.is_pending() {
+                clock.advance_time(ClockTick::new().set_tick(5).set_phase(phase::END));
+                assert_eq!(Pin::new(&mut delay).poll(&mut cx), Poll::Ready(()));
+            }
+        }
+    }
+
+    struct CountingResolve(Cell<u64>);
+
+    impl Resolve for CountingResolve {
+        fn resolve(&self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+
+    #[test]
+    fn resolve_between_ticks_is_scheduled_for_next_tick() {
+        let clock = Clock::new(500.0);
+        clock.advance_time(ClockTick::new().set_tick(4).set_phase(phase::NONE));
+        let resolve = Rc::new(CountingResolve(Cell::new(0)));
+        clock.add_resolve(resolve.clone());
+
+        assert_eq!(clock.time_of_next(), 10.0);
+        assert_eq!(clock.phase_of_next(), phase::RESOLVE);
+
+        clock.advance_time(ClockTick::new().set_tick(5).set_phase(phase::END));
+        assert_eq!(resolve.0.get(), 0);
+
+        clock.advance_time(ClockTick::new().set_tick(5).set_phase(phase::RESOLVE));
+        assert_eq!(resolve.0.get(), 1);
     }
 
     #[test]
     fn tick_waits_resume_in_end_phase() {
         let clock = Clock::new(1000.0);
 
-        let begin = clock.wait_phase(phase::END);
+        let begin = clock.wait_phase(phase::END).unwrap();
         assert_eq!(begin.until.tick(), 0);
         assert_eq!(begin.until.phase(), phase::END);
 
