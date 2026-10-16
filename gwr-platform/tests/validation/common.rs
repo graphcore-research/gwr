@@ -62,6 +62,8 @@ pub(crate) fn cache(name: &str) -> CacheSection {
         config: CacheConfigSection {
             bw_bytes_per_tick: None,
             line_size_bytes: None,
+            max_inflight_parents: None,
+            max_inflight_fills: None,
             num_ways: None,
             num_sets: None,
             delay_ticks: None,

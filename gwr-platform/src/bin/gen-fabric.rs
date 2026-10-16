@@ -218,6 +218,8 @@ fn build_cache(
         config: CacheConfigSection {
             bw_bytes_per_tick: Some(bytes_per_tick),
             line_size_bytes: Some(DEFAULT_CACHE_LINE_SIZE_BYTES),
+            max_inflight_parents: None,
+            max_inflight_fills: None,
             num_ways: Some(num_ways),
             num_sets: Some(num_sets),
             delay_ticks: Some(latency),
