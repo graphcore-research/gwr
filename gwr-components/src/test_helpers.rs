@@ -230,6 +230,147 @@ impl std::fmt::Display for StepLocation {
     }
 }
 
+/// Receive and check a value, retaining the packet for dependent steps.
+#[doc(hidden)]
+pub async fn expect_value<T, E>(
+    receiver: &mut InPort<T>,
+    expected: &E,
+    location: &str,
+) -> Result<T, gwr_engine::types::SimError>
+where
+    T: SimObject,
+    E: ValueCheck<T>,
+{
+    let actual = receiver.get()?.await;
+    expected.assert_matches(location, &actual);
+    Ok(actual)
+}
+
+/// A cloneable script factory. Each execution creates a fresh future and
+/// locals.
+#[doc(hidden)]
+pub struct HarnessScript<P> {
+    run: Rc<dyn Fn(P) -> HarnessScriptFuture<P>>,
+}
+
+#[doc(hidden)]
+pub type HarnessScriptFuture<P> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<P, gwr_engine::types::SimError>>>>;
+
+impl<P> HarnessScript<P> {
+    pub fn new<F, Fut>(run: F) -> Self
+    where
+        F: FnOnce(P) -> Fut + Clone + 'static,
+        Fut: std::future::Future<Output = Result<P, gwr_engine::types::SimError>> + 'static,
+    {
+        Self {
+            run: Rc::new(move |ports| Box::pin(run.clone()(ports))),
+        }
+    }
+
+    pub fn run(&self, ports: P) -> HarnessScriptFuture<P> {
+        (self.run)(ports)
+    }
+}
+
+impl<P> Clone for HarnessScript<P> {
+    fn clone(&self) -> Self {
+        Self {
+            run: self.run.clone(),
+        }
+    }
+}
+
+impl<P> std::fmt::Debug for HarnessScript<P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HarnessScript")
+    }
+}
+
+// Only the capture list is parsed. Rust owns the entire async body.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __define_harness_script {
+    (($d:tt);
+        [$($scalar_variant:ident => $scalar_field:ident),* $(,)?];
+        [$($array_variant:ident => $array_field:ident),* $(,)?]
+    ) => {
+        #[allow(unused_macros)]
+        macro_rules! script {
+            (ports { $d($d binding:ident = $d variant:ident $d([$d index:expr])?),* $d(,)? }
+                async $d body:block
+            ) => {{
+                let selected_ports: Vec<Port> = vec![
+                    $d(script_port!(@select $d variant $d([$d index])?)),*
+                ];
+                Step::script(
+                    selected_ports.clone(),
+                    step_location!(),
+                    move |mut runner_ports| async move {
+                        #[allow(unused_mut, unused_variables)]
+                        let mut selectors = selected_ports.iter().copied();
+                        $d(
+                            #[allow(unused_mut, unused_variables)]
+                            let mut $d binding = script_port!(
+                                @take runner_ports; $d variant, selectors.next().unwrap()
+                            );
+                        )*
+                        let result: gwr_engine::types::SimResult = (async $d body).await;
+                        #[allow(unused_mut, unused_variables)]
+                        let mut selectors = selected_ports.iter().copied();
+                        $d(script_port!(
+                            @return runner_ports; $d variant, selectors.next().unwrap(), $d binding
+                        );)*
+                        result?;
+                        Ok(runner_ports)
+                    },
+                )
+            }};
+        }
+
+        #[allow(unused_macros)]
+        macro_rules! script_port {
+            $(
+                (@select $scalar_variant) => { Port::$scalar_variant };
+                (@take $d ports:ident; $scalar_variant, $d selector:expr) => {{
+                    let _ = $d selector;
+                    $d ports.$scalar_field.take()
+                        .expect(concat!(stringify!($scalar_variant), " port already taken"))
+                }};
+                (@return $d ports:ident; $scalar_variant, $d selector:expr, $d value:expr) => {{
+                    let _ = $d selector;
+                    $d ports.$scalar_field = Some($d value);
+                }};
+            )*
+            $(
+                (@select $array_variant [$d index:expr]) => { Port::$array_variant($d index) };
+                (@take $d ports:ident; $array_variant, $d selector:expr) => {{
+                    let Port::$array_variant(index) = $d selector else { unreachable!() };
+                    $d ports.$array_field.get_mut(index).and_then(Option::take)
+                        .expect(concat!(stringify!($array_variant), " index out of range or port already taken"))
+                }};
+                (@return $d ports:ident; $array_variant, $d selector:expr, $d value:expr) => {{
+                    let Port::$array_variant(index) = $d selector else { unreachable!() };
+                    $d ports.$array_field[index] = Some($d value);
+                }};
+            )*
+        }
+
+        #[allow(unused_macros)]
+        macro_rules! seq {
+            ($d steps:expr $d(,)?) => {
+                Step::Seq {
+                    location: step_location!(),
+                    steps: $d steps.into_iter().collect(),
+                }
+            };
+            ($d($d step:expr);+ $d(;)?) => {
+                seq!([$d($d step),+])
+            };
+        }
+    };
+}
+
 /// Build a simulation test harness around a component.
 ///
 /// This macro generates the harness struct, local `Port`/`Step` enums, helper
@@ -850,7 +991,13 @@ macro_rules! build_component_harness {
             }
 
             #[derive(Clone, Debug)]
-            $vis enum Step<$item_ty, $expected_ident = ()> {
+            #[must_use = "harness steps must be executed with run_steps, seq!, or par!"]
+            $vis enum Step<$item_ty, $expected_ident = ()> $($step_where)* {
+                Script {
+                    location: $crate::test_helpers::StepLocation,
+                    ports: Vec<Port>,
+                    script: $crate::test_helpers::HarnessScript<[<$harness Ports>]<$item_ty>>,
+                },
                 Seq {
                     location: $crate::test_helpers::StepLocation,
                     steps: Vec<Step<$item_ty, $expected_ty>>,
@@ -905,10 +1052,32 @@ macro_rules! build_component_harness {
                 __Expected(std::marker::PhantomData<fn() -> $expected_ident>),
             }
 
-            impl<$item_ty, $expected_ident> Step<$item_ty, $expected_ident> {
+            impl<$item_ty, $expected_ident> Step<$item_ty, $expected_ident> $($step_where)* {
+                fn script<F, Fut>(
+                    ports: Vec<Port>,
+                    location: $crate::test_helpers::StepLocation,
+                    run: F,
+                ) -> Self
+                where
+                    F: FnOnce([<$harness Ports>]<$item_ty>) -> Fut
+                        + Clone + 'static,
+                    Fut: std::future::Future<Output = Result<[<$harness Ports>]<$item_ty>, gwr_engine::types::SimError>> + 'static,
+                {
+                    let mut unique_ports = std::collections::HashSet::new();
+                    for port in &ports {
+                        assert!(unique_ports.insert(*port), "{location}: {port:?} captured more than once");
+                    }
+                    Self::Script {
+                        location,
+                        ports,
+                        script: $crate::test_helpers::HarnessScript::new(run),
+                    }
+                }
+
                 fn location(&self) -> $crate::test_helpers::StepLocation {
                     match self {
-                        Step::Seq { location, .. }
+                        Step::Script { location, .. }
+                        | Step::Seq { location, .. }
                         | Step::Par { location, .. }
                         $(| Step::[<Send $rx_variant>] { location, .. })*
                         $(| Step::[<ExpectPendingSend $rx_variant>] { location, .. })*
@@ -925,7 +1094,8 @@ macro_rules! build_component_harness {
                 }
             }
 
-            struct [<$harness Ports>]<$item_ty> $($step_where)* {
+            #[doc(hidden)]
+            $vis struct [<$harness Ports>]<$item_ty> $($step_where)* {
                 $(
                     [<$rx_field _driver>]: Option<gwr_engine::port::OutPort<$rx_ty>>,
                 )*
@@ -1091,7 +1261,8 @@ macro_rules! build_component_harness {
                             ports.insert(*port);
                         }
                         )*
-                        Step::<$item_ty, $expected_ty>::ExpectNoTraffic { ports: step_ports, .. } => {
+                        Step::<$item_ty, $expected_ty>::Script { ports: step_ports, .. }
+                        | Step::<$item_ty, $expected_ty>::ExpectNoTraffic { ports: step_ports, .. } => {
                             ports.extend(step_ports.iter().copied());
                         }
                         Step::<$item_ty, $expected_ty>::Delay { ports: step_ports, .. } => {
@@ -1121,6 +1292,9 @@ macro_rules! build_component_harness {
                         for step in steps {
                             let location = step.location().to_string();
                             match step {
+                                Step::<$item_ty, $expected_ty>::Script { script, .. } => {
+                                    self = script.run(self).await?;
+                                }
                                 Step::<$item_ty, $expected_ty>::Seq { steps, .. } => {
                                     self = self.run_steps(steps, clock.clone(), spawner.clone()).await?;
                                 }
@@ -1196,16 +1370,13 @@ macro_rules! build_component_harness {
                                     let Port::$tx_variant = port else {
                                         panic!("{location}: {port:?}: step is for {}", stringify!($tx_variant));
                                     };
-                                    let actual = self.[<$tx_field _receiver>]
+                                    $crate::test_helpers::expect_value(
+                                        self.[<$tx_field _receiver>]
                                         .as_mut()
-                                        .expect(concat!(stringify!($tx_field), " receiver already taken"))
-                                        .get()?
-                                        .await;
-                                    $crate::test_helpers::ValueCheck::assert_matches(
+                                        .expect(concat!(stringify!($tx_field), " receiver already taken")),
                                         &value,
                                         &format!("{location} {port:?}"),
-                                        &actual,
-                                    );
+                                    ).await?;
                                 }
                                 )*
                                 $(
@@ -1246,17 +1417,14 @@ macro_rules! build_component_harness {
                                     let Port::$tx_array_variant(idx) = port else {
                                         panic!("{location}: {port:?}: step is for {}", stringify!($tx_array_variant));
                                     };
-                                    let actual = self.[<$tx_array_field _receivers>]
+                                    $crate::test_helpers::expect_value(
+                                        self.[<$tx_array_field _receivers>]
                                         .get_mut(idx)
                                         .and_then(|receiver| receiver.as_mut())
-                                        .unwrap_or_else(|| panic!("{location}: {} receiver index {idx} out of range or already taken", stringify!($tx_array_field)))
-                                        .get()?
-                                        .await;
-                                    $crate::test_helpers::ValueCheck::assert_matches(
+                                        .unwrap_or_else(|| panic!("{location}: {} receiver index {idx} out of range or already taken", stringify!($tx_array_field))),
                                         &value,
                                         &format!("{location} {port:?}"),
-                                        &actual,
-                                    );
+                                    ).await?;
                                 }
                                 )*
                                 Step::<$item_ty, $expected_ty>::ExpectNoTraffic { ports, ticks, .. } => {
@@ -1505,10 +1673,10 @@ macro_rules! build_component_harness {
                     let spawner = self.engine.spawner();
                     let runner_ports = [<$harness Ports>]::<$item_ty> {
                         $(
-                            [<$rx_field _driver>]: Some(self.[<take_ $rx_field _driver>]()),
+                            [<$rx_field _driver>]: self.[<$rx_field _driver>].take(),
                         )*
                         $(
-                            [<$tx_field _receiver>]: Some(self.[<take_ $tx_field _receiver>]()),
+                            [<$tx_field _receiver>]: self.[<$tx_field _receiver>].take(),
                         )*
                         $(
                             [<$rx_array_field _drivers>]: self
@@ -1559,6 +1727,8 @@ macro_rules! build_component_harness {
             $(
                 #[allow(unused_macros)]
                 macro_rules! [<send_ $rx_field>] {
+
+
                     ($value:expr,) => {
                         [<send_ $rx_field>]!($value)
                     };
@@ -1575,6 +1745,8 @@ macro_rules! build_component_harness {
             $(
                 #[allow(unused_macros)]
                 macro_rules! [<expect_pending_send_ $rx_field>] {
+
+
                     ($value:expr, $ticks:expr,) => {
                         [<expect_pending_send_ $rx_field>]!($value, $ticks)
                     };
@@ -1592,6 +1764,8 @@ macro_rules! build_component_harness {
             $(
                 #[allow(unused_macros)]
                 macro_rules! [<expect_ $tx_field>] {
+
+
                     ($value:expr,) => {
                         [<expect_ $tx_field>]!($value)
                     };
@@ -1608,6 +1782,8 @@ macro_rules! build_component_harness {
             $(
                 #[allow(unused_macros)]
                 macro_rules! [<send_ $rx_array_field>] {
+
+
                     ($idx:expr, $value:expr,) => {
                         [<send_ $rx_array_field>]!($idx, $value)
                     };
@@ -1624,6 +1800,8 @@ macro_rules! build_component_harness {
             $(
                 #[allow(unused_macros)]
                 macro_rules! [<expect_pending_send_ $rx_array_field>] {
+
+
                     ($idx:expr, $value:expr, $ticks:expr,) => {
                         [<expect_pending_send_ $rx_array_field>]!($idx, $value, $ticks)
                     };
@@ -1641,6 +1819,8 @@ macro_rules! build_component_harness {
             $(
                 #[allow(unused_macros)]
                 macro_rules! [<expect_ $tx_array_field>] {
+
+
                     ($idx:expr, $value:expr,) => {
                         [<expect_ $tx_array_field>]!($idx, $value)
                     };
@@ -1656,6 +1836,8 @@ macro_rules! build_component_harness {
 
             #[allow(unused_macros)]
             macro_rules! delay {
+
+
                 ($ticks:expr,) => {
                     delay!($ticks)
                 };
@@ -1670,6 +1852,8 @@ macro_rules! build_component_harness {
 
             #[allow(unused_macros)]
             macro_rules! expect_no_traffic {
+
+
                 ($ports:expr, $ticks:expr,) => {
                     expect_no_traffic!($ports, $ticks)
                 };
@@ -1682,18 +1866,16 @@ macro_rules! build_component_harness {
                 };
             }
 
-            #[allow(unused_macros)]
-            macro_rules! seq {
-                ($steps:expr,) => {
-                    seq!($steps)
-                };
-                ($steps:expr) => {
-                    Step::Seq {
-                        location: step_location!(),
-                        steps: $steps.into_iter().collect(),
-                    }
-                };
-            }
+            $crate::__define_harness_script!(($);
+                [
+                    $($rx_variant => [<$rx_field _driver>],)*
+                    $($tx_variant => [<$tx_field _receiver>],)*
+                ];
+                [
+                    $($rx_array_variant => [<$rx_array_field _drivers>],)*
+                    $($tx_array_variant => [<$tx_array_field _receivers>],)*
+                ]
+            );
 
             #[allow(unused_macros)]
             macro_rules! par {

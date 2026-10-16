@@ -51,6 +51,9 @@ fn assert_has_file_line_column(message: &str) {
 }
 
 mod delay_errors {
+    use gwr_components::test_helpers::expect_value;
+    use gwr_engine::types::SimResult;
+
     use super::*;
 
     build_component_harness! {
@@ -63,6 +66,83 @@ mod delay_errors {
                 Tx<T> => tx
             },
         }
+    }
+
+    #[test]
+    fn script_receive_mismatch_reports_the_call_site() {
+        let message = assert_panic_contains(
+            || {
+                let mut engine = start_test(file!());
+                let clock = engine.default_clock();
+                let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
+                let mut harness = DelayHarness::new(engine, delay);
+                harness.run_steps([script! {
+                    ports { input = Rx, output = Tx }
+                    async {
+                        input.put(7)?.await;
+                        expect_value(
+                            &mut output, &8, &format!("{} Tx", step_location!()),
+                        ).await?;
+                        Ok(())
+                    }
+                }]);
+            },
+            "Tx",
+        );
+        assert_has_file_line_column(&message);
+    }
+
+    #[test]
+    fn parallel_scripts_cannot_share_a_port() {
+        let message = assert_panic_contains(
+            || {
+                let mut engine = start_test(file!());
+                let clock = engine.default_clock();
+                let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
+                let mut harness = DelayHarness::new(engine, delay);
+                harness.run_steps([par!([
+                    script! { ports { input = Rx } async { input.put(7)?.await; Ok(()) } },
+                    script! { ports { input = Rx } async { input.put(8)?.await; Ok(()) } },
+                ])]);
+            },
+            "rx driver already taken",
+        );
+        assert_has_file_line_column(&message);
+    }
+
+    #[test]
+    fn script_rejects_duplicate_port_captures() {
+        let message = assert_panic_contains(
+            || {
+                let _: Step<i32> = script! {
+                    ports { first = Rx, second = Rx }
+                    async { Ok(()) }
+                };
+            },
+            "Rx captured more than once",
+        );
+        assert_has_file_line_column(&message);
+    }
+
+    #[test]
+    fn script_propagates_simulation_errors() {
+        assert_panic_contains(
+            || {
+                let mut engine = start_test(file!());
+                let clock = engine.default_clock();
+                let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
+                let mut harness = DelayHarness::new(engine, delay);
+                harness.run_steps([script! {
+                    ports { input = Rx }
+                    async {
+                        input.put(7)?.await;
+                        fail_script().await?;
+                        Ok(())
+                    }
+                }]);
+            },
+            "script failed",
+        );
     }
 
     #[test]
@@ -191,6 +271,10 @@ mod delay_errors {
             "unexpected simulation error",
         );
     }
+
+    async fn fail_script() -> SimResult {
+        gwr_engine::sim_error!("script failed")
+    }
 }
 
 mod arbiter_errors {
@@ -229,6 +313,30 @@ mod arbiter_errors {
                 harness.run_steps([send_rx!(1, 99)]);
             },
             "rx driver index 1 out of range or already taken",
+        );
+    }
+
+    #[test]
+    fn script_rejects_an_indexed_capture_out_of_range() {
+        assert_panic_contains(
+            || {
+                let mut engine = start_test(file!());
+                let clock = engine.default_clock();
+                let arbiter = Arbiter::new_and_register(
+                    &engine,
+                    &clock,
+                    engine.top(),
+                    "arb",
+                    1,
+                    Box::new(RoundRobin::new()),
+                );
+                let mut harness = ArbiterHarness::<i32>::new(engine, arbiter, 1);
+                harness.run_steps([script! {
+                    ports { input = Rx[1] }
+                    async { input.put(7)?.await; Ok(()) }
+                }]);
+            },
+            "Rx index out of range or port already taken",
         );
     }
 }

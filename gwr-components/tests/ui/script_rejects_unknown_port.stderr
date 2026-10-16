@@ -1,0 +1,71 @@
+error: no rules expected identifier `UnknownPort`
+  --> tests/ui/script_rejects_unknown_port.rs:17:24
+   |
+17 |       let _: Step<i32> = script! {
+   |  ________________________^
+18 | |         ports { input = UnknownPort }
+19 | |         async {
+20 | |             input.put(7)?.await;
+...  |
+23 | |     };
+   | |_____^ no rules expected this token in macro call
+   |
+note: while trying to match identifier `Rx`
+  --> tests/ui/script_rejects_unknown_port.rs:8:1
+   |
+ 8 | / build_component_harness! {
+ 9 | |     harness DelayHarness<T> {
+10 | |         component: delay: Rc<Delay<T>>,
+11 | |         rx ports: { Rx<T> => rx },
+...  |
+14 | | }
+   | |_^
+   = note: this error originates in the macro `script` which comes from the expansion of the macro `build_component_harness` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: no rules expected identifier `UnknownPort`
+  --> tests/ui/script_rejects_unknown_port.rs:17:24
+   |
+17 |       let _: Step<i32> = script! {
+   |  ________________________^
+18 | |         ports { input = UnknownPort }
+19 | |         async {
+20 | |             input.put(7)?.await;
+...  |
+23 | |     };
+   | |_____^ no rules expected this token in macro call
+   |
+note: while trying to match identifier `Rx`
+  --> tests/ui/script_rejects_unknown_port.rs:8:1
+   |
+ 8 | / build_component_harness! {
+ 9 | |     harness DelayHarness<T> {
+10 | |         component: delay: Rc<Delay<T>>,
+11 | |         rx ports: { Rx<T> => rx },
+...  |
+14 | | }
+   | |_^
+   = note: this error originates in the macro `script` which comes from the expansion of the macro `build_component_harness` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: no rules expected identifier `UnknownPort`
+  --> tests/ui/script_rejects_unknown_port.rs:17:24
+   |
+17 |       let _: Step<i32> = script! {
+   |  ________________________^
+18 | |         ports { input = UnknownPort }
+19 | |         async {
+20 | |             input.put(7)?.await;
+...  |
+23 | |     };
+   | |_____^ no rules expected this token in macro call
+   |
+note: while trying to match identifier `Rx`
+  --> tests/ui/script_rejects_unknown_port.rs:8:1
+   |
+ 8 | / build_component_harness! {
+ 9 | |     harness DelayHarness<T> {
+10 | |         component: delay: Rc<Delay<T>>,
+11 | |         rx ports: { Rx<T> => rx },
+...  |
+14 | | }
+   | |_^
+   = note: this error originates in the macro `script` which comes from the expansion of the macro `build_component_harness` (in Nightly builds, run with -Z macro-backtrace for more info)
