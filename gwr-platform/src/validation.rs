@@ -16,8 +16,8 @@ impl PlatformConfig {
     ///
     /// Returns an error if a fabric or physical memory range is invalid, or if
     /// a memory map or processing element references an unknown object, or if
-    /// a mapped memory is not aligned to a processing element's LSU access
-    /// size.
+    /// a physical memory is not aligned to a processing element's LSU access
+    /// size or a cache's line size.
     pub fn validate(&self) -> SimResult {
         self.validated().map(drop)
     }
@@ -27,7 +27,7 @@ impl PlatformConfig {
         let effective = EffectiveConfigs::new(self)?;
         self.validate_memory_ranges(&effective)?;
         self.validate_references(&lookup)?;
-        self.validate_lsu_memory_alignment(&lookup, &effective)?;
+        self.validate_memory_fetch_alignment(&effective)?;
         self.validate_connections(&lookup, &effective)?;
         Ok(effective)
     }
@@ -113,49 +113,6 @@ impl PlatformConfig {
         Ok(())
     }
 
-    fn validate_lsu_memory_alignment(
-        &self,
-        lookup: &PlatformValidationLookup<'_>,
-        effective: &EffectiveConfigs,
-    ) -> SimResult {
-        for (pe, config) in self
-            .processing_elements
-            .iter()
-            .flatten()
-            .zip(&effective.processing_elements)
-        {
-            let access_bytes = config.lsu_access_bytes as u64;
-            let memory_map = lookup.memory_maps[pe.memory_map.as_str()];
-            for device in &memory_map.devices {
-                let memory = lookup
-                    .memory(device.as_str())
-                    .expect("memory references are validated before LSU alignment");
-                // Whole blocks must fit within this region at both boundaries.
-                if !memory.base_address.is_multiple_of(access_bytes) {
-                    return sim_error!(
-                        "Processing element '{}', memory map '{}': Memory '{}': base address {:#x} must be aligned to LSU access size {}",
-                        pe.name,
-                        memory_map.name,
-                        memory.name,
-                        memory.base_address,
-                        access_bytes,
-                    );
-                }
-                if !memory.config.capacity_bytes.is_multiple_of(access_bytes) {
-                    return sim_error!(
-                        "Processing element '{}', memory map '{}': Memory '{}': capacity {} bytes must be aligned to LSU access size {}",
-                        pe.name,
-                        memory_map.name,
-                        memory.name,
-                        memory.config.capacity_bytes,
-                        access_bytes,
-                    );
-                }
-            }
-        }
-        Ok(())
-    }
-
     fn validate_connections(
         &self,
         lookup: &PlatformValidationLookup<'_>,
@@ -183,6 +140,51 @@ impl PlatformConfig {
                     "Connection '{from_source}' -> '{to_source}': {error}"
                 ))
             })?;
+        }
+        Ok(())
+    }
+
+    /// Validate every fetch size, including non-power-of-two sizes, without
+    /// computing an LCM that could overflow. Applies to all physical memories.
+    fn validate_memory_fetch_alignment(&self, effective: &EffectiveConfigs) -> SimResult {
+        let fetches =
+            self.processing_elements
+                .iter()
+                .flatten()
+                .zip(&effective.processing_elements)
+                .map(|(pe, config)| {
+                    (
+                        format!(
+                            "Processing element '{}', memory map '{}', LSU access size {}",
+                            pe.name, pe.memory_map, config.lsu_access_bytes,
+                        ),
+                        config.lsu_access_bytes,
+                    )
+                })
+                .chain(self.caches.iter().flatten().zip(&effective.caches).map(
+                    |(cache, config)| (format!("cache '{}'", cache.name), config.line_size_bytes()),
+                ));
+        for (source, bytes) in fetches {
+            let bytes = u64::try_from(bytes)
+                .map_err(|error| SimError(format!("{source} fetch size: {error}")))?;
+            for memory in self.memories.iter().flatten() {
+                if !memory.base_address.is_multiple_of(bytes) {
+                    return sim_error!(
+                        "{source}: Memory '{}': base address {:#x} must be aligned to the {}-byte fetch size",
+                        memory.name,
+                        memory.base_address,
+                        bytes
+                    );
+                }
+                if !memory.config.capacity_bytes.is_multiple_of(bytes) {
+                    return sim_error!(
+                        "{source}: Memory '{}': capacity {} bytes must be a multiple of the {}-byte fetch size",
+                        memory.name,
+                        memory.config.capacity_bytes,
+                        bytes
+                    );
+                }
+            }
         }
         Ok(())
     }

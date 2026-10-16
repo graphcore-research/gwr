@@ -163,6 +163,13 @@ overlapping line. Overlapping allocating reads share pending line fills;
 `NoAllocate` misses fetch full lines without populating the cache. Replacement
 and invalidation prevent old responses from marking new cache contents valid.
 
+Every physical memory's base address and capacity must be multiples of every
+configured cache line size and effective LSU access size. For power-of-two
+sizes, alignment to the largest size satisfies this rule. Other sizes must
+satisfy each alignment separately. Validation applies to all memories, including
+ones absent from PE memory maps, and rejects invalid boundaries before building
+the simulator.
+
 `max_inflight_parents` bounds tracked original client reads (parents) and
 `max_inflight_fills` bounds downstream fills; both default to 64. Large reads
 stream through these bounds. Completion waits for every required fill and its

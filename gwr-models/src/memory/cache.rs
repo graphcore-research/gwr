@@ -6,9 +6,9 @@
 //!
 //! Reads round missing data to whole cache lines. Writes invalidate every cache
 //! line they touch and are forwarded downstream at their original address and
-//! size. In-flight fills
-//! have independent owner identities that protect against stale responses.
-//! No numerical data content, vendor set hashing or hardware policy is implied.
+//! size. In-flight fills have independent owner identities that protect against
+//! stale responses. No numerical data content, vendor set hashing or hardware
+//! policy is implied.
 //!
 //! Transactions passing through this cache must implement
 //! [`CacheAccess`], which extends
@@ -581,9 +581,9 @@ where
         let request = state.rx.get()?.await;
         trace!(state.entity ; "Device request {}", request);
         let total_bytes = request.total_bytes();
-        handle_request(&state, &mut req, &mut rsp_arb_1, request).await?;
         let ticks = total_bytes.div_ceil(state.bw_bytes_per_tick);
         state.clock.wait_ticks(ticks as u64)?.await;
+        handle_request(&state, &mut req, &mut rsp_arb_1, request).await?;
     }
 }
 
