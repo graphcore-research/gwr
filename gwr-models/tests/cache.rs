@@ -2,13 +2,14 @@
 use std::rc::Rc;
 
 use gwr_components::connect_port;
+use gwr_components::test_helpers::expect_value;
 use gwr_engine::engine::Engine;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::SimObject;
 use gwr_models::build_model_harness;
 use gwr_models::memory::cache::{Cache, CacheConfig};
 use gwr_models::memory::memory_access::MemoryAccess;
-use gwr_models::memory::traits::{AccessMemory, ReadMemory};
+use gwr_models::memory::traits::{AccessMemory, CacheAccess, ReadMemory};
 use gwr_models::memory::{Memory, MemoryConfig};
 use gwr_models::test_helpers::{MemoryTxn, create_default_memory_map, create_read, create_write};
 use gwr_track::entity::GetEntity;
@@ -54,7 +55,7 @@ fn create_cache(engine: &mut Engine) -> Rc<Cache<MemoryAccess>> {
 /// Create a memory which is big enough to ensure the cache can't hold it all
 fn create_and_connect_memory<T>(engine: &mut Engine, cache: &Rc<Cache<T>>) -> Rc<Memory<T>>
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
     let clock = engine.default_clock();
     let top = engine.top();
@@ -80,7 +81,7 @@ mod full_cache_harness {
     use super::*;
 
     build_model_harness! {
-        harness CacheHarness<T> {
+        harness CacheHarness<T: CacheAccess> {
             component: cache: Rc<Cache<T>>,
             rx ports: {
                 DevRx<T> => dev_rx,
@@ -94,10 +95,10 @@ mod full_cache_harness {
     }
 
     #[test]
-    fn cache() {
+    fn cache_miss_fills_line_and_subsequent_read_hits() {
         let mut engine = start_test(file!());
         let cache = create_cache(&mut engine);
-        let mut harness = CacheHarness::<MemoryAccess>::new(engine, cache.clone());
+        let mut harness = CacheHarness::new(engine, cache.clone());
         let memory_delay_ticks = 10;
         let memory_map = Rc::new(create_default_memory_map());
         let dst_addr = DST_ADDR + 0x40;
@@ -110,48 +111,56 @@ mod full_cache_harness {
             SRC_ADDR,
             OVERHEAD_SIZE_BYTES,
         );
-        let response = read.to_response(&TestMemory {}).unwrap();
+        let expected_fill = MemoryTxn::read_req(dst_addr)
+            .with_src_addr(SRC_ADDR)
+            .with_bytes(ACCESS_SIZE_BYTES);
+        let response = MemoryTxn::read_rsp(dst_addr)
+            .with_src_addr(SRC_ADDR)
+            .with_bytes(ACCESS_SIZE_BYTES);
 
-        harness.run_steps([
-            send_dev_rx!(read.clone()),
-            expect_mem_tx!(
-                MemoryTxn::read_req(dst_addr)
-                    .with_src_addr(SRC_ADDR)
-                    .with_bytes(ACCESS_SIZE_BYTES),
-            ),
-            delay!(memory_delay_ticks),
-            send_mem_rx!(response.clone()),
-            expect_dev_tx!(
-                MemoryTxn::read_rsp(dst_addr)
-                    .with_src_addr(SRC_ADDR)
-                    .with_bytes(ACCESS_SIZE_BYTES),
-            ),
-            // Make a second device request to the same address - expecting response without
-            // need to go to memory
-            par!([
-                send_dev_rx!(read),
-                expect_dev_tx!(
-                    MemoryTxn::read_rsp(dst_addr)
-                        .with_src_addr(SRC_ADDR)
-                        .with_bytes(ACCESS_SIZE_BYTES),
-                ),
-                expect_no_traffic!(&[Port::MemTx], (DELAY_TICKS * 2) as u64),
-            ]),
-        ]);
+        let clock = harness.clock.clone();
+        harness.run_steps([par!([
+            seq! {
+                send_dev_rx!(read.clone());
+                expect_dev_tx!(response.clone());
+                send_dev_rx!(read);
+                expect_dev_tx!(response);
+            },
+            script! {
+                ports { requests = MemTx, responses = MemRx }
+                async {
+                    let fill: MemoryAccess = expect_value(
+                        &mut requests, &expected_fill, "memory fill request",
+                    ).await?;
+                    clock.wait_ticks(memory_delay_ticks)?.await;
+                    responses.put(fill.to_response(&TestMemory {})?)?.await;
+                    Ok(())
+                }
+            },
+        ])]);
 
         assert_eq!(cache.payload_bytes_read(), 2 * ACCESS_SIZE_BYTES);
         assert_eq!(cache.payload_bytes_written(), 0);
         assert_eq!(cache.num_misses(), 1);
         assert_eq!(cache.num_hits(), 1);
+        assert_eq!(cache.traffic_snapshot().fill_requests, 1);
     }
 
     #[test]
-    fn cache_dev_read_goes_to_mem() {
+    fn repeated_reads_to_same_line_forward_only_one_memory_request() {
         let num_accesses = 100;
         let ticks_per_request = OVERHEAD_SIZE_BYTES.div_ceil(BW_BYTES_PER_TICK) as u64;
 
         let mut engine = start_test(file!());
-        let cache = create_cache(&mut engine);
+        let clock = engine.default_clock();
+        let cache = Cache::new_and_register(
+            &engine,
+            &clock,
+            engine.top(),
+            "cache",
+            cache_config().with_admission_limits(128, 64),
+        )
+        .unwrap();
         let memory_map = Rc::new(create_default_memory_map());
 
         let request = create_read(
@@ -162,17 +171,25 @@ mod full_cache_harness {
             SRC_ADDR,
             OVERHEAD_SIZE_BYTES,
         );
+        let expected = MemoryTxn::read_req(DST_ADDR)
+            .with_src_addr(SRC_ADDR)
+            .with_bytes(ACCESS_SIZE_BYTES);
 
-        let mut harness = CacheHarness::<MemoryAccess>::new(engine, cache.clone());
+        let mut harness = CacheHarness::new(engine, cache.clone());
 
         harness.run_steps([
             par!([
                 seq!(vec![send_dev_rx!(request); num_accesses]),
-                expect_mem_tx!(
-                    MemoryTxn::read_req(DST_ADDR)
-                        .with_src_addr(SRC_ADDR)
-                        .with_bytes(ACCESS_SIZE_BYTES)
-                ),
+                script! {
+                    ports { requests = MemTx }
+                    async {
+                        let fill: MemoryAccess = expect_value(
+                            &mut requests, &expected, "coalesced memory fill",
+                        ).await?;
+                        assert!(fill.cache_fill_token().is_some());
+                        Ok(())
+                    }
+                },
             ]),
             expect_no_traffic!(&[Port::DevTx, Port::MemTx], ticks_per_request),
             expect_no_traffic!(&[Port::DevTx, Port::MemTx], DELAY_TICKS as u64),
@@ -190,7 +207,7 @@ mod dev_cache_harness {
     use super::*;
 
     build_model_harness! {
-        harness CacheDevHarness<T> {
+        harness CacheDevHarness<T: CacheAccess> {
             component: cache: Rc<Cache<T>>,
             rx ports: {
                 DevRx<T> => dev_rx

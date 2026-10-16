@@ -419,6 +419,44 @@ Use `run_steps([Step<...>])` for fixed test sequences and
 `run_step_generator(iterator)` for stateful generators that yield steps as the
 test progresses.
 
+Use `script!` for behavior that depends on received values or needs async Rust
+control flow. Declare the ports it uses, then write an ordinary async block:
+
+```rust,ignore
+harness.run_steps([script! {
+    ports { input = Rx, output = Tx }
+    async {
+        for value in [3, 7] {
+            input.put(value)?.await;
+            let received = output.get()?.await;
+            let next = if received > 5 { 10 } else { 0 };
+            input.put(next)?.await;
+            assert_eq!(output.get()?.await, next);
+        }
+        Ok(())
+    }
+}]);
+```
+
+The aliases are mutable raw ports: RX captures are `OutPort` drivers and TX
+captures are `InPort` receivers. Scripts can use loops, conditionals, early
+returns, `?`, concurrent futures, and any async helper that borrows those ports.
+There is no body parsing or automatic awaiting. The `send_` and `expect_` macros
+remain step constructors for use outside scripts; inside a script use port
+methods and ordinary async functions. The async body returns `SimResult`.
+
+Use `ports { input = Rx[index], output = Tx[index] }` for indexed ports.
+Selectors are evaluated once when constructing the script. Every declared port
+is reserved for the whole script, even if a conditional does not use it. A port
+cannot be captured twice or shared by parallel branches. Capture multiple ports
+when a script needs to choose between them at runtime. Ports are returned when
+the script completes, so later steps can use them again.
+
+For custom drivers outside scripts, the generated `take_<port>_receiver()` and
+`take_<port>_driver()` methods can transfer scalar ports to an async task.
+Harness steps continue to manage the remaining ports; steps that use a
+transferred port will fail.
+
 <!-- ANCHOR_END: testing -->
 
 [Add ports]: #ports

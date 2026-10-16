@@ -11,7 +11,7 @@ use gwr_track::id::Unique;
 use gwr_track::{Id, create_id, track_create_object};
 
 use crate::memory::CacheHintType;
-use crate::memory::traits::{AccessMemory, ReadMemory};
+use crate::memory::traits::{AccessMemory, CacheAccess, CacheFillToken, ReadMemory};
 
 #[derive(Clone, Debug)]
 pub struct MemoryAccess {
@@ -24,6 +24,7 @@ pub struct MemoryAccess {
     dst_device: DeviceId,
     src_device: DeviceId,
     cache_hint: CacheHintType,
+    cache_fill_token: Option<CacheFillToken>,
 
     /// Non-data overhead. Control/Read accesses don't contain any data.
     overhead_size_bytes: usize,
@@ -59,10 +60,6 @@ impl Unique for MemoryAccess {
 }
 
 impl AccessMemory for MemoryAccess {
-    fn cache_hint(&self) -> CacheHintType {
-        CacheHintType::Allocate
-    }
-
     fn access_size_bytes(&self) -> usize {
         self.access_size_bytes
     }
@@ -78,6 +75,11 @@ impl AccessMemory for MemoryAccess {
                 return sim_error!("{}: unsupported by to_response()", self.access_type);
             }
         };
+        if response_type == AccessType::ReadResponse {
+            self.access_size_bytes
+                .checked_add(self.overhead_size_bytes)
+                .ok_or_else(|| SimError("read response byte size overflows usize".into()))?;
+        }
         Ok(MemoryAccess {
             created_by: self.created_by.clone(),
             id: self.id,
@@ -88,8 +90,48 @@ impl AccessMemory for MemoryAccess {
             dst_device: self.src_device,
             src_device: self.dst_device,
             cache_hint: self.cache_hint,
+            cache_fill_token: self.cache_fill_token.clone(),
             overhead_size_bytes: self.overhead_size_bytes,
         })
+    }
+}
+
+impl CacheAccess for MemoryAccess {
+    fn cache_hint(&self) -> CacheHintType {
+        self.cache_hint
+    }
+
+    fn cache_read_fragment(
+        &self,
+        address: u64,
+        bytes: usize,
+        token: CacheFillToken,
+    ) -> Result<Self, SimError> {
+        if self.access_type != AccessType::ReadRequest
+            || bytes == 0
+            || address
+                .checked_add(u64::try_from(bytes - 1).map_err(|e| SimError(e.to_string()))?)
+                .is_none()
+        {
+            return Err(SimError("invalid cache fill range/type".into()));
+        }
+        let mut fragment = Self::new(
+            &self.created_by,
+            self.access_type,
+            bytes,
+            address,
+            self.src_addr,
+            self.dst_device,
+            self.src_device,
+            self.overhead_size_bytes,
+        );
+        fragment.cache_hint = self.cache_hint;
+        fragment.cache_fill_token = Some(token);
+        Ok(fragment)
+    }
+
+    fn cache_fill_token(&self) -> Option<&CacheFillToken> {
+        self.cache_fill_token.as_ref()
     }
 }
 
@@ -97,15 +139,19 @@ impl Routable for MemoryAccess {
     fn dst_addr(&self) -> u64 {
         self.dst_addr
     }
+
     fn src_addr(&self) -> u64 {
         self.src_addr
     }
+
     fn dst_device(&self) -> DeviceId {
         self.dst_device
     }
+
     fn src_device(&self) -> DeviceId {
         self.src_device
     }
+
     fn access_type(&self) -> AccessType {
         self.access_type
     }
@@ -134,6 +180,7 @@ impl MemoryAccess {
             dst_device,
             src_device,
             cache_hint: CacheHintType::Allocate,
+            cache_fill_token: None,
             overhead_size_bytes,
         };
         track_create_object!(
@@ -145,6 +192,14 @@ impl MemoryAccess {
             "MemoryAccess: {access}"
         );
         access
+    }
+
+    /// Explicit read allocation policy; defaults to Allocate. NoAllocate misses
+    /// in the reference cache do not populate or coalesce allocating fills.
+    #[must_use]
+    pub fn with_cache_hint(mut self, hint: CacheHintType) -> Self {
+        self.cache_hint = hint;
+        self
     }
 }
 

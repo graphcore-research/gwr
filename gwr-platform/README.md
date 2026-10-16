@@ -153,3 +153,32 @@ most `ticks_per_hop` pending packets plus one packet held by its output task.
 arbiters also hold a finite number of packets while forwarding. These are
 packet-count pipeline limits, separate from the configured byte-buffer
 capacities.
+
+## Cache ranges and fill admission
+
+Cache read misses fetch entire aligned `line_size_bytes` lines and return the
+original request's payload. Requests spanning multiple lines wait for every
+required fill. Writes retain their original byte traffic and invalidate every
+overlapping line. Overlapping allocating reads share pending line fills;
+`NoAllocate` misses fetch full lines without populating the cache. Replacement
+and invalidation prevent old responses from marking new cache contents valid.
+
+Every physical memory's base address and capacity must be multiples of every
+configured cache line size and effective LSU access size. For power-of-two
+sizes, alignment to the largest size satisfies this rule. Other sizes must
+satisfy each alignment separately. Validation applies to all memories, including
+ones absent from PE memory maps, and rejects invalid boundaries before building
+the simulator.
+
+`max_inflight_parents` bounds tracked original client reads (parents) and
+`max_inflight_fills` bounds downstream fills; both default to 64. Large reads
+stream through these bounds. Completion waits for every required fill and its
+full response ingress service. Original client headers and each downstream fill
+header are charged at their respective request service points. Hits and
+completed misses share the client return-service bandwidth.
+
+`Cache::traffic_snapshot()` separates logical client payload, rounded downstream
+payload, headers, hits, misses and coalescing. `inflight_fills_snapshot()`
+reports current and peak physical fill occupancy. The cache remains an analytic
+round-robin model without coherence or numerical data evaluation; these settings
+do not establish hardware calibration.

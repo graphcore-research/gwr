@@ -1,11 +1,53 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
-//! A basic n-way set-associative cache model.
+//! A range-correct whole-line n-way cache with round-robin replacement.
 //!
 //! The cache provides no memory ordering guarantees.
 //!
-//! TODO: Should cache accesses return an error if they are not
-//! cache-line aligned or sized?
+//! Reads round missing data to whole cache lines. Writes invalidate every cache
+//! line they touch and are forwarded downstream at their original address and
+//! size. In-flight fills
+//! have independent owner identities that protect against stale responses.
+//! No numerical data content, vendor set hashing or hardware policy is implied.
+//!
+//! Transactions passing through this cache must implement
+//! [`CacheAccess`], which extends
+//! [`AccessMemory`](crate::memory::traits::AccessMemory) with allocation
+//! policy, fill creation, and fill identity. Ordinary memories require only
+//! `AccessMemory`.
+//!
+//! # Concepts and terminology
+//!
+//! - **Parent:** an original read request received from the device side. The
+//!   cache tracks its dependencies and returns one response for the original
+//!   range once all required fills have completed. For example, a read spanning
+//!   three missing lines is one parent waiting for three fills. In nested
+//!   caches, a fill from an upper cache becomes a parent in the lower cache.
+//! - **Fill (child request):** an internal downstream read of one aligned,
+//!   whole cache line. Its response serves the parents waiting for that line.
+//! - **Coalescing:** an allocating read joins an existing pending fill instead
+//!   of issuing another read for the same line. Several parents can therefore
+//!   share one fill. Waiting for a fill counts as a request miss; a request hit
+//!   requires every needed line to be resident and valid already.
+//! - **Line, set, and way:** a line is the unit of fetching and validity. Its
+//!   address selects a set, whose ways are the available storage slots; a tag
+//!   identifies the line occupying a way. Replacement selects ways in
+//!   round-robin order within each set.
+//! - **Validity and fill ownership:** a line is missing, pending a particular
+//!   fill, or valid. Each fill has a cache-owned identity token, preserved in
+//!   its response. Replacement or invalidation prevents an older fill from
+//!   installing data into a slot that no longer belongs to it.
+//! - **Allocation:** allocating reads populate the cache on a miss.
+//!   `NoAllocate` reads can hit valid lines, but their misses fetch whole lines
+//!   without installing them. Writes invalidate every cache line they touch and
+//!   are forwarded downstream at their original address and size.
+//! - **Admission limits:** `max_inflight_parents` bounds tracked original
+//!   reads; `max_inflight_fills` bounds downstream line reads awaiting
+//!   responses. Large requests issue fills incrementally as slots become
+//!   available, so a parent can require more fills than fit concurrently.
+//! - **Service:** bandwidth accounting for packet payload and headers. A fill
+//!   becomes available only after its full response ingress service; hits and
+//!   completed misses share the client return-service bandwidth.
 //!
 //! ```text
 //!  ----------------------------
@@ -43,12 +85,13 @@ use gwr_components::arbiter::policy::RoundRobin;
 use gwr_components::delay::Delay;
 use gwr_components::{connect_tx, port_rx, take_option};
 use gwr_engine::engine::Engine;
+use gwr_engine::events::repeated::Repeated;
 use gwr_engine::executor::Spawner;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::time::compute_adjusted_value_and_rate;
-use gwr_engine::traits::{Runnable, SimObject};
+use gwr_engine::traits::{Event, Runnable, SimObject};
 use gwr_engine::types::{AccessType, SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::entity::Entity;
@@ -56,16 +99,13 @@ use gwr_track::tracker::aka::Aka;
 use gwr_track::{build_aka, trace};
 
 use crate::log_stats;
-#[cfg(test)]
-use crate::memory::memory_access::MemoryAccess;
-use crate::memory::traits::{AccessMemory, ReadMemory};
-
-type Tag = u64;
-type Index = usize;
+use crate::memory::traits::{CacheAccess, ReadMemory};
 
 #[derive(Clone)]
 pub struct CacheConfig {
     line_size_bytes: usize,
+    max_inflight_parents: usize,
+    max_inflight_fills: usize,
     bw_bytes_per_tick: usize,
     num_sets: usize,
     num_ways: usize,
@@ -83,6 +123,8 @@ impl CacheConfig {
     ) -> Self {
         Self {
             line_size_bytes,
+            max_inflight_parents: 64,
+            max_inflight_fills: 64,
             bw_bytes_per_tick,
             num_sets,
             num_ways,
@@ -90,9 +132,33 @@ impl CacheConfig {
         }
     }
 
+    /// Bytes fetched by each downstream read miss.
+    #[must_use]
+    pub fn line_size_bytes(&self) -> usize {
+        self.line_size_bytes
+    }
+
+    /// Set separate limits on tracked original reads (parents) and downstream
+    /// line reads awaiting responses (fills). A parent remains tracked until
+    /// all its required lines have been processed and its pending fills
+    /// complete. Larger valid requests stream through these bounds.
+    #[must_use]
+    pub fn with_admission_limits(
+        mut self,
+        max_inflight_parents: usize,
+        max_inflight_fills: usize,
+    ) -> Self {
+        self.max_inflight_parents = max_inflight_parents;
+        self.max_inflight_fills = max_inflight_fills;
+        self
+    }
+
     pub fn validate(&self) -> SimResult {
         if self.line_size_bytes == 0 {
             return sim_error!("cache line size must be greater than zero");
+        }
+        if self.max_inflight_parents == 0 || self.max_inflight_fills == 0 {
+            return sim_error!("cache admission bounds must be positive");
         }
         if self.bw_bytes_per_tick == 0 {
             return sim_error!("cache bandwidth must be greater than zero");
@@ -105,6 +171,7 @@ impl CacheConfig {
         }
         self.num_sets
             .checked_mul(self.num_ways)
+            .and_then(|n| n.checked_mul(self.line_size_bytes))
             .ok_or_else(|| SimError("cache entry count overflows".to_string()))?;
         Ok(())
     }
@@ -116,6 +183,54 @@ struct CacheMetrics {
     payload_bytes_written: usize,
     num_hits: usize,
     num_misses: usize,
+    line_hits: usize,
+    line_misses: usize,
+    coalesced_lines: usize,
+    fill_requests: usize,
+    downstream_read_bytes: usize,
+    downstream_write_bytes: usize,
+    downstream_request_header_bytes: usize,
+    downstream_response_header_bytes: usize,
+}
+
+/// Completed native cache activity; payload and transport overhead are
+/// separate.
+#[derive(Clone, Debug, Default)]
+pub struct CacheTraffic {
+    /// Original logical client read payload.
+    pub logical_read_bytes: usize,
+    /// Original logical client write payload.
+    pub logical_write_bytes: usize,
+    /// Requests where every cache line was already resident.
+    pub request_hits: usize,
+    /// Requests requiring a new or coalesced pending fill.
+    pub request_misses: usize,
+    /// Requested lines initially containing valid data.
+    pub line_hits: usize,
+    /// Lines issuing new full-line fills.
+    pub line_misses: usize,
+    /// Lines joining an already pending allocating fill.
+    pub coalesced_lines: usize,
+    /// Distinct internal fill transactions.
+    pub fill_requests: usize,
+    /// Actual rounded downstream read payload.
+    pub downstream_read_bytes: usize,
+    /// Actual forwarded original write payload.
+    pub downstream_write_bytes: usize,
+    /// Headers sent downstream, excluding read/write payload.
+    pub downstream_request_header_bytes: usize,
+    /// Headers received downstream, excluding response payload.
+    pub downstream_response_header_bytes: usize,
+}
+
+/// Current and peak fill counts governed by `max_inflight_fills`.
+/// Counts include invalidated fills still awaiting responses.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CacheInflightFills {
+    /// Current fills awaiting responses.
+    pub current: usize,
+    /// Largest number of fills awaiting responses at the same time.
+    pub peak: usize,
 }
 
 pub struct CacheStatsDisplay {
@@ -180,150 +295,12 @@ impl Display for CacheStatsDisplay {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
-enum EntryState {
-    #[default]
-    Available,
-    Allocated,
-    ValidData,
-}
-
-#[derive(Default, Clone)]
-struct CacheEntry {
-    state: EntryState,
-    tag: Tag,
-}
-
-// Cache structure:
-//  A set comprises N-ways
-type Set = Vec<CacheEntry>;
-//  The cache comprises M-sets
-type Sets = Vec<Set>;
-
-struct CacheContents<T>
-where
-    T: SimObject + AccessMemory,
-{
-    config: CacheConfig,
-    sets: Sets,
-    waiting_for_response: Vec<(Tag, Index, T)>,
-    lru_indices: Vec<usize>,
-}
-
-impl<T> CacheContents<T>
-where
-    T: SimObject + AccessMemory,
-{
-    fn new(config: CacheConfig) -> Self {
-        let sets = vec![vec![CacheEntry::default(); config.num_ways]; config.num_sets];
-        let lru_indices = vec![0; config.num_sets];
-        Self {
-            config,
-            sets,
-            waiting_for_response: Vec::new(),
-            lru_indices,
-        }
-    }
-
-    /// Split up an address into its component parts:
-    ///
-    ///  msb                  lsb
-    ///  +-----+-------+--------+
-    ///  | tag | index | offset |
-    ///  +-----+-------+--------+
-    ///
-    /// Where:
-    ///  - offset within a cache line
-    ///  - index is the part of the address used to select a cache set (n-ways)
-    ///  - tag contains the rest of the address that is compared to determine
-    ///    address matches
-    fn tag_and_index_for_addr(&self, addr: u64) -> (Tag, Index) {
-        let line_size = self.config.line_size_bytes as u64;
-        let num_sets = self.config.num_sets as u64;
-        let line = addr / line_size;
-        let index = (line % num_sets) as usize;
-        let tag = line / num_sets;
-        (tag, index)
-    }
-
-    fn state_for(&self, addr: u64) -> Option<EntryState> {
-        let (tag, index) = self.tag_and_index_for_addr(addr);
-        for i in 0..self.config.num_ways {
-            if (self.sets[index][i].state != EntryState::Available)
-                && self.sets[index][i].tag == tag
-            {
-                return Some(self.sets[index][i].state);
-            }
-        }
-        None
-    }
-
-    fn allocate(&mut self, addr: u64) {
-        let (tag, index) = self.tag_and_index_for_addr(addr);
-
-        let insert_index = self.lru_indices[index];
-        self.lru_indices[index] = (self.lru_indices[index] + 1) % self.config.num_ways;
-
-        self.sets[index][insert_index].tag = tag;
-        self.sets[index][insert_index].state = EntryState::Allocated;
-    }
-
-    fn set_data_valid(&mut self, addr: u64) {
-        let (tag, index) = self.tag_and_index_for_addr(addr);
-
-        for i in 0..self.config.num_ways {
-            if (self.sets[index][i].state != EntryState::Available)
-                && self.sets[index][i].tag == tag
-            {
-                self.sets[index][i].state = EntryState::ValidData;
-                break;
-            }
-        }
-    }
-
-    fn invalidate(&mut self, addr: u64) {
-        let (tag, index) = self.tag_and_index_for_addr(addr);
-
-        for i in 0..self.config.num_ways {
-            if self.sets[index][i].tag == tag {
-                self.sets[index][i].state = EntryState::Available;
-                self.sets[index][i].tag = 0;
-                break;
-            }
-        }
-    }
-
-    fn add_waiting_for_response(&mut self, request: T) {
-        let (tag, index) = self.tag_and_index_for_addr(request.dst_addr());
-        self.waiting_for_response.push((tag, index, request));
-    }
-
-    fn get_requests_waiting_for_response(&mut self, response: &T) -> Option<Vec<T>> {
-        let (response_tag, response_index) = self.tag_and_index_for_addr(response.dst_addr());
-
-        // If there are any requests waiting for this response then return
-        // matching sets
-        if self
-            .waiting_for_response
-            .iter()
-            .any(|(tag, index, _x)| *tag == response_tag && *index == response_index)
-        {
-            let all: Vec<(Tag, Index, T)> = std::mem::take(&mut self.waiting_for_response);
-            let (matching, not_matching) = all
-                .into_iter()
-                .partition(|(tag, index, _x)| *tag == response_tag && *index == response_index);
-            self.waiting_for_response = not_matching;
-            let matching = matching.into_iter().map(|(_, _, x)| x).collect();
-            Some(matching)
-        } else {
-            None
-        }
-    }
-}
+mod contents;
+use contents::{CacheContents, LineAction};
 
 impl<T> ReadMemory for CacheContents<T>
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
     fn read(&self) -> Vec<u8> {
         Vec::new()
@@ -332,7 +309,7 @@ where
 
 impl<T> ReadMemory for RefCell<CacheContents<T>>
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
     fn read(&self) -> Vec<u8> {
         Vec::new()
@@ -342,7 +319,7 @@ where
 #[derive(EntityGet, EntityDisplay)]
 pub struct Cache<T>
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
     entity: Rc<Entity>,
 
@@ -350,6 +327,7 @@ where
     spawner: Spawner,
     metrics: Rc<RefCell<CacheMetrics>>,
     contents: Rc<RefCell<CacheContents<T>>>,
+    changed: Repeated<()>,
 
     response_delay: RefCell<Option<Rc<Delay<T>>>>,
     request_delay: RefCell<Option<Rc<Delay<T>>>>,
@@ -367,8 +345,19 @@ where
 
 impl<T> Cache<T>
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
+    /// Create an instance of the cache and register it with the Engine.
+    pub fn new_and_register(
+        engine: &Engine,
+        clock: &Clock,
+        parent: &Rc<Entity>,
+        name: &str,
+        config: CacheConfig,
+    ) -> Result<Rc<Self>, SimError> {
+        Self::new_and_register_with_renames(engine, clock, parent, name, None, config)
+    }
+
     /// Create an instance of the cache and register it with the Engine.
     pub fn new_and_register_with_renames(
         engine: &Engine,
@@ -437,6 +426,7 @@ where
             spawner,
             metrics: Rc::new(RefCell::new(CacheMetrics::default())),
             contents: Rc::new(RefCell::new(CacheContents::new(config))),
+            changed: Repeated::default(),
             response_delay: RefCell::new(Some(response_delay)),
             request_delay: RefCell::new(Some(request_delay)),
             dev_rx: RefCell::new(Some(dev_rx)),
@@ -449,17 +439,6 @@ where
         });
         engine.register(rc_self.clone());
         Ok(rc_self)
-    }
-
-    /// Create an instance of the cache and register it with the Engine.
-    pub fn new_and_register(
-        engine: &Engine,
-        clock: &Clock,
-        parent: &Rc<Entity>,
-        name: &str,
-        config: CacheConfig,
-    ) -> Result<Rc<Self>, SimError> {
-        Self::new_and_register_with_renames(engine, clock, parent, name, None, config)
     }
 
     pub fn connect_port_dev_tx(&self, port_state: PortStateResult<T>) -> SimResult {
@@ -498,6 +477,31 @@ where
         self.metrics.borrow().num_misses
     }
 
+    /// Snapshot actual activity. Pending requests are not completion claims.
+    pub fn traffic_snapshot(&self) -> CacheTraffic {
+        let metrics = self.metrics.borrow();
+        CacheTraffic {
+            logical_read_bytes: metrics.payload_bytes_read,
+            logical_write_bytes: metrics.payload_bytes_written,
+            request_hits: metrics.num_hits,
+            request_misses: metrics.num_misses,
+            line_hits: metrics.line_hits,
+            line_misses: metrics.line_misses,
+            coalesced_lines: metrics.coalesced_lines,
+            fill_requests: metrics.fill_requests,
+            downstream_read_bytes: metrics.downstream_read_bytes,
+            downstream_write_bytes: metrics.downstream_write_bytes,
+            downstream_request_header_bytes: metrics.downstream_request_header_bytes,
+            downstream_response_header_bytes: metrics.downstream_response_header_bytes,
+        }
+    }
+
+    /// Snapshot current and peak usage of the `max_inflight_fills` limit.
+    #[must_use]
+    pub fn inflight_fills_snapshot(&self) -> CacheInflightFills {
+        self.contents.borrow().inflight_fills_snapshot()
+    }
+
     pub fn dump_stats(&self, time_now_ns: f64) {
         let metrics = self.metrics.borrow();
         log_stats(
@@ -516,20 +520,21 @@ where
 
 struct RxHandlingState<T>
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
     entity: Rc<Entity>,
     rx: InPort<T>,
     clock: Clock,
     contents: Rc<RefCell<CacheContents<T>>>,
     metrics: Rc<RefCell<CacheMetrics>>,
+    changed: Repeated<()>,
     bw_bytes_per_tick: usize,
 }
 
 #[async_trait(?Send)]
 impl<T> Runnable for Cache<T>
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
     async fn run(&self) -> SimResult {
         {
@@ -540,6 +545,7 @@ where
                 clock: self.clock.clone(),
                 contents: self.contents.clone(),
                 metrics: self.metrics.clone(),
+                changed: self.changed.clone(),
                 bw_bytes_per_tick: self.bw_bytes_per_tick,
             };
             let req = take_option!(self.req);
@@ -555,6 +561,7 @@ where
             clock: self.clock.clone(),
             contents: self.contents.clone(),
             metrics: self.metrics.clone(),
+            changed: self.changed.clone(),
             bw_bytes_per_tick: self.bw_bytes_per_tick,
         };
         let rsp_arb_0 = take_option!(self.rsp_arb_0);
@@ -568,7 +575,7 @@ async fn run_dev_rx<T>(
     mut rsp_arb_1: OutPort<T>,
 ) -> SimResult
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
     loop {
         let request = state.rx.get()?.await;
@@ -580,169 +587,169 @@ where
     }
 }
 
-async fn handle_request<T>(
-    state: &RxHandlingState<T>,
-    req: &mut OutPort<T>,
-    rsp_arb_1: &mut OutPort<T>,
-    request: T,
-) -> SimResult
+async fn run_mem_rx<T>(mut state: RxHandlingState<T>, mut rsp: OutPort<T>) -> SimResult
 where
-    T: SimObject + AccessMemory,
-{
-    let addr = request.dst_addr();
-    let access_type = request.access_type();
-    match access_type {
-        AccessType::Control => {
-            state.contents.borrow_mut().invalidate(addr);
-        }
-        AccessType::ReadRequest => {
-            state.metrics.borrow_mut().payload_bytes_read += request.access_size_bytes();
-            let line_state = state.contents.borrow().state_for(addr);
-            match line_state {
-                Some(EntryState::ValidData) => {
-                    let response = request.to_response(state.contents.as_ref())?;
-                    rsp_arb_1.put(response)?.await;
-                    state.metrics.borrow_mut().num_hits += 1;
-                }
-                Some(EntryState::Allocated) => {
-                    // There is an outstanding request to memory for this
-                    // address already
-                    state
-                        .contents
-                        .borrow_mut()
-                        .add_waiting_for_response(request);
-                    state.metrics.borrow_mut().num_hits += 1;
-                }
-                Some(EntryState::Available) | None => {
-                    state.contents.borrow_mut().allocate(addr);
-                    req.put(request)?.await;
-                    state.metrics.borrow_mut().num_misses += 1;
-                }
-            }
-        }
-
-        AccessType::WriteRequest | AccessType::WriteNonPostedRequest => {
-            state.metrics.borrow_mut().payload_bytes_written += request.access_size_bytes();
-            state.contents.borrow_mut().invalidate(addr);
-            req.put(request)?.await;
-        }
-
-        AccessType::ReadResponse | AccessType::WriteNonPostedResponse => {
-            return sim_error!(
-                "{}: unsupported AccessType from device: {access_type}",
-                state.entity
-            );
-        }
-    }
-
-    Ok(())
-}
-
-async fn run_mem_rx<T>(mut state: RxHandlingState<T>, mut rsp_arb_0: OutPort<T>) -> SimResult
-where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
     loop {
         let response = state.rx.get()?.await;
         trace!(state.entity ; "Memory response {}", response);
         let total_bytes = response.total_bytes();
-        handle_response(&state, &mut rsp_arb_0, response).await?;
         let ticks = total_bytes.div_ceil(state.bw_bytes_per_tick);
         state.clock.wait_ticks(ticks as u64)?.await;
+        handle_response(&state, &mut rsp, response).await?;
     }
+}
+
+async fn handle_request<T>(
+    state: &RxHandlingState<T>,
+    req: &mut OutPort<T>,
+    rsp: &mut OutPort<T>,
+    request: T,
+) -> SimResult
+where
+    T: SimObject + CacheAccess,
+{
+    let address = request.dst_addr();
+    match request.access_type() {
+        AccessType::Control => {
+            state
+                .contents
+                .borrow_mut()
+                .invalidate_range(address, request.access_size_bytes())?;
+        }
+        AccessType::ReadRequest => {
+            // Validate the whole original range before any admission or
+            // metrics.
+            CacheContents::<T>::checked_range(address, request.access_size_bytes())?;
+            loop {
+                if state.contents.borrow().has_parent_capacity() {
+                    break;
+                }
+                state.changed.listen().await;
+            }
+            state.metrics.borrow_mut().payload_bytes_read += request.access_size_bytes();
+            let (parent, mut cursor, end) =
+                state.contents.borrow_mut().admit_read_request(request)?;
+            while cursor < end {
+                let action = state.contents.borrow_mut().process_line(
+                    parent,
+                    cursor,
+                    end,
+                    &mut state.metrics.borrow_mut(),
+                )?;
+                match action {
+                    LineAction::Advance(next) => cursor = next,
+                    LineAction::Send(line_read_request, next) => {
+                        let ticks = line_read_request
+                            .total_bytes()
+                            .div_ceil(state.bw_bytes_per_tick);
+                        req.put(line_read_request)?.await;
+                        state.clock.wait_ticks(ticks as u64)?.await;
+                        cursor = next;
+                    }
+                    LineAction::Blocked => state.changed.listen().await,
+                }
+            }
+            let ready = state
+                .contents
+                .borrow_mut()
+                .finish_issuing(parent, &mut state.metrics.borrow_mut());
+            if let Some(parent) = ready {
+                state.changed.notify();
+                serve_parent(state, rsp, parent).await?;
+            }
+        }
+        AccessType::WriteRequest | AccessType::WriteNonPostedRequest => {
+            CacheContents::<T>::checked_range(address, request.access_size_bytes())?;
+            state
+                .contents
+                .borrow_mut()
+                .invalidate_range(address, request.access_size_bytes())?;
+            let bytes = request.access_size_bytes();
+            {
+                let mut metrics = state.metrics.borrow_mut();
+                metrics.payload_bytes_written += bytes;
+                metrics.downstream_write_bytes += bytes;
+                metrics.downstream_request_header_bytes += request
+                    .total_bytes()
+                    .checked_sub(bytes)
+                    .ok_or_else(|| SimError("write packet shorter than payload".into()))?;
+            }
+            req.put(request)?.await;
+        }
+        other => {
+            return sim_error!(
+                "{}: unsupported AccessType from device: {other}",
+                state.entity
+            );
+        }
+    }
+    Ok(())
 }
 
 async fn handle_response<T>(
     state: &RxHandlingState<T>,
-    rsp_arb_0: &mut OutPort<T>,
-    access: T,
+    rsp: &mut OutPort<T>,
+    response: T,
 ) -> SimResult
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
-    let access_type = access.access_type();
-    match access_type {
-        AccessType::Control => {
-            // Drop and ignore for now
-        }
+    match response.access_type() {
+        AccessType::Control => {}
         AccessType::WriteNonPostedResponse => {
-            // Forward this response back to the memory (via the arbiter)
-            rsp_arb_0.put(access)?.await;
-        }
-        AccessType::ReadRequest | AccessType::WriteRequest | AccessType::WriteNonPostedRequest => {
-            return sim_error!(
-                "{}: unsupported {access_type} on response port",
-                state.entity
-            );
+            state.metrics.borrow_mut().downstream_response_header_bytes += response.total_bytes();
+            serve_response(state, rsp, response).await?;
         }
         AccessType::ReadResponse => {
-            state
-                .contents
-                .borrow_mut()
-                .set_data_valid(access.dst_addr());
-            let matching = state
-                .contents
-                .borrow_mut()
-                .get_requests_waiting_for_response(&access);
-
-            // Forward this response back to the memory (via the arbiter)
-            rsp_arb_0.put(access)?.await;
-
-            // Forward on any other waiting reads that were waiting for this
-            // response
-            if let Some(m) = matching {
-                for x in m {
-                    let response = x.to_response(state.contents.as_ref())?;
-                    rsp_arb_0.put(response)?.await;
-                }
+            state.metrics.borrow_mut().downstream_response_header_bytes += response
+                .total_bytes()
+                .checked_sub(response.access_size_bytes())
+                .ok_or_else(|| SimError("read response shorter than payload".into()))?;
+            let ready = state.contents.borrow_mut().response(&response)?;
+            state.changed.notify();
+            for parent in ready {
+                serve_parent(state, rsp, parent).await?;
             }
         }
+        other => return sim_error!("{}: unsupported {other} on response port", state.entity),
     }
-
     Ok(())
 }
 
-#[test]
-fn basic_ways() {
-    let line_size_bytes = 32;
-    let bw_bytes_per_tick = 32;
-    let num_sets = 1024;
-    let num_ways = 4;
-    let config = CacheConfig::new(line_size_bytes, bw_bytes_per_tick, num_sets, num_ways, 8);
-    let mut state: CacheContents<MemoryAccess> = CacheContents::new(config);
-
-    let mut addrs = Vec::new();
-    let mut addr = 0x0100_0000;
-    for _ in 0..num_ways + 1 {
-        addrs.push(addr);
-        addr += (line_size_bytes * num_sets * num_ways) as u64;
-    }
-
-    for addr in addrs.iter().take(num_ways) {
-        assert_eq!(state.state_for(*addr), None);
-        state.allocate(*addr);
-        assert_eq!(state.state_for(*addr), Some(EntryState::Allocated));
-    }
-
-    state.allocate(addrs[num_ways]);
-
-    // Should have been evicted
-    assert_eq!(state.state_for(addrs[0]), None);
-    for i in 0..num_ways {
-        // While all the rest remain
-        assert_eq!(state.state_for(addrs[i + 1]), Some(EntryState::Allocated));
-    }
+async fn serve_parent<T>(state: &RxHandlingState<T>, tx: &mut OutPort<T>, request: T) -> SimResult
+where
+    T: SimObject + CacheAccess,
+{
+    let response = request.to_response(state.contents.as_ref())?;
+    serve_response(state, tx, response).await
 }
 
-#[test]
-fn invalidate() {
-    let num_ways = 4;
-    let config = CacheConfig::new(32, 32, 1024, num_ways, 8);
-    let mut state: CacheContents<MemoryAccess> = CacheContents::new(config);
-
-    let addr = 0x40000;
-    state.allocate(addr);
-    assert_eq!(state.state_for(addr), Some(EntryState::Allocated));
-    state.invalidate(addr);
-    assert_eq!(state.state_for(addr), None);
+async fn serve_response<T>(
+    state: &RxHandlingState<T>,
+    tx: &mut OutPort<T>,
+    response: T,
+) -> SimResult
+where
+    T: SimObject + CacheAccess,
+{
+    // One shared client-return service timeline, including resident hits.
+    // Incoming memory responses and request headers retain their own port
+    // rates.
+    let now = state.clock.tick_now().tick();
+    let end = {
+        let mut contents = state.contents.borrow_mut();
+        let start = now.max(contents.response_service_end);
+        let ticks = u64::try_from(response.total_bytes().div_ceil(state.bw_bytes_per_tick))
+            .map_err(|e| SimError(e.to_string()))?;
+        let end = start
+            .checked_add(ticks)
+            .ok_or_else(|| SimError("cache return service timeline overflows".into()))?;
+        contents.response_service_end = end;
+        end
+    };
+    state.clock.wait_ticks(end - now)?.await;
+    tx.put(response)?.await;
+    Ok(())
 }

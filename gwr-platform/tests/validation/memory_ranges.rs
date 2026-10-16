@@ -132,7 +132,7 @@ fn validates_lsu_alignment_for_every_pe_sharing_a_map() {
 }
 
 #[test]
-fn lsu_alignment_only_applies_to_memories_in_the_pe_map() {
+fn rejects_unaligned_memories_outside_the_pe_map() {
     let mut config = platform();
     config.memory_maps = vec![
         memory_map("mm0", &["hbm0"]),
@@ -141,5 +141,56 @@ fn lsu_alignment_only_applies_to_memories_in_the_pe_map() {
     config.memories = Some(vec![memory("hbm0", 0, 64), memory("other", 65, 1)]);
     config.processing_elements = Some(vec![processing_element("pe0", "mm0")]);
 
+    let error = config.validate().unwrap_err().to_string();
+    assert!(error.contains("Memory 'other'"), "{error}");
+    assert!(error.contains("32-byte fetch size"), "{error}");
+}
+
+#[test]
+fn rejects_memory_boundaries_not_aligned_to_cache_lines() {
+    for (base, bytes) in [(32, 256), (0, 160)] {
+        let mut config = platform();
+        let mut l2 = cache("l2");
+        l2.config.line_size_bytes = Some(128);
+        config.caches = Some(vec![l2]);
+        config.memories = Some(vec![memory("hbm0", base, bytes)]);
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("hbm0"));
+        assert!(error.contains("128"));
+        assert!(error.contains("l2"));
+    }
+}
+
+#[test]
+fn checks_all_memories_against_effective_lsu_and_cache_sizes() {
+    let mut config = platform();
+    config.memory_maps = vec![memory_map("mm0", &["used"])];
+    config.processing_elements = Some(vec![processing_element("pe0", "mm0")]);
+    config.memories = Some(vec![memory("used", 0, 256), memory("unused", 257, 32)]);
+    assert!(config.validate().is_err());
+    config.memories.as_mut().unwrap()[1].base_address = 256;
+    config.validate().unwrap();
+    config.processing_elements.as_mut().unwrap()[0]
+        .config
+        .lsu_access_bytes = Some(64);
+    assert!(config.validate().is_err());
+    config.memories.as_mut().unwrap()[1].config.capacity_bytes = 192;
+    let mut l2 = cache("l2");
+    l2.config.line_size_bytes = Some(48);
+    config.caches = Some(vec![l2]);
+    // 256 is aligned to the largest size (64), but not to 48.
+    assert!(config.validate().is_err());
+    config.memories.as_mut().unwrap()[0].config.capacity_bytes = 192;
+    config.memories.as_mut().unwrap()[1].base_address = 192;
+    config.validate().unwrap();
+}
+
+#[test]
+fn accepts_aligned_cache_memory_ending_at_the_final_physical_byte() {
+    let mut config = platform();
+    let mut l2 = cache("l2");
+    l2.config.line_size_bytes = Some(128);
+    config.caches = Some(vec![l2]);
+    config.memories = Some(vec![memory("top", u64::MAX - 127, 128)]);
     config.validate().unwrap();
 }

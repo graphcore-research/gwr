@@ -471,7 +471,13 @@ connections:
 
     run_simulation!(engine);
 
-    // Expect cache hits for repeated tensor reads plus memory traffic for
-    // first reads and writes.
-    assert_eq!(clock.time_now_ns(), 130.0);
+    // Repeated inputs hit after their initial fills. Full fill ingress and
+    // shared client-return service are included in the completion time.
+    let traffic = platform.cache("c0").unwrap().traffic_snapshot();
+    assert_eq!(traffic.request_hits, 2);
+    assert_eq!(traffic.request_misses, 2);
+    assert_eq!(traffic.fill_requests, 2);
+    assert_eq!(traffic.downstream_read_bytes, 64);
+    assert_eq!(traffic.downstream_write_bytes, 64);
+    assert_eq!(clock.time_now_ns(), 146.0);
 }
