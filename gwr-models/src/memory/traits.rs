@@ -21,7 +21,10 @@ where
     fn to_response(&self, mem: &impl ReadMemory) -> Result<Self, SimError>
     where
         Self: Sized;
+}
 
-    /// Returns the requested caching behaviour of a request
+/// Memory transactions that can pass through a cache.
+pub trait CacheAccess: AccessMemory {
+    /// Return the allocation policy requested by this transaction.
     fn cache_hint(&self) -> CacheHintType;
 }

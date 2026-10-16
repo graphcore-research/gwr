@@ -11,7 +11,7 @@ use gwr_track::id::Unique;
 use gwr_track::{Id, create_id, track_create_object};
 
 use crate::memory::CacheHintType;
-use crate::memory::traits::{AccessMemory, ReadMemory};
+use crate::memory::traits::{AccessMemory, CacheAccess, ReadMemory};
 
 #[derive(Clone, Debug)]
 pub struct MemoryAccess {
@@ -59,10 +59,6 @@ impl Unique for MemoryAccess {
 }
 
 impl AccessMemory for MemoryAccess {
-    fn cache_hint(&self) -> CacheHintType {
-        CacheHintType::Allocate
-    }
-
     fn access_size_bytes(&self) -> usize {
         self.access_size_bytes
     }
@@ -93,19 +89,29 @@ impl AccessMemory for MemoryAccess {
     }
 }
 
+impl CacheAccess for MemoryAccess {
+    fn cache_hint(&self) -> CacheHintType {
+        self.cache_hint
+    }
+}
+
 impl Routable for MemoryAccess {
     fn dst_addr(&self) -> u64 {
         self.dst_addr
     }
+
     fn src_addr(&self) -> u64 {
         self.src_addr
     }
+
     fn dst_device(&self) -> DeviceId {
         self.dst_device
     }
+
     fn src_device(&self) -> DeviceId {
         self.src_device
     }
+
     fn access_type(&self) -> AccessType {
         self.access_type
     }
@@ -145,6 +151,14 @@ impl MemoryAccess {
             "MemoryAccess: {access}"
         );
         access
+    }
+
+    /// Explicit read allocation policy; defaults to Allocate. NoAllocate misses
+    /// in the reference cache do not populate or coalesce allocating fills.
+    #[must_use]
+    pub fn with_cache_hint(mut self, hint: CacheHintType) -> Self {
+        self.cache_hint = hint;
+        self
     }
 }
 
