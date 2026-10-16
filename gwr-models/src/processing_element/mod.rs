@@ -599,14 +599,15 @@ impl TaskRunner {
             let compute_flops = machine_ops.checked_total().map_err(|error| {
                 SimError(format!("{} machine operation count: {error}", config.id))
             })?;
-            if let Some(flop_monitor) = &self.flop_monitor {
-                flop_monitor.record_interval(compute_ticks as u64, compute_flops as f64);
-            }
             {
                 // Lanes cannot support overlapping activity. Wait until the
                 // end of the current tick so a lane released during it can be
                 // reused.
-                self.clock.wait_phase(phase::END).await;
+                self.clock.wait_phase(phase::END)?.await;
+
+                if let Some(flop_monitor) = &self.flop_monitor {
+                    flop_monitor.record_interval(compute_ticks as u64, compute_flops as f64);
+                }
 
                 let _activity = ActivityLanes::begin_in_group(
                     &self.activity_lanes.compute,
