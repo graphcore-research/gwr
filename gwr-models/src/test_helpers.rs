@@ -489,12 +489,15 @@ impl gwr_components::test_helpers::ValueCheck<MemoryAccess> for MemoryAccess {
     }
 }
 
+/// Map every address in the 64-bit address space to device zero.
 #[must_use]
 pub fn create_default_memory_map() -> MemoryMap {
     let mut memory_map = MemoryMap::new();
 
-    // Map all addresses to a single device ID.
+    // A u64 region size cannot represent all 2^64 bytes, so cover the final
+    // byte with a second region using the same device ID.
     memory_map.insert(0x0, u64::MAX, DeviceId(0)).unwrap();
+    memory_map.insert(u64::MAX, 1, DeviceId(0)).unwrap();
 
     memory_map
 }

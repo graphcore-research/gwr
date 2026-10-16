@@ -108,7 +108,12 @@ fn basics() {
 
     assert_eq!(num_reads, num_hits + num_misses);
 
-    assert_eq!(num_misses * LINE_SIZE_BYTES, memory.bytes_read());
+    // An unaligned parent may touch two units or join pending units. Parent
+    // miss counts therefore do not determine downstream physical traffic.
+    let traffic = cache.traffic_snapshot();
+    assert_eq!(traffic.fill_requests * LINE_SIZE_BYTES, memory.bytes_read());
+    assert_eq!(traffic.line_misses, traffic.fill_requests);
+    assert_eq!(traffic.downstream_read_bytes, memory.bytes_read());
 
     assert_eq!(
         traffic_gen.payload_bytes_received(),

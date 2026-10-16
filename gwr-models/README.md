@@ -98,6 +98,11 @@ with a simple test harness that drives and expects objects that implement the
 API as `build_component_harness!`, but uses `MemoryTxn` to check objects coming
 out of the model.
 
+Cache models require `CacheAccess`, which extends `AccessMemory` with allocation
+policy and fill ownership. Declare a cache harness as
+`harness CacheHarness<T: gwr_models::memory::traits::CacheAccess>`; ordinary
+memory harnesses can continue to use `harness MemoryHarness<T>`.
+
 `MemoryTxn` lets tests match only the memory access fields that matter for a
 scenario. For example, this test harness checks that a `Memory` model produces a
 read response for the expected destination address, while ignoring fields that
