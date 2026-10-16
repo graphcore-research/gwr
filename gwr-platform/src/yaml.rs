@@ -263,6 +263,8 @@ fn emit_caches(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std:
             emitted_anchors[config_idx] = true;
             if config.bw_bytes_per_tick.is_none()
                 && config.line_size_bytes.is_none()
+                && config.max_inflight_parents.is_none()
+                && config.max_inflight_fills.is_none()
                 && config.num_ways.is_none()
                 && config.num_sets.is_none()
                 && config.delay_ticks.is_none()
@@ -272,6 +274,13 @@ fn emit_caches(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std:
                 emit_line(&mut out, format_args!("config: &{anchor}"), 2)?;
                 emit_optional_kv(&mut out, "bw_bytes_per_tick", config.bw_bytes_per_tick, 3)?;
                 emit_optional_kv(&mut out, "line_size_bytes", config.line_size_bytes, 3)?;
+                emit_optional_kv(
+                    &mut out,
+                    "max_inflight_parents",
+                    config.max_inflight_parents,
+                    3,
+                )?;
+                emit_optional_kv(&mut out, "max_inflight_fills", config.max_inflight_fills, 3)?;
                 emit_optional_kv(&mut out, "num_ways", config.num_ways, 3)?;
                 emit_optional_kv(&mut out, "num_sets", config.num_sets, 3)?;
                 emit_optional_kv(&mut out, "delay_ticks", config.delay_ticks, 3)?;
@@ -492,6 +501,8 @@ mod tests {
         let empty_cache_config = CacheConfigSection {
             bw_bytes_per_tick: None,
             line_size_bytes: None,
+            max_inflight_parents: None,
+            max_inflight_fills: None,
             num_ways: None,
             num_sets: None,
             delay_ticks: None,

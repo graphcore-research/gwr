@@ -136,6 +136,10 @@ pub struct CacheSection {
 pub struct CacheConfigSection {
     pub bw_bytes_per_tick: Option<usize>,
     pub line_size_bytes: Option<usize>,
+    /// Maximum tracked original read requests (parents); default 64.
+    pub max_inflight_parents: Option<usize>,
+    /// Maximum downstream line reads awaiting responses (fills); default 64.
+    pub max_inflight_fills: Option<usize>,
     pub num_ways: Option<usize>,
     pub num_sets: Option<usize>,
     pub delay_ticks: Option<usize>,

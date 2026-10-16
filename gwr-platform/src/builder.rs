@@ -247,6 +247,10 @@ pub const DEFAULT_CACHE_BW_BYTES_PER_TICK: usize = 32;
 pub const DEFAULT_CACHE_NUM_WAYS: usize = 4;
 pub const DEFAULT_CACHE_NUM_SETS: usize = 128;
 pub const DEFAULT_CACHE_LATENCY_TICKS: usize = 20;
+/// Default maximum number of tracked original read requests.
+pub const DEFAULT_CACHE_MAX_INFLIGHT_PARENTS: usize = 64;
+/// Default maximum number of downstream fills awaiting responses.
+pub const DEFAULT_CACHE_MAX_INFLIGHT_FILLS: usize = 64;
 
 impl CacheConfigSection {
     pub(crate) fn model_config(&self) -> Result<CacheConfig, SimError> {
@@ -258,6 +262,12 @@ impl CacheConfigSection {
             self.num_sets.unwrap_or(DEFAULT_CACHE_NUM_SETS),
             self.num_ways.unwrap_or(DEFAULT_CACHE_NUM_WAYS),
             self.delay_ticks.unwrap_or(DEFAULT_CACHE_LATENCY_TICKS),
+        )
+        .with_admission_limits(
+            self.max_inflight_parents
+                .unwrap_or(DEFAULT_CACHE_MAX_INFLIGHT_PARENTS),
+            self.max_inflight_fills
+                .unwrap_or(DEFAULT_CACHE_MAX_INFLIGHT_FILLS),
         );
         config.validate()?;
         Ok(config)
