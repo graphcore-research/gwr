@@ -58,7 +58,7 @@ use gwr_track::{build_aka, trace};
 use crate::log_stats;
 #[cfg(test)]
 use crate::memory::memory_access::MemoryAccess;
-use crate::memory::traits::{AccessMemory, ReadMemory};
+use crate::memory::traits::{CacheAccess, ReadMemory};
 
 type Tag = u64;
 type Index = usize;
@@ -202,7 +202,7 @@ type Sets = Vec<Set>;
 
 struct CacheContents<T>
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
     config: CacheConfig,
     sets: Sets,
@@ -212,7 +212,7 @@ where
 
 impl<T> CacheContents<T>
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
     fn new(config: CacheConfig) -> Self {
         let sets = vec![vec![CacheEntry::default(); config.num_ways]; config.num_sets];
@@ -323,7 +323,7 @@ where
 
 impl<T> ReadMemory for CacheContents<T>
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
     fn read(&self) -> Vec<u8> {
         Vec::new()
@@ -332,7 +332,7 @@ where
 
 impl<T> ReadMemory for RefCell<CacheContents<T>>
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
     fn read(&self) -> Vec<u8> {
         Vec::new()
@@ -342,7 +342,7 @@ where
 #[derive(EntityGet, EntityDisplay)]
 pub struct Cache<T>
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
     entity: Rc<Entity>,
 
@@ -367,7 +367,7 @@ where
 
 impl<T> Cache<T>
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
     /// Create an instance of the cache and register it with the Engine.
     pub fn new_and_register_with_renames(
@@ -516,7 +516,7 @@ where
 
 struct RxHandlingState<T>
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
     entity: Rc<Entity>,
     rx: InPort<T>,
@@ -529,7 +529,7 @@ where
 #[async_trait(?Send)]
 impl<T> Runnable for Cache<T>
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
     async fn run(&self) -> SimResult {
         {
@@ -568,7 +568,7 @@ async fn run_dev_rx<T>(
     mut rsp_arb_1: OutPort<T>,
 ) -> SimResult
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
     loop {
         let request = state.rx.get()?.await;
@@ -587,7 +587,7 @@ async fn handle_request<T>(
     request: T,
 ) -> SimResult
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
     let addr = request.dst_addr();
     let access_type = request.access_type();
@@ -640,7 +640,7 @@ where
 
 async fn run_mem_rx<T>(mut state: RxHandlingState<T>, mut rsp_arb_0: OutPort<T>) -> SimResult
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
     loop {
         let response = state.rx.get()?.await;
@@ -658,7 +658,7 @@ async fn handle_response<T>(
     access: T,
 ) -> SimResult
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
     let access_type = access.access_type();
     match access_type {

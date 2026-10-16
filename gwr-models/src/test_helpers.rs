@@ -8,7 +8,6 @@ pub use gwr_components::build_component_harness;
 use gwr_engine::types::{AccessType, DeviceId};
 use gwr_track::entity::Entity;
 
-use crate::memory::CacheHintType;
 use crate::memory::memory_access::MemoryAccess;
 use crate::memory::memory_map::MemoryMap;
 use crate::memory::traits::AccessMemory;
@@ -17,7 +16,9 @@ use crate::memory::traits::AccessMemory;
 ///
 /// This macro uses the same harness DSL and generated API as
 /// `gwr_components::build_component_harness!`, but requires `AccessMemory` and
-/// checks TX expectations against `MemoryTxn`.
+/// checks TX expectations against `MemoryTxn`. Cache harnesses can require
+/// `CacheAccess` explicitly with `harness CacheHarness<T: CacheAccess>`.
+/// An explicit bound must extend `AccessMemory`.
 ///
 /// See the crate-level Testing documentation for the intended usage pattern,
 /// generated API, and examples.
@@ -26,6 +27,20 @@ macro_rules! build_model_harness {
     (
         $(#[$meta:meta])*
         $vis:vis harness $harness:ident <$item:ident> {
+            $($body:tt)*
+        }
+    ) => {
+        $crate::build_model_harness! {
+            $(#[$meta])*
+            $vis harness $harness<$item: $crate::memory::traits::AccessMemory> {
+                $($body)*
+            }
+        }
+    };
+
+    (
+        $(#[$meta:meta])*
+        $vis:vis harness $harness:ident <$item:ident: $access_memory:path> {
             component: $component_field:ident : $component_ty:ty,
             $($sections:tt)*
         }
@@ -35,7 +50,7 @@ macro_rules! build_model_harness {
             [$(#[$meta])*]
             [$vis]
             [$harness]
-            [$item]
+            [$item: $access_memory]
 
             [$component_field: $component_ty]
             []
@@ -51,7 +66,7 @@ macro_rules! build_model_harness {
         [$($meta:tt)*]
         [$vis:vis]
         [$harness:ident]
-        [$item:ident]
+        [$item:ident: $access_memory:path]
         [$component_field:ident : $component_ty:ty]
         [$($rx_ports:tt)*]
         [$($tx_ports:tt)*]
@@ -61,7 +76,7 @@ macro_rules! build_model_harness {
     ) => {
         $crate::build_model_harness! {
             @normalize
-            [$($meta)*] [$vis] [$harness] [$item] [$component_field: $component_ty]
+            [$($meta)*] [$vis] [$harness] [$item: $access_memory] [$component_field: $component_ty]
             [$($rx_section)*] [$($tx_ports)*] [$($rx_arrays)*] [$($tx_arrays)*]
             $($rest)*
         }
@@ -72,7 +87,7 @@ macro_rules! build_model_harness {
         [$($meta:tt)*]
         [$vis:vis]
         [$harness:ident]
-        [$item:ident]
+        [$item:ident: $access_memory:path]
         [$component_field:ident : $component_ty:ty]
         [$($rx_ports:tt)*]
         [$($tx_ports:tt)*]
@@ -82,7 +97,7 @@ macro_rules! build_model_harness {
     ) => {
         $crate::build_model_harness! {
             @normalize
-            [$($meta)*] [$vis] [$harness] [$item] [$component_field: $component_ty]
+            [$($meta)*] [$vis] [$harness] [$item: $access_memory] [$component_field: $component_ty]
             [$($rx_section)*] [$($tx_ports)*] [$($rx_arrays)*] [$($tx_arrays)*]
         }
     };
@@ -92,7 +107,7 @@ macro_rules! build_model_harness {
         [$($meta:tt)*]
         [$vis:vis]
         [$harness:ident]
-        [$item:ident]
+        [$item:ident: $access_memory:path]
         [$component_field:ident : $component_ty:ty]
         [$($rx_ports:tt)*]
         [$($tx_ports:tt)*]
@@ -102,7 +117,7 @@ macro_rules! build_model_harness {
     ) => {
         $crate::build_model_harness! {
             @normalize
-            [$($meta)*] [$vis] [$harness] [$item] [$component_field: $component_ty]
+            [$($meta)*] [$vis] [$harness] [$item: $access_memory] [$component_field: $component_ty]
             [$($rx_ports)*] [$($tx_section)*] [$($rx_arrays)*] [$($tx_arrays)*]
             $($rest)*
         }
@@ -113,7 +128,7 @@ macro_rules! build_model_harness {
         [$($meta:tt)*]
         [$vis:vis]
         [$harness:ident]
-        [$item:ident]
+        [$item:ident: $access_memory:path]
         [$component_field:ident : $component_ty:ty]
         [$($rx_ports:tt)*]
         [$($tx_ports:tt)*]
@@ -123,7 +138,7 @@ macro_rules! build_model_harness {
     ) => {
         $crate::build_model_harness! {
             @normalize
-            [$($meta)*] [$vis] [$harness] [$item] [$component_field: $component_ty]
+            [$($meta)*] [$vis] [$harness] [$item: $access_memory] [$component_field: $component_ty]
             [$($rx_ports)*] [$($tx_section)*] [$($rx_arrays)*] [$($tx_arrays)*]
         }
     };
@@ -133,7 +148,7 @@ macro_rules! build_model_harness {
         [$($meta:tt)*]
         [$vis:vis]
         [$harness:ident]
-        [$item:ident]
+        [$item:ident: $access_memory:path]
         [$component_field:ident : $component_ty:ty]
         [$($rx_ports:tt)*]
         [$($tx_ports:tt)*]
@@ -143,7 +158,7 @@ macro_rules! build_model_harness {
     ) => {
         $crate::build_model_harness! {
             @normalize
-            [$($meta)*] [$vis] [$harness] [$item] [$component_field: $component_ty]
+            [$($meta)*] [$vis] [$harness] [$item: $access_memory] [$component_field: $component_ty]
             [$($rx_ports)*] [$($tx_ports)*] [$($rx_array_section)*] [$($tx_arrays)*]
             $($rest)*
         }
@@ -154,7 +169,7 @@ macro_rules! build_model_harness {
         [$($meta:tt)*]
         [$vis:vis]
         [$harness:ident]
-        [$item:ident]
+        [$item:ident: $access_memory:path]
         [$component_field:ident : $component_ty:ty]
         [$($rx_ports:tt)*]
         [$($tx_ports:tt)*]
@@ -164,7 +179,7 @@ macro_rules! build_model_harness {
     ) => {
         $crate::build_model_harness! {
             @normalize
-            [$($meta)*] [$vis] [$harness] [$item] [$component_field: $component_ty]
+            [$($meta)*] [$vis] [$harness] [$item: $access_memory] [$component_field: $component_ty]
             [$($rx_ports)*] [$($tx_ports)*] [$($rx_array_section)*] [$($tx_arrays)*]
         }
     };
@@ -174,7 +189,7 @@ macro_rules! build_model_harness {
         [$($meta:tt)*]
         [$vis:vis]
         [$harness:ident]
-        [$item:ident]
+        [$item:ident: $access_memory:path]
         [$component_field:ident : $component_ty:ty]
         [$($rx_ports:tt)*]
         [$($tx_ports:tt)*]
@@ -184,7 +199,7 @@ macro_rules! build_model_harness {
     ) => {
         $crate::build_model_harness! {
             @normalize
-            [$($meta)*] [$vis] [$harness] [$item] [$component_field: $component_ty]
+            [$($meta)*] [$vis] [$harness] [$item: $access_memory] [$component_field: $component_ty]
             [$($rx_ports)*] [$($tx_ports)*] [$($rx_arrays)*] [$($tx_array_section)*]
             $($rest)*
         }
@@ -195,7 +210,7 @@ macro_rules! build_model_harness {
         [$($meta:tt)*]
         [$vis:vis]
         [$harness:ident]
-        [$item:ident]
+        [$item:ident: $access_memory:path]
         [$component_field:ident : $component_ty:ty]
         [$($rx_ports:tt)*]
         [$($tx_ports:tt)*]
@@ -205,7 +220,7 @@ macro_rules! build_model_harness {
     ) => {
         $crate::build_model_harness! {
             @normalize
-            [$($meta)*] [$vis] [$harness] [$item] [$component_field: $component_ty]
+            [$($meta)*] [$vis] [$harness] [$item: $access_memory] [$component_field: $component_ty]
             [$($rx_ports)*] [$($tx_ports)*] [$($rx_arrays)*] [$($tx_array_section)*]
         }
     };
@@ -215,7 +230,7 @@ macro_rules! build_model_harness {
         [$($meta:tt)*]
         [$vis:vis]
         [$harness:ident]
-        [$item:ident]
+        [$item:ident: $access_memory:path]
         [$component_field:ident : $component_ty:ty]
         [$($rx_ports:tt)*]
         [$($tx_ports:tt)*]
@@ -224,7 +239,7 @@ macro_rules! build_model_harness {
     ) => {
         $crate::build_model_harness! {
             @impl
-            [$($meta)*] [$vis] [$harness] [$item] [$component_field: $component_ty]
+            [$($meta)*] [$vis] [$harness] [$item: $access_memory] [$component_field: $component_ty]
             rx ports: { $($rx_ports)* },
             tx ports: { $($tx_ports)* },
             rx port arrays: { $($rx_arrays)* },
@@ -237,7 +252,7 @@ macro_rules! build_model_harness {
         [$($meta:tt)*]
         [$vis:vis]
         [$harness:ident]
-        [$item:ident]
+        [$item:ident: $access_memory:path]
         [$component_field:ident : $component_ty:ty]
         rx ports: { $($rx_variant:ident <$rx_ty:ty> => $rx_field:ident),* $(,)? },
         tx ports: { $($tx_variant:ident <$tx_ty:ty> => $tx_field:ident),* $(,)? },
@@ -260,7 +275,7 @@ macro_rules! build_model_harness {
             [$item]
 
             [$crate::test_helpers::MemoryTxn]
-            [$crate::memory::traits::AccessMemory]
+            [$access_memory]
             [$component_field: $component_ty]
             rx ports: {
                 $(
@@ -291,6 +306,8 @@ macro_rules! build_model_harness {
 
 }
 
+/// Expected memory transaction fields, independent of cache capabilities.
+/// To check cache hints as well, use a concrete `MemoryAccess` expectation.
 #[derive(Clone, Debug)]
 pub struct MemoryTxn {
     access_type: AccessType,
@@ -300,7 +317,6 @@ pub struct MemoryTxn {
     total_bytes: Option<usize>,
     dst_device: Option<DeviceId>,
     src_device: Option<DeviceId>,
-    cache_hint: Option<CacheHintType>,
 }
 
 impl MemoryTxn {
@@ -314,7 +330,6 @@ impl MemoryTxn {
             total_bytes: None,
             dst_device: None,
             src_device: None,
-            cache_hint: None,
         }
     }
 
@@ -377,12 +392,6 @@ impl MemoryTxn {
         self.src_device = Some(src_device);
         self
     }
-
-    #[must_use]
-    pub fn with_cache_hint(mut self, cache_hint: CacheHintType) -> Self {
-        self.cache_hint = Some(cache_hint);
-        self
-    }
 }
 
 pub trait MemoryAccessMatcher<T>
@@ -442,13 +451,6 @@ where
                 "{check_id}: src device mismatch for actual {actual:?}",
             );
         }
-        if let Some(cache_hint) = self.cache_hint {
-            assert_eq!(
-                actual.cache_hint(),
-                cache_hint,
-                "{check_id}: cache hint mismatch for actual {actual:?}",
-            );
-        }
     }
 }
 
@@ -463,7 +465,6 @@ where
             .with_total_bytes(self.total_bytes())
             .with_dst_device(self.dst_device())
             .with_src_device(self.src_device())
-            .with_cache_hint(self.cache_hint())
             .assert_matches(check_id, actual);
     }
 }
@@ -479,6 +480,11 @@ where
 
 impl gwr_components::test_helpers::ValueCheck<MemoryAccess> for MemoryAccess {
     fn assert_matches(&self, check_id: &str, actual: &MemoryAccess) {
+        assert_eq!(
+            crate::memory::traits::CacheAccess::cache_hint(actual),
+            crate::memory::traits::CacheAccess::cache_hint(self),
+            "{check_id}: cache hint mismatch",
+        );
         MemoryAccessMatcher::assert_matches(self, check_id, actual);
     }
 }

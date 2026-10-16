@@ -8,7 +8,7 @@ use gwr_engine::traits::SimObject;
 use gwr_models::build_model_harness;
 use gwr_models::memory::cache::{Cache, CacheConfig};
 use gwr_models::memory::memory_access::MemoryAccess;
-use gwr_models::memory::traits::{AccessMemory, ReadMemory};
+use gwr_models::memory::traits::{AccessMemory, CacheAccess, ReadMemory};
 use gwr_models::memory::{Memory, MemoryConfig};
 use gwr_models::test_helpers::{MemoryTxn, create_default_memory_map, create_read, create_write};
 use gwr_track::entity::GetEntity;
@@ -54,7 +54,7 @@ fn create_cache(engine: &mut Engine) -> Rc<Cache<MemoryAccess>> {
 /// Create a memory which is big enough to ensure the cache can't hold it all
 fn create_and_connect_memory<T>(engine: &mut Engine, cache: &Rc<Cache<T>>) -> Rc<Memory<T>>
 where
-    T: SimObject + AccessMemory,
+    T: SimObject + CacheAccess,
 {
     let clock = engine.default_clock();
     let top = engine.top();
@@ -80,7 +80,7 @@ mod full_cache_harness {
     use super::*;
 
     build_model_harness! {
-        harness CacheHarness<T> {
+        harness CacheHarness<T: CacheAccess> {
             component: cache: Rc<Cache<T>>,
             rx ports: {
                 DevRx<T> => dev_rx,
@@ -190,7 +190,7 @@ mod dev_cache_harness {
     use super::*;
 
     build_model_harness! {
-        harness CacheDevHarness<T> {
+        harness CacheDevHarness<T: CacheAccess> {
             component: cache: Rc<Cache<T>>,
             rx ports: {
                 DevRx<T> => dev_rx
