@@ -304,6 +304,7 @@ fn configure_field(field: &mut Field, sparse: bool) -> syn::Result<()> {
         .any(|m| m.path().is_ident("value_enum"));
     let optional = inner_type(&field.ty, "Option");
     let ty = optional.unwrap_or(&field.ty);
+    let os_default = is_type(ty, "PathBuf") || is_type(ty, "OsString");
     for attr in &mut field.attrs {
         if attr.path().is_ident("arg") || attr.path().is_ident("clap") {
             let props = attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
@@ -318,11 +319,20 @@ fn configure_field(field: &mut Field, sparse: bool) -> syn::Result<()> {
                     // our Option<T> fallbacks have type T. Enum fallbacks may
                     // also lack a CLI spelling; retain those for layered parsing.
                     if !sparse
-                        && (optional.is_some() || value_enum)
+                        && (optional.is_some() || value_enum || os_default)
                         && let Meta::NameValue(value) = &meta
                         && value.path.is_ident("default_value_t")
                     {
                         let expr = &value.value;
+                        if os_default {
+                            return parse_quote!(default_value_os = {
+                                static DEFAULT: std::sync::OnceLock<std::ffi::OsString> = std::sync::OnceLock::new();
+                                DEFAULT.get_or_init(|| {
+                                    let value: #ty = #expr;
+                                    std::ffi::OsString::from(value)
+                                }).as_os_str()
+                            });
+                        }
                         let spelling = if value_enum {
                             quote! { clap::ValueEnum::to_possible_value(&value)
                                 .map(|possible| possible.get_name().to_owned()) }

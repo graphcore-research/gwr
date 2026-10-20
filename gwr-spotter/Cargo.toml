@@ -28,11 +28,14 @@ axum = { version = "0.8.9", default-features = false, features = ["http1", "http
 capnp.workspace = true
 clap.workspace = true
 crossterm.workspace = true
+figment.workspace = true
+gwr-config = { path = "../gwr-config", version = "0.2.0" }
 gwr-track = { path = "../gwr-track", version = "0.13.0" }
 itertools.workspace = true
 log.workspace = true
 ratatui.workspace = true
 regex.workspace = true
+serde.workspace = true
 tokio = { version = "1.45.1", features = ["macros", "net", "rt-multi-thread"] }
 
 [build-dependencies]

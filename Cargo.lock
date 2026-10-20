@@ -420,7 +420,10 @@ name = "check-copyright"
 version = "1.0.0"
 dependencies = [
  "clap",
+ "figment",
+ "gwr-config",
  "regex",
+ "serde",
  "tempfile",
 ]
 
@@ -946,11 +949,14 @@ version = "4.0.0"
 dependencies = [
  "async-trait",
  "clap",
+ "figment",
  "gwr-components",
+ "gwr-config",
  "gwr-engine",
  "gwr-model-builder",
  "gwr-track",
  "rand 0.10.3",
+ "serde",
 ]
 
 [[package]]
@@ -959,11 +965,14 @@ version = "4.0.0"
 dependencies = [
  "async-trait",
  "clap",
+ "figment",
  "gwr-components",
+ "gwr-config",
  "gwr-engine",
  "gwr-model-builder",
  "gwr-track",
  "rand 0.10.3",
+ "serde",
 ]
 
 [[package]]
@@ -1179,7 +1188,9 @@ name = "gwr-code-coverage"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "figment",
  "gwr-build",
+ "gwr-config",
  "serde",
  "serde_json",
  "tempfile",
@@ -1203,6 +1214,8 @@ dependencies = [
  "log",
  "paste",
  "rand 0.10.3",
+ "serde",
+ "serde_json",
  "trybuild",
 ]
 
@@ -1234,10 +1247,13 @@ name = "gwr-doc-builder"
 version = "0.2.0"
 dependencies = [
  "clap",
+ "figment",
  "gwr-build",
+ "gwr-config",
  "proc-macro2",
  "quote",
  "regex",
+ "serde",
  "syn 3.0.6",
  "tempfile",
 ]
@@ -1348,7 +1364,9 @@ dependencies = [
  "async-trait",
  "byte-unit",
  "clap",
+ "figment",
  "gwr-build",
+ "gwr-config",
  "gwr-engine",
  "gwr-model-builder",
  "gwr-models",
@@ -1388,12 +1406,15 @@ dependencies = [
  "capnp",
  "clap",
  "crossterm",
+ "figment",
  "gwr-build",
+ "gwr-config",
  "gwr-track",
  "itertools 0.15.0",
  "log",
  "ratatui",
  "regex",
+ "serde",
  "serial_test",
  "tokio",
  "tower",
@@ -1422,7 +1443,9 @@ dependencies = [
  "async-trait",
  "byte-unit",
  "clap",
+ "figment",
  "gwr-build",
+ "gwr-config",
  "gwr-engine",
  "gwr-model-builder",
  "gwr-models",
@@ -2842,10 +2865,13 @@ version = "3.0.0"
 dependencies = [
  "async-trait",
  "clap",
+ "figment",
  "gwr-components",
+ "gwr-config",
  "gwr-engine",
  "gwr-model-builder",
  "gwr-track",
+ "serde",
 ]
 
 [[package]]
@@ -3000,7 +3026,9 @@ version = "5.0.0"
 dependencies = [
  "byte-unit",
  "clap",
+ "figment",
  "gwr-components",
+ "gwr-config",
  "gwr-engine",
  "gwr-model-builder",
  "gwr-models",
@@ -3018,7 +3046,9 @@ version = "2.0.0"
 dependencies = [
  "byte-unit",
  "clap",
+ "figment",
  "gwr-components",
+ "gwr-config",
  "gwr-engine",
  "gwr-model-builder",
  "gwr-models",
@@ -3034,13 +3064,16 @@ version = "1.0.0"
 dependencies = [
  "clap",
  "crossterm",
+ "figment",
  "futures",
  "gwr-components",
+ "gwr-config",
  "gwr-engine",
  "gwr-track",
  "log",
  "rand 0.10.3",
  "ratatui",
+ "serde",
 ]
 
 [[package]]
@@ -3048,13 +3081,16 @@ name = "sim-ring"
 version = "8.0.0"
 dependencies = [
  "clap",
+ "figment",
  "gwr-components",
+ "gwr-config",
  "gwr-engine",
  "gwr-model-builder",
  "gwr-models",
  "gwr-track",
  "indicatif",
  "log",
+ "serde",
 ]
 
 [[package]]
