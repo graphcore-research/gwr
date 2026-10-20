@@ -62,7 +62,7 @@ fn test_rate_limiter(
     let rate_limiter = RateLimiter::new(&clock, bits_per_tick).unwrap();
 
     engine.spawn(async move {
-        rate_limiter.delay(&object).await?;
+        clock.wait_ticks(rate_limiter.ticks(&object)?)?.await;
         Ok(())
     });
 
