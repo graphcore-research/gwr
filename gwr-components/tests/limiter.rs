@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::fmt;
 use std::rc::Rc;
 
@@ -13,21 +13,25 @@ use gwr_track::id::{Id, Unique};
 
 #[derive(Clone, Debug)]
 struct Packet(usize);
+
 impl TotalBytes for Packet {
     fn total_bytes(&self) -> usize {
         self.0
     }
 }
+
 impl fmt::Display for Packet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "packet({})", self.0)
     }
 }
+
 impl Unique for Packet {
     fn id(&self) -> Id {
         Id(0)
     }
 }
+
 impl SimObject for Packet {}
 
 #[test]
@@ -45,10 +49,6 @@ fn rate_rounds_up_and_accepts_zero_payload() {
         let limiter = RateLimiter::new(&clock, bits_per_tick).unwrap();
         assert_eq!(
             limiter.ticks(&Packet(packet_bytes)).unwrap(),
-            expected_ticks
-        );
-        assert_eq!(
-            limiter.ticks_from_bits(packet_bytes * 8).unwrap(),
             expected_ticks
         );
     }
@@ -72,8 +72,8 @@ fn constructor_rejects_zero_rate() {
     }
 }
 
-// Real retained producer put futures: first delivery is earlier than sender
-// ACK.
+// Retain real producer put futures to observe both arrival and service
+// completion.
 fn arrival_and_ack(receiver_delay: u64) -> (u64, u64) {
     let mut engine = Engine::default();
     let clock = engine.default_clock();
@@ -109,7 +109,7 @@ fn arrival_and_ack(receiver_delay: u64) -> (u64, u64) {
     let pending_ack = ack.clone();
     let check_clock = clock.clone();
     engine.spawn(async move {
-        check_clock.wait_ticks(receiver_delay + 1)?.await;
+        check_clock.wait_ticks(receiver_delay.max(32) - 1)?.await;
         assert_eq!(
             pending_ack.get(),
             None,
@@ -120,13 +120,125 @@ fn arrival_and_ack(receiver_delay: u64) -> (u64, u64) {
     engine.run().unwrap();
     (arrival.get().unwrap(), ack.get().unwrap())
 }
+
 #[test]
 fn first_forwarded_arrival_precedes_rate_ack() {
     assert_eq!(arrival_and_ack(0), (0, 32));
 }
+
 #[test]
-fn receiver_stall_precedes_service_wait() {
-    assert_eq!(arrival_and_ack(5), (5, 37));
+fn receiver_stall_overlaps_service_wait() {
+    assert_eq!(arrival_and_ack(5), (5, 32));
+    assert_eq!(arrival_and_ack(40), (40, 40));
+}
+
+#[test]
+fn chaining_equal_rate_limiters_preserves_bandwidth() {
+    // A four-byte packet at two bits per tick takes 16 ticks, regardless of
+    // chain length. Adding service waits after forwarding would multiply this.
+    for rates in [&[2][..], &[2, 2], &[2, 2, 2, 2]] {
+        let (arrivals, acks) = chain_timings(rates, 4);
+        assert_eq!(
+            arrivals,
+            [0, 16, 32, 48, 64, 80, 96, 112],
+            "rates={rates:?}"
+        );
+        assert_eq!(acks, [16, 32, 48, 64, 80, 96, 112, 128], "rates={rates:?}");
+    }
+}
+
+#[test]
+fn chained_bandwidth_is_the_lowest_rate_in_every_order() {
+    // The one-bit-per-tick limiter sets a 32-tick interval in all six orders.
+    for rates in [
+        [1, 2, 4],
+        [1, 4, 2],
+        [2, 1, 4],
+        [2, 4, 1],
+        [4, 1, 2],
+        [4, 2, 1],
+    ] {
+        let (arrivals, acks) = chain_timings(&rates, 4);
+        assert_eq!(
+            arrivals,
+            [0, 32, 64, 96, 128, 160, 192, 224],
+            "rates={rates:?}"
+        );
+        assert_eq!(
+            acks,
+            [32, 64, 96, 128, 160, 192, 224, 256],
+            "rates={rates:?}"
+        );
+    }
+}
+
+#[test]
+fn chained_bandwidth_rounds_packet_service_up_to_whole_ticks() {
+    // 32 bits / 3 bits per tick rounds up to 11 ticks; the five-bit rate
+    // rounds to seven ticks and must not add another delay to the interval.
+    for rates in [[3, 5], [5, 3]] {
+        let (arrivals, acks) = chain_timings(&rates, 4);
+        assert_eq!(arrivals, [0, 11, 22, 33, 44, 55, 66, 77], "rates={rates:?}");
+        assert_eq!(acks, [11, 22, 33, 44, 55, 66, 77, 88], "rates={rates:?}");
+    }
+}
+
+// A continuously ready source and sink isolate the chain's service bandwidth.
+// Record both ends: the first arrival is immediate, but each put must wait for
+// service to complete before the source can send the next packet.
+fn chain_timings(bits_per_tick: &[usize], packet_bytes: usize) -> (Vec<u64>, Vec<u64>) {
+    const PACKETS: usize = 8;
+    let mut engine = Engine::default();
+    let clock = engine.default_clock();
+    let limiters: Vec<_> = bits_per_tick
+        .iter()
+        .enumerate()
+        .map(|(index, &rate)| {
+            Limiter::<Packet>::new_and_register(
+                &engine,
+                &clock,
+                engine.top(),
+                &format!("limit_{index}"),
+                Rc::new(RateLimiter::new(&clock, rate).unwrap()),
+            )
+        })
+        .collect();
+    let mut source = OutPort::new(engine.top(), "source");
+    source.connect(limiters.first().unwrap().port_rx()).unwrap();
+    for pair in limiters.windows(2) {
+        pair[0].connect_port_tx(pair[1].port_rx()).unwrap();
+    }
+    let mut sink = InPort::new(&engine, &clock, engine.top(), "sink");
+    limiters
+        .last()
+        .unwrap()
+        .connect_port_tx(sink.state())
+        .unwrap();
+
+    let arrivals = Rc::new(RefCell::new(Vec::new()));
+    let receiver_arrivals = arrivals.clone();
+    let receiver_clock = clock.clone();
+    engine.spawn(async move {
+        for _ in 0..PACKETS {
+            let packet = sink.get()?.await;
+            assert_eq!(packet.0, packet_bytes);
+            receiver_arrivals
+                .borrow_mut()
+                .push(receiver_clock.tick_now().tick());
+        }
+        Ok(())
+    });
+    let acks = Rc::new(RefCell::new(Vec::new()));
+    let sender_acks = acks.clone();
+    engine.spawn(async move {
+        for _ in 0..PACKETS {
+            source.put(Packet(packet_bytes))?.await;
+            sender_acks.borrow_mut().push(clock.tick_now().tick());
+        }
+        Ok(())
+    });
+    engine.run().unwrap();
+    (arrivals.take(), acks.take())
 }
 
 #[test]
@@ -167,7 +279,7 @@ fn packet_bit_overflow_precedes_delivery_and_ack() {
 // Private arithmetic boundary, not a physically reachable fabric workload
 // claim.
 #[test]
-fn late_deadline_error_keeps_already_delivered_packet_unacked() {
+fn service_deadline_overflow_precedes_delivery_and_ack() {
     let mut engine = Engine::default();
     let clock = engine.default_clock();
     let limiter = Limiter::new_and_register(
@@ -200,6 +312,6 @@ fn late_deadline_error_keeps_already_delivered_packet_unacked() {
     });
     let error = engine.run().unwrap_err();
     assert!(error.to_string().contains("deadline overflows"));
-    assert_eq!(delivered.get(), Some(u64::MAX - 16));
+    assert_eq!(delivered.get(), None);
     assert!(!acked.get());
 }

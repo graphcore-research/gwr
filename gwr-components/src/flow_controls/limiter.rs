@@ -17,7 +17,7 @@ use gwr_engine::engine::Engine;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Runnable, SimObject};
-use gwr_engine::types::SimResult;
+use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
@@ -28,7 +28,9 @@ use crate::{connect_tx, port_rx, take_option};
 /// The [`Limiter`] is a component that will allow data through at a
 /// specified rate.
 ///
-/// The rate is defined in bits-per-second.
+/// The supplied [`RateLimiter`] defines the rate in bits per clock tick.
+/// Downstream backpressure overlaps the packet's service interval. The upstream
+/// handoff completes once both service and downstream acceptance have finished.
 #[derive(EntityGet, EntityDisplay)]
 pub struct Limiter<T>
 where
@@ -93,16 +95,26 @@ where
         let mut rx = take_option!(self.rx);
         let mut tx = take_option!(self.tx);
         let limiter = &self.limiter;
+        let clock = limiter.clock();
         loop {
             // Get the value but without letting the OutPort complete
             let value = rx.start_get()?.await;
 
             let value_id = value.id();
             let ticks = limiter.ticks(&value)?;
+            let service_end_tick = clock.tick_now().tick().checked_add(ticks).ok_or_else(|| {
+                SimError(format!(
+                    "{}: limiter service deadline overflows",
+                    self.entity
+                ))
+            })?;
             self.entity.track_enter(value_id);
 
             tx.put(value)?.await;
-            limiter.delay_ticks(ticks).await?;
+            let remaining_ticks = service_end_tick.saturating_sub(clock.tick_now().tick());
+            if remaining_ticks > 0 {
+                clock.wait_ticks(remaining_ticks)?.await;
+            }
             self.entity.track_exit(value_id);
 
             // Allow the OutPort to complete

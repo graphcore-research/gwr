@@ -2,20 +2,15 @@
 
 //! Provide effective bandwidth limit for a component.
 //!
-//! A [RateLimiter] is a component that is given a
+//! A [RateLimiter] is given a
 //! [clock](gwr_engine::time::clock::Clock) and a rate in `bits per tick`.
-//! It uses this rate limit to enforce a delay determined by the object that is
-//! being rate limited.
+//! It calculates the service duration for an object. Components such as
+//! [Limiter](crate::flow_controls::limiter::Limiter) use this duration and the
+//! clock to enforce the rate limit.
 //!
 //! The [RateLimiter] therefore requires objects to implement the
 //! [TotalBytes] trait so that the number of bits of the object can be
 //! determined.
-//!
-//! # Ports
-//!
-//! This component has the following ports:
-//!  - One [input port](gwr_engine::port::InPort): `rx`
-//!  - One [output port](gwr_engine::port::OutPort): `tx`
 //!
 //! # Creating a Rate Limiter
 //!
@@ -90,7 +85,7 @@ use std::marker::PhantomData;
 
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::TotalBytes;
-use gwr_engine::types::{SimError, SimResult};
+use gwr_engine::types::SimError;
 
 /// Create a [RateLimiter] wrapped in an [Rc](std::rc::Rc), returning a
 /// [`SimError`] if the rate is zero.
@@ -143,15 +138,8 @@ where
         })
     }
 
-    /// Wait for the packet's service duration, rejecting invalid arithmetic.
-    pub async fn delay(&self, value: &T) -> SimResult {
-        self.delay_ticks(self.ticks(value)?).await
-    }
-
-    /// Wait for a service duration, checking the deadline at the wait point.
-    pub async fn delay_ticks(&self, ticks: u64) -> SimResult {
-        self.clock.wait_ticks(ticks)?.await;
-        Ok(())
+    pub(super) fn clock(&self) -> &Clock {
+        &self.clock
     }
 
     /// Calculate a packet's service duration without overflowing its bit count.
@@ -164,7 +152,7 @@ where
     }
 
     /// Round up to whole ticks, rejecting an unrepresentable duration.
-    pub fn ticks_from_bits(&self, bits: usize) -> Result<u64, SimError> {
+    fn ticks_from_bits(&self, bits: usize) -> Result<u64, SimError> {
         u64::try_from(bits.div_ceil(self.bits_per_tick))
             .map_err(|_| SimError("rate limiter duration exceeds u64".into()))
     }
