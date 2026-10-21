@@ -78,11 +78,60 @@ fn serializable_to_str<T: Serialize>(value: &T) -> Result<String, Box<dyn std::e
     }
 }
 
+/// Double-quote a YAML scalar without allowing line breaks or control
+/// characters to change the surrounding hand-written document structure.
+fn quoted_clock_name(name: &str) -> Result<String, std::fmt::Error> {
+    let mut out = String::from("\"");
+    for character in name.chars() {
+        match character {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => write!(out, "\\u{:04x}", u32::from(c))?,
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    Ok(out)
+}
+
+fn emit_clocks(platform: &PlatformConfig) -> Result<String, std::fmt::Error> {
+    let mut out = if platform.clocks.is_empty() {
+        String::from("clocks: []\n")
+    } else {
+        start_section("clocks")?
+    };
+    for clock in &platform.clocks {
+        emit_line(
+            &mut out,
+            format_args!("- name: {}", quoted_clock_name(&clock.name)?),
+            1,
+        )?;
+        emit_kv(&mut out, "frequency_mhz", clock.frequency_mhz, 2)?;
+    }
+    emit_kv(
+        &mut out,
+        "default_clock",
+        quoted_clock_name(&platform.default_clock)?,
+        0,
+    )?;
+    Ok(out)
+}
+
+fn emit_clock_assignment(out: &mut String, clock: Option<&str>) -> Result<(), std::fmt::Error> {
+    if let Some(clock) = clock {
+        emit_kv(out, "clock", quoted_clock_name(clock)?, 2)?;
+    }
+    Ok(())
+}
+
 fn emit_memory_maps(
     platform: &PlatformConfig,
 ) -> Result<Option<String>, Box<dyn std::error::Error>> {
     if platform.memory_maps.is_empty() {
-        return Ok(None);
+        return Ok(Some(String::from("memory_maps: []\n")));
     }
 
     let mut out = start_section("memory_maps")?;
@@ -124,6 +173,7 @@ fn emit_processing_elements(
 
         emit_line(&mut out, format_args!("- name: {}", pe.name), 1)?;
         emit_line(&mut out, format_args!("memory_map: {}", pe.memory_map), 2)?;
+        emit_clock_assignment(&mut out, pe.clock.as_deref())?;
         if emitted_anchors[config_idx] {
             emit_line(&mut out, format_args!("config: *{anchor}"), 2)?;
         } else {
@@ -176,6 +226,7 @@ fn emit_fabrics(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std
 
     for fabric in fabrics {
         emit_line(&mut out, format_args!("- name: {}", fabric.name), 1)?;
+        emit_clock_assignment(&mut out, fabric.clock.as_deref())?;
         emit_line(
             &mut out,
             format_args!("kind: {}", serializable_to_str(&fabric.kind)?),
@@ -257,6 +308,7 @@ fn emit_caches(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std:
         let config = &cache.config;
 
         emit_line(&mut out, format_args!("- name: {}", cache.name), 1)?;
+        emit_clock_assignment(&mut out, cache.clock.as_deref())?;
         if emitted_anchors[config_idx] {
             emit_line(&mut out, format_args!("config: *{anchor}"), 2)?;
         } else {
@@ -299,6 +351,7 @@ fn emit_memories(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn st
 
     for memory in memories {
         emit_line(&mut out, format_args!("- name: {}", memory.name), 1)?;
+        emit_clock_assignment(&mut out, memory.clock.as_deref())?;
         emit_line(
             &mut out,
             format_args!("kind: {}", serializable_to_str(&memory.kind)?),
@@ -362,7 +415,7 @@ fn emit_optional_section(out: &mut String, section: Option<String>) {
 pub fn platform_to_yaml_str(
     platform: &PlatformConfig,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let mut out = String::new();
+    let mut out = emit_clocks(platform)?;
 
     emit_optional_section(&mut out, emit_memory_maps(platform)?);
     emit_optional_section(&mut out, emit_processing_elements(platform)?);
@@ -395,6 +448,11 @@ mod tests {
     #[test]
     fn emitted_null_endpoint_is_a_yaml_string_and_round_trips() {
         let platform = PlatformConfig {
+            clocks: vec![crate::types::ClockSection {
+                name: "default".to_string(),
+                frequency_mhz: 1000.0,
+            }],
+            default_clock: "default".to_string(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: None,
@@ -438,20 +496,28 @@ mod tests {
             compares_per_tick: Some(16.0),
         };
         let platform = PlatformConfig {
+            clocks: vec![crate::types::ClockSection {
+                name: "default".to_string(),
+                frequency_mhz: 1000.0,
+            }],
+            default_clock: "default".to_string(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: Some(vec![
                 ProcessingElementSection {
+                    clock: None,
                     name: "pe0".to_string(),
                     memory_map: "memory_map".to_string(),
                     config: shared_config.clone(),
                 },
                 ProcessingElementSection {
+                    clock: None,
                     name: "pe1".to_string(),
                     memory_map: "memory_map".to_string(),
                     config: unique_config.clone(),
                 },
                 ProcessingElementSection {
+                    clock: None,
                     name: "pe2".to_string(),
                     memory_map: "memory_map".to_string(),
                     config: shared_config.clone(),
@@ -508,19 +574,27 @@ mod tests {
             delay_ticks: None,
         };
         let platform = PlatformConfig {
+            clocks: vec![crate::types::ClockSection {
+                name: "default".to_string(),
+                frequency_mhz: 1000.0,
+            }],
+            default_clock: "default".to_string(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: Some(vec![ProcessingElementSection {
+                clock: None,
                 name: "pe0".to_string(),
                 memory_map: "memory_map".to_string(),
                 config: empty_pe_config.clone(),
             }]),
             caches: Some(vec![
                 CacheSection {
+                    clock: None,
                     name: "l1a".to_string(),
                     config: empty_cache_config.clone(),
                 },
                 CacheSection {
+                    clock: None,
                     name: "l1b".to_string(),
                     config: empty_cache_config.clone(),
                 },
@@ -570,11 +644,17 @@ mod tests {
             delay_ticks: Some(9),
         };
         let platform = PlatformConfig {
+            clocks: vec![crate::types::ClockSection {
+                name: "default".to_string(),
+                frequency_mhz: 1000.0,
+            }],
+            default_clock: "default".to_string(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: None,
             caches: None,
             fabrics: Some(vec![FabricSection {
+                clock: None,
                 name: "fabric0".to_string(),
                 kind: FabricKind::Functional,
                 columns: 2,
@@ -582,6 +662,7 @@ mod tests {
                 config: fabric_config.clone(),
             }]),
             memories: Some(vec![MemorySection {
+                clock: None,
                 name: "hbm0".to_string(),
                 kind: MemoryKind::HBM,
                 base_address: 0x1000,
@@ -621,12 +702,18 @@ mod tests {
             ..only_port_selection.clone()
         };
         let platform = PlatformConfig {
+            clocks: vec![crate::types::ClockSection {
+                name: "default".to_string(),
+                frequency_mhz: 1000.0,
+            }],
+            default_clock: "default".to_string(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: None,
             caches: None,
             fabrics: Some(vec![
                 FabricSection {
+                    clock: None,
                     name: "fabric0".to_string(),
                     kind: FabricKind::Functional,
                     columns: 2,
@@ -634,6 +721,7 @@ mod tests {
                     config: only_port_selection.clone(),
                 },
                 FabricSection {
+                    clock: None,
                     name: "fabric1".to_string(),
                     kind: FabricKind::Functional,
                     columns: 4,

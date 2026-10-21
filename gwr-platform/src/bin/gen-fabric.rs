@@ -187,6 +187,7 @@ fn create_name(prefix: &str, column: usize, row: usize) -> String {
 
 fn build_fabrics(args: &Args) -> Vec<FabricSection> {
     vec![FabricSection {
+        clock: None,
         name: FABRIC_NAME.to_string(),
         kind: args.fabric_model,
         columns: args.num_columns,
@@ -214,6 +215,7 @@ fn build_cache(
 ) -> CacheSection {
     let num_sets = (kib * 1024) / num_ways / DEFAULT_CACHE_LINE_SIZE_BYTES;
     CacheSection {
+        clock: None,
         name,
         config: CacheConfigSection {
             bw_bytes_per_tick: Some(bytes_per_tick),
@@ -265,6 +267,7 @@ fn build_memories(args: &Args) -> Vec<MemorySection> {
     (0..args.num_hbms)
         .map(|i| {
             let mem = MemorySection {
+                clock: None,
                 name: format!("hbm{i}"),
                 kind: MemoryKind::HBM,
                 base_address: base as u64,
@@ -336,6 +339,7 @@ fn build_processing_elements(
 ) -> Result<Vec<ProcessingElementSection>, String> {
     Ok(PeIdGen::new(args)?
         .map(|(column, row)| ProcessingElementSection {
+            clock: None,
             name: create_name("pe", column, row),
             memory_map: PE_MEMORY_MAP_NAME.to_string(),
             config: pe_config.clone(),
@@ -351,6 +355,11 @@ fn build_platform(args: &Args) -> Result<PlatformConfig, String> {
     let pe_config = build_pe_config(args);
 
     Ok(PlatformConfig {
+        clocks: vec![gwr_platform::types::ClockSection {
+            name: "default".to_string(),
+            frequency_mhz: 1000.0,
+        }],
+        default_clock: "default".to_string(),
         memory_maps: vec![memory_map],
         defaults: None,
         processing_elements: Some(build_processing_elements(args, &pe_config)?),

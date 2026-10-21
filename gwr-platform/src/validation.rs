@@ -14,7 +14,8 @@ impl PlatformConfig {
     ///
     /// # Errors
     ///
-    /// Returns an error if a fabric or physical memory range is invalid, or if
+    /// Returns an error if a clock definition or reference is invalid, if a
+    /// fabric or physical memory range is invalid, or if
     /// a memory map or processing element references an unknown object, or if
     /// a physical memory is not aligned to a processing element's LSU access
     /// size or a cache's line size.
@@ -23,6 +24,7 @@ impl PlatformConfig {
     }
 
     pub(crate) fn validated(&self) -> Result<EffectiveConfigs, SimError> {
+        self.validate_clocks()?;
         let lookup = self.validation_lookup()?;
         let effective = EffectiveConfigs::new(self)?;
         self.validate_memory_ranges(&effective)?;
@@ -30,6 +32,70 @@ impl PlatformConfig {
         self.validate_memory_fetch_alignment(&effective)?;
         self.validate_connections(&lookup, &effective)?;
         Ok(effective)
+    }
+
+    pub(crate) fn validate_clocks(&self) -> SimResult {
+        if self.clocks.is_empty() {
+            return sim_error!("Platform must define at least one clock");
+        }
+        let mut clocks = HashSet::new();
+        for clock in &self.clocks {
+            if clock.name.trim().is_empty() {
+                return sim_error!("Clock name must not be empty or whitespace-only");
+            }
+            if !clocks.insert(clock.name.as_str()) {
+                return sim_error!("Duplicate clock name '{}'", clock.name);
+            }
+            if !clock.frequency_mhz.is_finite() || clock.frequency_mhz <= 0.0 {
+                return sim_error!(
+                    "Clock '{}': frequency_mhz must be finite and positive, got {}",
+                    clock.name,
+                    clock.frequency_mhz
+                );
+            }
+            // Check the full tick range, matching ClockState::tick_to_ns.
+            if !(u64::MAX as f64 / clock.frequency_mhz * 1000.0).is_finite() {
+                return sim_error!(
+                    "Clock '{}': frequency_mhz must yield a finite duration in nanoseconds over the full u64 tick range, got {}",
+                    clock.name,
+                    clock.frequency_mhz
+                );
+            }
+        }
+        if !clocks.contains(self.default_clock.as_str()) {
+            return sim_error!("Unknown default clock '{}'", self.default_clock);
+        }
+        let references = self
+            .processing_elements
+            .iter()
+            .flatten()
+            .map(|pe| ("processing element", &pe.name, &pe.clock))
+            .chain(
+                self.caches
+                    .iter()
+                    .flatten()
+                    .map(|cache| ("cache", &cache.name, &cache.clock)),
+            )
+            .chain(
+                self.fabrics
+                    .iter()
+                    .flatten()
+                    .map(|fabric| ("fabric", &fabric.name, &fabric.clock)),
+            )
+            .chain(
+                self.memories
+                    .iter()
+                    .flatten()
+                    .map(|memory| ("memory", &memory.name, &memory.clock)),
+            );
+        for (kind, name, clock) in references {
+            if let Some(clock) = clock
+                && !clocks.contains(clock.as_str())
+            {
+                return sim_error!("Unknown clock '{}' for {} '{}'", clock, kind, name);
+            }
+        }
+        Ok(())
     }
 
     fn validation_lookup(&self) -> Result<PlatformValidationLookup<'_>, SimError> {

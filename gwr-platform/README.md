@@ -37,8 +37,12 @@ For example:
 # use gwr_platform::Platform;
 # fn main() {
 # let mut engine = Engine::default();
-# let clock = engine.default_clock();
-# let _ = Platform::from_string(&engine, &clock, "
+# let _ = Platform::from_string(&mut engine, "
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps:
   - name: pe_memory_map
     devices:
@@ -103,11 +107,9 @@ use gwr_platform::Platform;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut engine = Engine::default();
-    let clock = engine.default_clock();
 
     let platform = Rc::new(Platform::from_file(
-        &engine,
-        &clock,
+        &mut engine,
         Path::new("gwr-platform/examples/simple_pe_cache_mem.yaml"),
     )?);
 
