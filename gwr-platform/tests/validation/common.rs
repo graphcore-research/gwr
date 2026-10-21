@@ -3,14 +3,20 @@
 pub(crate) use gwr_engine::test_helpers::start_test;
 pub(crate) use gwr_platform::Platform;
 pub(crate) use gwr_platform::types::{
-    AddressSpaceSection, CacheConfigSection, CacheSection, ConnectSection, FabricConfigSection,
-    FabricKind, FabricSection, MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
-    PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
+    AddressSpaceSection, CacheConfigSection, CacheSection, ClockSection, ConnectSection,
+    FabricConfigSection, FabricKind, FabricSection, MemoryConfigSection, MemoryKind,
+    MemoryMapSection, MemorySection, PlatformConfig, ProcessingElementConfigSection,
+    ProcessingElementSection,
 };
 
 pub(crate) fn platform() -> PlatformConfig {
     PlatformConfig {
         coherency_managers: None,
+        clocks: vec![ClockSection {
+            name: "default".to_string(),
+            frequency_mhz: 1000.0,
+        }],
+        default_clock: "default".to_string(),
         memory_maps: Vec::new(),
         address_spaces: Vec::new(),
         defaults: None,
@@ -24,6 +30,7 @@ pub(crate) fn platform() -> PlatformConfig {
 
 pub(crate) fn memory(name: &str, base_address: u64, capacity_bytes: u64) -> MemorySection {
     MemorySection {
+        clock: None,
         name: name.to_string(),
         kind: MemoryKind::HBM,
         base_address,
@@ -53,6 +60,7 @@ pub(crate) fn address_space(name: &str, memory_map: &str) -> AddressSpaceSection
 
 pub(crate) fn processing_element(name: &str, address_space: &str) -> ProcessingElementSection {
     ProcessingElementSection {
+        clock: None,
         name: name.to_string(),
         address_space: address_space.to_string(),
         config: ProcessingElementConfigSection {
@@ -69,6 +77,7 @@ pub(crate) fn processing_element(name: &str, address_space: &str) -> ProcessingE
 pub(crate) fn cache(name: &str) -> CacheSection {
     CacheSection {
         coherency_managers: None,
+        clock: None,
         name: name.to_string(),
         config: CacheConfigSection {
             bw_bytes_per_tick: None,
@@ -84,6 +93,7 @@ pub(crate) fn cache(name: &str) -> CacheSection {
 
 pub(crate) fn fabric(name: &str) -> FabricSection {
     FabricSection {
+        clock: None,
         name: name.to_string(),
         kind: FabricKind::Functional,
         columns: 1,

@@ -5,11 +5,14 @@ use super::common::*;
 #[test]
 fn unknown_top_level_field_is_rejected() {
     let mut engine = start_test(file!());
-    let clock = engine.default_clock();
     let err = Platform::from_string(
-        &engine,
-        &clock,
+        &mut engine,
         "
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps: []
 address_spaces: []
 processing_elementz: []
@@ -23,11 +26,14 @@ processing_elementz: []
 #[test]
 fn unknown_pe_config_field_is_rejected() {
     let mut engine = start_test(file!());
-    let clock = engine.default_clock();
     let err = Platform::from_string(
-        &engine,
-        &clock,
+        &mut engine,
         "
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps:
   - name: mm0
     devices: []
@@ -50,11 +56,14 @@ processing_elements:
 #[test]
 fn defaults_pe_config_anchor_is_allowed() {
     let mut engine = start_test(file!());
-    let clock = engine.default_clock();
     let platform = Platform::from_string(
-        &engine,
-        &clock,
+        &mut engine,
         "
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps:
   - name: mm0
     devices: []
@@ -80,11 +89,14 @@ processing_elements:
 #[test]
 fn defaults_pe_config_anchor_is_type_checked() {
     let mut engine = start_test(file!());
-    let clock = engine.default_clock();
     let err = Platform::from_string(
-        &engine,
-        &clock,
+        &mut engine,
         "
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps: []
 address_spaces: []
 

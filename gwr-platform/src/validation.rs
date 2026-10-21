@@ -8,8 +8,8 @@ use gwr_engine::types::{SimError, SimResult};
 use crate::builder::{DEFAULT_ADDRESS_SPACE_ACCESS_BYTES, EffectiveConfigs};
 use crate::connection_id::{CachePortId, ConnectionEndpointId, parse_connection_endpoint_id};
 use crate::types::{
-    AddressRegionSection, AddressSpaceSection, CacheSection, FabricSection, MemoryMapSection,
-    MemorySection, PlatformConfig,
+    AddressRegionSection, AddressSpaceSection, CacheSection, ClockSection, FabricSection,
+    MemoryMapSection, MemorySection, PlatformConfig,
 };
 
 impl PlatformConfig {
@@ -17,7 +17,8 @@ impl PlatformConfig {
     ///
     /// # Errors
     ///
-    /// Returns an error if a fabric or physical memory range is invalid, or if
+    /// Returns an error if a clock definition or reference is invalid, if a
+    /// fabric or physical memory range is invalid, or if
     /// a memory map or processing element references an unknown object, or if
     /// a physical memory is not aligned to a processing element's LSU access
     /// size or a cache's line size.
@@ -27,6 +28,7 @@ impl PlatformConfig {
 
     pub(crate) fn validated(&self) -> Result<EffectiveConfigs, SimError> {
         let lookup = self.validation_lookup()?;
+        self.validate_clock_references(&lookup)?;
         let effective = EffectiveConfigs::new(self)?;
         self.validate_memory_ranges(&effective)?;
         self.validate_references(&lookup)?;
@@ -37,6 +39,8 @@ impl PlatformConfig {
     }
 
     fn validation_lookup(&self) -> Result<PlatformValidationLookup<'_>, SimError> {
+        let clocks =
+            collect_unique_sections("clock", self.clocks.iter(), |clock| clock.name.as_str())?;
         let mut devices = HashMap::new();
         for pe in self.processing_elements.iter().flatten() {
             insert_device(
@@ -92,12 +96,56 @@ impl PlatformConfig {
         }
 
         Ok(PlatformValidationLookup {
+            clocks,
             devices,
             memory_maps,
             address_spaces,
             caches,
             fabrics,
         })
+    }
+
+    fn validate_clock_references(&self, lookup: &PlatformValidationLookup<'_>) -> SimResult {
+        if !lookup.clocks.contains_key(self.default_clock.as_str()) {
+            return sim_error!("Unknown default clock '{}'", self.default_clock);
+        }
+        let clock_references = self
+            .processing_elements
+            .iter()
+            .flatten()
+            .map(|pe| ("processing element", &pe.name, &pe.clock))
+            .chain(
+                self.caches
+                    .iter()
+                    .flatten()
+                    .map(|cache| ("cache", &cache.name, &cache.clock)),
+            )
+            .chain(
+                self.fabrics
+                    .iter()
+                    .flatten()
+                    .map(|fabric| ("fabric", &fabric.name, &fabric.clock)),
+            )
+            .chain(
+                self.memories
+                    .iter()
+                    .flatten()
+                    .map(|memory| ("memory", &memory.name, &memory.clock)),
+            )
+            .chain(
+                self.coherency_managers
+                    .iter()
+                    .flatten()
+                    .map(|manager| ("coherency manager", &manager.name, &manager.clock)),
+            );
+        for (kind, name, clock) in clock_references {
+            if let Some(clock) = clock
+                && !lookup.clocks.contains_key(clock.as_str())
+            {
+                return sim_error!("Unknown clock '{}' for {} '{}'", clock, kind, name);
+            }
+        }
+        Ok(())
     }
 
     fn validate_references(&self, lookup: &PlatformValidationLookup<'_>) -> SimResult {
@@ -338,6 +386,7 @@ enum PlatformDevice<'a> {
 }
 
 struct PlatformValidationLookup<'a> {
+    clocks: HashMap<&'a str, &'a ClockSection>,
     devices: HashMap<&'a str, PlatformDevice<'a>>,
     memory_maps: HashMap<&'a str, &'a MemoryMapSection>,
     address_spaces: HashMap<&'a str, &'a AddressSpaceSection>,

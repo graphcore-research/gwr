@@ -73,10 +73,9 @@ impl Simulation {
         validate_workload: fn(&Self),
     ) -> Self {
         let mut engine = Engine::new(&dev_null_tracker());
-        let clock = engine.default_clock();
         let yaml = platform_to_yaml_str(platform_config).expect("serialize benchmark platform");
         let platform = Rc::new(
-            Platform::from_string(&engine, &clock, &yaml).expect("construct benchmark platform"),
+            Platform::from_string(&mut engine, &yaml).expect("construct benchmark platform"),
         );
         let graph = timetable_file
             .into_graph()

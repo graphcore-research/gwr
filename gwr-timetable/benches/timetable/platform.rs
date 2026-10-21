@@ -2,10 +2,10 @@
 
 use gwr_models::fabric::node::FabricRoutingAlgorithm;
 use gwr_platform::types::{
-    AddressSpaceSection, CacheConfigSection, CacheSection, CoherencyManagerConfigSection,
-    CoherencyManagerSection, ConnectSection, FabricConfigSection, FabricKind, FabricSection,
-    MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection, PlatformConfig,
-    ProcessingElementConfigSection, ProcessingElementSection,
+    AddressSpaceSection, CacheConfigSection, CacheSection, ClockSection,
+    CoherencyManagerConfigSection, CoherencyManagerSection, ConnectSection, FabricConfigSection,
+    FabricKind, FabricSection, MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
+    PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
 };
 
 pub(super) const PES: usize = 60;
@@ -42,6 +42,11 @@ pub(super) fn config() -> PlatformConfig {
         max_inflight_fills: Some(64),
     };
     PlatformConfig {
+        clocks: vec![ClockSection {
+            name: "default".to_owned(),
+            frequency_mhz: 1000.0,
+        }],
+        default_clock: "default".to_owned(),
         memory_maps: memory_maps(),
         address_spaces: vec![AddressSpaceSection {
             name: "default".to_owned(),
@@ -54,6 +59,7 @@ pub(super) fn config() -> PlatformConfig {
             (0..PES)
                 .map(|index| ProcessingElementSection {
                     name: endpoint_name("pe", index),
+                    clock: None,
                     address_space: "default".to_owned(),
                     config: pe_config.clone(),
                 })
@@ -63,6 +69,7 @@ pub(super) fn config() -> PlatformConfig {
             (0..PES)
                 .map(|index| CacheSection {
                     name: endpoint_name("l1", index),
+                    clock: None,
                     coherency_managers: Some((0..BANKS).map(|bank| format!("cm{bank}")).collect()),
                     config: cache_config.clone(),
                 })
@@ -71,6 +78,7 @@ pub(super) fn config() -> PlatformConfig {
         coherency_managers: Some(coherency_managers()),
         fabrics: Some(vec![FabricSection {
             name: "interconnect".to_owned(),
+            clock: None,
             kind: FabricKind::Routed,
             columns: 8,
             rows: 8,
@@ -90,6 +98,7 @@ pub(super) fn config() -> PlatformConfig {
             (0..BANKS)
                 .map(|bank| MemorySection {
                     name: format!("hbm{bank}"),
+                    clock: None,
                     kind: MemoryKind::HBM,
                     base_address: bank_base(bank),
                     config: MemoryConfigSection {
@@ -120,6 +129,7 @@ fn coherency_managers() -> Vec<CoherencyManagerSection> {
     (0..BANKS)
         .map(|bank| CoherencyManagerSection {
             name: format!("cm{bank}"),
+            clock: None,
             memory_map: format!("coherent_bank{bank}"),
             config: CoherencyManagerConfigSection {
                 line_size_bytes: Some(256),
