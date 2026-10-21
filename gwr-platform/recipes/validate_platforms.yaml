@@ -8,6 +8,11 @@ ingredients:
     command:
       cargo run --bin validate-platform -p gwr-platform -- --platform
       gwr-platform/examples/simple_pe_cache_mem.yaml
+  - comment:
+      Validate the PE-cache-fabric-memory platform with named clock domains.
+    command:
+      cargo run --bin validate-platform -p gwr-platform -- --platform
+      gwr-platform/examples/platform_mixed_clocks.yaml
   - comment: Validate the default platform example.
     command:
       cargo run --bin validate-platform -p gwr-platform -- --platform

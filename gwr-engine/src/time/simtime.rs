@@ -10,41 +10,8 @@ use std::rc::Rc;
 use gwr_track::entity::Entity;
 use gwr_track::set_time;
 
-use super::clock::{Clock, Phase, phase};
+use super::clock::{Clock, Phase, phase, validate_frequency_mhz};
 use crate::time::clock::SimInstant;
-
-/// Conservative tick limit that keeps adjacent ticks distinguishable as `f64`
-/// nanosecond timestamps. Timestamps can still be approximate below this limit,
-/// but adjacent ticks cannot collapse to the same timestamp. The first actual
-/// collision may occur later, depending on the frequency.
-///
-/// The integer-to-`f64` cast is exact below 2^53 ticks. Within that range,
-/// `tick_to_ns` still rounds twice: once when dividing by the MHz frequency,
-/// then again when multiplying by 1000 to get nanoseconds. For normal finite
-/// arithmetic, each operation has relative error at most `u = 2^-53` (about
-/// one part in 9 quadrillion). Together their relative error is at most
-/// `a = (1 + u)^2 - 1 = 2u + u^2`. These expressions describe exact
-/// mathematical bounds; they are not calculations performed using `f64`.
-///
-/// Let `P` be the exact tick period for the stored frequency. Tick `n` should
-/// occur at `n * P`, so its converted timestamp can be wrong by at most
-/// `a * n * P` nanoseconds. To preserve the ordering of ticks `n` and `n + 1`,
-/// even if the earlier time rounds up and the later time rounds down, their
-/// combined error must be smaller than the one-period gap:
-///
-/// `a * n * P + a * (n + 1) * P < P`, or `a * (2n + 1) < 1`.
-///
-/// The period cancels, so the same tick-count bound works at every supported
-/// frequency.
-///
-/// Since `a` is approximately 2^-52, this requires roughly `n < 2^51`.
-/// Choosing `n <= 2^51 - 1` satisfies the strict inequality with the full
-/// error bound above. It also keeps the following tick distinguishable,
-/// which synchronization needs when locating the current clock edge.
-///
-/// Clock registration checks the arithmetic range required by this bound.
-/// It does not guarantee exact ordering between different clock frequencies.
-const MAX_PRECISE_TICKS: u64 = (1 << 51) - 1;
 
 /// The overall owner of time within a simulation.
 ///
@@ -85,14 +52,10 @@ impl SimTime {
                 return clock.clone();
             }
         }
-        let max_time_ns = MAX_PRECISE_TICKS as f64 / freq_mhz * 1000.0;
-        assert!(
-            freq_mhz.is_finite()
-                && freq_mhz > 0.0
-                && (1.0 / freq_mhz).is_normal()
-                && max_time_ns.is_finite(),
-            "Clock frequency {freq_mhz} MHz is outside the supported floating-point time precision range"
-        );
+        let max_time_ns = validate_frequency_mhz(freq_mhz)
+            .unwrap_or_else(|error| {
+                panic!("Clock frequency is outside the supported floating-point time precision range: {error}")
+            });
         assert!(
             self.now.get().ns <= max_time_ns,
             "Current simulation time exceeds the floating-point time precision limit of {max_time_ns} ns for the {freq_mhz} MHz clock"

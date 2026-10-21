@@ -7,14 +7,17 @@ use gwr_engine::types::{SimError, SimResult};
 
 use crate::builder::EffectiveConfigs;
 use crate::connection_id::{CachePortId, ConnectionEndpointId, parse_connection_endpoint_id};
-use crate::types::{CacheSection, FabricSection, MemoryMapSection, MemorySection, PlatformConfig};
+use crate::types::{
+    CacheSection, ClockSection, FabricSection, MemoryMapSection, MemorySection, PlatformConfig,
+};
 
 impl PlatformConfig {
     /// Validate platform properties that do not require building the simulator.
     ///
     /// # Errors
     ///
-    /// Returns an error if a fabric or physical memory range is invalid, or if
+    /// Returns an error if a clock definition or reference is invalid, if a
+    /// fabric or physical memory range is invalid, or if
     /// a memory map or processing element references an unknown object, or if
     /// a physical memory is not aligned to a processing element's LSU access
     /// size or a cache's line size.
@@ -24,9 +27,9 @@ impl PlatformConfig {
 
     pub(crate) fn validated(&self) -> Result<EffectiveConfigs, SimError> {
         let lookup = self.validation_lookup()?;
+        self.validate_references(&lookup)?;
         let effective = EffectiveConfigs::new(self)?;
         self.validate_memory_ranges(&effective)?;
-        self.validate_references(&lookup)?;
         self.validate_memory_fetch_alignment(&effective)?;
         self.validate_coherence(&effective)?;
         self.validate_connections(&lookup, &effective)?;
@@ -34,6 +37,8 @@ impl PlatformConfig {
     }
 
     fn validation_lookup(&self) -> Result<PlatformValidationLookup<'_>, SimError> {
+        let clocks =
+            collect_unique_sections("clock", self.clocks.iter(), |clock| clock.name.as_str())?;
         let mut devices = HashMap::new();
         for pe in self.processing_elements.iter().flatten() {
             insert_device(
@@ -84,6 +89,7 @@ impl PlatformConfig {
         }
 
         Ok(PlatformValidationLookup {
+            clocks,
             devices,
             memory_maps,
             caches,
@@ -92,6 +98,45 @@ impl PlatformConfig {
     }
 
     fn validate_references(&self, lookup: &PlatformValidationLookup<'_>) -> SimResult {
+        if !lookup.clocks.contains_key(self.default_clock.as_str()) {
+            return sim_error!("Unknown default clock '{}'", self.default_clock);
+        }
+        let clock_references = self
+            .processing_elements
+            .iter()
+            .flatten()
+            .map(|pe| ("processing element", &pe.name, &pe.clock))
+            .chain(
+                self.caches
+                    .iter()
+                    .flatten()
+                    .map(|cache| ("cache", &cache.name, &cache.clock)),
+            )
+            .chain(
+                self.fabrics
+                    .iter()
+                    .flatten()
+                    .map(|fabric| ("fabric", &fabric.name, &fabric.clock)),
+            )
+            .chain(
+                self.memories
+                    .iter()
+                    .flatten()
+                    .map(|memory| ("memory", &memory.name, &memory.clock)),
+            )
+            .chain(
+                self.coherency_managers
+                    .iter()
+                    .flatten()
+                    .map(|manager| ("coherency manager", &manager.name, &manager.clock)),
+            );
+        for (kind, name, clock) in clock_references {
+            if let Some(clock) = clock
+                && !lookup.clocks.contains_key(clock.as_str())
+            {
+                return sim_error!("Unknown clock '{}' for {} '{}'", clock, kind, name);
+            }
+        }
         for memory_map in &self.memory_maps {
             let mut devices = HashSet::new();
             for device in &memory_map.devices {
@@ -247,6 +292,7 @@ enum PlatformDevice<'a> {
 }
 
 struct PlatformValidationLookup<'a> {
+    clocks: HashMap<&'a str, &'a ClockSection>,
     devices: HashMap<&'a str, PlatformDevice<'a>>,
     memory_maps: HashMap<&'a str, &'a MemoryMapSection>,
     caches: HashMap<&'a str, &'a CacheSection>,
