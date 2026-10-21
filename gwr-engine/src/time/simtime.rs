@@ -5,12 +5,13 @@
 //! Time is made up of a tick count and a phase.
 
 use std::cell::Cell;
+use std::cmp::Ordering;
 use std::rc::Rc;
 
 use gwr_track::entity::Entity;
 use gwr_track::set_time;
 
-use super::clock::{Clock, phase};
+use super::clock::Clock;
 use crate::time::clock::SimInstant;
 
 /// The overall owner of time within a simulation.
@@ -33,10 +34,7 @@ impl SimTime {
     pub fn new(parent: &Rc<Entity>) -> Self {
         Self {
             entity: Rc::new(Entity::new(parent, "time")),
-            now: Rc::new(Cell::new(SimInstant {
-                ns: 0.0,
-                phase: phase::BEGIN,
-            })),
+            now: Rc::new(Cell::new(SimInstant::new())),
             clocks: Vec::new(),
         }
     }
@@ -64,23 +62,32 @@ impl SimTime {
             .clocks
             .iter()
             .min_by(|a, b| a.cmp_next_event(b))
-            .unwrap();
-        assert!(next_clock.has_scheduled_events());
+            .expect("sim cannot exit but no clocks have pending events");
+
+        let previous_instant = self.now.get();
+        let mut next_instant = next_clock
+            .instant_of_next()
+            .expect("no events scheduled on next clock with pending events");
+
+        // Figure out whether the simulation has advanced
+        let time_order = next_instant.cmp_tick(&previous_instant);
+
+        // Clocks with coincident ticks can report different nanosecond counts
+        // due to f64 rounding
+        next_instant.ns = match time_order {
+            Ordering::Less => panic!("simulation time moved backwards"),
+            Ordering::Equal => {
+                assert!(next_instant.phase >= previous_instant.phase);
+                previous_instant.ns
+            }
+            Ordering::Greater => next_instant.ns.max(previous_instant.ns),
+        };
 
         // Update sim time and the tracker, and then bring the clock up to date
-
-        let next_instant = SimInstant {
-            ns: next_clock.time_of_next(),
-            phase: next_clock.phase_of_next(),
-        };
-        assert!(next_instant.ns >= self.now.get().ns);
-        if next_instant.ns == self.now.get().ns {
-            assert!(next_instant.phase >= self.now.get().phase);
-        } else {
+        if next_instant.ns != previous_instant.ns {
             set_time!(self.entity ; next_instant.ns);
         }
         self.now.set(next_instant);
-
         next_clock.advance_to_event();
 
         true

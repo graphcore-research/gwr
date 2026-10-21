@@ -16,10 +16,156 @@ use futures::future::FusedFuture;
 use crate::traits::{Resolve, Resolver};
 use crate::types::SimError;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Frequency {
+    significand: u64,
+    exponent: i16,
+}
+
+impl Frequency {
+    pub(super) fn new(freq_mhz: f64) -> Self {
+        assert!(freq_mhz.is_finite());
+        assert!(freq_mhz > 0.0);
+
+        let bits = freq_mhz.to_bits();
+
+        let mut significand = bits & ((1u64 << 52) - 1);
+        let mut exponent = ((bits >> 52) & ((1 << 11) - 1)) as i16;
+
+        if exponent == 0 {
+            // Subnormal numbers
+            exponent = -1074;
+        } else {
+            // Normal numbers
+            significand |= 1u64 << 52;
+            exponent -= 1075;
+        }
+
+        let trailing_zeros = significand.trailing_zeros();
+        significand >>= trailing_zeros;
+        exponent += trailing_zeros as i16;
+
+        Self {
+            significand,
+            exponent,
+        }
+    }
+
+    /// Compare the time of a tick at this frequency against a given tick at
+    /// another frequency.
+    pub(super) fn cmp_ticks(&self, tick: u64, other: &Self, other_tick: u64) -> Ordering {
+        if self == other {
+            return tick.cmp(&other_tick);
+        }
+
+        // We want to know if:
+        //   tick / self < other_tick / other
+        // Which is equivalent to:
+        //   tick * other < other_tick * self
+        let a = u128::from(tick) * u128::from(other.significand);
+        let a_shift = other.exponent;
+        let b = u128::from(other_tick) * u128::from(self.significand);
+        let b_shift = self.exponent;
+
+        cmp_scaled(a, a_shift, b, b_shift)
+    }
+
+    /// Get the last tick at this frequency not later than a given tick at
+    /// another frequency, and whether the ticks coincide.
+    ///
+    /// Returns None if the conversion would overflow.
+    pub(super) fn tick_at(&self, other: &Self, other_tick: u64) -> Option<(u64, bool)> {
+        // We want to calculate floor(other_tick / other * self)
+        if other_tick == 0 || self == other {
+            return Some((other_tick, true));
+        }
+
+        let numerator = u128::from(other_tick) * u128::from(self.significand);
+        let denominator = u128::from(other.significand);
+        let exponent = self.exponent - other.exponent;
+
+        // Return nothing if (numerator << exponent) / denominator >= 2^64
+        if cmp_scaled(numerator, exponent, denominator, 64).is_ge() {
+            return None;
+        }
+
+        let (tick, remainder) = if exponent >= 0 {
+            let shift = exponent as u32;
+            let numerator = numerator << shift;
+            (numerator / denominator, numerator % denominator)
+        } else {
+            let shift = exponent.unsigned_abs() as u32;
+
+            // If the denominator needs more bits than the numerator, then the
+            // fraction will lie in (0, 1) - i.e. the result is tick 0.
+            let denominator_bits = u128::BITS - denominator.leading_zeros() + shift;
+            let numerator_bits = u128::BITS - numerator.leading_zeros();
+            if denominator_bits > numerator_bits {
+                return Some((0, false));
+            }
+
+            let denominator = denominator << shift;
+            (numerator / denominator, numerator % denominator)
+        };
+
+        Some((tick as u64, remainder == 0))
+    }
+}
+
+/// Compare `a * 2^a_shift` with `b * 2^b_shift` exactly.
+fn cmp_scaled(a: u128, a_shift: i16, b: u128, b_shift: i16) -> Ordering {
+    if a_shift == b_shift || a == 0 || b == 0 {
+        return a.cmp(&b);
+    }
+
+    // Compare the bit lengths adjusted by their exponents. If these differ,
+    // the scaled values have different highest set-bit positions, which
+    // determines their order without needing to shift either operand.
+    let bits_a = (u128::BITS - a.leading_zeros()).cast_signed() + a_shift as i32;
+    let bits_b = (u128::BITS - b.leading_zeros()).cast_signed() + b_shift as i32;
+    let magnitude = bits_a.cmp(&bits_b);
+    if magnitude != Ordering::Equal {
+        return magnitude;
+    }
+
+    // Factor out the smaller power of two, leaving only a relative left shift.
+    // This avoids losing bits through right shifts when exponents are negative.
+    // Equal adjusted bit lengths guarantee that the shifted value has the same
+    // bit length as the other operand, so it fits in u128 and the shift is <
+    // 128.
+    let relative_shift = a_shift.abs_diff(b_shift);
+    if a_shift > b_shift {
+        (a << relative_shift).cmp(&b)
+    } else {
+        a.cmp(&(b << relative_shift))
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct SimInstant {
-    pub ns: f64,
+    pub freq: Frequency,
+    pub tick: u64,
     pub phase: u32,
+
+    /// Precomputed ns timestamp, for reporting only.
+    pub ns: f64,
+}
+
+impl SimInstant {
+    pub(super) fn new() -> Self {
+        Self {
+            freq: Frequency::new(1000.0),
+            tick: 0,
+            phase: phase::BEGIN,
+            ns: 0.0,
+        }
+    }
+
+    /// Compare the time of this instant against the time of another instant,
+    /// ignoring phase.
+    pub(super) fn cmp_tick(self, other: &SimInstant) -> Ordering {
+        self.freq.cmp_ticks(self.tick, &other.freq, other.tick)
+    }
 }
 
 pub mod phase {
@@ -135,6 +281,8 @@ struct ClockState {
     /// *Note*: Should never be changed as it is registered at this frequency.
     freq_mhz: f64,
 
+    freq: Frequency,
+
     sim_instant: Rc<Cell<SimInstant>>,
 
     last_sync: Cell<SimInstant>,
@@ -175,36 +323,16 @@ impl ClockState {
 
     #[inline(never)]
     fn do_synchronize(&self, sim_instant: &SimInstant) -> ClockTick {
-        // Make an attempt to convert the sim time a tick count for this clock
-        let tick_estimate = sim_instant.ns * self.freq_mhz / 1000.0;
-        assert!(
-            tick_estimate.is_finite() && (0.0..u64::MAX as f64).contains(&tick_estimate),
-            "simulation clock cannot represent the current tick"
-        );
-        let mut tick = tick_estimate as u64;
+        let (tick, in_phase) = self
+            .freq
+            .tick_at(&sim_instant.freq, sim_instant.tick)
+            .expect("sim instant to tick overflows");
 
-        // Account for rounding errors in the f64 nanosecond to u64 tick count
-        // conversion. E.g. for a 333MHz clock:
-        // - tick_to_ns(1) is 3.003003003003003, but that time gets converted to
-        //   0.9999999999999999 in tick_estimate above, and then rounded down to
-        //   0 when cast to u64.
-        // - When sim_instant.ns = 21.02102102102102, tick_estimate is 7.0.
-        //   tick_to_ns(7) is actually 21.021021021021024 - i.e. slightly after
-        //   sim_instant.ns.
-        while tick > 0 && self.tick_to_ns(tick) > sim_instant.ns {
-            tick -= 1;
-        }
-        while tick < u64::MAX && self.tick_to_ns(tick + 1) <= sim_instant.ns {
-            tick += 1;
-        }
-
-        // If we've advanced to a tick of this clock, then pull the phase from
-        // the given sim instant. Otherwise, the clock is between ticks and
-        // phase isn't relevant.
-        let mut phase = sim_instant.phase;
-        if self.tick_to_ns(tick) != sim_instant.ns {
-            phase = phase::NONE;
-        }
+        let phase = if in_phase {
+            sim_instant.phase
+        } else {
+            phase::NONE
+        };
 
         let synchronized = ClockTick { tick, phase };
 
@@ -339,11 +467,9 @@ impl Clock {
     pub(super) fn new(freq_mhz: f64, sim_instant: Rc<Cell<SimInstant>>) -> Self {
         let shared_state = Rc::new(ClockState {
             freq_mhz,
+            freq: Frequency::new(freq_mhz),
             sim_instant,
-            last_sync: Cell::new(SimInstant {
-                ns: 0.0,
-                phase: phase::BEGIN,
-            }),
+            last_sync: Cell::new(SimInstant::new()),
             now: Cell::new(ClockTick {
                 tick: 0,
                 phase: phase::BEGIN,
@@ -385,11 +511,11 @@ impl Clock {
         // Pop the next scheduled event
         let event_time = self.shared_state.waiting_times.borrow_mut().pop().unwrap();
         let event_wakers = self.shared_state.waiting.borrow_mut().pop().unwrap();
-        let event_ns = self.shared_state.tick_to_ns(event_time.tick);
 
         // The sim time should have been advanced already
         let sim_instant = self.shared_state.sim_instant.get();
-        assert_eq!(sim_instant.ns, event_ns);
+        assert_eq!(sim_instant.freq, self.shared_state.freq);
+        assert_eq!(sim_instant.tick, event_time.tick);
         assert_eq!(sim_instant.phase, event_time.phase);
 
         // Sanity check the event
@@ -424,9 +550,19 @@ impl Clock {
 
     /// Compare next scheduled event time against a given clock.
     pub(super) fn cmp_next_event(&self, other: &Clock) -> Ordering {
-        self.time_of_next()
-            .total_cmp(&other.time_of_next())
-            .then_with(|| self.phase_of_next().cmp(&other.phase_of_next()))
+        match (
+            self.shared_state.waiting_times.borrow().last(),
+            other.shared_state.waiting_times.borrow().last(),
+        ) {
+            (None, None) => Ordering::Equal,
+            (None, Some(_)) => Ordering::Greater,
+            (Some(_), None) => Ordering::Less,
+            (Some(tick), Some(other_tick)) => self
+                .shared_state
+                .freq
+                .cmp_ticks(tick.tick, &other.shared_state.freq, other_tick.tick)
+                .then_with(|| tick.phase.cmp(&other_tick.phase)),
+        }
     }
 
     /// Returns the clocks frequency in MHz.
@@ -447,22 +583,19 @@ impl Clock {
         self.shared_state.sim_instant.get().ns
     }
 
-    /// Returns the time in `ns` of the next event registered with this clock.
+    /// Returns the sim instant of the next event registered with this clock.
     #[must_use]
-    pub(super) fn time_of_next(&self) -> f64 {
-        match self.shared_state.waiting_times.borrow().last() {
-            Some(clock_time) => self.to_ns(clock_time),
-            None => f64::MAX,
-        }
-    }
-
-    /// Returns the phase of the next event registered with this clock.
-    #[must_use]
-    pub(super) fn phase_of_next(&self) -> u32 {
-        match self.shared_state.waiting_times.borrow().last() {
-            Some(clock_time) => clock_time.phase(),
-            None => u32::MAX,
-        }
+    pub(super) fn instant_of_next(&self) -> Option<SimInstant> {
+        self.shared_state
+            .waiting_times
+            .borrow()
+            .last()
+            .map(|clock_time| SimInstant {
+                freq: self.shared_state.freq,
+                tick: clock_time.tick,
+                phase: clock_time.phase,
+                ns: self.to_ns(clock_time),
+            })
     }
 
     /// Convert the given [ClockTick] to a time in `ns` for this clock.
@@ -590,19 +723,15 @@ mod tests {
     use super::*;
 
     fn new_clock(freq_mhz: f64) -> Clock {
-        Clock::new(
-            freq_mhz,
-            Rc::new(Cell::new(SimInstant {
-                ns: 0.0,
-                phase: phase::BEGIN,
-            })),
-        )
+        Clock::new(freq_mhz, Rc::new(Cell::new(SimInstant::new())))
     }
 
     fn clock_at_tick(tick: u64) -> Clock {
         let clock = new_clock(1000.0);
         let now = ClockTick::new().set_tick(tick);
         let instant = SimInstant {
+            freq: clock.shared_state.freq,
+            tick,
             ns: clock.to_ns(&now),
             phase: now.phase(),
         };
@@ -615,10 +744,10 @@ mod tests {
     }
 
     fn advance_to_next_event(clock: &Clock) {
-        clock.shared_state.sim_instant.replace(SimInstant {
-            ns: clock.time_of_next(),
-            phase: clock.phase_of_next(),
-        });
+        clock
+            .shared_state
+            .sim_instant
+            .replace(clock.instant_of_next().unwrap());
         clock.advance_to_event();
     }
 

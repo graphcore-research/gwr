@@ -420,3 +420,120 @@ fn resolves_run_once_per_registration() {
     assert_eq!((first.calls.get(), second.calls.get()), (2, 1));
     assert_eq!(engine.time_now_ns(), 1.0);
 }
+
+/// Test that clocks synchronize correctly at large tick counts
+#[test]
+fn synchronizing_at_large_tick_counts() {
+    let mut engine = start_test("exact_clock_boundaries");
+    let fast = engine.clock_mhz(2000.0);
+    let slow = engine.clock_mhz(1000.0);
+
+    engine.spawn(async move {
+        // Use the fast clock to advance until the slow clock ticks alias in an
+        // f64 nanosecond counter
+        fast.wait_ticks(1 << 54)?.await;
+
+        // The slow clock should synchronize to the same phase in a coincident
+        // tick
+        assert_eq!(slow.tick_now().tick(), 1 << 53);
+        assert_eq!(slow.tick_now().phase(), phase::BEGIN);
+        Ok(())
+    });
+
+    engine.run().unwrap();
+}
+
+/// Test that clocks synchronize between ticks correctly at large tick counts
+#[test]
+fn synchronizing_between_ticks_at_large_tick_counts() {
+    let mut engine = start_test("exact_clock_phase_reset");
+    let fast = engine.clock_mhz(2000.0);
+    let slow = engine.clock_mhz(1000.0);
+
+    engine.spawn(async move {
+        fast.wait_ticks(1 << 53)?.await;
+        fast.wait_phase(2)?.await;
+
+        // The slow clock should synchronize to the same phase in a coincident
+        // tick
+        assert_eq!(slow.tick_now().tick(), 1 << 52);
+        assert_eq!(slow.tick_now().phase(), 2);
+
+        // Now wait for an earlier phase in the next tick
+        fast.next_tick_and_phase(1)?.await;
+        assert_eq!(fast.tick_now().tick(), (1 << 53) + 1);
+        assert_eq!(fast.tick_now().phase(), 1);
+
+        // The slow clock should now be between ticks
+        assert_eq!(slow.tick_now().tick(), 1 << 52);
+        assert_eq!(slow.tick_now().phase(), phase::NONE);
+
+        Ok(())
+    });
+
+    engine.run().unwrap();
+}
+
+/// Test that events are handled in the correct order when f64 nanosecond times
+/// coincide
+#[test]
+fn event_order_is_correct_when_f64_ns_timestamps_coincide() {
+    let mut engine = start_test("exact_clock_order");
+    let fast = engine.clock_mhz(2000.0);
+    let slow = engine.clock_mhz(1000.0);
+
+    let order = Rc::new(RefCell::new(Vec::new()));
+
+    let observed = order.clone();
+    engine.spawn(async move {
+        fast.wait_ticks((1 << 54) + 1)?.await;
+        observed.borrow_mut().push("fast");
+        Ok(())
+    });
+
+    let observed = order.clone();
+    engine.spawn(async move {
+        slow.wait_ticks(1 << 53)?.await;
+        observed.borrow_mut().push("slow");
+        Ok(())
+    });
+
+    engine.run().unwrap();
+
+    assert_eq!(*order.borrow(), ["slow", "fast"]);
+}
+
+/// Test that ns time is monotonic even when raw conversion to ns using
+///   (tick as f64 / freq_mhz) * 1000.0
+/// produces different values for coincident ticks of different clocks.
+#[test]
+fn time_is_monotonic_when_clocks_could_report_different_ns() {
+    let mut engine = start_test("exact_clock_reporting");
+    let fast = engine.clock_mhz(9000.0);
+    let slow = engine.clock_mhz(1000.0);
+
+    engine.spawn(async move {
+        let tick = (1_u64 << 50) + 3;
+        fast.wait_ticks(9 * tick)?.await;
+
+        // The raw conversion ((9 * tick) as f64 / 9000.0) * 1000.0
+        // produces tick + 0.25 ns, or 1125899906842627.25 ns.
+        let before = fast.time_now_ns();
+
+        slow.wait_phase(1)?.await;
+
+        // The raw conversion (tick as f64 / 1000.0) * 1000.0 would
+        // produce tick ns, or 1125899906842627.0 ns. Preserve the previous
+        // report at this exact tie so reported time does not go backwards.
+        let after = slow.time_now_ns();
+
+        assert!(
+            after >= before,
+            "reported ns moved backwards: {before:?} -> {after:?}"
+        );
+
+        Ok(())
+    });
+
+    engine.run().unwrap();
+}
