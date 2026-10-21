@@ -203,19 +203,10 @@ impl Executor {
                     })?;
                 }
 
-                if self.state.new_tasks.borrow().is_empty() {
-                    if self.state.time.borrow().can_exit() {
-                        break;
-                    }
-
-                    if let Some(wakers) = self.state.time.borrow_mut().advance_time() {
-                        // No events left, advance time
-                        for task_waker in wakers.into_iter() {
-                            task_waker.waker.wake();
-                        }
-                    } else {
-                        break;
-                    }
+                if self.state.new_tasks.borrow().is_empty()
+                    && !self.state.time.borrow_mut().try_advance()
+                {
+                    break;
                 }
             }
             Ok(())
@@ -316,12 +307,10 @@ mod tests {
     use std::task::{Context, Poll};
     use std::time::Duration;
 
-    use futures::task::noop_waker;
     use gwr_track::entity::toplevel;
     use gwr_track::tracker::dev_null_tracker;
 
     use super::*;
-    use crate::time::clock::TaskWaker;
 
     struct PendingOnce {
         was_polled: bool,
@@ -343,23 +332,15 @@ mod tests {
     }
 
     #[test]
-    fn run_exits_when_time_cannot_advance() {
+    fn run_exits_when_pending_tasks_have_no_scheduled_events() {
         let tracker = dev_null_tracker();
         let top = toplevel(&tracker, "top");
-        let (executor, _spawner) = new_executor_and_spawner(&top);
-        let clock = executor.get_clock(1000.0);
-
-        clock
-            .shared_state
-            .waiting
-            .borrow_mut()
-            .push(vec![TaskWaker {
-                id: 0,
-                waker: noop_waker(),
-                can_exit: false,
-            }]);
+        let (executor, spawner) = new_executor_and_spawner(&top);
+        spawner.spawn(std::future::pending());
 
         executor.run().unwrap();
+        assert_eq!(executor.stats().futures_polled, 1);
+        assert_eq!(executor.stats().futures_completed, 0);
     }
 
     #[test]
