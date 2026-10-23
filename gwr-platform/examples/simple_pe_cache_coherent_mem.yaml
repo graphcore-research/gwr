@@ -1,0 +1,62 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+memory_maps:
+  - name: pe_memory_map
+    devices:
+      - mem0
+  - name: coherency_memory_map
+    devices:
+      - mem0
+
+processing_elements:
+  - name: pe0
+    memory_map: pe_memory_map
+    config:
+      lsu_access_bytes: 32
+      sram_bytes: 64KiB
+
+caches:
+  - name: l1_0
+    coherency_managers: [cm0]
+    config:
+      bw_bytes_per_tick: 32
+      line_size_bytes: 32
+      delay_ticks: 4
+
+coherency_managers:
+  - name: cm0
+    memory_map: coherency_memory_map
+    config:
+      line_size_bytes: 32
+
+fabrics:
+  - name: fabric0
+    kind: functional
+    columns: 2
+    rows: 2
+    config: {}
+
+memories:
+  - name: mem0
+    kind: ddr
+    base_address: 0x1_0000_0000
+    config:
+      capacity_bytes: 1GiB
+      delay_ticks: 40
+
+connections:
+  - connect:
+      - pe.pe0
+      - cache.l1_0.dev
+  - connect:
+      - cache.l1_0.mem
+      - fabric.fabric0@(0,0)
+  - connect:
+      - coherency_manager.cm0
+      - fabric.fabric0@(0,1)
+  - connect:
+      - mem.mem0
+      - fabric.fabric0@(1,0)
+  - connect:
+      - null
+      - fabric.fabric0@(1,1)

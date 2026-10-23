@@ -75,7 +75,8 @@ pub fn build_source_sinks(
                         num_send_frames
                     }
                 }
-                // All other generators will send the requested number without sending to self.
+                // All other generators will send the requested number without
+                // sending to self.
                 _ => num_send_frames,
             }
         } else {

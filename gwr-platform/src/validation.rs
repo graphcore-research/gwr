@@ -28,6 +28,7 @@ impl PlatformConfig {
         self.validate_memory_ranges(&effective)?;
         self.validate_references(&lookup)?;
         self.validate_memory_fetch_alignment(&effective)?;
+        self.validate_coherence(&effective)?;
         self.validate_connections(&lookup, &effective)?;
         Ok(effective)
     }
@@ -49,6 +50,13 @@ impl PlatformConfig {
             )?;
         }
 
+        for manager in self.coherency_managers.iter().flatten() {
+            insert_device(
+                &mut devices,
+                &manager.name,
+                PlatformDevice::CoherencyManager,
+            )?;
+        }
         let memory_maps =
             collect_unique_sections("memory map", self.memory_maps.iter(), |memory_map| {
                 memory_map.name.as_str()
@@ -56,6 +64,9 @@ impl PlatformConfig {
         let caches = collect_unique_sections("cache", self.caches.iter().flatten(), |cache| {
             cache.name.as_str()
         })?;
+        for cache in self.caches.iter().flatten() {
+            insert_device(&mut devices, &cache.name, PlatformDevice::Cache)?;
+        }
         let mut fabrics = HashMap::new();
         for (config_index, fabric) in self.fabrics.iter().flatten().enumerate() {
             if fabrics
@@ -230,6 +241,8 @@ struct FabricReference<'a> {
 
 enum PlatformDevice<'a> {
     ProcessingElement,
+    CoherencyManager,
+    Cache,
     Memory(&'a MemorySection),
 }
 
@@ -241,20 +254,6 @@ struct PlatformValidationLookup<'a> {
 }
 
 impl PlatformValidationLookup<'_> {
-    fn processing_element_exists(&self, name: &str) -> bool {
-        matches!(
-            self.devices.get(name),
-            Some(PlatformDevice::ProcessingElement)
-        )
-    }
-
-    fn memory(&self, name: &str) -> Option<&MemorySection> {
-        match self.devices.get(name) {
-            Some(PlatformDevice::Memory(memory)) => Some(memory),
-            Some(PlatformDevice::ProcessingElement) | None => None,
-        }
-    }
-
     fn validate_port_endpoint(
         &self,
         endpoint: &ConnectionEndpointId,
@@ -263,6 +262,15 @@ impl PlatformValidationLookup<'_> {
     ) -> SimResult {
         match endpoint {
             ConnectionEndpointId::Null => Ok(()),
+            ConnectionEndpointId::CoherencyManager { name } => {
+                if !matches!(
+                    self.devices.get(name.as_str()),
+                    Some(PlatformDevice::CoherencyManager)
+                ) {
+                    return sim_error!("No Coherency Manager '{name}'");
+                }
+                Ok(())
+            }
             ConnectionEndpointId::Pe { name } => {
                 if !self.processing_element_exists(name) {
                     return sim_error!("No PE '{name}'");
@@ -292,6 +300,20 @@ impl PlatformValidationLookup<'_> {
                 };
                 validate_fabric_port(source, fabric_ref, effective, *column, *row, *port)
             }
+        }
+    }
+
+    fn processing_element_exists(&self, name: &str) -> bool {
+        matches!(
+            self.devices.get(name),
+            Some(PlatformDevice::ProcessingElement)
+        )
+    }
+
+    fn memory(&self, name: &str) -> Option<&MemorySection> {
+        match self.devices.get(name) {
+            Some(PlatformDevice::Memory(memory)) => Some(memory),
+            _ => None,
         }
     }
 }
@@ -368,6 +390,7 @@ fn endpoint_port(
     match endpoint {
         ConnectionEndpointId::Null => unreachable!("null has no port to reserve"),
         ConnectionEndpointId::Pe { name } => format!("pe.{name}"),
+        ConnectionEndpointId::CoherencyManager { name } => format!("coherency_manager.{name}"),
         ConnectionEndpointId::Mem { name } => format!("mem.{name}"),
         ConnectionEndpointId::FabricPort {
             fabric,
@@ -395,7 +418,9 @@ fn cache_connection_port(
         ConnectionEndpointId::Pe { .. } => "dev",
         ConnectionEndpointId::Cache { .. } if is_from => "mem",
         ConnectionEndpointId::Cache { .. } => "dev",
-        ConnectionEndpointId::Mem { .. } | ConnectionEndpointId::FabricPort { .. } => "mem",
+        ConnectionEndpointId::Mem { .. }
+        | ConnectionEndpointId::CoherencyManager { .. }
+        | ConnectionEndpointId::FabricPort { .. } => "mem",
     }
 }
 
@@ -404,6 +429,18 @@ fn validate_port_endpoint_pair(
     to: &ConnectionEndpointId,
 ) -> SimResult {
     match (from, to) {
+        (
+            ConnectionEndpointId::CoherencyManager { .. },
+            ConnectionEndpointId::FabricPort { .. },
+        )
+        | (
+            ConnectionEndpointId::FabricPort { .. },
+            ConnectionEndpointId::CoherencyManager { .. },
+        ) => Ok(()),
+        (ConnectionEndpointId::CoherencyManager { .. }, _)
+        | (_, ConnectionEndpointId::CoherencyManager { .. }) => {
+            sim_error!("Coherency Managers must connect to a Fabric")
+        }
         (ConnectionEndpointId::Null, ConnectionEndpointId::FabricPort { .. })
         | (ConnectionEndpointId::FabricPort { .. }, ConnectionEndpointId::Null)
         | (ConnectionEndpointId::Null, ConnectionEndpointId::Cache { .. })
@@ -493,4 +530,181 @@ fn validate_fabric_port(
         );
     }
     Ok(())
+}
+
+impl PlatformConfig {
+    fn validate_coherence(&self, effective: &EffectiveConfigs) -> SimResult {
+        let managers = self
+            .coherency_managers
+            .iter()
+            .flatten()
+            .map(|m| (m.name.as_str(), m))
+            .collect::<HashMap<_, _>>();
+        let maps = self
+            .memory_maps
+            .iter()
+            .map(|m| (m.name.as_str(), m))
+            .collect::<HashMap<_, _>>();
+        self.validate_manager_domains(&managers, &maps)?;
+        self.validate_cache_coherence(effective, &managers, &maps)
+    }
+
+    fn validate_manager_domains(
+        &self,
+        managers: &HashMap<&str, &crate::types::CoherencyManagerSection>,
+        maps: &HashMap<&str, &MemoryMapSection>,
+    ) -> SimResult {
+        let memories = self
+            .memories
+            .iter()
+            .flatten()
+            .map(|m| (m.name.as_str(), m))
+            .collect::<HashMap<_, _>>();
+        let mut memory_owners = HashMap::new();
+        for manager in managers.values() {
+            let line = manager
+                .config
+                .line_size_bytes
+                .unwrap_or(crate::builder::DEFAULT_CACHE_LINE_SIZE_BYTES);
+            if line == 0 {
+                return sim_error!(
+                    "Coherency Manager '{}': line size must be positive",
+                    manager.name
+                );
+            }
+            let map = maps.get(manager.memory_map.as_str()).ok_or_else(|| {
+                SimError(format!(
+                    "Unknown memory map '{}' for Coherency Manager '{}'",
+                    manager.memory_map, manager.name
+                ))
+            })?;
+            if map.devices.is_empty() {
+                return sim_error!(
+                    "Coherency Manager '{}' has an empty memory map",
+                    manager.name
+                );
+            }
+            for name in &map.devices {
+                if let Some(previous) = memory_owners.insert(name.as_str(), manager.name.as_str()) {
+                    return sim_error!(
+                        "Memory '{}' is assigned to multiple coherency managers '{}' and '{}'",
+                        name,
+                        previous,
+                        manager.name
+                    );
+                }
+                let memory = memories[name.as_str()];
+                if !(memory.base_address as u128).is_multiple_of(line as u128)
+                    || !(memory.config.capacity_bytes as u128).is_multiple_of(line as u128)
+                {
+                    return sim_error!(
+                        "Coherency Manager '{}': Memory '{}' must align to its {}-byte line size",
+                        manager.name,
+                        name,
+                        line
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_cache_coherence(
+        &self,
+        effective: &EffectiveConfigs,
+        managers: &HashMap<&str, &crate::types::CoherencyManagerSection>,
+        maps: &HashMap<&str, &MemoryMapSection>,
+    ) -> SimResult {
+        for (cache, config) in self.caches.iter().flatten().zip(&effective.caches) {
+            if let Some(names) = &cache.coherency_managers {
+                if names.is_empty() {
+                    return sim_error!(
+                        "Cache '{}' has an empty coherency manager list",
+                        cache.name
+                    );
+                }
+                let mut covered = HashSet::new();
+                for name in names {
+                    let manager = managers.get(name.as_str()).ok_or_else(|| {
+                        SimError(format!(
+                            "Unknown coherency manager '{name}' for Cache '{}'",
+                            cache.name
+                        ))
+                    })?;
+                    let manager_line_size_bytes = manager
+                        .config
+                        .line_size_bytes
+                        .unwrap_or(crate::builder::DEFAULT_CACHE_LINE_SIZE_BYTES);
+                    if manager_line_size_bytes != config.line_size_bytes() {
+                        return sim_error!(
+                            "Cache '{}' line size {} does not match Coherency Manager '{}' line size {}",
+                            cache.name,
+                            config.line_size_bytes(),
+                            name,
+                            manager_line_size_bytes
+                        );
+                    }
+                    for memory in &maps[manager.memory_map.as_str()].devices {
+                        if !covered.insert(memory.as_str()) {
+                            return sim_error!(
+                                "Cache '{}' maps memory '{}' to multiple coherency managers",
+                                cache.name,
+                                memory
+                            );
+                        }
+                    }
+                }
+                for connection in self.connections.iter().flatten() {
+                    let [left, right] = connection.connect.as_slice() else {
+                        continue;
+                    };
+                    let left = parse_connection_endpoint_id(left)?;
+                    let right = parse_connection_endpoint_id(right)?;
+                    let peer = match (&left, &right) {
+                        (ConnectionEndpointId::Cache { name, .. }, peer) if name == &cache.name => {
+                            peer
+                        }
+                        (peer, ConnectionEndpointId::Cache { name, .. }) if name == &cache.name => {
+                            peer
+                        }
+                        _ => continue,
+                    };
+                    match peer {
+                        ConnectionEndpointId::Cache { .. } => {
+                            return sim_error!(
+                                "Cache '{}': hierarchical coherence is unsupported",
+                                cache.name
+                            );
+                        }
+                        ConnectionEndpointId::Mem { .. } => {
+                            return sim_error!(
+                                "Coherent Cache '{}' must connect through a Fabric to its managers",
+                                cache.name
+                            );
+                        }
+                        ConnectionEndpointId::Pe { name } => {
+                            let pe = self
+                                .processing_elements
+                                .iter()
+                                .flatten()
+                                .find(|pe| &pe.name == name)
+                                .ok_or_else(|| SimError(format!("No PE '{name}'")))?;
+                            for memory in &maps[pe.memory_map.as_str()].devices {
+                                if !covered.contains(memory.as_str()) {
+                                    return sim_error!(
+                                        "Cache '{}' has no coherency manager for Memory '{}' used by PE '{}'",
+                                        cache.name,
+                                        memory,
+                                        name
+                                    );
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }

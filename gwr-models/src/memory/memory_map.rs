@@ -14,6 +14,7 @@ pub struct MemoryRegion {
     pub device: DeviceId,
 }
 
+#[derive(Clone)]
 pub struct MemoryMap {
     // key = start address of region
     regions: BTreeMap<u64, MemoryRegion>,
@@ -99,14 +100,6 @@ mod tests {
 
     use crate::memory::memory_map::MemoryMap;
 
-    fn setup_map() -> MemoryMap {
-        let mut memory_map = MemoryMap::new();
-        memory_map.insert(0x0000_0000, 0x1000, DeviceId(1)).unwrap();
-        memory_map.insert(0x0000_2000, 0x1000, DeviceId(2)).unwrap();
-        memory_map.insert(0x0000_4000, 0x1000, DeviceId(3)).unwrap();
-        memory_map
-    }
-
     #[test]
     fn insert_successfully() {
         let memory_map = setup_map();
@@ -189,5 +182,13 @@ mod tests {
     fn insert_zero_sized() {
         let mut memory_map = setup_map();
         memory_map.insert(0x0000_8000, 0x0, DeviceId(4)).unwrap();
+    }
+
+    fn setup_map() -> MemoryMap {
+        let mut memory_map = MemoryMap::new();
+        memory_map.insert(0x0000_0000, 0x1000, DeviceId(1)).unwrap();
+        memory_map.insert(0x0000_2000, 0x1000, DeviceId(2)).unwrap();
+        memory_map.insert(0x0000_4000, 0x1000, DeviceId(3)).unwrap();
+        memory_map
     }
 }
