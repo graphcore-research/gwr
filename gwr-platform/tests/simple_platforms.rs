@@ -125,6 +125,11 @@ macro_rules! pe_mem_config {
     ($num_active_requests:expr) => {
         format!(
             "
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps:
   - name: mm0
     devices:
@@ -159,8 +164,7 @@ connections:
 fn run_pe_mem(num_active_requests: usize) -> (Engine, Clock) {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
-    let platform =
-        Platform::from_string(&engine, &clock, pe_mem_config!(num_active_requests)).unwrap();
+    let platform = Platform::from_string(&mut engine, pe_mem_config!(num_active_requests)).unwrap();
 
     assert_eq!(platform.num_pes(), 1);
     assert_eq!(platform.num_memories(), 1);
@@ -178,10 +182,14 @@ fn run_pe_fabric_mem(num_active_requests: usize) -> (Engine, Clock) {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
     let platform = Platform::from_string(
-        &engine,
-        &clock,
+        &mut engine,
         format!(
             "
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps:
   - name: mm0
     devices:
@@ -285,17 +293,16 @@ fn access_dispatcher(strided: bool) -> Rc<dyn Dispatch> {
     ))
 }
 
-fn strided_platform(
-    engine: &Engine,
-    clock: &Clock,
-    sram_bytes: usize,
-    lsu_access_bytes: usize,
-) -> Platform {
+fn strided_platform(engine: &mut Engine, sram_bytes: usize, lsu_access_bytes: usize) -> Platform {
     Platform::from_string(
         engine,
-        clock,
         &format!(
             "
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps:
   - name: mm0
     devices:
@@ -332,7 +339,7 @@ fn strided_ranges_share_active_requests() {
     let run = |strided| {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
-        let platform = strided_platform(&engine, &clock, 8, 1);
+        let platform = strided_platform(&mut engine, 8, 1);
         platform.attach_dispatcher(&access_dispatcher(strided));
 
         engine.run().unwrap();
@@ -356,8 +363,7 @@ fn lsu_services_full_access_chunks_for_partial_reads_and_writes() {
         (0x1_0000_0001, 32, 64, 0x1_0000_0101),
     ] {
         let mut engine = start_test(file!());
-        let clock = engine.default_clock();
-        let platform = strided_platform(&engine, &clock, 64, 32);
+        let platform = strided_platform(&mut engine, 64, 32);
         let input = TensorView::new_full(
             Tensor::new(&[requested_read_bytes], &DataType::Int8, read_address).unwrap(),
         );
@@ -398,7 +404,7 @@ fn lsu_services_full_access_chunks_for_partial_reads_and_writes() {
 fn strided_partition_checks_the_complete_working_set() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
-    let platform = strided_platform(&engine, &clock, 1, 1);
+    let platform = strided_platform(&mut engine, 1, 1);
     platform.attach_dispatcher(&access_dispatcher(true));
 
     let error = engine.run().unwrap_err();
@@ -422,9 +428,13 @@ fn simple_pe_cache_mem() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
     let platform = Platform::from_string(
-        &engine,
-        &clock,
+        &mut engine,
         "
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps:
   - name: mm0
     devices:

@@ -10,7 +10,6 @@ use std::rc::Rc;
 
 use gwr_engine::engine::Engine;
 use gwr_engine::sim_error;
-use gwr_engine::time::clock::Clock;
 use gwr_engine::types::{DeviceId, SimError, SimResult};
 use gwr_model_builder::EntityGet;
 use gwr_models::fabric::Fabric;
@@ -25,8 +24,8 @@ use gwr_models::processing_element::{
 use gwr_track::entity::{Entity, GetEntity};
 
 use crate::builder::{
-    build_caches_from_configs, build_fabric_destination_port_maps, build_memories_from_configs,
-    build_memory_maps, build_pes_from_configs,
+    build_caches_from_configs, build_clocks, build_fabric_destination_port_maps,
+    build_memories_from_configs, build_memory_maps, build_pes_from_configs,
 };
 use crate::connect::connect_ports;
 use crate::connection_id::fabric_port_endpoint_id;
@@ -75,37 +74,30 @@ impl fmt::Debug for Platform {
 }
 
 impl Platform {
-    pub fn from_file(
-        engine: &Engine,
-        clock: &Clock,
-        platform_path: &Path,
-    ) -> Result<Self, SimError> {
+    pub fn from_file(engine: &mut Engine, platform_path: &Path) -> Result<Self, SimError> {
         let s = std::fs::read_to_string(platform_path)
             .map_err(|e| SimError(format!("Unable to read {}: {e}", platform_path.display())))?;
-        Platform::from_string(engine, clock, &s)
+        Platform::from_string(engine, &s)
     }
 
-    pub fn from_string(
-        engine: &Engine,
-        clock: &Clock,
-        platform_config: &str,
-    ) -> Result<Self, SimError> {
+    pub fn from_string(engine: &mut Engine, platform_config: &str) -> Result<Self, SimError> {
         let cfg: PlatformConfig = yaml_serde::from_str(platform_config)
             .map_err(|e| SimError(format!("yaml_serde::from_str failed: {e}")))?;
-        Platform::build(engine, clock, &cfg)
+        Platform::build(engine, &cfg)
     }
 
-    fn build(engine: &Engine, clock: &Clock, cfg: &PlatformConfig) -> Result<Self, SimError> {
+    fn build(engine: &mut Engine, cfg: &PlatformConfig) -> Result<Self, SimError> {
         let effective = cfg.validated()?;
         let device_ids = assign_device_ids(cfg)?;
+        let clocks = build_clocks(engine, cfg)?;
 
         let top = engine.top();
         let (memories, memories_idx_by_id) =
-            build_memories_from_configs(engine, clock, top, cfg, &effective.memories)?;
+            build_memories_from_configs(engine, &clocks, top, cfg, &effective.memories)?;
         let memory_maps = build_memory_maps(cfg, &memories, &memories_idx_by_id, &device_ids)?;
         let (processing_elements, pes_idx_by_id) = build_pes_from_configs(
             engine,
-            clock,
+            &clocks,
             top,
             cfg,
             &effective.processing_elements,
@@ -113,10 +105,15 @@ impl Platform {
             &device_ids,
         )?;
         let (caches, caches_idx_by_id) =
-            build_caches_from_configs(engine, clock, top, cfg, &effective.caches)?;
+            build_caches_from_configs(engine, &clocks, top, cfg, &effective.caches)?;
         let fabric_destination_port_maps = build_fabric_destination_port_maps(cfg, &device_ids)?;
-        let (fabrics, fabrics_idx_by_id) =
-            crate::builder::build_fabrics(engine, clock, top, cfg, &fabric_destination_port_maps)?;
+        let (fabrics, fabrics_idx_by_id) = crate::builder::build_fabrics(
+            engine,
+            &clocks,
+            top,
+            cfg,
+            &fabric_destination_port_maps,
+        )?;
         let device_names_by_id = device_ids
             .iter()
             .map(|(name, device_id)| (device_id.0, name.clone()))
@@ -136,7 +133,8 @@ impl Platform {
             memories_idx_by_id,
             device_names_by_id,
         };
-        connect_ports(engine, clock, &platform, cfg)?;
+        let default_clock = crate::builder::clock_for(&clocks, cfg, None)?;
+        connect_ports(engine, default_clock, &platform, cfg)?;
         Ok(platform)
     }
 

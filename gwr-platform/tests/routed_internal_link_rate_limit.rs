@@ -35,8 +35,7 @@ fn omitted_none_manual_yaml_shape_and_positive_roundtrip() {
         .internal_link_bits_per_tick = None;
     assert_eq!(platform_to_yaml_str(&parsed).unwrap(), before);
     let mut engine = Engine::default();
-    let clock = engine.default_clock();
-    Platform::from_string(&engine, &clock, &baseline).unwrap();
+    Platform::from_string(&mut engine, &baseline).unwrap();
 }
 
 #[test]
@@ -58,10 +57,8 @@ fn schema_types_and_closed_keys_reject() {
 #[test]
 fn single_node_routed_fabric_accepts_unused_link_rate_limit() {
     let mut engine = Engine::default();
-    let clock = engine.default_clock();
     Platform::from_string(
-        &engine,
-        &clock,
+        &mut engine,
         &yaml("routed", 1, "      internal_link_bits_per_tick: 7\n"),
     )
     .unwrap();
@@ -80,8 +77,7 @@ fn invalid_opt_in_rejects_with_intended_categories() {
     // Valid legacy baseline first, including the one-node geometry.
     for (kind, columns) in [("functional", 2), ("routed", 1)] {
         let mut e = Engine::default();
-        let c = e.default_clock();
-        Platform::from_string(&e, &c, &yaml(kind, columns, "")).unwrap();
+        Platform::from_string(&mut e, &yaml(kind, columns, "")).unwrap();
     }
     assert!(
         build_error(&yaml("routed", 2, "      internal_link_bits_per_tick: 0\n"))
@@ -99,7 +95,12 @@ fn invalid_opt_in_rejects_with_intended_categories() {
 
 fn yaml(kind: &str, columns: usize, policy: &str) -> String {
     format!(
-        r"memory_maps:
+        r"clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
+memory_maps:
   - name: map
     devices:
       - hbm0
@@ -133,8 +134,7 @@ fabrics:
 
 fn build_error(input: &str) -> String {
     let mut engine = Engine::default();
-    let clock = engine.default_clock();
-    match Platform::from_string(&engine, &clock, input) {
+    match Platform::from_string(&mut engine, input) {
         Err(e) => e.to_string(),
         Ok(_) => panic!("expected invalid configuration"),
     }

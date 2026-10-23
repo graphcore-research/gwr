@@ -100,11 +100,14 @@ fn rejects_an_unknown_memory_in_a_memory_map() {
 #[should_panic(expected = "Started without dispatcher")]
 fn processing_element_requires_a_dispatcher() {
     let mut engine = start_test(file!());
-    let clock = engine.default_clock();
     Platform::from_string(
-        &engine,
-        &clock,
+        &mut engine,
         "
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps:
   - name: mm0
     devices:
