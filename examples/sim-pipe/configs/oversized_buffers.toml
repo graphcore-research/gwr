@@ -1,0 +1,8 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+stdout = true
+stdout_level = "Info"
+
+pipe_buffer_entries = 32
+pipe_data_delay = 5
+pipe_credit_delay = 5

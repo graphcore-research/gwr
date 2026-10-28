@@ -12,9 +12,9 @@ use gwr_track::entity::Entity;
 use rand::SeedableRng;
 use rand::seq::{IteratorRandom, SliceRandom};
 use rand_xoshiro::Xoshiro256PlusPlus;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(ValueEnum, Clone, Copy, Default, Debug, Serialize, PartialEq)]
+#[derive(ValueEnum, Clone, Copy, Default, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum TrafficPattern {
     /// All sources will send to one dest chosen at random
