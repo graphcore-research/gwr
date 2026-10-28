@@ -17,4 +17,4 @@ categories = ["development-tools::build-utils"]
 publish.workspace = true
 
 [dependencies]
-pulldown-cmark = { version = "0.13.4", default-features = false }
+pulldown-cmark = { version = "0.13.5", default-features = false }
