@@ -16,6 +16,83 @@ use futures::future::FusedFuture;
 use crate::traits::{Resolve, Resolver};
 use crate::types::SimError;
 
+/// Conservative tick limit that keeps adjacent ticks distinguishable as `f64`
+/// nanosecond timestamps. Timestamps can still be approximate below this limit,
+/// but adjacent ticks cannot collapse to the same timestamp. The first actual
+/// collision may occur later, depending on the frequency.
+///
+/// The integer-to-`f64` cast is exact below 2^53 ticks. Within that range,
+/// `tick_to_ns` still rounds twice: once when dividing by the MHz frequency,
+/// then again when multiplying by 1000 to get nanoseconds. For normal finite
+/// arithmetic, each operation has relative error at most `u = 2^-53` (about
+/// one part in 9 quadrillion). Together their relative error is at most
+/// `a = (1 + u)^2 - 1 = 2u + u^2`. These expressions describe exact
+/// mathematical bounds; they are not calculations performed using `f64`.
+///
+/// Let `P` be the exact tick period for the stored frequency. Tick `n` should
+/// occur at `n * P`, so its converted timestamp can be wrong by at most
+/// `a * n * P` nanoseconds. To preserve the ordering of ticks `n` and `n + 1`,
+/// even if the earlier time rounds up and the later time rounds down, their
+/// combined error must be smaller than the one-period gap:
+///
+/// `a * n * P + a * (n + 1) * P < P`, or `a * (2n + 1) < 1`.
+///
+/// The period cancels, so the same tick-count bound works at every supported
+/// frequency.
+///
+/// Since `a` is approximately 2^-52, this requires roughly `n < 2^51`.
+/// Choosing `n <= 2^51 - 1` satisfies the strict inequality with the full
+/// error bound above. It also keeps the following tick distinguishable,
+/// which synchronization needs when locating the current clock edge.
+///
+/// Clock registration checks the arithmetic range required by this bound.
+/// It does not guarantee exact ordering between different clock frequencies.
+const MAX_PRECISE_TICKS: u64 = (1 << 51) - 1;
+
+/// Validate a frequency in MHz and return its timestamp at the engine's
+/// supported tick limit, in nanoseconds.
+///
+/// # Errors
+///
+/// Returns an error if the frequency is invalid or outside the supported range.
+pub fn validate_frequency_mhz(freq_mhz: f64) -> Result<f64, SimError> {
+    if !freq_mhz.is_finite() || freq_mhz <= 0.0 {
+        return Err(SimError(format!(
+            "frequency_mhz must be finite and positive, got {freq_mhz}"
+        )));
+    }
+    // Division by MHz yields microseconds before tick_to_ns scales to ns.
+    // The MAX_PRECISE_TICKS bound assumes rounding introduces a relative error
+    // of at most 2^-53 per operation. Normal f64 values have 53 bits of
+    // significand precision, but subnormal values near zero have fewer, so this
+    // relative-error bound does not hold uniformly for them. Scaling to ns
+    // afterwards cannot recover precision already lost in the division.
+    //
+    // Tick 1 gives the smallest positive division result. Requiring it to be
+    // normal keeps later divisions from underflowing; overflow is checked
+    // below. This is a conservative requirement for the proof, not evidence
+    // that a subnormal result would itself cause tick aliasing.
+    let period_us = 1.0 / freq_mhz;
+    if !period_us.is_normal() {
+        return Err(SimError(format!(
+            "frequency_mhz {freq_mhz:e} yields a non-normal intermediate tick period of {period_us:e} us before conversion to nanoseconds"
+        )));
+    }
+    let max_duration_ns = tick_to_ns(MAX_PRECISE_TICKS, freq_mhz);
+    if !max_duration_ns.is_finite() {
+        return Err(SimError(format!(
+            "frequency_mhz {freq_mhz:e} yields a nonfinite duration of {max_duration_ns:e} ns at {MAX_PRECISE_TICKS} ticks"
+        )));
+    }
+    Ok(max_duration_ns)
+}
+
+// Raw conversion shared by scheduling and validation. Preserve division before
+// scaling so both use the same rounding and intermediate arithmetic range.
+fn tick_to_ns(tick: u64, freq_mhz: f64) -> f64 {
+    tick as f64 / freq_mhz * 1000.0
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct SimInstant {
     pub ns: f64,
@@ -315,7 +392,7 @@ impl ClockState {
     }
 
     fn tick_to_ns(&self, tick: u64) -> f64 {
-        tick as f64 / self.freq_mhz * 1000.0
+        tick_to_ns(tick, self.freq_mhz)
     }
 }
 

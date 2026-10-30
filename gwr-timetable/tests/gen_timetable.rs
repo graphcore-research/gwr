@@ -12,6 +12,11 @@ use gwr_timetable::Timetable;
 use gwr_timetable::timetable_file::{NodeSection, TensorConfigSection, TimetableFile};
 
 const PLATFORM_YAML: &str = "
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps:
   - name: default
     devices:
@@ -140,8 +145,7 @@ fn generator_emits_multi_output_maxpool() {
     );
 
     let mut engine = start_test(file!());
-    let clock = engine.default_clock();
-    let platform = Rc::new(Platform::from_string(&engine, &clock, PLATFORM_YAML).unwrap());
+    let platform = Rc::new(Platform::from_string(&mut engine, PLATFORM_YAML).unwrap());
     Timetable::new(
         &engine.top().clone(),
         timetable_file.into_graph().unwrap(),

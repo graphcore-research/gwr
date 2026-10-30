@@ -13,6 +13,11 @@ use gwr_platform::yaml::platform_to_yaml_str;
 use gwr_track::entity::GetEntity;
 
 const CONFIG: &str = r"
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps:
   - name: all_hbm
     devices: [hbm0]
@@ -57,8 +62,7 @@ fn cache_configuration_survives_yaml_roundtrip() {
 #[test]
 fn platform_line_configuration_controls_actual_fill_traffic() {
     let mut engine = Engine::default();
-    let clock = engine.default_clock();
-    let platform = Platform::from_string(&engine, &clock, CONFIG).unwrap();
+    let platform = Platform::from_string(&mut engine, CONFIG).unwrap();
     let cache = platform.cache("l2").unwrap().clone();
     let memory = platform.memory("hbm0").unwrap().clone();
     let map = Rc::new(create_default_memory_map());
@@ -92,9 +96,8 @@ fn invalid_line_and_inflight_limits_fail_during_platform_build() {
         ("max_inflight_fills: 2", "max_inflight_fills: 0"),
     ] {
         let mut engine = Engine::default();
-        let clock = engine.default_clock();
         assert!(
-            Platform::from_string(&engine, &clock, &CONFIG.replace(from, to)).is_err(),
+            Platform::from_string(&mut engine, &CONFIG.replace(from, to)).is_err(),
             "{to}"
         );
     }

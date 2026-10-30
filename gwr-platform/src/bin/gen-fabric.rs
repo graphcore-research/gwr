@@ -215,9 +215,15 @@ fn build_platform(args: &Args) -> Result<PlatformConfig, String> {
         }
     }
     Ok(PlatformConfig {
+        clocks: vec![gwr_platform::types::ClockSection {
+            name: "default".to_string(),
+            frequency_mhz: 1000.0,
+        }],
+        default_clock: "default".to_string(),
         coherency_managers: args.use_coherency_managers.then(|| {
             vec![gwr_platform::types::CoherencyManagerSection {
                 name: "cm0".to_owned(),
+                clock: None,
                 memory_map: PE_MEMORY_MAP_NAME.to_owned(),
                 config: gwr_platform::types::CoherencyManagerConfigSection {
                     line_size_bytes: Some(DEFAULT_CACHE_LINE_SIZE_BYTES),
@@ -237,6 +243,7 @@ fn build_platform(args: &Args) -> Result<PlatformConfig, String> {
 
 fn build_fabrics(args: &Args) -> Vec<FabricSection> {
     vec![FabricSection {
+        clock: None,
         name: FABRIC_NAME.to_string(),
         kind: args.fabric_model,
         columns: args.num_columns,
@@ -300,6 +307,7 @@ fn build_cache(
 ) -> CacheSection {
     let num_sets = (kib * 1024) / num_ways / DEFAULT_CACHE_LINE_SIZE_BYTES;
     CacheSection {
+        clock: None,
         coherency_managers: None,
         name,
         config: CacheConfigSection {
@@ -320,6 +328,7 @@ fn build_memories(args: &Args) -> Vec<MemorySection> {
     (0..args.num_hbms)
         .map(|i| {
             let mem = MemorySection {
+                clock: None,
                 name: format!("hbm{i}"),
                 kind: MemoryKind::HBM,
                 base_address: base as u64,
@@ -407,6 +416,7 @@ fn build_processing_elements(
 ) -> Result<Vec<ProcessingElementSection>, String> {
     Ok(PeIdGen::new(args)?
         .map(|(column, row)| ProcessingElementSection {
+            clock: None,
             name: create_name("pe", column, row),
             memory_map: PE_MEMORY_MAP_NAME.to_string(),
             config: pe_config.clone(),

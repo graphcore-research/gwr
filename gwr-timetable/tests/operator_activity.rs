@@ -10,6 +10,11 @@ use gwr_timetable::Timetable;
 use gwr_timetable::timetable_file::TimetableFile;
 
 const PLATFORM_YAML: &str = "
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps:
   - name: pe_memory_map
     devices:
@@ -97,8 +102,7 @@ edges:
 fn compute_task_emits_operator_activity_on_pe() {
     let (test_tracker, tracker) = gwr_track::test_init!(1000);
     let mut engine = Engine::new(&tracker);
-    let clock = engine.default_clock();
-    let platform = Rc::new(Platform::from_string(&engine, &clock, PLATFORM_YAML).unwrap());
+    let platform = Rc::new(Platform::from_string(&mut engine, PLATFORM_YAML).unwrap());
     let timetable_file = TimetableFile::from_string(TIMETABLE_YAML).unwrap();
     let graph = timetable_file.into_graph().unwrap();
     let timetable = Rc::new(Timetable::new(engine.top(), graph, &platform).unwrap());

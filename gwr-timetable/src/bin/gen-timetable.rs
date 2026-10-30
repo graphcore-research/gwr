@@ -1123,6 +1123,11 @@ mod tests {
     fn generator_platform() -> PlatformConfig {
         yaml_serde::from_str(
             r"
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps:
   - name: default
     devices: [hbm0]

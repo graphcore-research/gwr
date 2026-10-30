@@ -1,5 +1,10 @@
 # Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps:
   - name: pe_memory_map
     devices:
