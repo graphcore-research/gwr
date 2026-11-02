@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use gwr_engine::sim_error;
 use gwr_engine::traits::{Routable, SimObject, TotalBytes};
-use gwr_engine::types::{AccessType, DeviceId, SimError};
+use gwr_engine::types::{AccessType, DeviceId, SimError, SimResult};
 use gwr_track::entity::Entity;
 use gwr_track::id::Unique;
 use gwr_track::{Id, create_id, track_create_object};
@@ -13,7 +13,9 @@ use gwr_track::{Id, create_id, track_create_object};
 use crate::cache::coherency_manager::CoherenceOp;
 use crate::cache::traits::{CoherenceToken, CoherentAccess};
 use crate::memory::CacheHintType;
-use crate::memory::traits::{AccessMemory, CacheAccess, CacheFillToken, ReadMemory};
+use crate::memory::traits::{
+    AccessMemory, CacheAccess, CacheFillToken, ReadMemory, StripingAccess,
+};
 
 #[derive(Clone, Debug)]
 pub struct MemoryAccess {
@@ -94,6 +96,67 @@ impl AccessMemory for MemoryAccess {
             }
         };
         Ok(self.build_response(response_type))
+    }
+}
+
+impl StripingAccess for MemoryAccess {
+    fn stripe_fragment(
+        &self,
+        address: u64,
+        bytes: usize,
+        destination: DeviceId,
+        source: DeviceId,
+        fragment_id: u64,
+    ) -> Result<Self, SimError> {
+        if !matches!(
+            self.access_type,
+            AccessType::ReadRequest | AccessType::WriteRequest | AccessType::WriteNonPostedRequest
+        ) || u64::try_from(bytes)
+            .ok()
+            .and_then(|n| super::checked_last_address(address, n))
+            .is_none()
+        {
+            return sim_error!("invalid memory stripe fragment range/type");
+        }
+        let fragment = Self {
+            id: create_id!(self.created_by),
+            access_size_bytes: bytes,
+            dst_addr: address,
+            src_addr: fragment_id,
+            dst_device: destination,
+            src_device: source,
+            ..self.clone()
+        };
+        track_create_object!(
+            self.created_by;
+            fragment.id,
+            fragment.total_bytes(),
+            "bytes",
+            fragment.access_type() as u8,
+            "MemoryAccess: {fragment}"
+        );
+        Ok(fragment)
+    }
+
+    fn validate_stripe_response(&self, response: &Self) -> SimResult {
+        let expected_bytes = self.checked_stripe_response_bytes()?;
+        let received_bytes = response.checked_stripe_response_bytes()?;
+        if received_bytes != expected_bytes {
+            return sim_error!(
+                "stripe response wire size mismatch: received {received_bytes}, expected {expected_bytes}"
+            );
+        }
+        if response.cache_hint() != self.cache_hint()
+            || !cache_fill_tokens_match(self.cache_fill_token(), response.cache_fill_token())
+        {
+            return sim_error!("stripe response cache metadata mismatch");
+        }
+        if response.coherence_op() != self.coherence_op()
+            || !coherence_tokens_match(self.coherence_token(), response.coherence_token())
+        {
+            return sim_error!("stripe response coherence metadata mismatch");
+        }
+        Ok(())
     }
 }
 
@@ -270,6 +333,24 @@ impl MemoryAccess {
         self
     }
 
+    fn checked_stripe_response_bytes(&self) -> Result<usize, SimError> {
+        if matches!(
+            self.access_type,
+            AccessType::ReadRequest | AccessType::ReadResponse
+        ) {
+            self.access_size_bytes
+                .checked_add(self.overhead_size_bytes)
+                .ok_or_else(|| {
+                    SimError(format!(
+                        "read response byte size overflows usize: access_size_bytes={}, overhead_size_bytes={}",
+                        self.access_size_bytes, self.overhead_size_bytes
+                    ))
+                })
+        } else {
+            Ok(self.overhead_size_bytes)
+        }
+    }
+
     fn build_response(&self, response_type: AccessType) -> Self {
         Self {
             access_type: response_type,
@@ -277,6 +358,30 @@ impl MemoryAccess {
             src_device: self.dst_device,
             ..self.clone()
         }
+    }
+}
+
+fn cache_fill_tokens_match(
+    expected: Option<&CacheFillToken>,
+    received: Option<&CacheFillToken>,
+) -> bool {
+    match (expected, received) {
+        (None, None) => true,
+        (Some(expected), Some(received)) => {
+            Rc::ptr_eq(&expected.owner, &received.owner) && expected.ordinal == received.ordinal
+        }
+        _ => false,
+    }
+}
+
+fn coherence_tokens_match(
+    expected: Option<&CoherenceToken>,
+    received: Option<&CoherenceToken>,
+) -> bool {
+    match (expected, received) {
+        (None, None) => true,
+        (Some(expected), Some(received)) => expected.matches(received),
+        _ => false,
     }
 }
 
@@ -294,6 +399,235 @@ mod coherence_tests {
     const FILL_ORDINAL: u64 = 7;
     const LINE_SIZE_BYTES: usize = 32;
     const REQUEST_HEADER_SIZE_BYTES: usize = 16;
+
+    #[test]
+    fn stripe_fragments_preserve_protocol_metadata_and_create_fresh_traces() {
+        let (test_tracker, tracker) = gwr_track::test_init!(100);
+        let engine = gwr_engine::engine::Engine::new(&tracker);
+        for (access_type, expected_wire_bytes) in [
+            (AccessType::ReadRequest, 16),
+            (AccessType::WriteRequest, 24),
+            (AccessType::WriteNonPostedRequest, 24),
+        ] {
+            let mut parent = MemoryAccess::new(
+                engine.top(),
+                access_type,
+                LINE_SIZE_BYTES,
+                0x1000,
+                0x2000,
+                PARENT_DESTINATION_DEVICE_ID,
+                PARENT_SOURCE_DEVICE_ID,
+                REQUEST_HEADER_SIZE_BYTES,
+            )
+            .with_cache_hint(CacheHintType::NoAllocate)
+            .with_coherence_op(Some(CoherenceOp::ExclusiveWrite))
+            .with_coherence_token(Some(CoherenceToken {
+                owner: Rc::new(()),
+                ordinal: 11,
+            }));
+            parent.cache_fill_token = Some(CacheFillToken {
+                owner: Rc::new(()),
+                ordinal: FILL_ORDINAL,
+            });
+            let event_count = test_tracker.events().len();
+
+            let fragment = parent
+                .stripe_fragment(
+                    0x3000,
+                    8,
+                    CHILD_DESTINATION_DEVICE_ID,
+                    CHILD_SOURCE_DEVICE_ID,
+                    99,
+                )
+                .unwrap();
+
+            assert_ne!(fragment.id(), parent.id());
+            assert!(Rc::ptr_eq(&fragment.created_by, &parent.created_by));
+            assert_eq!(fragment.access_type(), access_type);
+            assert_eq!(fragment.dst_addr(), 0x3000);
+            assert_eq!(fragment.access_size_bytes(), 8);
+            assert_eq!(fragment.dst_device(), CHILD_DESTINATION_DEVICE_ID);
+            assert_eq!(fragment.src_device(), CHILD_SOURCE_DEVICE_ID);
+            assert_eq!(fragment.src_addr(), 99);
+            assert_eq!(fragment.total_bytes(), expected_wire_bytes);
+            assert_eq!(fragment.cache_hint(), CacheHintType::NoAllocate);
+            let parent_fill = parent.cache_fill_token().unwrap();
+            let fragment_fill = fragment.cache_fill_token().unwrap();
+            assert!(Rc::ptr_eq(&fragment_fill.owner, &parent_fill.owner));
+            assert_eq!(fragment_fill.ordinal, FILL_ORDINAL);
+            assert_eq!(fragment.coherence_op(), Some(CoherenceOp::ExclusiveWrite));
+            assert!(
+                fragment
+                    .coherence_token()
+                    .unwrap()
+                    .matches(parent.coherence_token().unwrap())
+            );
+
+            let events = test_tracker.events();
+            assert_eq!(events.len(), event_count + 1);
+            assert!(events.last().unwrap().starts_with(&format!(
+                "{}: created object {}, {}, {expected_wire_bytes}, bytes,",
+                parent.created_by.id,
+                fragment.id(),
+                access_type as u8,
+            )));
+        }
+    }
+
+    #[test]
+    fn stripe_response_validation_uses_protocol_wire_sizes() {
+        for request_type in [AccessType::ReadRequest, AccessType::WriteNonPostedRequest] {
+            let request = build_test_request(request_type);
+            let response = request.to_response(&TestMemory).unwrap();
+            request.validate_stripe_response(&response).unwrap();
+
+            let malformed = MemoryAccess {
+                overhead_size_bytes: REQUEST_HEADER_SIZE_BYTES + 1,
+                ..response
+            };
+            let error = request
+                .validate_stripe_response(&malformed)
+                .unwrap_err()
+                .to_string();
+            let expected_error = match request_type {
+                AccessType::ReadRequest => {
+                    "stripe response wire size mismatch: received 49, expected 48"
+                }
+                AccessType::WriteNonPostedRequest => {
+                    "stripe response wire size mismatch: received 17, expected 16"
+                }
+                _ => unreachable!(),
+            };
+            assert!(error.contains(expected_error), "{error}");
+        }
+    }
+
+    #[test]
+    fn stripe_response_validation_rejects_protocol_metadata_mismatches() {
+        let request = build_test_request(AccessType::ReadRequest);
+        let response = request.to_response(&TestMemory).unwrap();
+        let other_owner = Rc::new(());
+        for (malformed, expected_error) in [
+            (
+                response.clone().with_cache_hint(CacheHintType::Allocate),
+                "stripe response cache metadata mismatch",
+            ),
+            (
+                response.clone().with_coherence_op(None),
+                "stripe response coherence metadata mismatch",
+            ),
+            (
+                MemoryAccess {
+                    cache_fill_token: None,
+                    ..response.clone()
+                },
+                "stripe response cache metadata mismatch",
+            ),
+            (
+                MemoryAccess {
+                    cache_fill_token: Some(CacheFillToken {
+                        owner: other_owner.clone(),
+                        ordinal: FILL_ORDINAL,
+                    }),
+                    ..response.clone()
+                },
+                "stripe response cache metadata mismatch",
+            ),
+            (
+                MemoryAccess {
+                    cache_fill_token: Some(CacheFillToken {
+                        owner: request.cache_fill_token().unwrap().owner.clone(),
+                        ordinal: FILL_ORDINAL + 1,
+                    }),
+                    ..response.clone()
+                },
+                "stripe response cache metadata mismatch",
+            ),
+            (
+                response.clone().with_coherence_token(None),
+                "stripe response coherence metadata mismatch",
+            ),
+            (
+                response.clone().with_coherence_token(Some(CoherenceToken {
+                    owner: other_owner,
+                    ordinal: FILL_ORDINAL,
+                })),
+                "stripe response coherence metadata mismatch",
+            ),
+            (
+                response.with_coherence_token(Some(CoherenceToken {
+                    owner: request.coherence_token().unwrap().owner.clone(),
+                    ordinal: FILL_ORDINAL + 1,
+                })),
+                "stripe response coherence metadata mismatch",
+            ),
+        ] {
+            let error = request
+                .validate_stripe_response(&malformed)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(expected_error), "{error}");
+        }
+    }
+
+    #[test]
+    fn stripe_response_validation_reports_the_first_mismatched_category() {
+        let request = build_test_request(AccessType::ReadRequest);
+        let malformed = MemoryAccess {
+            cache_fill_token: None,
+            coherence_op: None,
+            ..request.to_response(&TestMemory).unwrap()
+        };
+        let error = request.validate_stripe_response(&malformed).unwrap_err();
+        assert_eq!(error.0, "stripe response cache metadata mismatch");
+
+        let malformed = MemoryAccess {
+            overhead_size_bytes: REQUEST_HEADER_SIZE_BYTES + 1,
+            ..malformed
+        };
+        let error = request.validate_stripe_response(&malformed).unwrap_err();
+        assert_eq!(
+            error.0,
+            "stripe response wire size mismatch: received 49, expected 48"
+        );
+    }
+
+    #[test]
+    fn stripe_response_validation_checks_expected_read_size_before_wire_accounting() {
+        let request = MemoryAccess {
+            access_size_bytes: usize::MAX,
+            ..build_test_request(AccessType::ReadRequest)
+        };
+        let response = request.build_response(AccessType::ReadResponse);
+        let error = request
+            .validate_stripe_response(&response)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("read response byte size overflows usize"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn stripe_response_validation_rejects_overflowing_received_read_size() {
+        let request = build_test_request(AccessType::ReadRequest);
+        let response = MemoryAccess {
+            overhead_size_bytes: usize::MAX,
+            ..request.build_response(AccessType::ReadResponse)
+        };
+
+        let error = request
+            .validate_stripe_response(&response)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("read response byte size overflows usize")
+                && error.contains("access_size_bytes=32")
+                && error.contains(&format!("overhead_size_bytes={}", usize::MAX)),
+            "{error}"
+        );
+    }
 
     #[test]
     fn acks_require_no_memory_and_preserve_request_metadata() {

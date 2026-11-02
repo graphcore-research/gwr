@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use gwr_engine::traits::{Routable, TotalBytes};
-use gwr_engine::types::SimError;
+use gwr_engine::types::{DeviceId, SimError, SimResult};
 
 use crate::memory::CacheHintType;
 
@@ -51,6 +51,49 @@ where
     fn to_ack(&self) -> Result<Self, SimError>
     where
         Self: Sized;
+}
+
+/// Traffic-model transactions that can be split by a memory striper.
+///
+/// The striper owns address translation, fragment boundaries, routing and
+/// completion tracking. Packet implementations own wire-byte accounting and
+/// protocol metadata, including fields unknown to the striper.
+///
+/// Fragment responses must echo the supplied fragment ID in
+/// [`Routable::src_addr`], independently of optional tracing identities.
+/// Once all fragments of a read or nonposted write complete, the striper
+/// constructs one response from the original request. Reads use
+/// [`AccessMemory::to_response`] with a [`ReadMemory`] that returns no data;
+/// nonposted writes use [`AccessMemory::to_ack`]. Posted writes produce no
+/// response. Implementations must support this traffic-only completion path;
+/// fragment payloads are not assembled.
+pub trait StripingAccess: AccessMemory {
+    /// Construct a fragment with the supplied translated range and device
+    /// routing, setting its source address to `fragment_id`.
+    ///
+    /// Preserve the parent's access type and all other protocol metadata.
+    /// Support reads, posted writes and nonposted writes; reject unsupported,
+    /// empty or overflowing ranges. Create a fresh tracing identity when
+    /// tracking is enabled, while retaining the parent's identity for its
+    /// eventual upstream response.
+    fn stripe_fragment(
+        &self,
+        address: u64,
+        bytes: usize,
+        destination: DeviceId,
+        source: DeviceId,
+        fragment_id: u64,
+    ) -> Result<Self, SimError>
+    where
+        Self: Sized;
+
+    /// Validate a response against this retained fragment request.
+    ///
+    /// The striper has already checked the response type, device routing,
+    /// translated address, byte count and fragment ID. Check the packet's
+    /// wire-byte accounting and protocol metadata, returning a descriptive
+    /// error for any mismatch without changing either packet.
+    fn validate_stripe_response(&self, response: &Self) -> SimResult;
 }
 
 /// Memory transactions that can pass through a cache.
