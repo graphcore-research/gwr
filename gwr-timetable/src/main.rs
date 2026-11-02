@@ -2,7 +2,8 @@
 
 //! A simple front-end for running a [Timetable] on a [Platform].
 
-use std::fs;
+use std::error::Error;
+use std::fs::write;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -12,18 +13,20 @@ use clap::Parser;
 use gwr_engine::engine::Engine;
 use gwr_engine::executor::ExecutorStats;
 use gwr_engine::time::clock::Clock;
+use gwr_engine::types::SimResult;
 use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_platform::Platform;
-use gwr_timetable::Timetable;
 use gwr_timetable::timetable_file::TimetableFile;
+use gwr_timetable::{Timetable, Workload};
 use gwr_track::Track;
 use gwr_track::builder::{TrackerArgs, setup_trackers};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
+use log::Level;
 
 fn main() -> Result<()> {
     let mut args = Cli::parse();
     args.tracker
-        .ensure_visiblity(args.dump_stats, "--dump-stats", log::Level::Info);
+        .ensure_visiblity(args.dump_stats, "--dump-stats", Level::Info);
 
     let tracker: Rc<dyn Track> = setup_trackers(&args.tracker.trackers_config()).unwrap();
     let mut engine = Engine::new(&tracker);
@@ -63,8 +66,7 @@ fn main() -> Result<()> {
                 &clock,
                 snapshot.stats,
                 snapshot.active_task_count,
-            );
-            Ok(())
+            )
         })
     } else {
         engine.run()
@@ -73,7 +75,7 @@ fn main() -> Result<()> {
     let executor_stats = engine.executor_stats();
 
     if let Some(progress_bars) = progress_bars {
-        progress_bars.update(&timetable, &clock, executor_stats, 0);
+        progress_bars.update(&timetable, &clock, executor_stats, 0)?;
         progress_bars.finish();
     }
 
@@ -105,7 +107,7 @@ fn refresh_interval(progress_hz: NonZeroU32) -> Duration {
     Duration::from_secs(1) / progress_hz.get()
 }
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 /// Command-line arguments.
 #[derive(Parser)]
@@ -157,7 +159,7 @@ fn parse_progress_hz(value: &str) -> std::result::Result<NonZeroU32, String> {
 #[derive(Clone)]
 struct ProgressBars {
     _multi: MultiProgress,
-    workload: gwr_timetable::Workload,
+    workload: Workload,
     nodes: ProgressBar,
     reads: ProgressBar,
     writes: ProgressBar,
@@ -166,14 +168,11 @@ struct ProgressBars {
 }
 
 impl ProgressBars {
-    fn new(workload: gwr_timetable::Workload) -> Self {
+    fn new(workload: Workload) -> Self {
         Self::with_draw_target(workload, ProgressDrawTarget::stderr())
     }
 
-    fn with_draw_target(
-        workload: gwr_timetable::Workload,
-        draw_target: ProgressDrawTarget,
-    ) -> Self {
+    fn with_draw_target(workload: Workload, draw_target: ProgressDrawTarget) -> Self {
         let multi = MultiProgress::with_draw_target(draw_target);
         let bar_style =
             ProgressStyle::with_template("{prefix:>12} [{wide_bar:.cyan/blue}] {msg:<50!}")
@@ -190,12 +189,15 @@ impl ProgressBars {
         let activity = multi.add(ProgressBar::new_spinner());
         activity.set_style(ProgressStyle::with_template("{spinner:.green} {msg}").unwrap());
 
+        let compute = multi.add(ProgressBar::new_spinner());
+        compute.set_style(ProgressStyle::with_template("{spinner:.cyan} {msg}").unwrap());
+
         Self {
             workload,
             nodes: add_bar("nodes", workload.nodes),
             reads: add_bar("reads", workload.read_bytes),
             writes: add_bar("writes", workload.written_bytes),
-            compute: add_bar("compute", workload.machine_operations),
+            compute,
             activity,
             _multi: multi,
         }
@@ -207,7 +209,7 @@ impl ProgressBars {
         clock: &Clock,
         executor_stats: ExecutorStats,
         active_task_count: usize,
-    ) {
+    ) -> SimResult {
         let completed = timetable
             .completed_workload()
             .expect("progress tracking is enabled");
@@ -225,19 +227,18 @@ impl ProgressBars {
             self.workload.written_bytes,
             "bytes",
         );
-        Self::update_bar(
-            &self.compute,
-            completed.machine_operations,
-            self.workload.machine_operations,
-            "ops",
-        );
-
+        self.compute.set_message(format!(
+            "{} machine operations completed",
+            timetable.machine_operations_executed()?
+        ));
+        self.compute.tick();
         self.update_activity(
             timetable.num_graph_nodes_active(),
             executor_stats,
             active_task_count,
             clock.time_now_ns(),
         );
+        Ok(())
     }
 
     fn update_activity(
@@ -295,7 +296,7 @@ fn progress_message(actual: usize, expected: usize, unit: &str) -> String {
 
 fn write_error_mermaid(timetable: &Timetable, path: &Path) {
     let mermaid = timetable.render_mermaid();
-    if let Err(err) = fs::write(path, mermaid) {
+    if let Err(err) = write(path, mermaid) {
         eprintln!(
             "Failed to write Mermaid timetable state to '{}': {err}",
             path.display()
@@ -328,6 +329,7 @@ mod tests {
     use std::time::Duration;
 
     use gwr_engine::executor::ExecutorStats;
+    use log::Level;
 
     use super::*;
 
@@ -375,9 +377,9 @@ mod tests {
         let mut args = Cli::try_parse_from(["gwr-timetable"]).unwrap();
 
         args.tracker
-            .ensure_visiblity(args.dump_stats, "--dump-stats", log::Level::Info);
+            .ensure_visiblity(args.dump_stats, "--dump-stats", Level::Info);
 
-        assert!(!args.tracker.level_enabled(log::Level::Info));
+        assert!(!args.tracker.level_enabled(Level::Info));
     }
 
     #[test]
@@ -385,9 +387,9 @@ mod tests {
         let mut args = Cli::try_parse_from(["gwr-timetable", "--dump-stats"]).unwrap();
 
         args.tracker
-            .ensure_visiblity(args.dump_stats, "--dump-stats", log::Level::Info);
+            .ensure_visiblity(args.dump_stats, "--dump-stats", Level::Info);
 
-        assert!(args.tracker.level_enabled(log::Level::Info));
+        assert!(args.tracker.level_enabled(Level::Info));
     }
 
     #[test]

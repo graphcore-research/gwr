@@ -4,6 +4,36 @@ use gwr_platform::types::PlatformConfig;
 const DEFAULT_LINE_SIZE_BYTES: usize = 32;
 const BACKING_MEMORY_CAPACITY_BYTES: u64 = 1536;
 
+fn create_coherent_platform_config(
+    cache_line_size_bytes: usize,
+    manager_line_size_bytes: usize,
+) -> PlatformConfig {
+    yaml_serde::from_str(&format!(
+        r"
+operation_classes:
+  add: {{ operations: [add], arity: 2 }}
+
+memory_maps:
+  - name: backing
+    devices: [memory]
+memories:
+  - name: memory
+    kind: hbm
+    base_address: 0
+    config: {{capacity_bytes: {BACKING_MEMORY_CAPACITY_BYTES}}}
+caches:
+  - name: cache
+    coherency_managers: [directory]
+    config: {{line_size_bytes: {cache_line_size_bytes}, max_inflight_parents: 1, max_inflight_fills: 1}}
+coherency_managers:
+  - name: directory
+    memory_map: backing
+    config: {{line_size_bytes: {manager_line_size_bytes}}}
+"
+    ))
+    .unwrap()
+}
+
 #[test]
 fn manager_processing_rate_survives_yaml_roundtrip_without_a_line_size() {
     let mut cfg = create_coherent_platform_config(DEFAULT_LINE_SIZE_BYTES, DEFAULT_LINE_SIZE_BYTES);
@@ -138,7 +168,17 @@ fn upstream_pe_memory_map_must_be_covered_by_selected_managers() {
     cfg.processing_elements = Some(vec![gwr_platform::types::ProcessingElementSection {
         name: "pe".into(),
         memory_map: "pe_map".into(),
-        config: yaml_serde::from_str("{}").unwrap(),
+        config: yaml_serde::from_str(
+            r"
+compute:
+  execution_units:
+    vector:
+      capabilities:
+        - class: add
+          ops_per_tick: 256
+",
+        )
+        .unwrap(),
     }]);
 
     // Route that processing element through the coherent cache.
@@ -153,31 +193,4 @@ fn upstream_pe_memory_map_must_be_covered_by_selected_managers() {
             .to_string()
             .contains("no coherency manager for Memory 'other'")
     );
-}
-
-fn create_coherent_platform_config(
-    cache_line_size_bytes: usize,
-    manager_line_size_bytes: usize,
-) -> PlatformConfig {
-    yaml_serde::from_str(&format!(
-        r"
-memory_maps:
-  - name: backing
-    devices: [memory]
-memories:
-  - name: memory
-    kind: hbm
-    base_address: 0
-    config: {{capacity_bytes: {BACKING_MEMORY_CAPACITY_BYTES}}}
-caches:
-  - name: cache
-    coherency_managers: [directory]
-    config: {{line_size_bytes: {cache_line_size_bytes}, max_inflight_parents: 1, max_inflight_fills: 1}}
-coherency_managers:
-  - name: directory
-    memory_map: backing
-    config: {{line_size_bytes: {manager_line_size_bytes}}}
-"
-    ))
-    .unwrap()
 }

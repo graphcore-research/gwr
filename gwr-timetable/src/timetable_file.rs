@@ -2,13 +2,15 @@
 
 //! Types that map directly to the YAML file contents
 
+use std::fs::read_to_string;
 use std::path::Path;
 
 use gwr_engine::sim_error;
 use gwr_engine::types::{SimError, SimResult};
-use gwr_models::processing_element::operators::dtype::DataType;
-use gwr_models::processing_element::task::ComputeOp;
+use gwr_models::processing_element::program::syntax::{ProgramSpec, TileSpec};
+use gwr_models::processing_element::tensors::dtype::DataType;
 use serde::{Deserialize, Serialize};
+use yaml_serde::from_str;
 
 use crate::graph::TimetableGraph;
 
@@ -21,14 +23,13 @@ pub struct TimetableFile {
 
 impl TimetableFile {
     pub fn from_file(graph_path: &Path) -> Result<Self, SimError> {
-        let s = std::fs::read_to_string(graph_path)
+        let s = read_to_string(graph_path)
             .map_err(|e| SimError(format!("Unable to read {}: {e}", graph_path.display())))?;
         Self::from_string(&s)
     }
 
     pub fn from_string(graph_str: &str) -> Result<Self, SimError> {
-        yaml_serde::from_str(graph_str)
-            .map_err(|e| SimError(format!("yaml_serde::from_str failed: {e}")))
+        from_str(graph_str).map_err(|e| SimError(format!("yaml_serde::from_str failed: {e}")))
     }
 
     /// Validate graph structure, node connections, and tensor views.
@@ -53,32 +54,20 @@ pub enum NodeSection {
     #[serde(rename = "compute")]
     Compute {
         id: String,
-        op: ComputeOp,
+        program: Box<ProgramSpec>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tiling: Option<TileSpec>,
         pe: Option<String>,
-        input_views: Vec<Option<TensorViewSection>>,
-        output_views: Vec<Option<TensorViewSection>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input_views: Option<Vec<Option<TensorViewSection>>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output_views: Option<Vec<Option<TensorViewSection>>>,
     },
     #[serde(rename = "tensor")]
     Tensor {
         id: String,
         config: TensorConfigSection,
     },
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct TensorViewSection {
-    pub offsets: Vec<usize>,
-    pub shape: Vec<usize>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct TensorConfigSection {
-    #[serde(deserialize_with = "gwr_platform::types::parse_u64_byte_str")]
-    pub addr: u64,
-    pub dtype: DataType,
-    pub shape: Vec<usize>,
 }
 
 impl NodeSection {
@@ -99,13 +88,20 @@ impl NodeSection {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum EdgeKind {
-    /// Transfers tensor data and creates a scheduling dependency.
-    Data,
-    /// Records a graph relationship without affecting task readiness.
-    Control,
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TensorViewSection {
+    pub offsets: Vec<usize>,
+    pub shape: Vec<usize>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TensorConfigSection {
+    #[serde(deserialize_with = "gwr_platform::types::parse_u64_byte_str")]
+    pub addr: u64,
+    pub dtype: DataType,
+    pub shape: Vec<usize>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -144,6 +140,15 @@ impl EdgeSection {
     pub fn to_node_and_edge(&self) -> Result<(&str, Option<usize>), SimError> {
         parse_edge_end(&self.to)
     }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EdgeKind {
+    /// Transfers tensor data and creates a scheduling dependency.
+    Data,
+    /// Records a graph relationship without affecting task readiness.
+    Control,
 }
 
 /// Take the string defining the end of an edge and return the index of
