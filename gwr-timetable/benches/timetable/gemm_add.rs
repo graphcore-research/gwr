@@ -1,8 +1,12 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+use std::collections::BTreeMap;
+
 use gwr_models::cache::coherency_manager::CoherenceOp;
-use gwr_models::processing_element::operators::dtype::DataType;
-use gwr_models::processing_element::task::ComputeOp;
+use gwr_models::processing_element::program::syntax::{
+    AssignmentSpec, BoundsMode, ExprSpec, IndexSpec, ProgramSpec, TileSpec,
+};
+use gwr_models::processing_element::tensors::dtype::DataType;
 use gwr_timetable::timetable_file::{
     EdgeKind, EdgeSection, NodeSection, TensorConfigSection, TensorViewSection, TimetableFile,
 };
@@ -84,7 +88,8 @@ fn validate(simulation: &Simulation) {
         let reads = blocks * (activation_bytes + partitions * weight_bytes)
             + (blocks / 2) * 2 * activation_bytes;
         let writes = (blocks + blocks / 2) * activation_bytes;
-        let operations = blocks * m * n * (2 * n - 1) + (blocks / 2) * m * n;
+        // Each matrix MAC contributes two FLOPs.
+        let operations = blocks * m * n * (2 * n) + (blocks / 2) * m * n;
 
         assert_eq!(
             pe.total_graph_nodes(),
@@ -93,7 +98,7 @@ fn validate(simulation: &Simulation) {
         );
         assert_eq!(pe.bytes_consumed(), reads, "{name}: {pe_name}");
         assert_eq!(pe.bytes_produced(), writes, "{name}: {pe_name}");
-        assert_eq!(pe.total_flops().unwrap(), operations, "{name}: {pe_name}");
+        assert_eq!(pe.total_flops(), operations, "{name}: {pe_name}");
 
         let cache = simulation
             .platform
@@ -204,14 +209,27 @@ impl GraphBuilder {
     fn compute(
         &mut self,
         id: &str,
-        op: ComputeOp,
+        expr: ExprSpec,
         pe: usize,
-        input_views: Vec<Option<TensorViewSection>>,
-        output_views: Vec<Option<TensorViewSection>>,
+        tiling: Option<TileSpec>,
+        input_views: Option<Vec<Option<TensorViewSection>>>,
+        output_views: Option<Vec<Option<TensorViewSection>>>,
     ) {
         self.file.nodes.push(NodeSection::Compute {
             id: id.to_owned(),
-            op,
+            program: Box::new(ProgramSpec {
+                inputs: vec!["A".to_owned(), "B".to_owned()],
+                outputs: vec!["Y".to_owned()],
+                temporaries: BTreeMap::new(),
+                assignments: vec![AssignmentSpec {
+                    output: Some("Y".to_owned()),
+                    indices_output: None,
+                    axes: vec!["m".to_owned(), "n".to_owned()],
+                    expr,
+                }],
+                extents: BTreeMap::new(),
+            }),
+            tiling,
             pe: Some(endpoint_name("pe", pe)),
             input_views,
             output_views,
@@ -219,11 +237,19 @@ impl GraphBuilder {
     }
 }
 
-fn half_view(m: usize, n: usize, branch: usize) -> Option<TensorViewSection> {
-    Some(TensorViewSection {
+fn half_view(m: usize, n: usize, branch: usize) -> TensorViewSection {
+    TensorViewSection {
         offsets: vec![branch * m, 0],
         shape: vec![m, n],
-    })
+    }
+}
+
+fn read(tensor: &str, axes: [&str; 2]) -> ExprSpec {
+    ExprSpec::Read {
+        tensor: tensor.to_owned(),
+        indices: axes.map(|axis| IndexSpec::Axis(axis.to_owned())).into(),
+        bounds: BoundsMode::RequireInRange,
+    }
 }
 
 /// Build FP32 GEMM/Add chains for thirty PE pairs. Each block runs two
@@ -254,7 +280,16 @@ fn timetable_file() -> TimetableFile {
     }
 
     for lane in 0..LANES {
-        let LaneConfig { m, n, blocks, .. } = lane_config(lane);
+        let LaneConfig {
+            m,
+            n,
+            blocks,
+            expected_sram_partitions,
+            ..
+        } = lane_config(lane);
+        let tiling = (expected_sram_partitions > 1).then(|| TileSpec {
+            sizes: BTreeMap::from([("m".to_owned(), m / expected_sram_partitions)]),
+        });
         for block in 0..blocks {
             // Create tensors for the matmul and elementwise add outputs.
             // The input of this block is the output of the previous block.
@@ -269,10 +304,15 @@ fn timetable_file() -> TimetableFile {
                 let gemm = format!("gemm{lane}_{block}_{branch}");
                 builder.compute(
                     &gemm,
-                    ComputeOp::Gemm,
+                    ExprSpec::MatrixMac {
+                        accumulator: DataType::Fp32,
+                        args: vec![read("A", ["m", "k"]), read("B", ["k", "n"])],
+                        over: vec!["k".to_owned()],
+                    },
                     2 * lane + branch,
-                    vec![None, None],
-                    vec![half_view(m, n, branch)],
+                    tiling.clone(),
+                    None,
+                    Some(vec![Some(half_view(m, n, branch))]),
                 );
                 builder.edge(&input, format!("{gemm}.0"));
                 builder.edge(
@@ -286,10 +326,14 @@ fn timetable_file() -> TimetableFile {
             let add = format!("add{lane}_{block}");
             builder.compute(
                 &add,
-                ComputeOp::Add,
+                ExprSpec::Call {
+                    op: "add".to_owned(),
+                    args: vec![read("A", ["m", "n"]), read("B", ["m", "n"])],
+                },
                 2 * lane + block % 2,
-                vec![half_view(m, n, 0), half_view(m, n, 1)],
-                vec![None],
+                tiling.clone(),
+                Some(vec![Some(half_view(m, n, 0)), Some(half_view(m, n, 1))]),
+                None,
             );
             builder.edge(&joined, format!("{add}.0"));
             builder.edge(&joined, format!("{add}.1"));

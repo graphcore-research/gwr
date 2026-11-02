@@ -32,7 +32,7 @@ connections:
 }
 
 #[test]
-fn null_connections_cover_the_former_hbm_fabric_ports() {
+fn all_ports_of_a_large_fabric_can_be_null_connected() {
     let mut engine = Engine::new(&dev_null_tracker());
     let clock = engine.default_clock();
     let mut yaml = String::from(
@@ -88,10 +88,11 @@ memory_maps:
 address_spaces:
   - name: as0
     memory_map: mm
+operation_classes: { add: { operations: [add], arity: 2 } }
 processing_elements:
   - name: pe0
     address_space: as0
-    config: {}
+    config: { compute: { execution_units: { vector: { capabilities: [{class: add, ops_per_tick: 1}] } } } }
 connections:
   - connect: ['null', pe.pe0]
 ",

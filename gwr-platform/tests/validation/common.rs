@@ -1,16 +1,22 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-pub(crate) use gwr_engine::test_helpers::start_test;
-pub(crate) use gwr_platform::Platform;
+use std::collections::BTreeMap;
+
+use gwr_models::processing_element::compute::{
+    CapabilityConfig, CapabilityKind, ComputeConfig, ExecutionUnitConfig, OperationClass,
+};
 pub(crate) use gwr_platform::types::{
     AddressSpaceSection, CacheConfigSection, CacheSection, ConnectSection, FabricConfigSection,
     FabricKind, FabricSection, MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
     PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
 };
 
+const BASIC_OPERATION_CLASSES: [&str; 3] = ["add", "mul", "compare"];
+
 pub(crate) fn platform() -> PlatformConfig {
     PlatformConfig {
         coherency_managers: None,
+        operation_classes: basic_classes(),
         memory_maps: Vec::new(),
         address_spaces: Vec::new(),
         defaults: None,
@@ -20,6 +26,22 @@ pub(crate) fn platform() -> PlatformConfig {
         memories: None,
         connections: None,
     }
+}
+
+pub(crate) fn basic_classes() -> BTreeMap<String, OperationClass> {
+    BASIC_OPERATION_CLASSES
+        .into_iter()
+        .map(|name| {
+            (
+                name.into(),
+                OperationClass {
+                    operations: vec![name.into()],
+                    arity: 2,
+                    flops_per_op: 1,
+                },
+            )
+        })
+        .collect()
 }
 
 pub(crate) fn memory(name: &str, base_address: u64, capacity_bytes: u64) -> MemorySection {
@@ -32,13 +54,6 @@ pub(crate) fn memory(name: &str, base_address: u64, capacity_bytes: u64) -> Memo
             bw_bytes_per_tick: None,
             delay_ticks: None,
         },
-    }
-}
-
-pub(crate) fn memory_map(name: &str, devices: &[&str]) -> MemoryMapSection {
-    MemoryMapSection {
-        name: name.to_string(),
-        devices: devices.iter().map(|name| (*name).to_string()).collect(),
     }
 }
 
@@ -59,10 +74,35 @@ pub(crate) fn processing_element(name: &str, address_space: &str) -> ProcessingE
             num_active_requests: None,
             overhead_size_bytes: None,
             sram_bytes: None,
-            adds_per_tick: None,
-            muls_per_tick: None,
-            compares_per_tick: None,
+            compute: Some(basic_compute()),
         },
+    }
+}
+
+pub(crate) fn memory_map(name: &str, devices: &[&str]) -> MemoryMapSection {
+    MemoryMapSection {
+        name: name.to_string(),
+        devices: devices.iter().map(|name| (*name).to_string()).collect(),
+    }
+}
+
+pub(crate) fn basic_compute() -> ComputeConfig {
+    ComputeConfig {
+        execution_units: BTreeMap::from([(
+            "alu".into(),
+            ExecutionUnitConfig {
+                matrix_accumulator_capacity_bytes: None,
+                capabilities: BASIC_OPERATION_CLASSES
+                    .into_iter()
+                    .map(|class| CapabilityConfig {
+                        kind: CapabilityKind::Scalar,
+                        class: class.into(),
+                        input_dtypes: None,
+                        ops_per_tick: 16.0,
+                    })
+                    .collect(),
+            },
+        )]),
     }
 }
 
@@ -71,10 +111,10 @@ pub(crate) fn cache(name: &str) -> CacheSection {
         coherency_managers: None,
         name: name.to_string(),
         config: CacheConfigSection {
-            bw_bytes_per_tick: None,
-            line_size_bytes: None,
             max_inflight_parents: None,
             max_inflight_fills: None,
+            bw_bytes_per_tick: None,
+            line_size_bytes: None,
             num_ways: None,
             num_sets: None,
             delay_ticks: None,

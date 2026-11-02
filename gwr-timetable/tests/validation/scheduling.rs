@@ -1,6 +1,13 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use super::common::*;
+use gwr_models::processing_element::dispatch::Dispatch;
+use gwr_models::processing_element::tensors::dtype::DataType;
+use gwr_timetable::timetable_file::{EdgeKind, EdgeSection, NodeSection, TensorConfigSection};
+
+use super::common::{
+    build_timetable, compute, control_edge, create_default_timetable_file, data_edge, tensor,
+    timetable,
+};
 
 #[test]
 fn builds_a_valid_timetable() {
@@ -46,7 +53,7 @@ fn control_edges_are_ignored_by_scheduler() {
 }
 
 #[test]
-fn control_edges_ignore_data_tensor_indices() {
+fn accepts_control_edge_endpoint_indices_without_data_port_validation() {
     let (_, _, mut timetable_file) = create_default_timetable_file();
     timetable_file.edges.push(EdgeSection {
         from: "tensor2.99".to_string(),

@@ -1,5 +1,7 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+use gwr_engine::test_helpers::start_test;
+use gwr_platform::Platform;
 use gwr_platform::types::AddressRegionSection;
 
 use super::common::*;
@@ -202,6 +204,8 @@ fn processing_element_requires_a_dispatcher() {
         &engine,
         &clock,
         "
+operation_classes:
+  add: { operations: [add], arity: 2 }
 memory_maps:
   - name: mm0
     devices:
@@ -213,6 +217,10 @@ processing_elements:
   - name: pe0
     address_space: as0
     config:
+      compute:
+        execution_units:
+          alu:
+            capabilities: [{ class: add, ops_per_tick: 1 }]
 memories:
   - name: hbm0
     kind: hbm
