@@ -47,6 +47,27 @@ A model of a memory to handle read/write accesses.
 
 **Interfaces:** `rx`: [input port], `tx`: [output port]
 
+## Memory striping
+
+`memory::striper::MemoryStriper<T>` exposes one logical memory range backed by a
+`MemoryMap`, assigning configurable stripes round-robin to backing regions in
+increasing address order. It splits reads and writes at stripe boundaries and
+rejoins responses for each original read or nonposted write. Packets implement
+`SimObject` and `memory::traits::StripingAccess`.
+
+Parent requests and downstream fragments have independent admission limits.
+Completion models traffic only: read payloads are not assembled, and no
+processing or bandwidth delay is added. Control and barrier packets are
+unsupported. See the [striper module](src/memory/striper.rs) for configuration,
+examples, and the packet contract.
+
+**Interfaces:**
+
+- `dev_rx`: upstream requests
+- `dev_tx`: upstream responses
+- `mem_tx`: downstream requests
+- `mem_rx`: downstream responses
+
 ## Cache
 
 A whole-line n-way set associative cache with bounded parent requests and line
