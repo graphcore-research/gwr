@@ -1,6 +1,11 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use super::common::*;
+use gwr_models::processing_element::tensors::dtype::DataType;
+use gwr_timetable::timetable_file::{NodeSection, TensorViewSection, TimetableFile};
+
+use super::common::{
+    build_timetable, compute, create_default_timetable_file, data_edge, tensor, timetable, view,
+};
 
 #[test]
 fn rejects_zero_sized_views() {
@@ -63,18 +68,19 @@ fn accepts_a_tensor_at_the_final_physical_byte() {
 #[test]
 fn compute_node_rejects_unknown_view_field() {
     let err = TimetableFile::from_string(
-        "
+        r"
 nodes:
   - id: add0
     kind: compute
-    op: add
+    program:
+      inputs: [A, B]
+      outputs: [Y]
+      assignments: []
     pe: pe0
     input_views:
       - offsets: [0]
         shape: [4]
         stride: [1]
-      -
-    output_views:
       -
 
 edges:
@@ -85,15 +91,18 @@ edges:
 }
 
 #[test]
-fn compute_input_view_outside_tensor() {
+fn rejects_compute_input_view_outside_tensor() {
     let (top, platform, mut timetable_file) = create_default_timetable_file();
     let NodeSection::Compute { input_views, .. } = &mut timetable_file.nodes[2] else {
         panic!("expected compute node");
     };
-    input_views[0] = Some(TensorViewSection {
-        shape: vec![3, 10, 10],
-        offsets: vec![1, 1, 1],
-    });
+    *input_views = Some(vec![
+        Some(TensorViewSection {
+            shape: vec![3, 10, 10],
+            offsets: vec![1, 1, 1],
+        }),
+        None,
+    ]);
 
     let err = build_timetable(&top, timetable_file, &platform).unwrap_err();
     assert!(format!("{err}").contains(
@@ -102,15 +111,15 @@ fn compute_input_view_outside_tensor() {
 }
 
 #[test]
-fn compute_output_view_outside_tensor() {
+fn rejects_compute_output_view_outside_tensor() {
     let (top, platform, mut timetable_file) = create_default_timetable_file();
     let NodeSection::Compute { output_views, .. } = &mut timetable_file.nodes[2] else {
         panic!("expected compute node");
     };
-    output_views[0] = Some(TensorViewSection {
+    *output_views = Some(vec![Some(TensorViewSection {
         shape: vec![3, 10, 100],
         offsets: vec![0, 0, 0],
-    });
+    })]);
 
     let err = build_timetable(&top, timetable_file, &platform).unwrap_err();
     assert!(format!("{err}").contains(
@@ -133,8 +142,9 @@ fn rejects_a_view_on_a_disconnected_tensor_index() {
 }
 
 #[test]
-fn accepts_an_empty_optional_tensor() {
-    timetable(vec![compute("compute", vec![None], vec![None])], vec![])
+fn rejects_an_unbound_program_input_port() {
+    let error = timetable(vec![compute("compute", vec![None], vec![None])], vec![])
         .validate()
-        .unwrap();
+        .unwrap_err();
+    assert!(error.to_string().contains("unbound program input"));
 }

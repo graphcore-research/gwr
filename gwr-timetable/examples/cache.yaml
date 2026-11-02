@@ -11,12 +11,20 @@ nodes:
   - id: add
     kind: compute
     pe: pe0
-    op: add
-    input_views:
-      -
-      -
-    output_views:
-      -
+    program:
+      inputs: [A, B]
+      outputs: [Y]
+      assignments:
+        - output: Y
+          axes: [i]
+          expr:
+            {
+              add:
+                [
+                  { read: { tensor: A, indices: [i] } },
+                  { read: { tensor: B, indices: [i] } },
+                ],
+            }
 
   - id: tensor_C
     kind: tensor

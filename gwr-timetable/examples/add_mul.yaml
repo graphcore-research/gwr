@@ -1,0 +1,42 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+nodes:
+  - { id: A, kind: tensor, config: { addr: 0x1000, dtype: fp32, shape: [8] } }
+  - { id: B, kind: tensor, config: { addr: 0x2000, dtype: fp32, shape: [8] } }
+  - { id: C, kind: tensor, config: { addr: 0x3000, dtype: fp32, shape: [8] } }
+  - id: add
+    kind: compute
+    pe: pe0
+    program:
+      inputs: [A, B]
+      outputs: [T]
+      assignments:
+        - output: T
+          axes: [i]
+          expr:
+            add:
+              - read: { tensor: A, indices: [i] }
+              - read: { tensor: B, indices: [i] }
+    tiling: { sizes: { i: 4 } }
+  - { id: T, kind: tensor, config: { addr: 0x4000, dtype: fp32, shape: [8] } }
+  - id: multiply
+    kind: compute
+    pe: pe0
+    program:
+      inputs: [T, C]
+      outputs: [Y]
+      assignments:
+        - output: Y
+          axes: [i]
+          expr:
+            mul:
+              - read: { tensor: T, indices: [i] }
+              - read: { tensor: C, indices: [i] }
+    tiling: { sizes: { i: 4 } }
+  - { id: Y, kind: tensor, config: { addr: 0x5000, dtype: fp32, shape: [8] } }
+edges:
+  - { from: A, to: add.0, kind: data }
+  - { from: B, to: add.1, kind: data }
+  - { from: add.0, to: T, kind: data }
+  - { from: T, to: multiply.0, kind: data }
+  - { from: C, to: multiply.1, kind: data }
+  - { from: multiply.0, to: Y, kind: data }

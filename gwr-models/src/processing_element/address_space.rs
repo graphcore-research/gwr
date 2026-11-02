@@ -6,6 +6,7 @@
 //! physical addresses.
 
 use std::collections::BTreeMap;
+use std::ops::Range;
 use std::option::Option;
 use std::vec::Vec;
 
@@ -160,6 +161,14 @@ impl AddressSpace {
         self.regions.insert(start, region);
 
         Ok(())
+    }
+
+    /// Return the mapped virtual ranges, with exclusive ends represented in
+    /// `u128` so a region may include `u64::MAX`.
+    pub(crate) fn logical_ranges(&self) -> impl Iterator<Item = Range<u128>> + '_ {
+        self.regions
+            .values()
+            .map(|region| u128::from(region.start)..u128::from(region.end) + 1)
     }
 
     /// Resolve an aligned virtual address to its destination device and
