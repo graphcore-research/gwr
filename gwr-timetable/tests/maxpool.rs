@@ -25,11 +25,17 @@ address_spaces:
   - name: default
     memory_map: default
     access_bytes: 32
+operation_classes:
+  compare: { operations: [compare], arity: 2 }
 
 processing_elements:
   - name: pe0
     address_space: default
     config:
+      compute:
+        execution_units:
+          vector:
+            capabilities: [{ class: compare, ops_per_tick: 16 }]
 
 memories:
   - name: hbm0
@@ -48,7 +54,7 @@ memories:
 fn compute_completion_updates_multiple_outputs() {
     let (top, platform) = create_platform();
     let timetable_file = TimetableFile::from_string(
-        "
+        r"
 nodes:
   - id: input
     kind: tensor
@@ -59,15 +65,32 @@ nodes:
 
   - id: pool
     kind: compute
-    op:
-      maxpool:
-        kernel_shape: [2, 2]
+    program:
+      inputs: [A]
+      outputs: [Y, I]
+      extents: { b: 1, c: 1, oh: 3, ow: 3, kh: 2, kw: 2 }
+      assignments:
+        - output: Y
+          indices_output: I
+          axes: [b, c, oh, ow]
+          expr:
+            reduce:
+              op: max
+              over: [kh, kw]
+              value:
+                read:
+                  tensor: A
+                  indices:
+                    - b
+                    - c
+                    - affine:
+                        terms: { oh: 1, kh: 1 }
+                        offset: 0
+                    - affine:
+                        terms: { ow: 1, kw: 1 }
+                        offset: 0
+                  bounds: exclude
     pe: pe0
-    input_views:
-      -
-    output_views:
-      -
-      -
 
   - id: pooled
     kind: tensor

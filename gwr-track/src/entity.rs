@@ -7,169 +7,13 @@
 //! for tracing.
 
 use std::fmt;
+use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 
+use log::Level;
+
 use crate::tracker::aka::{Aka, get_alternative_names};
-use crate::{Id, Tracker, create_id, destroy, trace};
-
-/// A capacity value and its units.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Capacity {
-    /// Capacity value.
-    pub value: usize,
-
-    /// Capacity units, for example "objects" or "bytes".
-    pub units: String,
-}
-
-impl Capacity {
-    /// Construct a new [`Capacity`].
-    #[must_use]
-    pub fn new(value: usize, units: impl Into<String>) -> Self {
-        Self {
-            value,
-            units: units.into(),
-        }
-    }
-}
-
-/// A simulation entity
-///
-/// An entity is a part of a hierarchical simulation in which it must have a
-/// parent. The simulation top-level should be created using `toplevel("name")`.
-///
-/// The entity is used when logging so that its unique ID can be emitted and
-/// it can determine which messages are emitted to both the binary and textual
-/// outputs.
-pub struct Entity {
-    /// Name of this entity.
-    pub name: String,
-
-    /// Optional parent entity (only the top-level should be None).
-    pub parent: Option<Rc<Entity>>,
-
-    /// Unique simulation identifier used for bin/log messages.
-    pub id: Id,
-
-    /// [`Tracker`] used to handle trace/log events.
-    pub tracker: Tracker,
-
-    /// Most verbose log level enabled for this entity by any tracker.
-    enabled_level: log::Level,
-}
-
-static JOIN: &str = "::";
-
-impl Entity {
-    /// Create a new entity.
-    #[must_use]
-    pub fn new(parent: &Rc<Entity>, name: &str) -> Self {
-        Self::new_with_renames(parent, name, None)
-    }
-
-    /// Create a new entity with a potential list of alternative names
-    #[must_use]
-    pub fn new_with_renames(parent: &Rc<Entity>, name: &str, aka: Option<&Aka>) -> Self {
-        let alternative_names = get_alternative_names(aka, name);
-        let mut full_name = parent.full_name();
-        full_name.push_str(JOIN);
-        full_name.push_str(name);
-
-        let tracker = parent.tracker.clone();
-        let id = create_id!(parent);
-        let enabled_level = tracker.add_entity(id, &full_name, alternative_names);
-
-        let entity = Self {
-            name: String::from(name),
-            parent: Some(parent.clone()),
-            id,
-            tracker,
-            enabled_level,
-        };
-        entity.track_create(parent.id, &full_name);
-
-        if let Some(alternative_names) = alternative_names {
-            for name in alternative_names {
-                trace!(entity ; "aka {name}");
-            }
-        }
-
-        entity
-    }
-
-    /// Returns the full hierarchical name of this entity
-    #[must_use]
-    pub fn full_name(&self) -> String {
-        match &self.parent {
-            Some(parent) => {
-                let mut name = parent.full_name();
-                name.push_str(JOIN);
-                name.push_str(self.name.as_str());
-                name
-            }
-            None => self.name.clone(),
-        }
-    }
-
-    /// Return whether trace-level events for this entity will be emitted.
-    #[must_use]
-    pub fn trace_enabled(&self) -> bool {
-        self.enabled_for(log::Level::Trace)
-    }
-
-    /// Return whether events at the given level will be emitted for this
-    /// entity.
-    #[must_use]
-    pub fn enabled_for(&self, level: log::Level) -> bool {
-        level <= self.enabled_level
-    }
-
-    /// Emit the capacity represented by this simulation entity.
-    pub fn track_capacity(&self, value: usize, units: impl Into<String>) {
-        self.tracker.capacity(self.id, Capacity::new(value, units));
-    }
-
-    /// Emit an enter event for an object.
-    pub fn track_enter(&self, entered: Id) {
-        self.tracker.enter(self.id, entered);
-    }
-
-    /// Emit an exit event for an object.
-    pub fn track_exit(&self, exited: Id) {
-        self.tracker.exit(self.id, exited);
-    }
-
-    fn track_create(&self, created_by: Id, full_name: &str) {
-        self.tracker.create_entity(created_by, self.id, full_name);
-    }
-}
-
-impl Drop for Entity {
-    fn drop(&mut self) {
-        destroy!(self);
-    }
-}
-
-impl fmt::Debug for Entity {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Entity")
-            .field("name", &self.name)
-            .field("parent", &self.parent)
-            .field("id", &self.id)
-            .finish()
-    }
-}
-
-impl fmt::Display for Entity {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(parent) = &self.parent {
-            parent.fmt(f).unwrap();
-            write!(f, "{}{}", JOIN, self.name)
-        } else {
-            write!(f, "{}", self.name)
-        }
-    }
-}
+use crate::{Id, NO_ID, Tracker, create_id, destroy, trace};
 
 /// Create the top-level entity. This should be the only entity without a
 /// parent.
@@ -183,7 +27,7 @@ pub fn toplevel(tracker: &Tracker, name: &str) -> Rc<Entity> {
         tracker: tracker.clone(),
         enabled_level,
     });
-    top.track_create(crate::NO_ID, name);
+    top.track_create(NO_ID, name);
     top
 }
 
@@ -233,6 +77,14 @@ impl EntityMonitor {
     }
 }
 
+impl GetEntity for EntityMonitor {
+    fn entity(&self) -> &Rc<Entity> {
+        &self.entity
+    }
+}
+
+static JOIN: &str = "::";
+
 /// A child trace lane used to represent named activity intervals.
 pub struct EntityLane {
     /// Parent entity that owns this lane.
@@ -249,6 +101,13 @@ pub struct EntityLane {
     active_group: Option<Id>,
 }
 
+impl Drop for EntityLane {
+    fn drop(&mut self) {
+        self.end();
+        self.entity.tracker.destroy(self.entity.id, self.id);
+    }
+}
+
 impl EntityLane {
     /// Create a new lane under `parent`.
     #[must_use]
@@ -258,6 +117,7 @@ impl EntityLane {
         full_name.push_str(name);
 
         let id = create_id!(parent);
+        parent.tracker.add_entity(id, &full_name, None);
         let lane = Self {
             entity: parent.clone(),
             id,
@@ -316,13 +176,6 @@ impl EntityLane {
     }
 }
 
-impl Drop for EntityLane {
-    fn drop(&mut self) {
-        self.end();
-        self.entity.tracker.destroy(self.entity.id, self.id);
-    }
-}
-
 /// A trace group used to associate related activities.
 pub struct EntityGroup {
     /// Parent entity that owns this group.
@@ -371,8 +224,159 @@ pub trait GetEntity {
     fn entity(&self) -> &Rc<Entity>;
 }
 
-impl GetEntity for EntityMonitor {
-    fn entity(&self) -> &Rc<Entity> {
-        &self.entity
+/// A simulation entity
+///
+/// An entity is a part of a hierarchical simulation in which it must have a
+/// parent. The simulation top-level should be created using `toplevel("name")`.
+///
+/// The entity is used when logging so that its unique ID can be emitted and
+/// it can determine which messages are emitted to both the binary and textual
+/// outputs.
+pub struct Entity {
+    /// Name of this entity.
+    pub name: String,
+
+    /// Optional parent entity (only the top-level should be None).
+    pub parent: Option<Rc<Entity>>,
+
+    /// Unique simulation identifier used for bin/log messages.
+    pub id: Id,
+
+    /// [`Tracker`] used to handle trace/log events.
+    pub tracker: Tracker,
+
+    /// Most verbose log level enabled for this entity by any tracker.
+    enabled_level: Level,
+}
+
+impl Entity {
+    /// Create a new entity.
+    #[must_use]
+    pub fn new(parent: &Rc<Entity>, name: &str) -> Self {
+        Self::new_with_renames(parent, name, None)
+    }
+
+    /// Create a new entity with a potential list of alternative names
+    #[must_use]
+    pub fn new_with_renames(parent: &Rc<Entity>, name: &str, aka: Option<&Aka>) -> Self {
+        let alternative_names = get_alternative_names(aka, name);
+        let mut full_name = parent.full_name();
+        full_name.push_str(JOIN);
+        full_name.push_str(name);
+
+        let tracker = parent.tracker.clone();
+        let id = create_id!(parent);
+        let enabled_level = tracker.add_entity(id, &full_name, alternative_names);
+
+        let entity = Self {
+            name: String::from(name),
+            parent: Some(parent.clone()),
+            id,
+            tracker,
+            enabled_level,
+        };
+        entity.track_create(parent.id, &full_name);
+
+        if let Some(alternative_names) = alternative_names {
+            for name in alternative_names {
+                trace!(entity ; "aka {name}");
+            }
+        }
+
+        entity
+    }
+
+    /// Returns the full hierarchical name of this entity
+    #[must_use]
+    pub fn full_name(&self) -> String {
+        match &self.parent {
+            Some(parent) => {
+                let mut name = parent.full_name();
+                name.push_str(JOIN);
+                name.push_str(self.name.as_str());
+                name
+            }
+            None => self.name.clone(),
+        }
+    }
+
+    /// Return whether trace-level events for this entity will be emitted.
+    #[must_use]
+    pub fn trace_enabled(&self) -> bool {
+        self.enabled_for(Level::Trace)
+    }
+
+    /// Return whether events at the given level will be emitted for this
+    /// entity.
+    #[must_use]
+    pub fn enabled_for(&self, level: Level) -> bool {
+        level <= self.enabled_level
+    }
+
+    /// Emit the capacity represented by this simulation entity.
+    pub fn track_capacity(&self, value: usize, units: impl Into<String>) {
+        self.tracker.capacity(self.id, Capacity::new(value, units));
+    }
+
+    /// Emit an enter event for an object.
+    pub fn track_enter(&self, entered: Id) {
+        self.tracker.enter(self.id, entered);
+    }
+
+    /// Emit an exit event for an object.
+    pub fn track_exit(&self, exited: Id) {
+        self.tracker.exit(self.id, exited);
+    }
+
+    fn track_create(&self, created_by: Id, full_name: &str) {
+        self.tracker.create_entity(created_by, self.id, full_name);
+    }
+}
+
+impl Drop for Entity {
+    fn drop(&mut self) {
+        destroy!(self);
+    }
+}
+
+impl Display for Entity {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        if let Some(parent) = &self.parent {
+            parent.fmt(f).unwrap();
+            write!(f, "{}{}", JOIN, self.name)
+        } else {
+            write!(f, "{}", self.name)
+        }
+    }
+}
+
+impl fmt::Debug for Entity {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Entity")
+            .field("name", &self.name)
+            .field("parent", &self.parent)
+            .field("id", &self.id)
+            .finish()
+    }
+}
+
+/// A capacity value and its units.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Capacity {
+    /// Capacity value.
+    pub value: usize,
+
+    /// Capacity units, for example "objects" or "bytes".
+    pub units: String,
+}
+
+impl Capacity {
+    /// Construct a new [`Capacity`].
+    #[must_use]
+    pub fn new(value: usize, units: impl Into<String>) -> Self {
+        Self {
+            value,
+            units: units.into(),
+        }
     }
 }

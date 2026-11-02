@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use gwr_models::processing_element::operators::HasShape;
+use gwr_models::processing_element::tensors::HasShape;
 use gwr_timetable::ComputeTensorDirection;
 use gwr_timetable::timetable_file::TimetableFile;
 
@@ -14,10 +14,12 @@ nodes:
     config: { addr: 4096, dtype: int8, shape: [2, 4] }
   - id: compute
     kind: compute
-    op: { custom: { machine_ops: {} } }
+    program:
+      inputs: [A]
+      outputs: []
+      assignments: []
     input_views:
       - { offsets: [0, 1], shape: [2, 1] }
-    output_views: []
 edges:
   - { from: input, to: compute, kind: data }
 ",

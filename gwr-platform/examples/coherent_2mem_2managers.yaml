@@ -16,12 +16,18 @@ address_spaces:
   - name: pe_address_space
     memory_map: pe_memory_map
     access_bytes: 32
+operation_classes:
+  add: { operations: [add], arity: 2 }
 
 processing_elements:
   - name: pe0
     address_space: pe_address_space
     config:
       num_active_requests: 8
+      compute:
+        execution_units:
+          vector:
+            capabilities: [{ class: add, ops_per_tick: 256 }]
 
 caches:
   - name: l1_0
