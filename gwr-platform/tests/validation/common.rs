@@ -10,6 +10,7 @@ pub(crate) use gwr_platform::types::{
 
 pub(crate) fn platform() -> PlatformConfig {
     PlatformConfig {
+        memory_stripers: None,
         coherency_managers: None,
         memory_maps: Vec::new(),
         defaults: None,

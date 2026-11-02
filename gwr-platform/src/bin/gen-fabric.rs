@@ -215,6 +215,7 @@ fn build_platform(args: &Args) -> Result<PlatformConfig, String> {
         }
     }
     Ok(PlatformConfig {
+        memory_stripers: None,
         coherency_managers: args.use_coherency_managers.then(|| {
             vec![gwr_platform::types::CoherencyManagerSection {
                 name: "cm0".to_owned(),

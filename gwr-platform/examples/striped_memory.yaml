@@ -1,0 +1,40 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+memory_maps:
+  - name: logical
+    devices: [s0]
+  - name: backing
+    devices: [m0, m1]
+processing_elements:
+  - name: pe0
+    memory_map: logical
+    config: {}
+memory_stripers:
+  - name: s0
+    memory_map: backing
+    config:
+      base_address: 0
+      capacity_bytes: 1KiB
+      stripe_size_bytes: 64
+memories:
+  - name: m0
+    kind: ddr
+    base_address: 0x100000
+    config:
+      capacity_bytes: 512B
+  - name: m1
+    kind: ddr
+    base_address: 0x200000
+    config:
+      capacity_bytes: 512B
+fabrics:
+  - name: backing
+    kind: functional
+    columns: 3
+    rows: 1
+    config: {}
+connections:
+  - connect: [pe.pe0, striper.s0.dev]
+  - connect: [striper.s0.mem, "fabric.backing@(0,0)"]
+  - connect: [mem.m0, "fabric.backing@(1,0)"]
+  - connect: [mem.m1, "fabric.backing@(2,0)"]

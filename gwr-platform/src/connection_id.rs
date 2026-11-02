@@ -6,6 +6,7 @@
 //! `connections` entries:
 //! - `pe.<name>`
 //! - `cache.<name>[.dev|.mem]`
+//! - `striper.<name>.dev|mem`
 //! - `mem.<name>`
 //! - `fabric.<name>@(<column>,<row>)[.<port>]`
 //! - `null` for an unused fabric or cache port
@@ -18,18 +19,19 @@ use std::sync::LazyLock;
 use gwr_engine::types::SimError;
 use regex::Regex;
 
-/// Identifies one of the cache's external connection ports.
+/// Identifies a device-facing or memory-facing side shared by cache and
+/// memory-striper endpoints.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CachePortId {
-    /// Device-facing cache port.
+    /// Device-facing side.
     Dev,
 
-    /// Memory-facing cache port.
+    /// Memory-facing side.
     Mem,
 }
 
 impl CachePortId {
-    /// Returns the endpoint suffix used for this cache port.
+    /// Returns the endpoint suffix used for this side.
     #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -93,6 +95,9 @@ pub enum ConnectionEndpointId {
 
     /// A deliberately unused fabric or cache port.
     Null,
+
+    /// Logical memory endpoint with an explicit device-facing or backing side.
+    Striper { name: String, port: CachePortId },
 }
 
 impl fmt::Display for ConnectionEndpointId {
@@ -108,6 +113,7 @@ impl fmt::Display for ConnectionEndpointId {
                 }
                 Ok(())
             }
+            Self::Striper { name, port } => write!(f, "striper.{name}.{port}"),
             Self::Mem { name } => write!(f, "mem.{name}"),
             Self::FabricPort {
                 fabric,
@@ -128,6 +134,7 @@ impl fmt::Display for ConnectionEndpointId {
 /// Parses a platform connection endpoint ID.
 ///
 /// Supported forms are `pe.<name>`, `cache.<name>[.dev|.mem]`,
+/// `striper.<name>.dev|mem`,
 /// `mem.<name>`, `fabric.<name>@(<column>,<row>)[.<port>]`, and `null`. Fabric
 /// ports default to port 0 when the suffix is omitted.
 pub fn parse_connection_endpoint_id(s: &str) -> Result<ConnectionEndpointId, SimError> {
@@ -171,7 +178,13 @@ pub fn parse_connection_endpoint_id(s: &str) -> Result<ConnectionEndpointId, Sim
         }
         "cache" => Ok(ConnectionEndpointId::Cache {
             name: name.to_string(),
-            port: port.map(parse_cache_port_id).transpose()?,
+            port: port.map(parse_dev_mem_port_id).transpose()?,
+        }),
+        "striper" => Ok(ConnectionEndpointId::Striper {
+            name: name.to_string(),
+            port: parse_dev_mem_port_id(port.ok_or_else(|| {
+                SimError("Memory Striper endpoints require explicit dev or mem side".into())
+            })?)?,
         }),
         "mem" => {
             if port.is_some() {
@@ -187,11 +200,13 @@ pub fn parse_connection_endpoint_id(s: &str) -> Result<ConnectionEndpointId, Sim
     }
 }
 
-fn parse_cache_port_id(s: &str) -> Result<CachePortId, SimError> {
+fn parse_dev_mem_port_id(s: &str) -> Result<CachePortId, SimError> {
     match s {
         "dev" => Ok(CachePortId::Dev),
         "mem" => Ok(CachePortId::Mem),
-        other => Err(SimError(format!("Unsupported Cache port '{other}'"))),
+        other => Err(SimError(format!(
+            "Unsupported device port '{other}'; expected dev or mem"
+        ))),
     }
 }
 

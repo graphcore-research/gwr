@@ -114,10 +114,11 @@ connections:
 # }
 ```
 
-Each memory in a processing element's memory map must have a base address and
-capacity that are multiples of that PE's `lsu_access_bytes` (32 by default).
-This keeps each aligned LSU access entirely within one mapped memory region.
-When PEs share a memory map, its memories must satisfy every PE's access size.
+Each physical or logical memory in a processing element's memory map must have a
+base address and capacity that are multiples of that PE's `lsu_access_bytes` (32
+by default). This keeps each aligned LSU access entirely within one mapped
+memory region. When PEs share a memory map, its memories must satisfy every PE's
+access size.
 
 Connect an unused fabric endpoint to `null` so its ingress and egress ports are
 deliberately left idle without causing an unconnected-port error when the
@@ -153,6 +154,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+## Striped logical memories
+
+A `memory_stripers` entry defines a logical memory device backed by a named
+memory map. Include its name in a PE's memory map, and connect its device side
+(`striper.<name>.dev`) to the PE or cache and its memory side
+(`striper.<name>.mem`) to the backing devices, usually through a fabric.
+
+```yaml
+memory_maps:
+  - name: logical_memory
+    devices: [striped]
+  - name: backing_memory
+    devices: [bank_a, bank_b]
+
+memory_stripers:
+  - name: striped
+    memory_map: backing_memory
+    config:
+      base_address: 0
+      capacity_bytes: 1KiB
+      stripe_size_bytes: 64
+```
+
+See the [complete example](examples/striped_memory.yaml) for physical memories
+and connections backing a 1KiB logical device with two 512-byte banks.
+
+`stripe_size_bytes` is required and must be positive. The optional
+`max_inflight_parents` and `max_inflight_fragments` limits independently bound
+admitted requests and downstream fragments awaiting responses; both default to
+32 and must be positive. See the
+[striper model](../gwr-models/src/memory/striper.rs) for detailed mapping,
+completion and admission behaviour.
+
+Stripes are assigned round-robin in backing-address order. Each bank must have
+enough capacity for its assigned stripes. Logical and backing ranges occupy
+separate maps and may overlap. Stripers may back other stripers, but dependency
+cycles are rejected.
+
+The two sides must use separate fabric routing domains: a fabric and its linked
+fabrics cannot connect to both sides of one striper. A coherence manager may use
+a striper as backing memory; coherent caches after address translation are
+unsupported.
 
 <!-- ANCHOR_END: overview -->
 
@@ -200,12 +244,12 @@ overlapping line. Overlapping allocating reads share pending line fills;
 `NoAllocate` misses fetch full lines without populating the cache. Replacement
 and invalidation prevent old responses from marking new cache contents valid.
 
-Every physical memory's base address and capacity must be multiples of every
-configured cache line size and effective LSU access size. For power-of-two
-sizes, alignment to the largest size satisfies this rule. Other sizes must
-satisfy each alignment separately. Validation applies to all memories, including
-ones absent from PE memory maps, and rejects invalid boundaries before building
-the simulator.
+Physical memories and exposed logical apertures must have base addresses and
+capacities that are multiples of the configured cache line and LSU access sizes.
+For power-of-two sizes, alignment to the largest size satisfies this rule. Other
+sizes must satisfy each alignment separately. Backing devices used only through
+stripers may have byte-aligned boundaries, since the striper splits accesses.
+Validation rejects invalid boundaries before building the simulator.
 
 `max_inflight_parents` bounds tracked original client reads (parents) and
 `max_inflight_fills` bounds downstream fills; both default to 64. Large reads

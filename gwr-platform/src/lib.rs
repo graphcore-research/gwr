@@ -18,6 +18,7 @@ use gwr_models::cache::{Cache, CacheStatsDisplay};
 use gwr_models::fabric::Fabric;
 use gwr_models::log_stats;
 use gwr_models::memory::memory_access::MemoryAccess;
+use gwr_models::memory::striper::MemoryStriper;
 use gwr_models::memory::{Memory, MemoryStatsDisplay};
 use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::{
@@ -63,6 +64,7 @@ pub struct Platform {
     coherency_managers: HashMap<String, Rc<CoherencyManager>>,
     fabrics: Fabrics,
     fabrics_idx_by_id: NameToIdxMap,
+    memory_stripers: HashMap<String, Rc<MemoryStriper<MemoryAccess>>>,
     memories: Memories,
     memories_idx_by_id: NameToIdxMap,
     device_names_by_id: HashMap<u64, String>,
@@ -100,11 +102,13 @@ impl Platform {
     fn build(engine: &Engine, clock: &Clock, cfg: &PlatformConfig) -> Result<Self, SimError> {
         let effective = cfg.validated()?;
         let device_ids = assign_device_ids(cfg)?;
+        let memory_maps = build_memory_maps(cfg, &device_ids)?;
 
         let top = engine.top();
         let (memories, memories_idx_by_id) =
             build_memories_from_configs(engine, clock, top, cfg, &effective.memories)?;
-        let memory_maps = build_memory_maps(cfg, &memories, &memories_idx_by_id, &device_ids)?;
+        let memory_stripers =
+            builder::build_memory_stripers(engine, clock, top, cfg, &memory_maps, &device_ids)?;
         let (processing_elements, pes_idx_by_id) = build_pes_from_configs(
             engine,
             clock,
@@ -144,12 +148,26 @@ impl Platform {
             coherency_managers,
             fabrics,
             fabrics_idx_by_id,
+            memory_stripers,
             memories,
             memories_idx_by_id,
             device_names_by_id,
         };
         connect_ports(engine, clock, &platform, cfg)?;
         Ok(platform)
+    }
+
+    /// Number of logical memory striping devices.
+    #[must_use]
+    pub fn num_memory_stripers(&self) -> usize {
+        self.memory_stripers.len()
+    }
+
+    /// Look up a logical memory striping device by its configured name.
+    pub fn memory_striper(&self, name: &str) -> Result<&Rc<MemoryStriper<MemoryAccess>>, SimError> {
+        self.memory_stripers
+            .get(name)
+            .ok_or_else(|| SimError(format!("No Memory Striper '{name}'")))
     }
 
     pub fn coherency_manager(&self, name: &str) -> Result<&Rc<CoherencyManager>, SimError> {
@@ -392,6 +410,15 @@ impl Display for Platform {
             }
         }
 
+        if !self.memory_stripers.is_empty() {
+            writeln!(f, "\nMemoryStripers:")?;
+            let mut stripers: Vec<_> = self.memory_stripers.iter().collect();
+            stripers.sort_by_key(|(name, _)| *name);
+            for (name, striper) in stripers {
+                writeln!(f, "  {name}: {}", striper.entity())?;
+            }
+        }
+
         if !self.caches.is_empty() {
             writeln!(f, "\nCaches:")?;
             for (i, cache) in self.caches.iter().enumerate() {
@@ -434,6 +461,15 @@ fn assign_device_ids(cfg: &PlatformConfig) -> Result<DeviceIds, SimError> {
             }
             device_id += 1;
         }
+    }
+    for striper in cfg.memory_stripers.iter().flatten() {
+        if device_ids
+            .insert(striper.name.clone(), DeviceId(device_id))
+            .is_some()
+        {
+            return sim_error!("Duplicate device name {}", striper.name);
+        }
+        device_id += 1;
     }
     for name in cfg
         .caches

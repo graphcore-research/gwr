@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
-use gwr_platform::types::PlatformConfig;
+use gwr_platform::types::{MemoryStriperConfigSection, MemoryStriperSection, PlatformConfig};
 
 const DEFAULT_LINE_SIZE_BYTES: usize = 32;
 const BACKING_MEMORY_CAPACITY_BYTES: u64 = 1536;
@@ -96,6 +96,53 @@ fn coherent_cache_rejects_direct_memory_connection() {
 
     // Require coherence traffic to pass through a fabric.
     assert!(cfg.validate().unwrap_err().to_string().contains("Fabric"));
+}
+
+#[test]
+fn coherent_cache_striper_diagnostics_follow_the_parsed_striper_side() {
+    for (striper_endpoint, cache_endpoints, expected) in [
+        (
+            "striper.striper.mem",
+            ["cache.cache.dev", "cache.cache"],
+            "Coherent Cache 'cache' behind a Memory Striper is unsupported",
+        ),
+        (
+            "striper.striper.dev",
+            ["cache.cache.mem", "cache.cache"],
+            "Coherent Cache 'cache' must connect through a Fabric to its managers",
+        ),
+    ] {
+        for cache_endpoint in cache_endpoints {
+            for reverse in [false, true] {
+                let mut cfg = create_coherent_platform_config(
+                    DEFAULT_LINE_SIZE_BYTES,
+                    DEFAULT_LINE_SIZE_BYTES,
+                );
+                cfg.memory_stripers = Some(vec![MemoryStriperSection {
+                    name: "striper".into(),
+                    memory_map: "backing".into(),
+                    config: MemoryStriperConfigSection {
+                        base_address: 0,
+                        capacity_bytes: usize::try_from(BACKING_MEMORY_CAPACITY_BYTES).unwrap(),
+                        stripe_size_bytes: 64,
+                        max_inflight_parents: None,
+                        max_inflight_fragments: None,
+                    },
+                }]);
+                let mut connect = vec![striper_endpoint.into(), cache_endpoint.into()];
+                if reverse {
+                    connect.reverse();
+                }
+                cfg.connections = Some(vec![gwr_platform::types::ConnectSection { connect }]);
+
+                let error = cfg.validate().unwrap_err().to_string();
+                assert!(
+                    error.contains(expected),
+                    "{striper_endpoint}, {cache_endpoint}, reverse={reverse}: {error}"
+                );
+            }
+        }
+    }
 }
 
 #[test]

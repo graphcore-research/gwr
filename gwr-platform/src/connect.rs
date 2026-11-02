@@ -12,6 +12,7 @@ use gwr_models::cache::coherency_manager::CoherencyManager;
 use gwr_models::fabric::Fabric;
 use gwr_models::memory::Memory;
 use gwr_models::memory::memory_access::MemoryAccess;
+use gwr_models::memory::striper::MemoryStriper;
 use gwr_models::processing_element::ProcessingElement;
 use gwr_track::debug;
 use gwr_track::entity::GetEntity;
@@ -31,6 +32,10 @@ pub enum PortId<'a> {
     Cache {
         cache: &'a Rc<Cache<MemoryAccess>>,
         port: Option<CachePortId>,
+    },
+    Striper {
+        striper: &'a Rc<MemoryStriper<MemoryAccess>>,
+        port: CachePortId,
     },
     Mem {
         memory: &'a Rc<Memory<MemoryAccess>>,
@@ -85,6 +90,10 @@ fn resolve_port_id<'a>(
             cache: platform.cache(name)?,
             port: port.clone(),
         },
+        ConnectionEndpointId::Striper { name, port } => PortId::Striper {
+            striper: platform.memory_striper(name)?,
+            port: port.clone(),
+        },
         ConnectionEndpointId::Mem { name } => PortId::Mem {
             memory: platform.memory(name)?,
         },
@@ -122,7 +131,14 @@ fn connect_port(
         }
         _ => {}
     }
+    if let PortId::Striper { striper, port } = from {
+        return connect_striper_to(striper, port, to);
+    }
+    if let PortId::Striper { striper, port } = to {
+        return connect_striper_to(striper, port, from);
+    }
     match from {
+        PortId::Striper { .. } => unreachable!("striper connections handled above"),
         PortId::Manager { manager } => match to {
             PortId::FabricTile { fabric, port_idx } => {
                 manager.connect_port_tx(fabric.port_ingress_i(*port_idx))?;
@@ -181,6 +197,7 @@ fn connect_fabric_to_null(
 
 fn connect_pe_to(platform: &Platform, pe: &Rc<ProcessingElement>, to: &PortId) -> SimResult {
     match to {
+        PortId::Striper { .. } => unreachable!("striper connections handled above"),
         PortId::Manager { .. } => sim_error!("Coherency Managers must connect to a Fabric"),
         PortId::Null => unreachable!("null connections handled above"),
         PortId::Pe { .. } => {
@@ -201,6 +218,7 @@ fn connect_cache_to(
     to: &PortId,
 ) -> SimResult {
     match to {
+        PortId::Striper { .. } => unreachable!("striper connections handled above"),
         PortId::Manager { .. } => sim_error!("Coherency Managers must connect to a Fabric"),
         PortId::Null => unreachable!("null connections handled above"),
         PortId::Pe { pe } => connect_pe_to_cache(platform, pe, cache, cache_port),
@@ -222,6 +240,7 @@ fn connect_fabric_to(
     to: &PortId,
 ) -> SimResult {
     match to {
+        PortId::Striper { .. } => unreachable!("striper connections handled above"),
         PortId::Manager { manager } => {
             manager.connect_port_tx(fabric.port_ingress_i(fabric_port_idx))?;
             fabric.connect_port_egress_i(fabric_port_idx, manager.port_rx())
@@ -247,6 +266,7 @@ fn connect_memory_to(
     to: &PortId,
 ) -> SimResult {
     match to {
+        PortId::Striper { .. } => unreachable!("striper connections handled above"),
         PortId::Manager { .. } => sim_error!("Coherency Managers must connect to a Fabric"),
         PortId::Null => unreachable!("null connections handled above"),
         PortId::Pe { pe } => connect_pe_to_memory(platform, pe, memory),
@@ -384,4 +404,65 @@ fn connect_fabric_to_fabric(
     debug!(platform.entity() ; "Connect {}.{} to {}.{}", from_fabric, from_port_idx, to_fabric, to_port_idx);
     from_fabric.connect_port_egress_i(from_port_idx, to_fabric.port_ingress_i(to_port_idx))?;
     to_fabric.connect_port_egress_i(to_port_idx, from_fabric.port_ingress_i(from_port_idx))
+}
+
+fn connect_striper_to(
+    striper: &Rc<MemoryStriper<MemoryAccess>>,
+    side: &CachePortId,
+    other: &PortId,
+) -> SimResult {
+    let rx = match side {
+        CachePortId::Dev => striper.port_dev_rx(),
+        CachePortId::Mem => striper.port_mem_rx(),
+    };
+    let peer_rx = match other {
+        PortId::Pe { pe } => {
+            pe.connect_port_tx(rx)?;
+            pe.port_rx()
+        }
+        PortId::Mem { memory } => {
+            memory.connect_port_tx(rx)?;
+            memory.port_rx()
+        }
+        PortId::FabricTile { fabric, port_idx } => {
+            fabric.connect_port_egress_i(*port_idx, rx)?;
+            fabric.port_ingress_i(*port_idx)
+        }
+        PortId::Cache { cache, port } => {
+            // Cache side is opposite to the explicitly specified striper side.
+            let peer_side = port.as_ref().unwrap_or(match side {
+                CachePortId::Dev => &CachePortId::Mem,
+                CachePortId::Mem => &CachePortId::Dev,
+            });
+            match peer_side {
+                CachePortId::Dev => {
+                    cache.connect_port_dev_tx(rx)?;
+                    cache.port_dev_rx()
+                }
+                CachePortId::Mem => {
+                    cache.connect_port_mem_tx(rx)?;
+                    cache.port_mem_rx()
+                }
+            }
+        }
+        PortId::Striper {
+            striper: peer,
+            port,
+        } => match port {
+            CachePortId::Dev => {
+                peer.connect_port_dev_tx(rx)?;
+                peer.port_dev_rx()
+            }
+            CachePortId::Mem => {
+                peer.connect_port_mem_tx(rx)?;
+                peer.port_mem_rx()
+            }
+        },
+        PortId::Manager { .. } => return sim_error!("Coherency Managers must connect to a Fabric"),
+        PortId::Null => return sim_error!("Memory Striper ports cannot connect to null"),
+    };
+    match side {
+        CachePortId::Dev => striper.connect_port_dev_tx(peer_rx),
+        CachePortId::Mem => striper.connect_port_mem_tx(peer_rx),
+    }
 }

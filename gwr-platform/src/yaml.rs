@@ -21,6 +21,7 @@ pub fn platform_to_yaml_str(
     emit_optional_section(&mut out, emit_fabrics(platform)?);
     emit_optional_section(&mut out, emit_caches(platform)?);
     emit_optional_section(&mut out, emit_memories(platform)?);
+    emit_optional_section(&mut out, emit_memory_stripers(platform)?);
     emit_optional_section(&mut out, emit_connections(platform)?);
     emit_optional_section(&mut out, emit_coherency_managers(platform)?);
 
@@ -283,6 +284,46 @@ fn emit_memories(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn st
     Ok(Some(out))
 }
 
+fn emit_memory_stripers(
+    platform: &PlatformConfig,
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    let Some(stripers) = &platform.memory_stripers else {
+        return Ok(None);
+    };
+    let mut out = start_section("memory_stripers")?;
+    for striper in stripers {
+        emit_line(&mut out, format_args!("- name: {}", striper.name), 1)?;
+        emit_kv(&mut out, "memory_map", &striper.memory_map, 2)?;
+        emit_line(&mut out, "config:", 2)?;
+        emit_kv(
+            &mut out,
+            "base_address",
+            u64_hex_str(striper.config.base_address),
+            3,
+        )?;
+        emit_kv(&mut out, "capacity_bytes", striper.config.capacity_bytes, 3)?;
+        emit_kv(
+            &mut out,
+            "stripe_size_bytes",
+            striper.config.stripe_size_bytes,
+            3,
+        )?;
+        emit_optional_kv(
+            &mut out,
+            "max_inflight_parents",
+            striper.config.max_inflight_parents,
+            3,
+        )?;
+        emit_optional_kv(
+            &mut out,
+            "max_inflight_fragments",
+            striper.config.max_inflight_fragments,
+            3,
+        )?;
+    }
+    Ok(Some(out))
+}
+
 /// Format a `u64` as lowercase hexadecimal with a `0x` prefix and underscores
 /// inserted every 4 hex digits (grouped from the right).
 ///
@@ -428,6 +469,7 @@ mod tests {
     fn emitted_null_endpoint_is_a_yaml_string_and_round_trips() {
         let platform = PlatformConfig {
             coherency_managers: None,
+            memory_stripers: None,
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: None,
@@ -472,6 +514,7 @@ mod tests {
         };
         let platform = PlatformConfig {
             coherency_managers: None,
+            memory_stripers: None,
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: Some(vec![
@@ -543,6 +586,7 @@ mod tests {
         };
         let platform = PlatformConfig {
             coherency_managers: None,
+            memory_stripers: None,
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: Some(vec![ProcessingElementSection {
@@ -608,6 +652,7 @@ mod tests {
         };
         let platform = PlatformConfig {
             coherency_managers: None,
+            memory_stripers: None,
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: None,
@@ -660,6 +705,7 @@ mod tests {
         };
         let platform = PlatformConfig {
             coherency_managers: None,
+            memory_stripers: None,
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: None,

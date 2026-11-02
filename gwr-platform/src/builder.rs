@@ -17,6 +17,7 @@ use gwr_models::fabric::{
 };
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::memory_map::MemoryMap;
+use gwr_models::memory::striper::{MemoryStriper, MemoryStriperConfig};
 use gwr_models::memory::{Memory, MemoryConfig};
 use gwr_models::processing_element::{ProcessingElement, ProcessingElementConfig};
 use gwr_track::entity::{Entity, GetEntity};
@@ -24,48 +25,106 @@ use gwr_track::entity::{Entity, GetEntity};
 use crate::connection_id::{CachePortId, ConnectionEndpointId, parse_connection_endpoint_id};
 use crate::types::{
     CacheConfigSection, CacheSection, FabricConfigSection, FabricKind, FabricSection,
-    MemoryConfigSection, MemoryMapSection, MemorySection, PlatformConfig,
-    ProcessingElementConfigSection, ProcessingElementSection,
+    MemoryConfigSection, MemorySection, PlatformConfig, ProcessingElementConfigSection,
+    ProcessingElementSection,
 };
 use crate::{Caches, DeviceIds, Fabrics, Memories, NameToIdxMap, ProcessingElements};
 
-pub fn build_memory_maps(
+pub(crate) fn build_memory_maps(
     cfg: &PlatformConfig,
-    memories: &Memories,
-    memories_idx_by_id: &NameToIdxMap,
     device_ids: &DeviceIds,
 ) -> Result<HashMap<String, Rc<MemoryMap>>, SimError> {
-    let mut memory_maps = HashMap::new();
-    for memory_map in &cfg.memory_maps {
-        let built = build_memory_map(memory_map, memories, memories_idx_by_id, device_ids)?;
-        memory_maps.insert(memory_map.name.clone(), Rc::new(built));
-    }
-
-    Ok(memory_maps)
+    cfg.memory_maps
+        .iter()
+        .map(|section| {
+            let mut map = MemoryMap::new();
+            for name in &section.devices {
+                let (base, capacity) = memory_device_aperture(cfg, name)?;
+                let device_id = *device_ids
+                    .get(name)
+                    .ok_or_else(|| SimError(format!("Unknown device '{name}'")))?;
+                map.insert(base, capacity, device_id)
+                    .map_err(|error| SimError(format!("Memory map '{}': {error}", section.name)))?;
+            }
+            Ok((section.name.clone(), Rc::new(map)))
+        })
+        .collect()
 }
 
-pub fn build_memory_map(
-    cfg: &MemoryMapSection,
-    memories: &Memories,
-    memories_idx_by_id: &NameToIdxMap,
-    device_ids: &DeviceIds,
-) -> Result<MemoryMap, SimError> {
-    let mut memory_map = MemoryMap::new();
-    for device in &cfg.devices {
-        let memory_idx = memories_idx_by_id
-            .get(device.as_str())
-            .ok_or_else(|| SimError(format!("Unknown memory '{device}'")))?;
-        let memory = &memories[*memory_idx];
-        let device_id = *device_ids
-            .get(device)
-            .ok_or_else(|| SimError(format!("Unknown device '{device}'")))?;
-        memory_map.insert(
-            memory.base_address(),
-            memory.capacity_bytes() as u64,
-            device_id,
-        )?;
+pub(crate) fn memory_device_aperture(
+    cfg: &PlatformConfig,
+    name: &str,
+) -> Result<(u64, u64), SimError> {
+    if let Some(memory) = cfg
+        .memories
+        .iter()
+        .flatten()
+        .find(|memory| memory.name == name)
+    {
+        return Ok((memory.base_address, memory.config.capacity_bytes));
     }
-    Ok(memory_map)
+    if let Some(striper) = cfg
+        .memory_stripers
+        .iter()
+        .flatten()
+        .find(|striper| striper.name == name)
+    {
+        return Ok((
+            striper.config.base_address,
+            u64::try_from(striper.config.capacity_bytes)
+                .map_err(|error| SimError(format!("Memory Striper '{name}' capacity: {error}")))?,
+        ));
+    }
+    Err(SimError(format!("Unknown memory '{name}'")))
+}
+
+pub(crate) fn memory_striper_config(
+    section: &crate::types::MemoryStriperSection,
+    maps: &HashMap<String, Rc<MemoryMap>>,
+    device_ids: &DeviceIds,
+) -> Result<MemoryStriperConfig, SimError> {
+    let map = maps.get(&section.memory_map).ok_or_else(|| {
+        SimError(format!(
+            "Unknown memory map '{}' for Memory Striper '{}'",
+            section.memory_map, section.name
+        ))
+    })?;
+    let config = MemoryStriperConfig::new(
+        section.config.base_address,
+        section.config.capacity_bytes,
+        section.config.stripe_size_bytes,
+        device_ids[&section.name],
+        map.as_ref().clone(),
+    )
+    .with_admission_limits(
+        section.config.max_inflight_parents.unwrap_or(32),
+        section.config.max_inflight_fragments.unwrap_or(32),
+    );
+    config
+        .validate()
+        .map_err(|error| SimError(format!("Memory Striper '{}': {error}", section.name)))?;
+    Ok(config)
+}
+
+pub(crate) fn build_memory_stripers(
+    engine: &Engine,
+    clock: &Clock,
+    parent: &Rc<Entity>,
+    cfg: &PlatformConfig,
+    maps: &HashMap<String, Rc<MemoryMap>>,
+    device_ids: &DeviceIds,
+) -> Result<HashMap<String, Rc<MemoryStriper<MemoryAccess>>>, SimError> {
+    cfg.memory_stripers
+        .iter()
+        .flatten()
+        .map(|section| {
+            let config = memory_striper_config(section, maps, device_ids)?;
+            Ok((
+                section.name.clone(),
+                MemoryStriper::new_and_register(engine, clock, parent, &section.name, config)?,
+            ))
+        })
+        .collect()
 }
 
 pub(crate) struct EffectiveConfigs {
@@ -597,6 +656,8 @@ enum ResolvedEndpoint {
     Pe(String),
     CacheDev(String),
     CacheMem(String),
+    StriperDev(String),
+    StriperMem(String),
     Mem(String),
     CoherencyManager(String),
     FabricPort { fabric: String, port_idx: usize },
@@ -674,7 +735,9 @@ impl FabricTopology {
                 ResolvedEndpoint::Pe(name)
                 | ResolvedEndpoint::Mem(name)
                 | ResolvedEndpoint::CoherencyManager(name)
-                | ResolvedEndpoint::CacheMem(name) => {
+                | ResolvedEndpoint::CacheMem(name)
+                | ResolvedEndpoint::StriperDev(name)
+                | ResolvedEndpoint::StriperMem(name) => {
                     if let Some(device_id) = device_ids.get(name) {
                         found.entry(device_id.0).or_insert(distance);
                     }
@@ -709,6 +772,31 @@ impl FabricTopology {
         found
     }
 
+    fn reachable_nodes(
+        &self,
+        starts: impl IntoIterator<Item = ResolvedEndpoint>,
+    ) -> HashSet<ResolvedEndpoint> {
+        let mut queue: VecDeque<_> = starts.into_iter().collect();
+        let mut visited = HashSet::new();
+        while let Some(node) = queue.pop_front() {
+            if !visited.insert(node.clone()) {
+                continue;
+            }
+            if let Some(neighbors) = self.edges.get(&node) {
+                queue.extend(neighbors.iter().cloned());
+            }
+            if let ResolvedEndpoint::FabricPort { fabric, .. } = node {
+                for port_idx in self.fabric_configs[&fabric].port_indices() {
+                    queue.push_back(ResolvedEndpoint::FabricPort {
+                        fabric: fabric.clone(),
+                        port_idx: *port_idx,
+                    });
+                }
+            }
+        }
+        visited
+    }
+
     fn parse_topology_connection(
         &self,
         from: &str,
@@ -737,6 +825,10 @@ impl FabricTopology {
                 Ok(ResolvedEndpoint::CoherencyManager(name.clone()))
             }
             ConnectionEndpointId::Mem { name } => Ok(ResolvedEndpoint::Mem(name.clone())),
+            ConnectionEndpointId::Striper { name, port } => Ok(match port {
+                CachePortId::Dev => ResolvedEndpoint::StriperDev(name.clone()),
+                CachePortId::Mem => ResolvedEndpoint::StriperMem(name.clone()),
+            }),
             ConnectionEndpointId::FabricPort {
                 fabric,
                 column,
@@ -758,7 +850,15 @@ impl FabricTopology {
                     ConnectionEndpointId::Cache { .. } => {
                         Ok(ResolvedEndpoint::CacheDev(name.clone()))
                     }
-                    ConnectionEndpointId::Mem { .. }
+                    ConnectionEndpointId::Striper {
+                        port: CachePortId::Mem,
+                        ..
+                    } => Ok(ResolvedEndpoint::CacheDev(name.clone())),
+                    ConnectionEndpointId::Striper {
+                        port: CachePortId::Dev,
+                        ..
+                    }
+                    | ConnectionEndpointId::Mem { .. }
                     | ConnectionEndpointId::CoherencyManager { .. }
                     | ConnectionEndpointId::FabricPort { .. } => {
                         Ok(ResolvedEndpoint::CacheMem(name.clone()))
@@ -797,6 +897,52 @@ impl FabricTopology {
         }
         Ok(config.col_row_port_to_fabric_port_index(column, row, port))
     }
+}
+
+/// A striper uses one routing ID for both isolated address domains. The
+/// domains must not share a fabric path, which would make its side ambiguous.
+pub(crate) fn validate_striper_fabric_domains(cfg: &PlatformConfig) -> Result<(), SimError> {
+    if cfg.memory_stripers.iter().flatten().next().is_none() {
+        return Ok(());
+    }
+    let topology = FabricTopology::new(cfg)?;
+    for striper in cfg.memory_stripers.iter().flatten() {
+        let reachable =
+            topology.reachable_nodes([ResolvedEndpoint::StriperDev(striper.name.clone())]);
+        if reachable.contains(&ResolvedEndpoint::StriperMem(striper.name.clone())) {
+            return Err(SimError(format!(
+                "Memory Striper '{}' has dev and mem sides in the same fabric domain",
+                striper.name
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Cache fills align addresses in their downstream domain, even when that
+/// domain is itself behind a striper. Traversal stops at each striper side.
+pub(crate) fn cache_fetched_device_names(
+    cfg: &PlatformConfig,
+) -> Result<HashSet<String>, SimError> {
+    if cfg.memory_stripers.iter().flatten().next().is_none()
+        || cfg.caches.iter().flatten().next().is_none()
+    {
+        return Ok(HashSet::new());
+    }
+    let topology = FabricTopology::new(cfg)?;
+    Ok(topology
+        .reachable_nodes(
+            cfg.caches
+                .iter()
+                .flatten()
+                .map(|cache| ResolvedEndpoint::CacheMem(cache.name.clone())),
+        )
+        .into_iter()
+        .filter_map(|node| match node {
+            ResolvedEndpoint::Mem(name) | ResolvedEndpoint::StriperDev(name) => Some(name),
+            _ => None,
+        })
+        .collect())
 }
 
 fn build_empty_fabric_configs(
@@ -850,25 +996,40 @@ pub(crate) fn build_coherency_managers(
 
 #[cfg(test)]
 mod tests {
-    use gwr_engine::test_helpers::start_test;
     use gwr_engine::types::DeviceId;
 
-    use super::{build_fabric_destination_port_maps, build_memories, build_memory_maps};
+    use super::{build_fabric_destination_port_maps, build_memory_maps};
     use crate::DeviceIds;
     use crate::types::{
-        MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection, PlatformConfig,
+        MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
+        MemoryStriperConfigSection, MemoryStriperSection, PlatformConfig,
     };
 
     #[test]
-    fn builds_runtime_memory_maps_from_built_memories() {
-        let mut engine = start_test(file!());
-        let clock = engine.default_clock();
+    fn builds_memory_maps_from_configured_device_ranges() {
         let cfg = PlatformConfig {
             coherency_managers: None,
-            memory_maps: vec![MemoryMapSection {
-                name: "mm0".to_string(),
-                devices: vec!["hbm0".to_string()],
-            }],
+            memory_stripers: Some(vec![MemoryStriperSection {
+                name: "s0".to_string(),
+                memory_map: "backing".to_string(),
+                config: MemoryStriperConfigSection {
+                    base_address: 0x10000,
+                    capacity_bytes: 0x1000,
+                    stripe_size_bytes: 64,
+                    max_inflight_parents: None,
+                    max_inflight_fragments: None,
+                },
+            }]),
+            memory_maps: vec![
+                MemoryMapSection {
+                    name: "mm0".to_string(),
+                    devices: vec!["hbm0".to_string(), "s0".to_string()],
+                },
+                MemoryMapSection {
+                    name: "backing".to_string(),
+                    devices: vec!["hbm0".to_string()],
+                },
+            ],
             defaults: None,
             processing_elements: None,
             caches: None,
@@ -885,18 +1046,21 @@ mod tests {
             }]),
             connections: None,
         };
-        let device_ids = DeviceIds::from([("hbm0".to_string(), DeviceId(7))]);
-        let (memories, memories_idx_by_id) = build_memories(&engine, &clock, engine.top(), &cfg)
-            .expect("memory build should succeed");
-
-        let memory_maps = build_memory_maps(&cfg, &memories, &memories_idx_by_id, &device_ids)
-            .expect("memory maps should build");
+        let device_ids = DeviceIds::from([
+            ("hbm0".to_string(), DeviceId(7)),
+            ("s0".to_string(), DeviceId(9)),
+        ]);
+        let memory_maps = build_memory_maps(&cfg, &device_ids).expect("memory maps should build");
         let memory_map = memory_maps.get("mm0").expect("memory map should exist");
 
-        assert_eq!(memory_map.num_regions(), 1);
+        assert_eq!(memory_map.num_regions(), 2);
         assert_eq!(memory_map.lookup(0x4000), Some((DeviceId(7), 0)));
         assert_eq!(memory_map.lookup(0x5fff), Some((DeviceId(7), 0x1fff)));
         assert_eq!(memory_map.lookup(0x6000), None);
+        assert_eq!(memory_map.lookup(0x10000), Some((DeviceId(9), 0)));
+        assert_eq!(memory_map.lookup(0x10fff), Some((DeviceId(9), 0xfff)));
+        assert_eq!(memory_map.lookup(0x11000), None);
+        assert_eq!(memory_maps["backing"].lookup(0x10000), None);
     }
 
     #[test]

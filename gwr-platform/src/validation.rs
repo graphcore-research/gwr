@@ -27,9 +27,11 @@ impl PlatformConfig {
         let effective = EffectiveConfigs::new(self)?;
         self.validate_memory_ranges(&effective)?;
         self.validate_references(&lookup)?;
+        self.validate_memory_stripers()?;
         self.validate_memory_fetch_alignment(&effective)?;
         self.validate_coherence(&effective)?;
         self.validate_connections(&lookup, &effective)?;
+        crate::builder::validate_striper_fabric_domains(self)?;
         Ok(effective)
     }
 
@@ -50,6 +52,9 @@ impl PlatformConfig {
             )?;
         }
 
+        for striper in self.memory_stripers.iter().flatten() {
+            insert_device(&mut devices, &striper.name, PlatformDevice::Striper)?;
+        }
         for manager in self.coherency_managers.iter().flatten() {
             insert_device(
                 &mut devices,
@@ -95,7 +100,12 @@ impl PlatformConfig {
         for memory_map in &self.memory_maps {
             let mut devices = HashSet::new();
             for device in &memory_map.devices {
-                if lookup.memory(device.as_str()).is_none() {
+                if lookup.memory(device.as_str()).is_none()
+                    && !matches!(
+                        lookup.devices.get(device.as_str()),
+                        Some(PlatformDevice::Striper)
+                    )
+                {
                     return sim_error!(
                         "Unknown memory '{}' in memory map '{}'",
                         device,
@@ -121,6 +131,56 @@ impl PlatformConfig {
                 );
             }
         }
+        Ok(())
+    }
+
+    fn validate_memory_stripers(&self) -> SimResult {
+        let ids = crate::assign_device_ids(self)?;
+        let maps = crate::builder::build_memory_maps(self, &ids)?;
+        let mut completed = HashSet::new();
+        for striper in self.memory_stripers.iter().flatten() {
+            self.visit_backing_devices(&striper.name, &mut HashSet::new(), &mut completed)?;
+            crate::builder::memory_striper_config(striper, &maps, &ids)?;
+        }
+        Ok(())
+    }
+
+    fn visit_backing_devices<'a>(
+        &'a self,
+        name: &'a str,
+        active: &mut HashSet<&'a str>,
+        completed: &mut HashSet<&'a str>,
+    ) -> SimResult {
+        if completed.contains(name) {
+            return Ok(());
+        }
+        let Some(striper) = self
+            .memory_stripers
+            .iter()
+            .flatten()
+            .find(|striper| striper.name == name)
+        else {
+            completed.insert(name);
+            return Ok(());
+        };
+        if !active.insert(name) {
+            return sim_error!("Cyclic Memory Striper backing map dependency at '{name}'");
+        }
+        let map = self
+            .memory_maps
+            .iter()
+            .find(|map| map.name == striper.memory_map)
+            .ok_or_else(|| {
+                SimError(format!(
+                    "Unknown memory map '{}' for Memory Striper '{name}'",
+                    striper.memory_map
+                ))
+            })?;
+        for device in &map.devices {
+            self.visit_backing_devices(device, active, completed)?;
+        }
+        active.remove(name);
+        completed.insert(name);
         Ok(())
     }
 
@@ -152,11 +212,20 @@ impl PlatformConfig {
                 ))
             })?;
         }
+        for striper in self.memory_stripers.iter().flatten() {
+            for side in ["dev", "mem"] {
+                let endpoint = format!("striper.{}.{side}", striper.name);
+                if !connected_ports.contains(&endpoint) {
+                    return sim_error!("Memory Striper port '{endpoint}' is not connected");
+                }
+            }
+        }
         Ok(())
     }
 
     /// Validate every fetch size, including non-power-of-two sizes, without
-    /// computing an LCM that could overflow. Applies to all physical memories.
+    /// computing an LCM that could overflow. Translated backing apertures can
+    /// be byte aligned unless they are also fetched directly.
     fn validate_memory_fetch_alignment(&self, effective: &EffectiveConfigs) -> SimResult {
         let fetches =
             self.processing_elements
@@ -175,10 +244,59 @@ impl PlatformConfig {
                 .chain(self.caches.iter().flatten().zip(&effective.caches).map(
                     |(cache, config)| (format!("cache '{}'", cache.name), config.line_size_bytes()),
                 ));
+        let backing_devices: HashSet<_> = self
+            .memory_stripers
+            .iter()
+            .flatten()
+            .flat_map(|striper| {
+                self.memory_maps
+                    .iter()
+                    .filter(move |map| map.name == striper.memory_map)
+                    .flat_map(|map| map.devices.iter().map(String::as_str))
+            })
+            .collect();
+        let mut direct_devices: HashSet<_> = self
+            .processing_elements
+            .iter()
+            .flatten()
+            .map(|pe| pe.memory_map.as_str())
+            .chain(
+                self.coherency_managers
+                    .iter()
+                    .flatten()
+                    .map(|manager| manager.memory_map.as_str()),
+            )
+            .flat_map(|name| {
+                self.memory_maps
+                    .iter()
+                    .filter(move |map| map.name == name)
+                    .flat_map(|map| map.devices.iter().map(String::as_str))
+            })
+            .collect();
+        let cache_fetched_devices = crate::builder::cache_fetched_device_names(self)?;
+        direct_devices.extend(cache_fetched_devices.iter().map(String::as_str));
         for (source, bytes) in fetches {
             let bytes = u64::try_from(bytes)
                 .map_err(|error| SimError(format!("{source} fetch size: {error}")))?;
+            for striper in self.memory_stripers.iter().flatten() {
+                if !direct_devices.contains(striper.name.as_str()) {
+                    continue;
+                }
+                if !striper.config.base_address.is_multiple_of(bytes)
+                    || !(striper.config.capacity_bytes as u128).is_multiple_of(bytes as u128)
+                {
+                    return sim_error!(
+                        "{source}: Memory Striper '{}' aperture must be aligned to the {bytes}-byte fetch size",
+                        striper.name
+                    );
+                }
+            }
             for memory in self.memories.iter().flatten() {
+                if backing_devices.contains(memory.name.as_str())
+                    && !direct_devices.contains(memory.name.as_str())
+                {
+                    continue;
+                }
                 if !memory.base_address.is_multiple_of(bytes) {
                     return sim_error!(
                         "{source}: Memory '{}': base address {:#x} must be aligned to the {}-byte fetch size",
@@ -242,6 +360,7 @@ struct FabricReference<'a> {
 enum PlatformDevice<'a> {
     ProcessingElement,
     CoherencyManager,
+    Striper,
     Cache,
     Memory(&'a MemorySection),
 }
@@ -280,6 +399,15 @@ impl PlatformValidationLookup<'_> {
             ConnectionEndpointId::Cache { name, .. } => {
                 if !self.caches.contains_key(name.as_str()) {
                     return sim_error!("No Cache '{name}'");
+                }
+                Ok(())
+            }
+            ConnectionEndpointId::Striper { name, .. } => {
+                if !matches!(
+                    self.devices.get(name.as_str()),
+                    Some(PlatformDevice::Striper)
+                ) {
+                    return sim_error!("No Memory Striper '{name}'");
                 }
                 Ok(())
             }
@@ -392,6 +520,7 @@ fn endpoint_port(
         ConnectionEndpointId::Pe { name } => format!("pe.{name}"),
         ConnectionEndpointId::CoherencyManager { name } => format!("coherency_manager.{name}"),
         ConnectionEndpointId::Mem { name } => format!("mem.{name}"),
+        ConnectionEndpointId::Striper { name, port } => format!("striper.{name}.{port}"),
         ConnectionEndpointId::FabricPort {
             fabric,
             column,
@@ -418,7 +547,15 @@ fn cache_connection_port(
         ConnectionEndpointId::Pe { .. } => "dev",
         ConnectionEndpointId::Cache { .. } if is_from => "mem",
         ConnectionEndpointId::Cache { .. } => "dev",
-        ConnectionEndpointId::Mem { .. }
+        ConnectionEndpointId::Striper {
+            port: CachePortId::Mem,
+            ..
+        } => "dev",
+        ConnectionEndpointId::Striper {
+            port: CachePortId::Dev,
+            ..
+        }
+        | ConnectionEndpointId::Mem { .. }
         | ConnectionEndpointId::CoherencyManager { .. }
         | ConnectionEndpointId::FabricPort { .. } => "mem",
     }
@@ -428,6 +565,12 @@ fn validate_port_endpoint_pair(
     from: &ConnectionEndpointId,
     to: &ConnectionEndpointId,
 ) -> SimResult {
+    if let ConnectionEndpointId::Striper { port, .. } = from {
+        return validate_striper_peer(port, to);
+    }
+    if let ConnectionEndpointId::Striper { port, .. } = to {
+        return validate_striper_peer(port, from);
+    }
     match (from, to) {
         (
             ConnectionEndpointId::CoherencyManager { .. },
@@ -495,6 +638,21 @@ fn validate_port_endpoint_pair(
     }
 }
 
+fn validate_striper_peer(side: &CachePortId, peer: &ConnectionEndpointId) -> SimResult {
+    let valid = match peer {
+        ConnectionEndpointId::Pe { .. } => side == &CachePortId::Dev,
+        ConnectionEndpointId::Mem { .. } => side == &CachePortId::Mem,
+        ConnectionEndpointId::FabricPort { .. } => true,
+        ConnectionEndpointId::Striper { port, .. } => side != port,
+        ConnectionEndpointId::Cache { port, .. } => port.as_ref().is_none_or(|port| side != port),
+        _ => false,
+    };
+    if !valid {
+        return sim_error!("Memory Striper '{side}' side has an incompatible peer '{peer}'");
+    }
+    Ok(())
+}
+
 fn validate_cache_dev_port(port: Option<&CachePortId>) -> SimResult {
     if port.is_some_and(|port| port != &CachePortId::Dev) {
         return sim_error!("PEs can only connect to the 'dev' port on the Cache");
@@ -554,12 +712,6 @@ impl PlatformConfig {
         managers: &HashMap<&str, &crate::types::CoherencyManagerSection>,
         maps: &HashMap<&str, &MemoryMapSection>,
     ) -> SimResult {
-        let memories = self
-            .memories
-            .iter()
-            .flatten()
-            .map(|m| (m.name.as_str(), m))
-            .collect::<HashMap<_, _>>();
         let mut memory_owners = HashMap::new();
         for manager in managers.values() {
             if manager.config.operations_per_tick == Some(0) {
@@ -591,17 +743,19 @@ impl PlatformConfig {
                 );
             }
             for name in &map.devices {
-                if let Some(previous) = memory_owners.insert(name.as_str(), manager.name.as_str()) {
-                    return sim_error!(
-                        "Memory '{}' is assigned to multiple coherency managers '{}' and '{}'",
-                        name,
-                        previous,
-                        manager.name
-                    );
+                let mut backing = HashSet::new();
+                self.collect_backing_memory_names(name, &mut backing);
+                for physical in backing {
+                    if let Some(previous) = memory_owners.insert(physical, manager.name.as_str()) {
+                        return sim_error!(
+                            "Memory '{name}' backing is assigned to multiple coherency managers '{previous}' and '{}'",
+                            manager.name
+                        );
+                    }
                 }
-                let memory = memories[name.as_str()];
-                if !(memory.base_address as u128).is_multiple_of(line as u128)
-                    || !(memory.config.capacity_bytes as u128).is_multiple_of(line as u128)
+                let (base, capacity) = crate::builder::memory_device_aperture(self, name)?;
+                if !(base as u128).is_multiple_of(line as u128)
+                    || !(capacity as u128).is_multiple_of(line as u128)
                 {
                     return sim_error!(
                         "Coherency Manager '{}': Memory '{}' must align to its {}-byte line size",
@@ -613,6 +767,27 @@ impl PlatformConfig {
             }
         }
         Ok(())
+    }
+
+    fn collect_backing_memory_names<'a>(&'a self, name: &'a str, result: &mut HashSet<&'a str>) {
+        if let Some(striper) = self
+            .memory_stripers
+            .iter()
+            .flatten()
+            .find(|striper| striper.name == name)
+        {
+            if let Some(map) = self
+                .memory_maps
+                .iter()
+                .find(|map| map.name == striper.memory_map)
+            {
+                for device in &map.devices {
+                    self.collect_backing_memory_names(device, result);
+                }
+            }
+        } else {
+            result.insert(name);
+        }
     }
 
     fn validate_cache_coherence(
@@ -682,7 +857,16 @@ impl PlatformConfig {
                                 cache.name
                             );
                         }
-                        ConnectionEndpointId::Mem { .. } => {
+                        ConnectionEndpointId::Striper {
+                            port: CachePortId::Mem,
+                            ..
+                        } => {
+                            return sim_error!(
+                                "Coherent Cache '{}' behind a Memory Striper is unsupported",
+                                cache.name
+                            );
+                        }
+                        ConnectionEndpointId::Striper { .. } | ConnectionEndpointId::Mem { .. } => {
                             return sim_error!(
                                 "Coherent Cache '{}' must connect through a Fabric to its managers",
                                 cache.name

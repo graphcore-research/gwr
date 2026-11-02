@@ -87,6 +87,7 @@ pub struct PlatformConfig {
     pub coherency_managers: Option<Vec<CoherencyManagerSection>>,
     pub fabrics: Option<Vec<FabricSection>>,
     pub memories: Option<Vec<MemorySection>>,
+    pub memory_stripers: Option<Vec<MemoryStriperSection>>,
     pub connections: Option<Vec<ConnectSection>>,
 }
 
@@ -100,7 +101,7 @@ pub struct DefaultsSection {
 #[serde(deny_unknown_fields)]
 pub struct MemoryMapSection {
     pub name: String,
-    /// Names of memories included in this map.
+    /// Names of physical memories or logical stripers included in this map.
     pub devices: Vec<String>,
 }
 
@@ -226,4 +227,35 @@ pub struct CoherencyManagerConfigSection {
     pub line_size_bytes: Option<usize>,
     /// Positive directory work budget per tick; omitted means unlimited.
     pub operations_per_tick: Option<usize>,
+}
+
+/// A logical round-robin memory device backed by another memory map.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryStriperSection {
+    /// Unique device name used in maps and explicit connection endpoints.
+    pub name: String,
+    /// Downstream map whose regions receive round-robin stripes.
+    pub memory_map: String,
+    /// Logical aperture, stripe length, and optional admission controls.
+    pub config: MemoryStriperConfigSection,
+}
+
+/// YAML configuration for a logical memory aperture.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryStriperConfigSection {
+    /// Start of the logical address domain, independent of backing addresses.
+    #[serde(deserialize_with = "parse_u64_byte_str")]
+    pub base_address: u64,
+    /// Total logical capacity; supports the same byte-unit strings as memories.
+    #[serde(deserialize_with = "parse_usize_byte_str")]
+    pub capacity_bytes: usize,
+    /// Required positive stripe length in bytes.
+    pub stripe_size_bytes: usize,
+    /// Positive bound on admitted parents, including blocked returns; default
+    /// 32.
+    pub max_inflight_parents: Option<usize>,
+    /// Positive bound on downstream fragments awaiting responses; default 32.
+    pub max_inflight_fragments: Option<usize>,
 }
