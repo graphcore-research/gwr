@@ -28,8 +28,7 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     let mut engine = Engine::default();
-    let clock = engine.default_clock();
-    let platform = Platform::from_file(&engine, &clock, &args.platform)?;
+    let platform = Platform::from_file(&mut engine, &args.platform)?;
 
     println!(
         "Validated '{}' with {} PEs, {} caches, {} memories, and {} fabrics.",

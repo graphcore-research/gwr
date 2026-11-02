@@ -80,6 +80,8 @@ where
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlatformConfig {
+    pub clocks: Vec<ClockSection>,
+    pub default_clock: String,
     pub memory_maps: Vec<MemoryMapSection>,
     pub defaults: Option<DefaultsSection>,
     pub processing_elements: Option<Vec<ProcessingElementSection>>,
@@ -88,6 +90,13 @@ pub struct PlatformConfig {
     pub fabrics: Option<Vec<FabricSection>>,
     pub memories: Option<Vec<MemorySection>>,
     pub connections: Option<Vec<ConnectSection>>,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ClockSection {
+    pub name: String,
+    pub frequency_mhz: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -108,6 +117,7 @@ pub struct MemoryMapSection {
 #[serde(deny_unknown_fields)]
 pub struct ProcessingElementSection {
     pub name: String,
+    pub clock: Option<String>,
     pub memory_map: String,
     pub config: ProcessingElementConfigSection,
 }
@@ -130,6 +140,7 @@ pub struct ProcessingElementConfigSection {
 pub struct CacheSection {
     pub name: String,
     pub coherency_managers: Option<Vec<String>>,
+    pub clock: Option<String>,
     pub config: CacheConfigSection,
 }
 
@@ -151,6 +162,7 @@ pub struct CacheConfigSection {
 #[serde(deny_unknown_fields)]
 pub struct FabricSection {
     pub name: String,
+    pub clock: Option<String>,
     pub kind: FabricKind,
     pub columns: usize,
     pub rows: usize,
@@ -177,6 +189,7 @@ pub struct FabricConfigSection {
 #[serde(deny_unknown_fields)]
 pub struct MemorySection {
     pub name: String,
+    pub clock: Option<String>,
     pub kind: MemoryKind,
     #[serde(deserialize_with = "parse_u64_byte_str")]
     pub base_address: u64,
@@ -216,6 +229,7 @@ pub struct ConnectSection {
 #[serde(deny_unknown_fields)]
 pub struct CoherencyManagerSection {
     pub name: String,
+    pub clock: Option<String>,
     pub memory_map: String,
     pub config: CoherencyManagerConfigSection,
 }

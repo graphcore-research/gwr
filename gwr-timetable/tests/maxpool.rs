@@ -11,11 +11,14 @@ use gwr_track::entity::Entity;
 
 fn create_platform() -> (Rc<Entity>, Rc<Platform>) {
     let mut engine = start_test(file!());
-    let clock = engine.default_clock();
     let platform = Platform::from_string(
-        &engine,
-        &clock,
+        &mut engine,
         "
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps:
   - name: default
     devices:

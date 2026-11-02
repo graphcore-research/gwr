@@ -3,14 +3,19 @@
 pub(crate) use gwr_engine::test_helpers::start_test;
 pub(crate) use gwr_platform::Platform;
 pub(crate) use gwr_platform::types::{
-    CacheConfigSection, CacheSection, ConnectSection, FabricConfigSection, FabricKind,
-    FabricSection, MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
+    CacheConfigSection, CacheSection, ClockSection, ConnectSection, FabricConfigSection,
+    FabricKind, FabricSection, MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
     PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
 };
 
 pub(crate) fn platform() -> PlatformConfig {
     PlatformConfig {
         coherency_managers: None,
+        clocks: vec![ClockSection {
+            name: "default".to_string(),
+            frequency_mhz: 1000.0,
+        }],
+        default_clock: "default".to_string(),
         memory_maps: Vec::new(),
         defaults: None,
         processing_elements: None,
@@ -23,6 +28,7 @@ pub(crate) fn platform() -> PlatformConfig {
 
 pub(crate) fn memory(name: &str, base_address: u64, capacity_bytes: u64) -> MemorySection {
     MemorySection {
+        clock: None,
         name: name.to_string(),
         kind: MemoryKind::HBM,
         base_address,
@@ -43,6 +49,7 @@ pub(crate) fn memory_map(name: &str, devices: &[&str]) -> MemoryMapSection {
 
 pub(crate) fn processing_element(name: &str, memory_map: &str) -> ProcessingElementSection {
     ProcessingElementSection {
+        clock: None,
         name: name.to_string(),
         memory_map: memory_map.to_string(),
         config: ProcessingElementConfigSection {
@@ -60,6 +67,7 @@ pub(crate) fn processing_element(name: &str, memory_map: &str) -> ProcessingElem
 pub(crate) fn cache(name: &str) -> CacheSection {
     CacheSection {
         coherency_managers: None,
+        clock: None,
         name: name.to_string(),
         config: CacheConfigSection {
             bw_bytes_per_tick: None,
@@ -75,6 +83,7 @@ pub(crate) fn cache(name: &str) -> CacheSection {
 
 pub(crate) fn fabric(name: &str) -> FabricSection {
     FabricSection {
+        clock: None,
         name: name.to_string(),
         kind: FabricKind::Functional,
         columns: 1,

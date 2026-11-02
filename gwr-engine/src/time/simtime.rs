@@ -10,41 +10,8 @@ use std::rc::Rc;
 use gwr_track::entity::Entity;
 use gwr_track::set_time;
 
-use super::clock::{Clock, Phase, phase};
+use super::clock::{Clock, Phase, phase, validate_frequency_mhz};
 use crate::time::clock::SimInstant;
-
-/// Conservative tick limit that keeps adjacent ticks distinguishable as `f64`
-/// nanosecond timestamps. Timestamps can still be approximate below this limit,
-/// but adjacent ticks cannot collapse to the same timestamp. The first actual
-/// collision may occur later, depending on the frequency.
-///
-/// The integer-to-`f64` cast is exact below 2^53 ticks. Within that range,
-/// `tick_to_ns` still rounds twice: once when dividing by the MHz frequency,
-/// then again when multiplying by 1000 to get nanoseconds. For normal finite
-/// arithmetic, each operation has relative error at most `u = 2^-53` (about
-/// one part in 9 quadrillion). Together their relative error is at most
-/// `a = (1 + u)^2 - 1 = 2u + u^2`. These expressions describe exact
-/// mathematical bounds; they are not calculations performed using `f64`.
-///
-/// Let `P` be the exact tick period for the stored frequency. Tick `n` should
-/// occur at `n * P`, so its converted timestamp can be wrong by at most
-/// `a * n * P` nanoseconds. To preserve the ordering of ticks `n` and `n + 1`,
-/// even if the earlier time rounds up and the later time rounds down, their
-/// combined error must be smaller than the one-period gap:
-///
-/// `a * n * P + a * (n + 1) * P < P`, or `a * (2n + 1) < 1`.
-///
-/// The period cancels, so the same tick-count bound works at every supported
-/// frequency.
-///
-/// Since `a` is approximately 2^-52, this requires roughly `n < 2^51`.
-/// Choosing `n <= 2^51 - 1` satisfies the strict inequality with the full
-/// error bound above. It also keeps the following tick distinguishable,
-/// which synchronization needs when locating the current clock edge.
-///
-/// Clock registration checks the arithmetic range required by this bound.
-/// It does not guarantee exact ordering between different clock frequencies.
-const MAX_PRECISE_TICKS: u64 = (1 << 51) - 1;
 
 /// The overall owner of time within a simulation.
 ///
@@ -85,14 +52,10 @@ impl SimTime {
                 return clock.clone();
             }
         }
-        let max_time_ns = MAX_PRECISE_TICKS as f64 / freq_mhz * 1000.0;
-        assert!(
-            freq_mhz.is_finite()
-                && freq_mhz > 0.0
-                && (1.0 / freq_mhz).is_normal()
-                && max_time_ns.is_finite(),
-            "Clock frequency {freq_mhz} MHz is outside the supported floating-point time precision range"
-        );
+        let max_time_ns = validate_frequency_mhz(freq_mhz)
+            .unwrap_or_else(|error| {
+                panic!("Clock frequency is outside the supported floating-point time precision range: {error}")
+            });
         assert!(
             self.now.get().ns <= max_time_ns,
             "Current simulation time exceeds the floating-point time precision limit of {max_time_ns} ns for the {freq_mhz} MHz clock"
@@ -154,6 +117,7 @@ impl SimTime {
 #[cfg(test)]
 mod tests {
     use std::future::Future;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::pin::Pin;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -163,6 +127,7 @@ mod tests {
     use gwr_track::test_helpers::create_tracker;
 
     use super::*;
+    use crate::time::clock::MAX_PRECISE_TICKS;
 
     #[derive(Default)]
     struct WakeCounter(AtomicUsize);
@@ -211,6 +176,68 @@ mod tests {
         let _clock = time.get_clock(1000.0);
         assert!(!time.try_advance());
         assert_eq!(time.time_now_ns(), 0.0);
+    }
+
+    #[test]
+    fn try_advance_enforces_the_fastest_clock_precision_limit_for_every_clock() {
+        for registered_frequencies_mhz in [[1000.0, 3000.0, 4000.0], [4000.0, 3000.0, 1000.0]] {
+            // Only event_frequency_mhz has scheduled events; the other clocks
+            // stay idle. The 4 GHz clock still sets the horizon for every
+            // clock.
+            for (event_frequency_mhz, last_tick) in [
+                (1000.0, MAX_PRECISE_TICKS / 4),
+                (3000.0, MAX_PRECISE_TICKS * 3 / 4),
+                (4000.0, MAX_PRECISE_TICKS),
+            ] {
+                let tracker = create_tracker(file!());
+                let top = toplevel(&tracker, "top");
+                let mut time = SimTime::new(&top);
+
+                // Register all of the clocks.
+                for frequency in registered_frequencies_mhz {
+                    time.get_clock(frequency);
+                }
+
+                // Create waits on the chosen clock:
+                // - One for the last tick within the global precision limit.
+                // - One for the next tick, the first beyond that limit.
+                let clock = time.get_clock(event_frequency_mhz);
+                let wakes = Arc::new(WakeCounter::default());
+                let waker = Waker::from(wakes.clone());
+                let mut cx = Context::from_waker(&waker);
+                let mut last_allowed = clock.wait_ticks(last_tick).unwrap();
+                let mut first_disallowed = clock.wait_ticks(last_tick + 1).unwrap();
+
+                // Poll both waits to register their events, then advance to the
+                // last tick within the global precision limit. This should
+                // succeed.
+                assert_eq!(Pin::new(&mut last_allowed).poll(&mut cx), Poll::Pending);
+                assert_eq!(Pin::new(&mut first_disallowed).poll(&mut cx), Poll::Pending);
+                assert!(time.try_advance());
+                assert_eq!(clock.tick_now().tick(), last_tick);
+                assert_eq!(Pin::new(&mut last_allowed).poll(&mut cx), Poll::Ready(()));
+                assert_eq!(wakes.0.load(Ordering::Relaxed), 1);
+
+                // Attempt to advance beyond the global precision limit.
+                // This should panic before simulation time changes.
+                let before = time.time_now_ns();
+                let panic = catch_unwind(AssertUnwindSafe(|| time.try_advance()))
+                    .expect_err("the next tick must exceed the fastest clock's precision limit");
+                let message = panic
+                    .downcast_ref::<String>()
+                    .map(String::as_str)
+                    .or_else(|| panic.downcast_ref::<&str>().copied())
+                    .expect("the panic must explain the precision limit");
+                assert!(
+                    message.contains("floating-point time precision limit"),
+                    "{event_frequency_mhz} MHz with registration order {registered_frequencies_mhz:?}: {message}"
+                );
+                assert_eq!(time.time_now_ns(), before);
+                assert_eq!(clock.tick_now().tick(), last_tick);
+                assert_eq!(wakes.0.load(Ordering::Relaxed), 1);
+                assert_eq!(Pin::new(&mut first_disallowed).poll(&mut cx), Poll::Pending);
+            }
+        }
     }
 
     #[test]

@@ -5,7 +5,7 @@ use std::hash::BuildHasher;
 use std::rc::Rc;
 
 use gwr_engine::engine::Engine;
-use gwr_engine::time::clock::Clock;
+use gwr_engine::time::clock::{Clock, validate_frequency_mhz};
 use gwr_engine::types::SimError;
 use gwr_models::cache::coherency_manager::{CoherencyManager, CoherencyManagerConfig};
 use gwr_models::cache::{Cache, CacheConfig, CoherenceConfig};
@@ -23,7 +23,7 @@ use gwr_track::entity::{Entity, GetEntity};
 
 use crate::connection_id::{CachePortId, ConnectionEndpointId, parse_connection_endpoint_id};
 use crate::types::{
-    CacheConfigSection, CacheSection, FabricConfigSection, FabricKind, FabricSection,
+    CacheConfigSection, CacheSection, ClockSection, FabricConfigSection, FabricKind, FabricSection,
     MemoryConfigSection, MemoryMapSection, MemorySection, PlatformConfig,
     ProcessingElementConfigSection, ProcessingElementSection,
 };
@@ -42,6 +42,55 @@ pub fn build_memory_maps(
     }
 
     Ok(memory_maps)
+}
+
+/// Create the fixed clocks declared by the platform after validating their
+/// frequencies.
+pub fn build_clocks(
+    engine: &mut Engine,
+    cfg: &PlatformConfig,
+) -> Result<HashMap<String, Clock>, SimError> {
+    let configs = clock_configs(cfg)?;
+    Ok(build_clocks_from_configs(engine, cfg, &configs))
+}
+
+fn clock_configs(platform: &PlatformConfig) -> Result<Vec<f64>, SimError> {
+    platform
+        .clocks
+        .iter()
+        .map(ClockSection::effective_config)
+        .collect()
+}
+
+impl ClockSection {
+    fn effective_config(&self) -> Result<f64, SimError> {
+        validate_frequency_mhz(self.frequency_mhz)
+            .map_err(|error| SimError(format!("Clock '{}': {error}", self.name)))?;
+        Ok(self.frequency_mhz)
+    }
+}
+
+pub(crate) fn build_clocks_from_configs(
+    engine: &mut Engine,
+    cfg: &PlatformConfig,
+    configs: &[f64],
+) -> HashMap<String, Clock> {
+    cfg.clocks
+        .iter()
+        .zip(configs)
+        .map(|(clock, &frequency)| (clock.name.clone(), engine.clock_mhz(frequency)))
+        .collect()
+}
+
+pub(crate) fn clock_for<'a, C: BuildHasher>(
+    clocks: &'a HashMap<String, Clock, C>,
+    cfg: &PlatformConfig,
+    selected: Option<&str>,
+) -> Result<&'a Clock, SimError> {
+    let name = selected.unwrap_or(&cfg.default_clock);
+    clocks
+        .get(name)
+        .ok_or_else(|| SimError(format!("Unknown clock '{name}'")))
 }
 
 pub fn build_memory_map(
@@ -69,6 +118,7 @@ pub fn build_memory_map(
 }
 
 pub(crate) struct EffectiveConfigs {
+    pub(crate) clocks: Vec<f64>,
     pub(crate) processing_elements: Vec<ProcessingElementConfig>,
     pub(crate) caches: Vec<CacheConfig>,
     pub(crate) fabrics: Vec<(Rc<FabricConfig>, FabricRoutingAlgorithm)>,
@@ -78,6 +128,7 @@ pub(crate) struct EffectiveConfigs {
 impl EffectiveConfigs {
     pub(crate) fn new(platform: &PlatformConfig) -> Result<Self, SimError> {
         Ok(Self {
+            clocks: clock_configs(platform)?,
             processing_elements: processing_element_configs(platform)?,
             caches: cache_configs(platform)?,
             fabrics: fabric_configs(platform)?,
@@ -136,9 +187,9 @@ fn fabric_configs(
     fabric_configs_with_destination_port_maps(platform, &FabricDestinationPortMaps::new())
 }
 
-pub fn build_pes<S: BuildHasher>(
+pub fn build_pes<C: BuildHasher, S: BuildHasher>(
     engine: &Engine,
-    clock: &Clock,
+    clocks: &HashMap<String, Clock, C>,
     parent: &Rc<Entity>,
     cfg: &PlatformConfig,
     memory_maps: &HashMap<String, Rc<MemoryMap>, S>,
@@ -147,7 +198,7 @@ pub fn build_pes<S: BuildHasher>(
     let configs = processing_element_configs(cfg)?;
     build_pes_from_configs(
         engine,
-        clock,
+        clocks,
         parent,
         cfg,
         &configs,
@@ -167,9 +218,9 @@ fn processing_element_configs(
         .collect()
 }
 
-pub(crate) fn build_pes_from_configs<S: BuildHasher>(
+pub(crate) fn build_pes_from_configs<C: BuildHasher, S: BuildHasher>(
     engine: &Engine,
-    clock: &Clock,
+    clocks: &HashMap<String, Clock, C>,
     parent: &Rc<Entity>,
     cfg: &PlatformConfig,
     configs: &[ProcessingElementConfig],
@@ -179,6 +230,7 @@ pub(crate) fn build_pes_from_configs<S: BuildHasher>(
     let mut processing_elements = Vec::new();
     if let Some(pes) = &cfg.processing_elements {
         for (pe_section, pe_config) in pes.iter().zip(configs) {
+            let clock = clock_for(clocks, cfg, pe_section.clock.as_deref())?;
             let memory_map = memory_maps
                 .get(pe_section.memory_map.as_str())
                 .ok_or_else(|| {
@@ -206,9 +258,9 @@ pub(crate) fn build_pes_from_configs<S: BuildHasher>(
     Ok((processing_elements, pes_idx_by_id))
 }
 
-pub fn build_caches<S: BuildHasher>(
+pub fn build_caches<C: BuildHasher, S: BuildHasher>(
     engine: &Engine,
-    clock: &Clock,
+    clocks: &HashMap<String, Clock, C>,
     parent: &Rc<Entity>,
     cfg: &PlatformConfig,
     memory_maps: &HashMap<String, Rc<MemoryMap>, S>,
@@ -217,7 +269,7 @@ pub fn build_caches<S: BuildHasher>(
     let configs = cache_configs(cfg)?;
     build_caches_from_configs(
         engine,
-        clock,
+        clocks,
         parent,
         cfg,
         &configs,
@@ -235,9 +287,9 @@ fn cache_configs(platform: &PlatformConfig) -> Result<Vec<CacheConfig>, SimError
         .collect()
 }
 
-pub(crate) fn build_caches_from_configs<S: BuildHasher>(
+pub(crate) fn build_caches_from_configs<C: BuildHasher, S: BuildHasher>(
     engine: &Engine,
-    clock: &Clock,
+    clocks: &HashMap<String, Clock, C>,
     parent: &Rc<Entity>,
     cfg: &PlatformConfig,
     configs: &[CacheConfig],
@@ -247,6 +299,7 @@ pub(crate) fn build_caches_from_configs<S: BuildHasher>(
     let mut caches = Vec::new();
     if let Some(caches_sections) = &cfg.caches {
         for (cache_section, config) in caches_sections.iter().zip(configs) {
+            let clock = clock_for(clocks, cfg, cache_section.clock.as_deref())?;
             let cache = if let Some(managers) = &cache_section.coherency_managers {
                 let mut manager_map = MemoryMap::new();
                 for name in managers {
@@ -376,15 +429,15 @@ pub fn build_fabric_destination_port_maps(
     Ok(maps)
 }
 
-pub fn build_fabrics(
+pub fn build_fabrics<C: BuildHasher>(
     engine: &Engine,
-    clock: &Clock,
+    clocks: &HashMap<String, Clock, C>,
     parent: &Rc<Entity>,
     cfg: &PlatformConfig,
     fabric_destination_port_maps: &FabricDestinationPortMaps,
 ) -> Result<(Fabrics, NameToIdxMap), SimError> {
     let configs = fabric_configs_with_destination_port_maps(cfg, fabric_destination_port_maps)?;
-    build_fabrics_from_configs(engine, clock, parent, cfg, &configs)
+    build_fabrics_from_configs(engine, clocks, parent, cfg, &configs)
 }
 
 pub const DEFAULT_FABRIC_PORTS_PER_NODE: usize = 1;
@@ -475,9 +528,9 @@ impl FabricSection {
     }
 }
 
-pub(crate) fn build_fabrics_from_configs(
+pub(crate) fn build_fabrics_from_configs<C: BuildHasher>(
     engine: &Engine,
-    clock: &Clock,
+    clocks: &HashMap<String, Clock, C>,
     parent: &Rc<Entity>,
     cfg: &PlatformConfig,
     configs: &[(Rc<FabricConfig>, FabricRoutingAlgorithm)],
@@ -485,6 +538,7 @@ pub(crate) fn build_fabrics_from_configs(
     let mut fabrics = Vec::new();
     if let Some(fabric_sections) = &cfg.fabrics {
         for (fabric_section, (config, fabric_algorithm)) in fabric_sections.iter().zip(configs) {
+            let clock = clock_for(clocks, cfg, fabric_section.clock.as_deref())?;
             let fabric: Rc<dyn Fabric<MemoryAccess>> = match fabric_section.kind {
                 FabricKind::Functional => FunctionalFabric::new_and_register(
                     engine,
@@ -515,14 +569,14 @@ pub(crate) fn build_fabrics_from_configs(
     Ok((fabrics, fabrics_idx_by_id))
 }
 
-pub fn build_memories(
+pub fn build_memories<C: BuildHasher>(
     engine: &Engine,
-    clock: &Clock,
+    clocks: &HashMap<String, Clock, C>,
     parent: &Rc<Entity>,
     cfg: &PlatformConfig,
 ) -> Result<(Memories, NameToIdxMap), SimError> {
     let configs = memory_configs(cfg)?;
-    build_memories_from_configs(engine, clock, parent, cfg, &configs)
+    build_memories_from_configs(engine, clocks, parent, cfg, &configs)
 }
 
 pub const DEFAULT_HBM_DELAY_TICKS: usize = 10;
@@ -563,9 +617,9 @@ fn memory_configs(platform: &PlatformConfig) -> Result<Vec<MemoryConfig>, SimErr
         .collect()
 }
 
-pub(crate) fn build_memories_from_configs(
+pub(crate) fn build_memories_from_configs<C: BuildHasher>(
     engine: &Engine,
-    clock: &Clock,
+    clocks: &HashMap<String, Clock, C>,
     parent: &Rc<Entity>,
     cfg: &PlatformConfig,
     configs: &[MemoryConfig],
@@ -573,6 +627,7 @@ pub(crate) fn build_memories_from_configs(
     let mut memories = Vec::new();
     if let Some(memories_section) = &cfg.memories {
         for (memory_section, config) in memories_section.iter().zip(configs) {
+            let clock = clock_for(clocks, cfg, memory_section.clock.as_deref())?;
             memories.push(Memory::new_and_register(
                 engine,
                 clock,
@@ -814,9 +869,9 @@ fn build_empty_fabric_configs(
     Ok(fabric_configs)
 }
 
-pub(crate) fn build_coherency_managers(
+pub(crate) fn build_coherency_managers<C: BuildHasher>(
     engine: &Engine,
-    clock: &Clock,
+    clocks: &HashMap<String, Clock, C>,
     parent: &Rc<Entity>,
     cfg: &PlatformConfig,
     maps: &HashMap<String, Rc<MemoryMap>>,
@@ -826,6 +881,7 @@ pub(crate) fn build_coherency_managers(
         .iter()
         .flatten()
         .map(|section| {
+            let clock = clock_for(clocks, cfg, section.clock.as_deref())?;
             let map = maps
                 .get(&section.memory_map)
                 .ok_or_else(|| SimError(format!("Unknown memory map '{}'", section.memory_map)))?;
@@ -862,9 +918,13 @@ mod tests {
     #[test]
     fn builds_runtime_memory_maps_from_built_memories() {
         let mut engine = start_test(file!());
-        let clock = engine.default_clock();
         let cfg = PlatformConfig {
             coherency_managers: None,
+            clocks: vec![crate::types::ClockSection {
+                name: "default".to_string(),
+                frequency_mhz: 1000.0,
+            }],
+            default_clock: "default".to_string(),
             memory_maps: vec![MemoryMapSection {
                 name: "mm0".to_string(),
                 devices: vec!["hbm0".to_string()],
@@ -874,6 +934,7 @@ mod tests {
             caches: None,
             fabrics: None,
             memories: Some(vec![MemorySection {
+                clock: None,
                 name: "hbm0".to_string(),
                 kind: MemoryKind::HBM,
                 base_address: 0x4000,
@@ -886,7 +947,8 @@ mod tests {
             connections: None,
         };
         let device_ids = DeviceIds::from([("hbm0".to_string(), DeviceId(7))]);
-        let (memories, memories_idx_by_id) = build_memories(&engine, &clock, engine.top(), &cfg)
+        let clocks = super::build_clocks(&mut engine, &cfg).unwrap();
+        let (memories, memories_idx_by_id) = build_memories(&engine, &clocks, engine.top(), &cfg)
             .expect("memory build should succeed");
 
         let memory_maps = build_memory_maps(&cfg, &memories, &memories_idx_by_id, &device_ids)
@@ -903,6 +965,9 @@ mod tests {
     fn derives_fabric_port_maps_from_direct_connections() {
         let cfg: PlatformConfig = yaml_serde::from_str(
             "
+clocks:
+  - {name: default, frequency_mhz: 1000}
+default_clock: default
 memory_maps:
   - name: mm0
     devices:
@@ -950,6 +1015,9 @@ connections:
     fn derives_fabric_port_maps_through_cache() {
         let cfg: PlatformConfig = yaml_serde::from_str(
             "
+clocks:
+  - {name: default, frequency_mhz: 1000}
+default_clock: default
 memory_maps:
   - name: mm0
     devices:
@@ -1003,6 +1071,9 @@ connections:
     fn derives_multiple_candidate_ports_for_same_device() {
         let cfg: PlatformConfig = yaml_serde::from_str(
             "
+clocks:
+  - {name: default, frequency_mhz: 1000}
+default_clock: default
 memory_maps:
   - name: mm0
     devices:
@@ -1043,6 +1114,9 @@ connections:
     fn derives_fabric_port_maps_through_single_fabric_link() {
         let cfg: PlatformConfig = yaml_serde::from_str(
             "
+clocks:
+  - {name: default, frequency_mhz: 1000}
+default_clock: default
 memory_maps:
   - name: mm0
     devices: []
@@ -1097,6 +1171,9 @@ connections:
     fn derives_fabric_port_maps_through_two_fabric_links() {
         let cfg: PlatformConfig = yaml_serde::from_str(
             "
+clocks:
+  - {name: default, frequency_mhz: 1000}
+default_clock: default
 memory_maps:
   - name: mm0
     devices: []
@@ -1154,6 +1231,9 @@ connections:
     fn derives_only_shortest_fabric_port_maps_through_cycle() {
         let cfg: PlatformConfig = yaml_serde::from_str(
             "
+clocks:
+  - {name: default, frequency_mhz: 1000}
+default_clock: default
 memory_maps:
   - name: mm0
     devices: []

@@ -10,9 +10,13 @@ use gwr_track::tracker::dev_null_tracker;
 fn null_connected_fabric_ports_run_without_unconnected_port_errors() {
     for kind in ["functional", "routed"] {
         let mut engine = Engine::new(&dev_null_tracker());
-        let clock = engine.default_clock();
         let yaml = format!(
             "
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps: []
 fabrics:
   - name: fabric0
@@ -25,7 +29,7 @@ connections:
   - connect: ['fabric.fabric0@(0,1)', 'null']
 ",
         );
-        let _platform = Platform::from_string(&engine, &clock, &yaml).unwrap();
+        let _platform = Platform::from_string(&mut engine, &yaml).unwrap();
 
         engine.run().unwrap();
     }
@@ -34,9 +38,8 @@ connections:
 #[test]
 fn null_connections_cover_the_former_hbm_fabric_ports() {
     let mut engine = Engine::new(&dev_null_tracker());
-    let clock = engine.default_clock();
     let mut yaml = String::from(
-        "memory_maps: []\nfabrics:\n  - name: fabric0\n    kind: functional\n    columns: 12\n    rows: 24\n    config: {}\nconnections:\n",
+        "clocks:\n  - name: default\n    frequency_mhz: 1000\ndefault_clock: default\n\nmemory_maps: []\nfabrics:\n  - name: fabric0\n    kind: functional\n    columns: 12\n    rows: 24\n    config: {}\nconnections:\n",
     );
     for column in 0..12 {
         for row in 0..24 {
@@ -47,7 +50,7 @@ fn null_connections_cover_the_former_hbm_fabric_ports() {
             .unwrap();
         }
     }
-    let _platform = Platform::from_string(&engine, &clock, &yaml).unwrap();
+    let _platform = Platform::from_string(&mut engine, &yaml).unwrap();
 
     engine.run().unwrap();
 }
@@ -55,11 +58,14 @@ fn null_connections_cover_the_former_hbm_fabric_ports() {
 #[test]
 fn null_connected_cache_ports_run_without_unconnected_port_errors() {
     let mut engine = Engine::new(&dev_null_tracker());
-    let clock = engine.default_clock();
     let _platform = Platform::from_string(
-        &engine,
-        &clock,
+        &mut engine,
         "
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps: []
 caches:
   - name: l1
@@ -77,11 +83,14 @@ connections:
 #[test]
 fn null_cannot_connect_to_a_processing_element() {
     let mut engine = Engine::new(&dev_null_tracker());
-    let clock = engine.default_clock();
     let error = Platform::from_string(
-        &engine,
-        &clock,
+        &mut engine,
         "
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps:
   - name: mm
     devices: []
@@ -105,11 +114,14 @@ connections:
 #[test]
 fn null_connection_cannot_reuse_a_fabric_port() {
     let mut engine = Engine::new(&dev_null_tracker());
-    let clock = engine.default_clock();
     let error = Platform::from_string(
-        &engine,
-        &clock,
+        &mut engine,
         "
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps: []
 fabrics:
   - name: fabric0
