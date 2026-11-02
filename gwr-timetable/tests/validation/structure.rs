@@ -1,6 +1,16 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use super::common::*;
+use std::path::Path;
+
+use gwr_models::processing_element::dispatch::Dispatch;
+use gwr_models::processing_element::tensors::dtype::DataType;
+use gwr_timetable::timetable_file::{
+    EdgeKind, EdgeSection, NodeSection, TensorConfigSection, TimetableFile,
+};
+
+use super::common::{
+    build_timetable, compute, create_default_timetable_file, data_edge, tensor, timetable,
+};
 
 #[test]
 fn rejects_tensor_to_tensor_data_edges() {
@@ -38,10 +48,9 @@ fn rejects_compute_to_compute_data_edges() {
 
 #[test]
 fn tiny_example_is_valid() {
-    let timetable_file = TimetableFile::from_file(
-        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/tiny.yaml"),
-    )
-    .unwrap();
+    let timetable_file =
+        TimetableFile::from_file(&Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/tiny.yaml"))
+            .unwrap();
 
     timetable_file.validate().unwrap();
 }
@@ -76,7 +85,7 @@ edges:
 }
 
 #[test]
-fn invalid_node_pe() {
+fn rejects_unknown_processing_element_on_compute_node() {
     let (top, platform, mut timetable_file) = create_default_timetable_file();
     let NodeSection::Compute { pe, .. } = &mut timetable_file.nodes[2] else {
         panic!("expected compute node");
@@ -88,7 +97,7 @@ fn invalid_node_pe() {
 }
 
 #[test]
-fn duplicate_node_id() {
+fn rejects_duplicate_node_ids() {
     let (top, platform, mut timetable_file) = create_default_timetable_file();
     timetable_file.nodes.push(NodeSection::Tensor {
         id: "tensor1".to_string(),
@@ -104,7 +113,7 @@ fn duplicate_node_id() {
 }
 
 #[test]
-fn invalid_from_edge_pe() {
+fn rejects_unknown_source_node_in_data_edge() {
     let (top, platform, mut timetable_file) = create_default_timetable_file();
     timetable_file.edges.push(EdgeSection {
         from: "node2".to_string(),
@@ -117,7 +126,7 @@ fn invalid_from_edge_pe() {
 }
 
 #[test]
-fn invalid_to_edge_pe() {
+fn rejects_unknown_destination_node_in_data_edge() {
     let (top, platform, mut timetable_file) = create_default_timetable_file();
     timetable_file.edges.push(EdgeSection {
         from: "add0".to_string(),
@@ -130,7 +139,7 @@ fn invalid_to_edge_pe() {
 }
 
 #[test]
-fn invalid_edge_endpoint_syntax() {
+fn rejects_malformed_edge_endpoint_index() {
     let (_, _, mut timetable_file) = create_default_timetable_file();
     timetable_file.edges.push(EdgeSection {
         from: "tensor0.invalid".to_string(),
@@ -143,7 +152,7 @@ fn invalid_edge_endpoint_syntax() {
 }
 
 #[test]
-fn duplicate_explicit_tensor_index_after_implicit_index() {
+fn rejects_explicit_tensor_index_already_assigned_implicitly() {
     let (_, _, mut timetable_file) = create_default_timetable_file();
     timetable_file.edges[0].to = "add0".to_string();
     timetable_file.edges.push(EdgeSection {
@@ -168,7 +177,7 @@ fn sparse_explicit_and_implicit_tensor_indices_are_allowed() {
 }
 
 #[test]
-fn maximum_tensor_index_does_not_materialize_intervening_indices() {
+fn accepts_the_maximum_tensor_index_without_intermediate_connections() {
     let (top, platform, mut timetable_file) = create_default_timetable_file();
     timetable_file.edges[0].from = format!("tensor0.{}", usize::MAX);
 
@@ -187,7 +196,7 @@ fn duplicate_sparse_tensor_indices_are_rejected() {
 }
 
 #[test]
-fn explicit_tensor_index_is_checked_before_tracking_occupancy() {
+fn rejects_out_of_range_explicit_input_index() {
     let timetable_file = timetable(
         vec![
             tensor("input", 0, DataType::Fp32, &[1]),

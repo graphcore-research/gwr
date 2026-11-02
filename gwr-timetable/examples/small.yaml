@@ -17,13 +17,22 @@ nodes:
 
   - id: pe_0_0_add
     kind: compute
-    op: add
+    program:
+      inputs: [A, B]
+      outputs: [Y]
+      assignments:
+        - output: Y
+          axes: [b, m, n]
+          expr:
+            {
+              add:
+                [
+                  { read: { tensor: A, indices: [b, m, n] } },
+                  { read: { tensor: B, indices: [b, m, n] } },
+                ],
+            }
+    tiling: { sizes: { m: 16, n: 16 } }
     pe: pe_0_0
-    input_views:
-      -
-      -
-    output_views:
-      -
 
   - id: tensor_0_0_to_0_1
     kind: tensor
@@ -34,7 +43,21 @@ nodes:
 
   - id: pe_0_1_add
     kind: compute
-    op: add
+    program:
+      inputs: [A, B]
+      outputs: [Y]
+      assignments:
+        - output: Y
+          axes: [b, m, n]
+          expr:
+            {
+              add:
+                [
+                  { read: { tensor: A, indices: [b, m, n] } },
+                  { read: { tensor: B, indices: [b, m, n] } },
+                ],
+            }
+    tiling: { sizes: { m: 16, n: 16 } }
     pe: pe_0_1
     input_views:
       - offsets:
@@ -53,8 +76,6 @@ nodes:
           - 1
           - 224
           - 224
-    output_views:
-      -
 
   - id: tensor_0_1_to_1_0
     kind: tensor
@@ -72,13 +93,21 @@ nodes:
 
   - id: pe_1_0_mul
     kind: compute
-    op: gemm
+    program:
+      inputs: [A, B]
+      outputs: [Y]
+      assignments:
+        - output: Y
+          axes: [b, m, n]
+          expr:
+            matrix_mac:
+              accumulator: fp32
+              over: [k]
+              args:
+                - { read: { tensor: A, indices: [b, m, k] } }
+                - { read: { tensor: B, indices: [b, k, n] } }
+    tiling: { sizes: { m: 16, n: 16, k: 16 } }
     pe: pe_1_0
-    input_views:
-      -
-      -
-    output_views:
-      -
 
   - id: output_tensor_0
     kind: tensor

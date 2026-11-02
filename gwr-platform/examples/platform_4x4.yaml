@@ -1,5 +1,20 @@
 # Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+operation_classes:
+  add:
+    operations: [add]
+    arity: 2
+  mul:
+    operations: [mul]
+    arity: 2
+  compare:
+    operations: [compare, maximum]
+    arity: 2
+  matrix:
+    operations: [matrix_mac]
+    arity: 2
+    flops_per_op: 2
+
 memory_maps:
   # The default memory map for Processing Elements
   - name: pe_memory_map
@@ -19,6 +34,16 @@ defaults:
   pe_config: &default_pe_config
     num_active_requests: 8
     lsu_access_bytes: 32
+    compute:
+      execution_units:
+        alu:
+          capabilities:
+            - { class: add, ops_per_tick: 16 }
+            - { class: mul, ops_per_tick: 4 }
+            - { class: compare, ops_per_tick: 16 }
+        matrix:
+          capabilities:
+            - { class: matrix, accumulator: fp32, ops_per_tick: 32 }
 
 processing_elements:
   - name: pe_0_0
