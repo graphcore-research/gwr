@@ -1376,6 +1376,7 @@ dependencies = [
 name = "gwr-resources"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "gwr-build",
  "gwr-engine",
  "gwr-track",
