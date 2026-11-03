@@ -25,4 +25,5 @@ gwr-engine = { path = "../gwr-engine", version = "0.16.0" }
 gwr-build = { path = "../gwr-build", version = "0.2.0" }
 
 [dev-dependencies]
+futures.workspace = true
 gwr-track = { path = "../gwr-track", version = "0.13.0" }
