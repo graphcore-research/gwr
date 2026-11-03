@@ -3,11 +3,12 @@
 use std::cmp::Reverse;
 use std::collections::{BTreeSet, BinaryHeap, HashSet};
 use std::fmt;
+use std::fmt::{Display, Formatter};
 use std::ops::Range;
 
 use gwr_engine::sim_error;
 use gwr_engine::types::SimResult;
-use gwr_models::processing_element::operators::TensorView;
+use gwr_models::processing_element::tensors::TensorView;
 
 use super::{ComputeTensorDirection, TimetableEdge, TimetableGraph};
 
@@ -79,29 +80,6 @@ fn conflict_candidates<'a>(
 ) -> impl Iterator<Item = &'a usize> {
     let reads = (kind == AccessKind::Write).then_some(reads);
     writes.iter().chain(reads.into_iter().flatten())
-}
-
-#[derive(Clone, Copy, Eq, Hash, PartialEq)]
-enum AccessKind {
-    Read,
-    Write,
-}
-
-impl fmt::Display for AccessKind {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Read => formatter.write_str("reads"),
-            Self::Write => formatter.write_str("writes"),
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct TensorAccess<'a> {
-    node: usize,
-    tensor: usize,
-    kind: AccessKind,
-    view: &'a TensorView,
 }
 
 struct AccessConflict<'a> {
@@ -177,6 +155,29 @@ impl AccessConflict<'_> {
                 second_range.end,
             ),
             (AccessKind::Read, AccessKind::Read) => Ok(()),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct TensorAccess<'a> {
+    node: usize,
+    tensor: usize,
+    kind: AccessKind,
+    view: &'a TensorView,
+}
+
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+enum AccessKind {
+    Read,
+    Write,
+}
+
+impl Display for AccessKind {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Read => formatter.write_str("reads"),
+            Self::Write => formatter.write_str("writes"),
         }
     }
 }
@@ -276,12 +277,39 @@ mod tests {
         let graph = TimetableFile::from_string(
             r"
 nodes:
-  - { id: compute0, kind: compute, op: { custom: { machine_ops: {} } }, input_views: [], output_views: [~] }
+  - { id: initial, kind: tensor, config: { addr: 10, dtype: int8, shape: [1] } }
+  - id: compute0
+    kind: compute
+    program:
+      inputs: [A]
+      outputs: [Y]
+      assignments:
+        - output: Y
+          axes: [i]
+          expr:
+            identity:
+              - read: { tensor: A, indices: [i] }
   - { id: tensor0, kind: tensor, config: { addr: 0, dtype: int8, shape: [1] } }
-  - { id: compute1, kind: compute, op: { custom: { machine_ops: {} } }, input_views: [~], output_views: [~] }
+  - id: compute1
+    kind: compute
+    program:
+      inputs: [A]
+      outputs: [Y]
+      assignments:
+        - output: Y
+          axes: [i]
+          expr:
+            identity:
+              - read: { tensor: A, indices: [i] }
   - { id: tensor1, kind: tensor, config: { addr: 1, dtype: int8, shape: [1] } }
-  - { id: compute2, kind: compute, op: { custom: { machine_ops: {} } }, input_views: [~], output_views: [] }
+  - id: compute2
+    kind: compute
+    program:
+      inputs: [A]
+      outputs: []
+      assignments: []
 edges:
+  - { from: initial, to: compute0, kind: data }
   - { from: compute0, to: tensor0, kind: data }
   - { from: tensor0, to: compute1, kind: data }
   - { from: compute1, to: tensor1, kind: data }
@@ -297,21 +325,21 @@ edges:
         assert!(dependencies.ancestors.reached.is_empty());
         assert!(dependencies.descendants.reached.is_empty());
 
-        assert!(dependencies.are_ordered(2, 0));
-        assert_eq!(dependencies.current, Some(2));
-        assert!(dependencies.ancestors.reached.contains(&0));
+        assert!(dependencies.are_ordered(3, 1));
+        assert_eq!(dependencies.current, Some(3));
+        assert!(dependencies.ancestors.reached.contains(&1));
         assert!(dependencies.descendants.reached.is_empty());
 
         let num_ancestors_reached = dependencies.ancestors.reached.len();
-        assert!(dependencies.are_ordered(2, 1));
+        assert!(dependencies.are_ordered(3, 2));
         assert_eq!(dependencies.ancestors.reached.len(), num_ancestors_reached);
 
-        assert!(dependencies.are_ordered(2, 4));
-        assert!(dependencies.descendants.reached.contains(&4));
+        assert!(dependencies.are_ordered(3, 5));
+        assert!(dependencies.descendants.reached.contains(&5));
 
-        assert!(dependencies.are_ordered(0, 4));
-        assert_eq!(dependencies.current, Some(0));
+        assert!(dependencies.are_ordered(1, 5));
+        assert_eq!(dependencies.current, Some(1));
         assert!(dependencies.ancestors.reached.is_empty());
-        assert!(dependencies.descendants.reached.contains(&4));
+        assert!(dependencies.descendants.reached.contains(&5));
     }
 }

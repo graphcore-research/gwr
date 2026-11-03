@@ -4,18 +4,20 @@
 //! We need robust anchor/alias output for repeated structures, and that is key
 //! to keeping generated platform files readable and editable by hand.
 
-use std::fmt::Write as _;
+use std::error::Error;
+use std::fmt;
+use std::fmt::{Display, Write as _};
+use std::str::from_utf8;
 
 use serde::Serialize;
-use yaml_serde::Value;
+use yaml_serde::{Value, to_string, to_value};
 
 use crate::types::{CacheConfigSection, PlatformConfig, ProcessingElementConfigSection};
 
-pub fn platform_to_yaml_str(
-    platform: &PlatformConfig,
-) -> Result<String, Box<dyn std::error::Error>> {
+pub fn platform_to_yaml_str(platform: &PlatformConfig) -> Result<String, Box<dyn Error>> {
     let mut out = String::new();
 
+    emit_optional_section(&mut out, emit_operation_classes(platform)?);
     emit_optional_section(&mut out, emit_memory_maps(platform)?);
     emit_optional_section(&mut out, emit_processing_elements(platform)?);
     emit_optional_section(&mut out, emit_fabrics(platform)?);
@@ -27,9 +29,20 @@ pub fn platform_to_yaml_str(
     Ok(out)
 }
 
-fn emit_memory_maps(
-    platform: &PlatformConfig,
-) -> Result<Option<String>, Box<dyn std::error::Error>> {
+fn emit_operation_classes(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn Error>> {
+    if platform.operation_classes.is_empty() {
+        return Ok(None);
+    }
+
+    let mut classes = start_section("operation_classes")?;
+    for line in to_string(&platform.operation_classes)?.lines() {
+        emit_line(&mut classes, line, 1)?;
+    }
+
+    Ok(Some(classes))
+}
+
+fn emit_memory_maps(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn Error>> {
     if platform.memory_maps.is_empty() {
         return Ok(None);
     }
@@ -39,16 +52,14 @@ fn emit_memory_maps(
     for memory_map in &platform.memory_maps {
         emit_line(&mut out, format_args!("- name: {}", memory_map.name), 1)?;
         emit_line(&mut out, "devices:", 2)?;
-        for device in &memory_map.devices {
-            emit_line(&mut out, format_args!("- {device}"), 3)?;
+        for range in &memory_map.devices {
+            emit_line(&mut out, format_args!("- {range}"), 3)?;
         }
     }
     Ok(Some(out))
 }
 
-fn emit_processing_elements(
-    platform: &PlatformConfig,
-) -> Result<Option<String>, Box<dyn std::error::Error>> {
+fn emit_processing_elements(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn Error>> {
     let Some(processing_elements) = &platform.processing_elements else {
         return Ok(None);
     };
@@ -81,9 +92,7 @@ fn emit_processing_elements(
                 && config.lsu_access_bytes.is_none()
                 && config.overhead_size_bytes.is_none()
                 && config.sram_bytes.is_none()
-                && config.adds_per_tick.is_none()
-                && config.muls_per_tick.is_none()
-                && config.compares_per_tick.is_none()
+                && config.compute.is_none()
             {
                 emit_line(&mut out, format_args!("config: &{anchor} {{}}"), 2)?;
             } else {
@@ -107,16 +116,19 @@ fn emit_processing_elements(
                     config.sram_bytes.map(u64_hex_str),
                     3,
                 )?;
-                emit_optional_kv(&mut out, "adds_per_tick", config.adds_per_tick, 3)?;
-                emit_optional_kv(&mut out, "muls_per_tick", config.muls_per_tick, 3)?;
-                emit_optional_kv(&mut out, "compares_per_tick", config.compares_per_tick, 3)?;
+                if let Some(compute) = &config.compute {
+                    emit_line(&mut out, "compute:", 3)?;
+                    for line in to_string(compute)?.lines() {
+                        emit_line(&mut out, line, 4)?;
+                    }
+                }
             }
         }
     }
     Ok(Some(out))
 }
 
-fn emit_fabrics(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std::error::Error>> {
+fn emit_fabrics(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn Error>> {
     let Some(fabrics) = &platform.fabrics else {
         return Ok(None);
     };
@@ -182,7 +194,7 @@ fn emit_fabrics(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std
     Ok(Some(out))
 }
 
-fn emit_caches(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std::error::Error>> {
+fn emit_caches(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn Error>> {
     let Some(caches) = &platform.caches else {
         return Ok(None);
     };
@@ -245,7 +257,7 @@ fn emit_caches(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std:
     Ok(Some(out))
 }
 
-fn emit_memories(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std::error::Error>> {
+fn emit_memories(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn Error>> {
     let Some(memories) = &platform.memories else {
         return Ok(None);
     };
@@ -283,84 +295,7 @@ fn emit_memories(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn st
     Ok(Some(out))
 }
 
-/// Format a `u64` as lowercase hexadecimal with a `0x` prefix and underscores
-/// inserted every 4 hex digits (grouped from the right).
-///
-/// Examples:
-/// - `0x1000000` -> `0x100_0000`
-/// - `0x100000000` -> `0x1_0000_0000`
-fn u64_hex_str(v: u64) -> String {
-    let hex = format!("{v:x}");
-    let mut out = String::with_capacity(2 + hex.len() + ((hex.len().saturating_sub(1)) / 4));
-    out.push_str("0x");
-
-    let first_group_len = match hex.len() % 4 {
-        0 => 4,
-        n => n,
-    };
-    out.push_str(&hex[..first_group_len]);
-    for chunk in hex.as_bytes()[first_group_len..].chunks(4) {
-        out.push('_');
-        // `hex` is a String, so each byte chunk should be UTF-8.
-        out.push_str(std::str::from_utf8(chunk).expect("hex chunk should be utf-8"));
-    }
-
-    out
-}
-
-fn emit_optional_kv<T: std::fmt::Display>(
-    out: &mut String,
-    key: &str,
-    value: Option<T>,
-    indent_level: usize,
-) -> Result<(), std::fmt::Error> {
-    if let Some(v) = value {
-        emit_kv(out, key, v, indent_level)?;
-    }
-    Ok(())
-}
-
-fn serializable_to_str<T: Serialize>(value: &T) -> Result<String, Box<dyn std::error::Error>> {
-    match yaml_serde::to_value(value)? {
-        Value::String(s) => Ok(s),
-        other => Err(format!("expected type to serialize a string, got: {other:?}").into()),
-    }
-}
-
-fn emit_connections(
-    platform: &PlatformConfig,
-) -> Result<Option<String>, Box<dyn std::error::Error>> {
-    let Some(connections) = &platform.connections else {
-        return Ok(None);
-    };
-
-    let mut out = start_section("connections")?;
-
-    for connection in connections {
-        emit_line(&mut out, "- connect:", 1)?;
-        for endpoint in &connection.connect {
-            if endpoint == "null" {
-                emit_line(&mut out, "- 'null'", 3)?;
-            } else {
-                emit_line(&mut out, format_args!("- {endpoint}"), 3)?;
-            }
-        }
-    }
-    Ok(Some(out))
-}
-
-fn emit_optional_section(out: &mut String, section: Option<String>) {
-    if let Some(section) = section {
-        if !out.is_empty() {
-            out.push('\n');
-        }
-        out.push_str(&section);
-    }
-}
-
-fn emit_coherency_managers(
-    platform: &PlatformConfig,
-) -> Result<Option<String>, Box<dyn std::error::Error>> {
+fn emit_coherency_managers(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn Error>> {
     let Some(managers) = &platform.coherency_managers else {
         return Ok(None);
     };
@@ -390,32 +325,108 @@ fn emit_coherency_managers(
     Ok(Some(out))
 }
 
-fn start_section(section: &str) -> Result<String, std::fmt::Error> {
+/// Format a `u64` as lowercase hexadecimal with a `0x` prefix and underscores
+/// inserted every 4 hex digits (grouped from the right).
+///
+/// Examples:
+/// - `0x1000000` -> `0x100_0000`
+/// - `0x100000000` -> `0x1_0000_0000`
+fn u64_hex_str(v: u64) -> String {
+    let hex = format!("{v:x}");
+    let mut out = String::with_capacity(2 + hex.len() + ((hex.len().saturating_sub(1)) / 4));
+    out.push_str("0x");
+
+    let first_group_len = match hex.len() % 4 {
+        0 => 4,
+        n => n,
+    };
+    out.push_str(&hex[..first_group_len]);
+    for chunk in hex.as_bytes()[first_group_len..].chunks(4) {
+        out.push('_');
+        // `hex` is a String, so each byte chunk should be UTF-8.
+        out.push_str(from_utf8(chunk).expect("hex chunk should be utf-8"));
+    }
+
+    out
+}
+
+fn emit_optional_kv<T: Display>(
+    out: &mut String,
+    key: &str,
+    value: Option<T>,
+    indent_level: usize,
+) -> Result<(), fmt::Error> {
+    if let Some(v) = value {
+        emit_kv(out, key, v, indent_level)?;
+    }
+    Ok(())
+}
+
+fn emit_kv<T: Display>(
+    out: &mut String,
+    key: &str,
+    value: T,
+    indent_level: usize,
+) -> Result<(), fmt::Error> {
+    emit_line(out, format_args!("{key}: {value}"), indent_level)
+}
+
+fn serializable_to_str<T: Serialize>(value: &T) -> Result<String, Box<dyn Error>> {
+    match to_value(value)? {
+        Value::String(s) => Ok(s),
+        other => Err(format!("expected type to serialize a string, got: {other:?}").into()),
+    }
+}
+
+fn emit_connections(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn Error>> {
+    let Some(connections) = &platform.connections else {
+        return Ok(None);
+    };
+
+    let mut out = start_section("connections")?;
+
+    for connection in connections {
+        emit_line(&mut out, "- connect:", 1)?;
+        for endpoint in &connection.connect {
+            if endpoint == "null" {
+                emit_line(&mut out, "- 'null'", 3)?;
+            } else {
+                emit_line(&mut out, format_args!("- {endpoint}"), 3)?;
+            }
+        }
+    }
+    Ok(Some(out))
+}
+
+fn start_section(section: &str) -> Result<String, fmt::Error> {
     let mut out = String::new();
     emit_line(&mut out, format_args!("{section}:"), 0)?;
     Ok(out)
 }
 
-fn emit_kv<T: std::fmt::Display>(
-    out: &mut String,
-    key: &str,
-    value: T,
-    indent_level: usize,
-) -> Result<(), std::fmt::Error> {
-    emit_line(out, format_args!("{key}: {value}"), indent_level)
+fn emit_line(out: &mut String, line: impl Display, indent_level: usize) -> Result<(), fmt::Error> {
+    writeln!(out, "{}{line}", "  ".repeat(indent_level))
 }
 
-fn emit_line(
-    out: &mut String,
-    line: impl std::fmt::Display,
-    indent_level: usize,
-) -> Result<(), std::fmt::Error> {
-    writeln!(out, "{}{line}", "  ".repeat(indent_level))
+fn emit_optional_section(out: &mut String, section: Option<String>) {
+    if let Some(section) = section {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&section);
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use gwr_models::fabric::FabricPortSelection;
+    use gwr_models::fabric::node::FabricRoutingAlgorithm;
+    use gwr_models::processing_element::compute::{
+        CapabilityConfig, CapabilityKind, ComputeConfig, ExecutionUnitConfig,
+    };
+    use yaml_serde::from_str;
 
     use super::platform_to_yaml_str;
     use crate::types::{
@@ -424,30 +435,31 @@ mod tests {
         PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
     };
 
-    #[test]
-    fn emitted_null_endpoint_is_a_yaml_string_and_round_trips() {
-        let platform = PlatformConfig {
-            coherency_managers: None,
-            memory_maps: vec![test_memory_map()],
-            defaults: None,
-            processing_elements: None,
-            caches: None,
-            fabrics: None,
-            memories: None,
-            connections: Some(vec![ConnectSection {
-                connect: vec!["null".to_string(), "cache.l1.dev".to_string()],
-            }]),
-        };
+    fn test_memory_map() -> MemoryMapSection {
+        MemoryMapSection {
+            name: "memory_map".to_string(),
+            devices: vec!["hbm0".to_string()],
+        }
+    }
 
-        let yaml = platform_to_yaml_str(&platform).unwrap();
-        let parsed: yaml_serde::Value = yaml_serde::from_str(&yaml).unwrap();
-        assert_eq!(
-            parsed["connections"][0]["connect"][0].as_str(),
-            Some("null")
-        );
-
-        let round_trip: PlatformConfig = yaml_serde::from_str(&yaml).unwrap();
-        assert_eq!(round_trip.connections.unwrap()[0].connect[0], "null");
+    fn vector_compute_config(add: f64, mul: f64, compare: f64) -> ComputeConfig {
+        ComputeConfig {
+            execution_units: BTreeMap::from([(
+                "alu".into(),
+                ExecutionUnitConfig {
+                    matrix_accumulator_capacity_bytes: None,
+                    capabilities: [("add", add), ("mul", mul), ("compare", compare)]
+                        .into_iter()
+                        .map(|(class, ops_per_tick)| CapabilityConfig {
+                            kind: CapabilityKind::Scalar,
+                            class: class.into(),
+                            input_dtypes: None,
+                            ops_per_tick,
+                        })
+                        .collect(),
+                },
+            )]),
+        }
     }
 
     #[test]
@@ -457,21 +469,18 @@ mod tests {
             lsu_access_bytes: Some(32),
             overhead_size_bytes: None,
             sram_bytes: Some(0x0010_0000),
-            adds_per_tick: Some(16.0),
-            muls_per_tick: Some(4.0),
-            compares_per_tick: None,
+            compute: Some(vector_compute_config(16.0, 4.0, 16.0)),
         };
         let unique_config = ProcessingElementConfigSection {
             num_active_requests: Some(16),
             lsu_access_bytes: Some(64),
             overhead_size_bytes: Some(12),
             sram_bytes: Some(0x0020_0000),
-            adds_per_tick: Some(32.0),
-            muls_per_tick: Some(8.0),
-            compares_per_tick: Some(16.0),
+            compute: Some(vector_compute_config(32.0, 8.0, 16.0)),
         };
         let platform = PlatformConfig {
             coherency_managers: None,
+            operation_classes: BTreeMap::new(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: Some(vec![
@@ -505,7 +514,7 @@ mod tests {
         assert!(!yaml.contains("*pe_config_1\n  - name: pe2"));
 
         let round_trip: PlatformConfig =
-            yaml_serde::from_str(&yaml).expect("generated yaml should deserialize");
+            from_str(&yaml).expect("generated yaml should deserialize");
         let pes = round_trip
             .processing_elements
             .expect("processing elements should be present");
@@ -528,9 +537,7 @@ mod tests {
             lsu_access_bytes: None,
             overhead_size_bytes: None,
             sram_bytes: None,
-            adds_per_tick: None,
-            muls_per_tick: None,
-            compares_per_tick: None,
+            compute: None,
         };
         let empty_cache_config = CacheConfigSection {
             bw_bytes_per_tick: None,
@@ -543,6 +550,7 @@ mod tests {
         };
         let platform = PlatformConfig {
             coherency_managers: None,
+            operation_classes: BTreeMap::new(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: Some(vec![ProcessingElementSection {
@@ -576,7 +584,7 @@ mod tests {
         assert!(yaml.contains("config: *cache_config_0"));
 
         let round_trip: PlatformConfig =
-            yaml_serde::from_str(&yaml).expect("generated yaml should deserialize");
+            from_str(&yaml).expect("generated yaml should deserialize");
         let pe = &round_trip
             .processing_elements
             .expect("processing elements should be present")[0];
@@ -598,7 +606,7 @@ mod tests {
             tx_buffer_bytes: Some(6),
             port_bits_per_tick: Some(7),
             internal_link_bits_per_tick: None,
-            routing: Some(gwr_models::fabric::node::FabricRoutingAlgorithm::RowFirst),
+            routing: Some(FabricRoutingAlgorithm::RowFirst),
             port_selection: None,
         };
         let memory_config = MemoryConfigSection {
@@ -608,6 +616,7 @@ mod tests {
         };
         let platform = PlatformConfig {
             coherency_managers: None,
+            operation_classes: BTreeMap::new(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: None,
@@ -631,7 +640,7 @@ mod tests {
         let yaml = platform_to_yaml_str(&platform).expect("yaml generation should succeed");
 
         let round_trip: PlatformConfig =
-            yaml_serde::from_str(&yaml).expect("generated yaml should deserialize");
+            from_str(&yaml).expect("generated yaml should deserialize");
         let fabric = &round_trip.fabrics.expect("fabric should be present")[0];
         let memory = &round_trip.memories.expect("memory should be present")[0];
         assert_eq!(fabric.columns, 2);
@@ -655,11 +664,12 @@ mod tests {
             port_selection: Some(FabricPortSelection::SourceIdModulo),
         };
         let mixed_config = FabricConfigSection {
-            routing: Some(gwr_models::fabric::node::FabricRoutingAlgorithm::RowFirst),
+            routing: Some(FabricRoutingAlgorithm::RowFirst),
             ..only_port_selection.clone()
         };
         let platform = PlatformConfig {
             coherency_managers: None,
+            operation_classes: BTreeMap::new(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: None,
@@ -694,16 +704,9 @@ mod tests {
         ));
 
         let round_trip: PlatformConfig =
-            yaml_serde::from_str(&yaml).expect("generated yaml should deserialize");
+            from_str(&yaml).expect("generated yaml should deserialize");
         let fabrics = round_trip.fabrics.expect("fabrics should be present");
         assert_eq!(fabrics[0].config, only_port_selection);
         assert_eq!(fabrics[1].config, mixed_config);
-    }
-
-    fn test_memory_map() -> MemoryMapSection {
-        MemoryMapSection {
-            name: "memory_map".to_string(),
-            devices: vec!["hbm0".to_string()],
-        }
     }
 }

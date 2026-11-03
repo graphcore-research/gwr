@@ -1287,7 +1287,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-models"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "async-trait",
  "clap",
@@ -1305,6 +1305,7 @@ dependencies = [
  "rand 0.10.3",
  "rand_xoshiro",
  "serde",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -1344,7 +1345,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-platform"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "async-trait",
  "byte-unit",
@@ -1418,7 +1419,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-timetable"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "byte-unit",

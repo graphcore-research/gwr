@@ -1,210 +1,51 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use std::fs;
+use std::collections::BTreeMap;
+use std::error::Error;
+use std::fs::{create_dir_all, write};
 use std::path::PathBuf;
 
 use clap::Parser;
 use gwr_models::fabric::node::FabricRoutingAlgorithm;
+use gwr_models::processing_element::compute::{
+    CapabilityConfig, CapabilityKind, ComputeConfig, ExecutionUnitConfig, OperationClass,
+};
+use gwr_models::processing_element::tensors::dtype::DataType;
 use gwr_platform::builder::{
     DEFAULT_CACHE_LINE_SIZE_BYTES, DEFAULT_FABRIC_PORT_BITS_PER_TICK,
     DEFAULT_FABRIC_PORTS_PER_NODE, DEFAULT_FABRIC_ROUTING, DEFAULT_FABRIC_RX_BUFFER_BYTES,
     DEFAULT_FABRIC_TICKS_OVERHEAD, DEFAULT_FABRIC_TICKS_PER_HOP, DEFAULT_FABRIC_TX_BUFFER_BYTES,
-    DEFAULT_HBM_DELAY_TICKS, DEFAULT_HBM_SIZE_BYTES, DEFAULT_PE_ADDS_PER_TICK,
-    DEFAULT_PE_COMPARES_PER_TICK, DEFAULT_PE_LSU_ACCESS_BYTES, DEFAULT_PE_MULS_PER_TICK,
+    DEFAULT_HBM_DELAY_TICKS, DEFAULT_HBM_SIZE_BYTES, DEFAULT_PE_LSU_ACCESS_BYTES,
     DEFAULT_PE_NUM_ACTIVE_REQUESTS, DEFAULT_PE_OVERHEAD_SIZE_BYTES, DEFAULT_PE_SRAM_BYTES,
 };
 use gwr_platform::connection_id::{
     cache_endpoint_id, fabric_port_endpoint_id, mem_endpoint_id, pe_endpoint_id,
 };
 use gwr_platform::types::{
-    CacheConfigSection, CacheSection, ConnectSection, FabricConfigSection, FabricKind,
-    FabricSection, MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
-    PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
+    CacheConfigSection, CacheSection, CoherencyManagerConfigSection, CoherencyManagerSection,
+    ConnectSection, FabricConfigSection, FabricKind, FabricSection, MemoryConfigSection,
+    MemoryKind, MemoryMapSection, MemorySection, PlatformConfig, ProcessingElementConfigSection,
+    ProcessingElementSection,
 };
 use gwr_platform::yaml::platform_to_yaml_str;
 
 const FABRIC_NAME: &str = "fabric0";
 const PE_MEMORY_MAP_NAME: &str = "default_memory_map";
 
-#[derive(Debug, Parser)]
-#[command(about = "Build a platform file based around a 2D fabric")]
-struct Args {
-    #[arg(long, default_value = "platform.yaml")]
-    out: PathBuf,
-
-    #[arg(long, default_value_t = DEFAULT_PE_NUM_ACTIVE_REQUESTS)]
-    pe_active_requests: usize,
-
-    #[arg(long, default_value_t = DEFAULT_PE_LSU_ACCESS_BYTES)]
-    pe_lsu_access_bytes: usize,
-
-    #[arg(long, default_value_t = DEFAULT_PE_SRAM_BYTES)]
-    pe_sram_bytes: u64,
-
-    #[arg(long, default_value_t = DEFAULT_PE_ADDS_PER_TICK)]
-    pe_adds_per_tick: f64,
-
-    #[arg(long, default_value_t = DEFAULT_PE_MULS_PER_TICK)]
-    pe_muls_per_tick: f64,
-
-    #[arg(long, default_value_t = DEFAULT_PE_COMPARES_PER_TICK)]
-    pe_compares_per_tick: f64,
-
-    #[arg(long, default_value_t = DEFAULT_PE_OVERHEAD_SIZE_BYTES)]
-    pe_overhead_size_bytes: usize,
-
-    #[arg(long, value_enum, default_value_t = FabricKind::Functional)]
-    fabric_model: FabricKind,
-
-    #[arg(long, value_enum, default_value_t = DEFAULT_FABRIC_ROUTING)]
-    fabric_routing: FabricRoutingAlgorithm,
-
-    #[arg(long, default_value_t = 2)]
-    num_columns: usize,
-
-    #[arg(long, default_value_t = 2)]
-    num_rows: usize,
-
-    #[arg(long, default_value_t = 2)]
-    num_hbms: usize,
-
-    #[arg(long, default_value_t = DEFAULT_HBM_SIZE_BYTES)]
-    hbm_base: usize,
-
-    #[arg(long, default_value_t = DEFAULT_HBM_SIZE_BYTES)]
-    hbm_size: usize,
-
-    #[arg(long, default_value_t = 0)]
-    l1_kib: usize,
-
-    #[arg(long, default_value_t = 32)]
-    l1_bytes_per_tick: usize,
-
-    #[arg(long, default_value_t = 4)]
-    l1_num_ways: usize,
-
-    #[arg(long, default_value_t = 5)]
-    l1_latency: usize,
-
-    #[arg(long, default_value_t = 0)]
-    l2_kib: usize,
-
-    #[arg(long, default_value_t = 32)]
-    l2_bytes_per_tick: usize,
-
-    #[arg(long, default_value_t = 8)]
-    l2_num_ways: usize,
-
-    #[arg(long, default_value_t = 20)]
-    l2_latency: usize,
-
-    #[arg(long, default_value_t = false)]
-    use_coherency_managers: bool,
-}
-
-impl Args {
-    fn validate(&self) -> Result<(), String> {
-        if self.use_coherency_managers
-            && (self.l1_kib == 0 || self.l2_kib != 0 || self.num_hbms == 0)
-        {
-            return Err("Coherency requires L1 caches, at least one HBM, and no L2 cache (hierarchical coherence is unsupported)".into());
-        }
-        if self.l2_kib != 0 && self.l1_kib == 0 {
-            return Err("Cannot have an L2 cache without an L1 cache".to_string());
-        }
-
-        let num_nodes = self.num_columns * self.num_rows;
-        if self.num_hbms > num_nodes {
-            return Err(format!(
-                "num-hbms ({}) cannot exceed number of fabric nodes ({num_nodes})",
-                self.num_hbms
-            ));
-        }
-
-        Ok(())
-    }
-}
-
-struct PeIdGen {
-    num_rows: usize,
-    pe_id: usize,
-    max_pe_id: usize,
-}
-
-impl PeIdGen {
-    fn new(args: &Args) -> Result<Self, String> {
-        args.validate()?;
-        let num_nodes = args.num_columns * args.num_rows;
-        Ok(Self {
-            num_rows: args.num_rows,
-            pe_id: 0,
-            max_pe_id: num_nodes - args.num_hbms,
-        })
-    }
-}
-
-impl Iterator for PeIdGen {
-    type Item = (usize, usize);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.pe_id < self.max_pe_id {
-            let pe_id = self.pe_id;
-            self.pe_id += 1;
-            Some((pe_id / self.num_rows, pe_id % self.num_rows))
-        } else {
-            None
-        }
-    }
-}
-
-struct HbmIdGen {
-    num_rows: usize,
-    mem_id: usize,
-    max_mem_id: usize,
-}
-
-impl HbmIdGen {
-    fn new(args: &Args) -> Result<Self, String> {
-        args.validate()?;
-        let num_nodes = args.num_columns * args.num_rows;
-        Ok(Self {
-            num_rows: args.num_rows,
-            mem_id: num_nodes - args.num_hbms,
-            max_mem_id: num_nodes,
-        })
-    }
-}
-
-impl Iterator for HbmIdGen {
-    type Item = (usize, usize);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.mem_id < self.max_mem_id {
-            let mem_id = self.mem_id;
-            self.mem_id += 1;
-            Some((mem_id / self.num_rows, mem_id % self.num_rows))
-        } else {
-            None
-        }
-    }
-}
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
-    let platform = build_platform(&args)?;
-    let yaml = platform_to_yaml_str(&platform)?;
     if let Some(parent) = args.out.parent() {
-        fs::create_dir_all(parent)?;
+        create_dir_all(parent)?;
     }
-    fs::write(&args.out, yaml)?;
-
+    let platform = build_platform(&args)?;
+    write(&args.out, platform_to_yaml_str(&platform)?)?;
     Ok(())
 }
 
 fn build_platform(args: &Args) -> Result<PlatformConfig, String> {
     let memory_map = MemoryMapSection {
         name: PE_MEMORY_MAP_NAME.to_string(),
-        devices: build_memory_map_devices(args),
+        devices: build_memory_map_ranges(args),
     };
     let pe_config = build_pe_config(args);
 
@@ -214,17 +55,53 @@ fn build_platform(args: &Args) -> Result<PlatformConfig, String> {
             cache.coherency_managers = Some(vec!["cm0".to_owned()]);
         }
     }
+
     Ok(PlatformConfig {
         coherency_managers: args.use_coherency_managers.then(|| {
-            vec![gwr_platform::types::CoherencyManagerSection {
+            vec![CoherencyManagerSection {
                 name: "cm0".to_owned(),
                 memory_map: PE_MEMORY_MAP_NAME.to_owned(),
-                config: gwr_platform::types::CoherencyManagerConfigSection {
+                config: CoherencyManagerConfigSection {
                     line_size_bytes: Some(DEFAULT_CACHE_LINE_SIZE_BYTES),
                     operations_per_tick: None,
                 },
             }]
         }),
+
+        operation_classes: BTreeMap::from([
+            (
+                "add".into(),
+                OperationClass {
+                    operations: vec!["add".into()],
+                    arity: 2,
+                    flops_per_op: 1,
+                },
+            ),
+            (
+                "mul".into(),
+                OperationClass {
+                    operations: vec!["mul".into()],
+                    arity: 2,
+                    flops_per_op: 1,
+                },
+            ),
+            (
+                "compare".into(),
+                OperationClass {
+                    operations: vec!["compare".into(), "maximum".into()],
+                    arity: 2,
+                    flops_per_op: 1,
+                },
+            ),
+            (
+                "matrix".into(),
+                OperationClass {
+                    operations: vec!["matrix_mac".into()],
+                    arity: 2,
+                    flops_per_op: 2,
+                },
+            ),
+        ]),
         memory_maps: vec![memory_map],
         defaults: None,
         processing_elements: Some(build_processing_elements(args, &pe_config)?),
@@ -233,6 +110,10 @@ fn build_platform(args: &Args) -> Result<PlatformConfig, String> {
         memories: Some(build_memories(args)),
         connections: Some(build_connections(args)?),
     })
+}
+
+fn build_memory_map_ranges(args: &Args) -> Vec<String> {
+    (0..args.num_hbms).map(|mm| format!("hbm{mm}")).collect()
 }
 
 fn build_fabrics(args: &Args) -> Vec<FabricSection> {
@@ -303,10 +184,10 @@ fn build_cache(
         coherency_managers: None,
         name,
         config: CacheConfigSection {
-            bw_bytes_per_tick: Some(bytes_per_tick),
-            line_size_bytes: Some(DEFAULT_CACHE_LINE_SIZE_BYTES),
             max_inflight_parents: None,
             max_inflight_fills: None,
+            bw_bytes_per_tick: Some(bytes_per_tick),
+            line_size_bytes: Some(DEFAULT_CACHE_LINE_SIZE_BYTES),
             num_ways: Some(num_ways),
             num_sets: Some(num_sets),
             delay_ticks: Some(latency),
@@ -385,20 +266,84 @@ fn build_connections(args: &Args) -> Result<Vec<ConnectSection>, String> {
     Ok(connections)
 }
 
+struct HbmIdGen {
+    num_rows: usize,
+    mem_id: usize,
+    max_mem_id: usize,
+}
+
+impl HbmIdGen {
+    fn new(args: &Args) -> Result<Self, String> {
+        args.validate()?;
+        let num_nodes = args.num_columns * args.num_rows;
+        Ok(Self {
+            num_rows: args.num_rows,
+            mem_id: num_nodes - args.num_hbms,
+            max_mem_id: num_nodes,
+        })
+    }
+}
+
+impl Iterator for HbmIdGen {
+    type Item = (usize, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.mem_id < self.max_mem_id {
+            let mem_id = self.mem_id;
+            self.mem_id += 1;
+            Some((mem_id / self.num_rows, mem_id % self.num_rows))
+        } else {
+            None
+        }
+    }
+}
+
 fn build_pe_config(args: &Args) -> ProcessingElementConfigSection {
     ProcessingElementConfigSection {
         num_active_requests: Some(args.pe_active_requests),
         lsu_access_bytes: Some(args.pe_lsu_access_bytes),
         overhead_size_bytes: Some(args.pe_overhead_size_bytes),
         sram_bytes: Some(args.pe_sram_bytes),
-        adds_per_tick: Some(args.pe_adds_per_tick),
-        muls_per_tick: Some(args.pe_muls_per_tick),
-        compares_per_tick: Some(args.pe_compares_per_tick),
+        compute: Some(ComputeConfig {
+            execution_units: [
+                (
+                    "alu",
+                    vec![
+                        ("add", args.pe_adds_per_tick),
+                        ("mul", args.pe_muls_per_tick),
+                        ("compare", args.pe_compares_per_tick),
+                    ],
+                ),
+                ("matrix", vec![("matrix", args.pe_matrix_macs_per_tick)]),
+            ]
+            .into_iter()
+            .map(|(name, capabilities)| {
+                (
+                    name.into(),
+                    ExecutionUnitConfig {
+                        matrix_accumulator_capacity_bytes: None,
+                        capabilities: capabilities
+                            .into_iter()
+                            .map(|(class, ops_per_tick)| CapabilityConfig {
+                                class: class.into(),
+                                ops_per_tick,
+                                input_dtypes: None,
+                                kind: if class == "matrix" {
+                                    CapabilityKind::Matrix {
+                                        accumulator: DataType::Fp32,
+                                        matrix_service_tile: None,
+                                    }
+                                } else {
+                                    CapabilityKind::Scalar
+                                },
+                            })
+                            .collect(),
+                    },
+                )
+            })
+            .collect(),
+        }),
     }
-}
-
-fn build_memory_map_devices(args: &Args) -> Vec<String> {
-    (0..args.num_hbms).map(|mm| format!("hbm{mm}")).collect()
 }
 
 fn build_processing_elements(
@@ -412,6 +357,143 @@ fn build_processing_elements(
             config: pe_config.clone(),
         })
         .collect())
+}
+
+struct PeIdGen {
+    num_rows: usize,
+    pe_id: usize,
+    max_pe_id: usize,
+}
+
+impl PeIdGen {
+    fn new(args: &Args) -> Result<Self, String> {
+        args.validate()?;
+        let num_nodes = args.num_columns * args.num_rows;
+        Ok(Self {
+            num_rows: args.num_rows,
+            pe_id: 0,
+            max_pe_id: num_nodes - args.num_hbms,
+        })
+    }
+}
+
+impl Iterator for PeIdGen {
+    type Item = (usize, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pe_id < self.max_pe_id {
+            let pe_id = self.pe_id;
+            self.pe_id += 1;
+            Some((pe_id / self.num_rows, pe_id % self.num_rows))
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Build a platform file based around a 2D fabric")]
+struct Args {
+    #[arg(long, default_value = "platform.yaml")]
+    out: PathBuf,
+
+    #[arg(long, default_value_t = DEFAULT_PE_NUM_ACTIVE_REQUESTS)]
+    pe_active_requests: usize,
+
+    #[arg(long, default_value_t = DEFAULT_PE_LSU_ACCESS_BYTES)]
+    pe_lsu_access_bytes: usize,
+
+    #[arg(long, default_value_t = DEFAULT_PE_SRAM_BYTES)]
+    pe_sram_bytes: u64,
+
+    #[arg(long, default_value_t = 16.0)]
+    pe_adds_per_tick: f64,
+
+    #[arg(long, default_value_t = 4.0)]
+    pe_muls_per_tick: f64,
+
+    #[arg(long, default_value_t = 16.0)]
+    pe_compares_per_tick: f64,
+
+    /// Matrix MACs per tick with an FP32 accumulator, each counted as two
+    /// FLOPs.
+    #[arg(long, default_value_t = 32.0)]
+    pe_matrix_macs_per_tick: f64,
+
+    #[arg(long, default_value_t = DEFAULT_PE_OVERHEAD_SIZE_BYTES)]
+    pe_overhead_size_bytes: usize,
+
+    #[arg(long, value_enum, default_value_t = FabricKind::Functional)]
+    fabric_model: FabricKind,
+
+    #[arg(long, value_enum, default_value_t = DEFAULT_FABRIC_ROUTING)]
+    fabric_routing: FabricRoutingAlgorithm,
+
+    #[arg(long, default_value_t = 2)]
+    num_columns: usize,
+
+    #[arg(long, default_value_t = 2)]
+    num_rows: usize,
+
+    #[arg(long, default_value_t = 2)]
+    num_hbms: usize,
+
+    #[arg(long, default_value_t = DEFAULT_HBM_SIZE_BYTES)]
+    hbm_base: usize,
+
+    #[arg(long, default_value_t = DEFAULT_HBM_SIZE_BYTES)]
+    hbm_size: usize,
+
+    #[arg(long, default_value_t = 0)]
+    l1_kib: usize,
+
+    #[arg(long, default_value_t = 32)]
+    l1_bytes_per_tick: usize,
+
+    #[arg(long, default_value_t = 4)]
+    l1_num_ways: usize,
+
+    #[arg(long, default_value_t = 5)]
+    l1_latency: usize,
+
+    #[arg(long, default_value_t = 0)]
+    l2_kib: usize,
+
+    #[arg(long, default_value_t = 32)]
+    l2_bytes_per_tick: usize,
+
+    #[arg(long, default_value_t = 8)]
+    l2_num_ways: usize,
+
+    #[arg(long, default_value_t = 20)]
+    l2_latency: usize,
+
+    #[arg(long, default_value_t = false)]
+    use_coherency_managers: bool,
+}
+
+impl Args {
+    fn validate(&self) -> Result<(), String> {
+        if self.use_coherency_managers
+            && (self.l1_kib == 0 || self.l2_kib != 0 || self.num_hbms == 0)
+        {
+            return Err("Coherency requires L1 caches, at least one HBM, and no L2 cache (hierarchical coherence is unsupported)".into());
+        }
+
+        if self.l2_kib != 0 && self.l1_kib == 0 {
+            return Err("Cannot have an L2 cache without an L1 cache".to_string());
+        }
+
+        let num_nodes = self.num_columns * self.num_rows;
+        if self.num_hbms > num_nodes {
+            return Err(format!(
+                "num-hbms ({}) cannot exceed number of fabric nodes ({num_nodes})",
+                self.num_hbms
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 fn create_name(prefix: &str, column: usize, row: usize) -> String {
