@@ -20,6 +20,12 @@ use crate::types::{AccessType, DeviceId, SimResult};
 /// sent.
 pub trait TotalBytes {
     fn total_bytes(&self) -> usize;
+
+    /// Payload bytes when the protocol distinguishes payload from headers.
+    /// Generic objects may leave this unknown.
+    fn payload_bytes(&self) -> Option<usize> {
+        None
+    }
 }
 
 /// The `Routable` trait provides an interface to an object to enable it to be

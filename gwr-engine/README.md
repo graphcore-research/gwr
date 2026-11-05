@@ -83,6 +83,75 @@ fn main() {
 
 <!-- prettier-ignore-end -->
 
+### Quiescent batches and construction transactions
+
+Aggregate models can opt into `Engine::register_quiescence`. Producers request
+its cloneable handle; repeated requests coalesce. At each simulation time and
+phase, the executor drains runnable tasks and simultaneous clock wakes, then
+runs a snapshot of pending callbacks in ascending caller-supplied ID order.
+Callbacks may wake tasks or request another round, but cannot recursively run
+the engine. Tasks drain before the next snapshot; later phases form separate
+batches. More than 10,000 rounds at one time/phase produces a diagnostic error.
+
+This orders callback batches, not arbitrary detailed-port acceptance. Producer
+polling remains unordered, so models must sort their own batch contents by
+stable identity where order matters.
+
+Factories can call `Engine::next_quiescence_id()` and immediately register the
+returned ID. It avoids committed and staged IDs but does not reserve one.
+Allocation follows construction order and is independent of trace entity IDs,
+which need not be unique when tracing is disabled.
+
+```rust
+use std::cell::Cell;
+use std::rc::Rc;
+use gwr_engine::engine::Engine;
+use gwr_engine::quiescence::QuiescenceCallback;
+use gwr_engine::types::SimResult;
+
+struct Batch(Cell<usize>);
+impl QuiescenceCallback for Batch {
+    fn on_quiescence(&self) -> SimResult {
+        self.0.set(self.0.get() + 1);
+        Ok(())
+    }
+}
+
+fn main() {
+let mut engine = Engine::default();
+let transaction = engine.registration_transaction().unwrap();
+let batch = Rc::new(Batch(Cell::new(0)));
+let handle = engine.register_quiescence(10, batch.clone()).unwrap();
+// Existing component constructors using engine.register(...) are also staged.
+transaction.commit();
+handle.request().unwrap();
+handle.request().unwrap();
+engine.run().unwrap();
+assert_eq!(batch.0.get(), 1);
+}
+```
+
+Dropping a transaction without committing discards its components, callbacks,
+and callback-owned drain observers. Escaped callback handles become invalid;
+staged callbacks cannot be requested. Nested transactions, execution during
+construction, and runtime spawning during construction are forbidden. Spawning
+panics before enqueuing work; run/step and nested transactions return errors.
+The guard does not undo entity allocation or construction trace records.
+Platform builders must explicitly use this guard; it is not automatic.
+
+A domain with unfinished service, latency tails, transactions, or joins must
+implement `QuiescenceCallback::check_drained`. At natural termination the engine
+calls these checks and includes the callback ID with any stall diagnostic.
+Observers should include blocked flow IDs, slots, dependencies, and expected
+response producers; the engine cannot infer those from parked futures.
+
+`run_until` retains its early-stop behavior: once its event waiter requests
+termination, no further callback round or drain check is forced. A synchronous
+callback snapshot already running finishes before tasks are polled again.
+Pending callbacks survive the return; arbitrary restart of detailed tasks is not
+guaranteed. Engines with no registered callbacks retain their existing batching
+and termination behavior.
+
 <!-- ANCHOR_END: overview -->
 
 ## Simple Application

@@ -13,6 +13,7 @@ pub mod executor;
 #[cfg(feature = "global_allocator")]
 mod global_allocator;
 pub mod port;
+pub mod quiescence;
 pub mod test_helpers;
 pub mod time;
 pub mod traits;
