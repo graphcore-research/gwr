@@ -62,8 +62,9 @@ Other views can be selected using the menu on the left of the page.
 The `frontend` directory contains a static [D3.js] frontend for visualising and
 interacting with a model loaded into `gwr-spotter` from a binary trace.
 
-Run all commands below from the workspace root. The frontend and `gwr-spotter`
-run as separate processes on the same machine.
+Run all commands below from the workspace root. `gwr-spotter` serves its embedded
+frontend and data API from one loopback server; no separate static server is
+required.
 
 ### 1. Create a Trace
 
@@ -82,21 +83,14 @@ Start `gwr-spotter` with the binary trace:
 cargo run --release --bin gwr-spotter -- --bin trace.bin
 ```
 
-Keep `gwr-spotter` running. It starts a loopback data API at
-`http://127.0.0.1:8000` for the frontend; this API is not itself a web page.
-Serve the frontend separately in the next step.
+Keep `gwr-spotter` running. It serves the frontend, JavaScript/CSS assets, and
+data API at `http://127.0.0.1:8000`.
 
-### 3. Serve the Frontend
+### 3. Open the Frontend
 
-Serve the static frontend files on a second loopback port using Python:
-
-```bash
-python3 -m http.server 9991 --bind 127.0.0.1 --directory gwr-spotter/frontend
-```
-
-### 4. Open the Frontend
-
-Open <http://localhost:9991> in a web browser on the same machine.
+Open <http://127.0.0.1:8000> in a web browser on the same machine. The assets
+are included in the binary, so an installed `gwr-spotter` needs no frontend
+source directory or Python runtime.
 
 ## Features
 
@@ -114,7 +108,7 @@ If the page is blank or cannot load the model:
 
 - Confirm that `gwr-spotter` is still running with the binary trace loaded.
 - Confirm that the `--no-server` flag has not been passed to `gwr-spotter`.
-- Confirm that ports 8000 and 9991 are not being used by another process.
+- Confirm that port 8000 is not being used by another process.
 - Check the browser console for failed requests to `http://localhost:8000`.
 
 <!-- ANCHOR_END: frontend_usage -->

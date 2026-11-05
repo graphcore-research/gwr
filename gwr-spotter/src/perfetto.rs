@@ -9,6 +9,21 @@ use gwr_track::Id;
 use gwr_track::perfetto_trace_builder::PerfettoTraceBuilder;
 use gwr_track::trace_visitor::{TraceVisitor, process_capnp};
 
+pub fn generate_perfetto_trace(input_bin_file_path: &Path, output_file_path: &Path) {
+    let file = match File::open(input_bin_file_path) {
+        Ok(file) => file,
+        Err(e) => {
+            println!("Error: {e}");
+            return;
+        }
+    };
+
+    let reader = BufReader::new(file);
+    let mut perfetto_gen = PerfettoGenerator::new(output_file_path);
+    process_capnp(reader, &mut perfetto_gen);
+    perfetto_gen.finish();
+}
+
 struct PerfettoGenerator {
     output: File,
     current_time_ns: u64,
@@ -49,7 +64,7 @@ impl TraceVisitor for PerfettoGenerator {
             .build_enter_exit_track_descriptor_trace_packet(
                 self.current_time_ns,
                 id,
-                created_by,
+                Some(created_by),
                 name,
             );
         let buf = self.trace_builder.build_trace_to_bytes(vec![trace_packet]);
@@ -61,7 +76,12 @@ impl TraceVisitor for PerfettoGenerator {
     fn create_monitor(&mut self, created_by: Id, id: Id, name: &str) {
         let trace_packet = self
             .trace_builder
-            .build_value_track_descriptor_trace_packet(self.current_time_ns, id, created_by, name);
+            .build_value_track_descriptor_trace_packet(
+                self.current_time_ns,
+                id,
+                Some(created_by),
+                name,
+            );
         let buf = self.trace_builder.build_trace_to_bytes(vec![trace_packet]);
         self.output
             .write_all(&buf)
@@ -74,7 +94,7 @@ impl TraceVisitor for PerfettoGenerator {
             .build_activity_track_descriptor_trace_packet(
                 self.current_time_ns,
                 id,
-                created_by,
+                Some(created_by),
                 name,
             );
         let buf = self.trace_builder.build_trace_to_bytes(vec![trace_packet]);
@@ -99,7 +119,7 @@ impl TraceVisitor for PerfettoGenerator {
             .build_enter_exit_track_descriptor_trace_packet(
                 self.current_time_ns,
                 id,
-                created_by,
+                Some(created_by),
                 details,
             );
         let buf = self.trace_builder.build_trace_to_bytes(vec![trace_packet]);
@@ -195,19 +215,4 @@ impl TraceVisitor for PerfettoGenerator {
     fn time(&mut self, _id: Id, time_ns: f64) {
         self.current_time_ns = time_ns as u64;
     }
-}
-
-pub fn generate_perfetto_trace(input_bin_file_path: &Path, output_file_path: &Path) {
-    let file = match File::open(input_bin_file_path) {
-        Ok(file) => file,
-        Err(e) => {
-            println!("Error: {e}");
-            return;
-        }
-    };
-
-    let reader = BufReader::new(file);
-    let mut perfetto_gen = PerfettoGenerator::new(output_file_path);
-    process_capnp(reader, &mut perfetto_gen);
-    perfetto_gen.finish();
 }

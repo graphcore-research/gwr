@@ -33,15 +33,6 @@ pub struct PerfettoTraceBuilder {
     id_to_name: HashMap<u64, String>,
 }
 
-impl Default for PerfettoTraceBuilder {
-    fn default() -> Self {
-        Self {
-            trusted_packet_sequence_id: random(),
-            id_to_name: HashMap::new(),
-        }
-    }
-}
-
 impl PerfettoTraceBuilder {
     /// Create a Perfetto trace builder.
     ///
@@ -52,10 +43,26 @@ impl PerfettoTraceBuilder {
         PerfettoTraceBuilder::default()
     }
 
+    /// Build a TracePacket containing the TrackDescriptor for
+    /// [crate::tracker::Track::enter] and [crate::tracker::Track::exit] events
+    /// (using an incremental counter).
+    #[must_use]
+    pub fn build_enter_exit_track_descriptor_trace_packet(
+        &mut self,
+        current_time_ns: u64,
+        id: Id,
+        parent: Option<Id>,
+        name: &str,
+    ) -> TracePacket {
+        let track_descriptor = self.build_incremental_counter_track_descriptor(id, parent, name);
+
+        self.build_track_descriptor_trace_packet(current_time_ns, track_descriptor)
+    }
+
     fn build_incremental_counter_track_descriptor(
         &mut self,
         id: Id,
-        parent: Id,
+        parent: Option<Id>,
         name: &str,
     ) -> TrackDescriptor {
         let counter_desc = CounterDescriptor {
@@ -71,10 +78,25 @@ impl PerfettoTraceBuilder {
         track_descriptor
     }
 
+    /// Build a TracePacket containing the TrackDescriptor for a sequence of
+    /// [crate::tracker::Track::value]s.
+    #[must_use]
+    pub fn build_value_track_descriptor_trace_packet(
+        &mut self,
+        current_time_ns: u64,
+        id: Id,
+        parent: Option<Id>,
+        name: &str,
+    ) -> TracePacket {
+        let track_descriptor = self.build_absolute_counter_track_descriptor(id, parent, name);
+
+        self.build_track_descriptor_trace_packet(current_time_ns, track_descriptor)
+    }
+
     fn build_absolute_counter_track_descriptor(
         &mut self,
         id: Id,
-        parent: Id,
+        parent: Option<Id>,
         name: &str,
     ) -> TrackDescriptor {
         let counter_desc = CounterDescriptor {
@@ -90,95 +112,6 @@ impl PerfettoTraceBuilder {
         track_descriptor
     }
 
-    fn build_track_descriptor(&mut self, id: Id, parent: Id, name: &str) -> TrackDescriptor {
-        self.set_id_to_name(id, name);
-
-        TrackDescriptor {
-            uuid: Some(id.0),
-            parent_uuid: Some(parent.0),
-            static_or_dynamic_name: Some(StaticOrDynamicName::AtraceName(name.to_string())),
-            ..Default::default()
-        }
-    }
-
-    fn set_id_to_name(&mut self, id: Id, name: &str) {
-        self.id_to_name.insert(id.0, name.to_owned());
-    }
-
-    fn build_incremental_counter_track_event(
-        &self,
-        id: Id,
-        other: Id,
-        increment: i64,
-    ) -> TrackEvent {
-        let mut track_event = self.build_track_event(id, other);
-        track_event.set_type(track_event::Type::Counter);
-        track_event.counter_value_field =
-            Some(track_event::CounterValueField::CounterValue(increment));
-
-        track_event
-    }
-
-    fn build_absolute_double_counter_track_event(&self, id: Id, absolute: f64) -> TrackEvent {
-        let mut track_event = self.build_track_event(id, Id(0));
-        track_event.set_type(track_event::Type::Counter);
-        track_event.counter_value_field =
-            Some(track_event::CounterValueField::DoubleCounterValue(absolute));
-
-        track_event
-    }
-
-    fn build_track_event(&self, id: Id, other: Id) -> TrackEvent {
-        TrackEvent {
-            track_uuid: Some(id.0),
-            name_field: Some(track_event::NameField::Name(self.id_to_name(id, other))),
-            ..Default::default()
-        }
-    }
-
-    fn id_to_name(&self, id: Id, other: Id) -> String {
-        let name = match id.0 {
-            0 => "root",
-            _ => match self.id_to_name.get(&other.0) {
-                Some(name) => name,
-                None => "UNKNOWN",
-            },
-        };
-
-        name.to_string()
-    }
-
-    /// Build a TracePacket containing the TrackDescriptor for
-    /// [crate::tracker::Track::enter] and [crate::tracker::Track::exit] events
-    /// (using an incremental counter).
-    #[must_use]
-    pub fn build_enter_exit_track_descriptor_trace_packet(
-        &mut self,
-        current_time_ns: u64,
-        id: Id,
-        parent: Id,
-        name: &str,
-    ) -> TracePacket {
-        let track_descriptor = self.build_incremental_counter_track_descriptor(id, parent, name);
-
-        self.build_track_descriptor_trace_packet(current_time_ns, track_descriptor)
-    }
-
-    /// Build a TracePacket containing the TrackDescriptor for a sequence of
-    /// [crate::tracker::Track::value]s.
-    #[must_use]
-    pub fn build_value_track_descriptor_trace_packet(
-        &mut self,
-        current_time_ns: u64,
-        id: Id,
-        parent: Id,
-        name: &str,
-    ) -> TracePacket {
-        let track_descriptor = self.build_absolute_counter_track_descriptor(id, parent, name);
-
-        self.build_track_descriptor_trace_packet(current_time_ns, track_descriptor)
-    }
-
     /// Build a TracePacket containing the TrackDescriptor for activity slices
     /// denoted by [crate::tracker::Track::begin_activity] and
     /// [crate::tracker::Track::end_activity] events.
@@ -187,12 +120,32 @@ impl PerfettoTraceBuilder {
         &mut self,
         current_time_ns: u64,
         id: Id,
-        parent: Id,
+        parent: Option<Id>,
         name: &str,
     ) -> TracePacket {
         let track_descriptor = self.build_track_descriptor(id, parent, name);
 
         self.build_track_descriptor_trace_packet(current_time_ns, track_descriptor)
+    }
+
+    fn build_track_descriptor(
+        &mut self,
+        id: Id,
+        parent: Option<Id>,
+        name: &str,
+    ) -> TrackDescriptor {
+        self.set_id_to_name(id, name);
+
+        TrackDescriptor {
+            uuid: Some(id.0),
+            parent_uuid: parent.map(|id| id.0),
+            static_or_dynamic_name: Some(StaticOrDynamicName::AtraceName(name.to_string())),
+            ..Default::default()
+        }
+    }
+
+    fn set_id_to_name(&mut self, id: Id, name: &str) {
+        self.id_to_name.insert(id.0, name.to_owned());
     }
 
     fn build_track_descriptor_trace_packet(
@@ -236,6 +189,20 @@ impl PerfettoTraceBuilder {
         self.build_track_event_trace_packet(current_time_ns, track_event)
     }
 
+    fn build_incremental_counter_track_event(
+        &self,
+        id: Id,
+        other: Id,
+        increment: i64,
+    ) -> TrackEvent {
+        let mut track_event = self.build_track_event(id, other);
+        track_event.set_type(track_event::Type::Counter);
+        track_event.counter_value_field =
+            Some(track_event::CounterValueField::CounterValue(increment));
+
+        track_event
+    }
+
     /// Build a TracePacket containing the TrackEvent for a floating point
     /// [crate::tracker::Track::value].
     #[must_use]
@@ -248,6 +215,35 @@ impl PerfettoTraceBuilder {
         let track_event = self.build_absolute_double_counter_track_event(id, value);
 
         self.build_track_event_trace_packet(current_time_ns, track_event)
+    }
+
+    fn build_absolute_double_counter_track_event(&self, id: Id, absolute: f64) -> TrackEvent {
+        let mut track_event = self.build_track_event(id, Id(0));
+        track_event.set_type(track_event::Type::Counter);
+        track_event.counter_value_field =
+            Some(track_event::CounterValueField::DoubleCounterValue(absolute));
+
+        track_event
+    }
+
+    fn build_track_event(&self, id: Id, other: Id) -> TrackEvent {
+        TrackEvent {
+            track_uuid: Some(id.0),
+            name_field: Some(track_event::NameField::Name(self.id_to_name(id, other))),
+            ..Default::default()
+        }
+    }
+
+    fn id_to_name(&self, id: Id, other: Id) -> String {
+        let name = match id.0 {
+            0 => "root",
+            _ => match self.id_to_name.get(&other.0) {
+                Some(name) => name,
+                None => "UNKNOWN",
+            },
+        };
+
+        name.to_string()
     }
 
     /// Build a TracePacket containing the TrackEvent for a
@@ -346,6 +342,15 @@ fn build_named_track_event(id: Id, name: &str) -> TrackEvent {
     }
 }
 
+impl Default for PerfettoTraceBuilder {
+    fn default() -> Self {
+        Self {
+            trusted_packet_sequence_id: random(),
+            id_to_name: HashMap::new(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use gwr_perfetto::protos::trace_packet::Data;
@@ -356,7 +361,7 @@ mod tests {
     fn activity_packets_are_perfetto_slices() {
         let mut builder = PerfettoTraceBuilder::new();
         let descriptor =
-            builder.build_activity_track_descriptor_trace_packet(0, Id(11), Id(10), "pe::op");
+            builder.build_activity_track_descriptor_trace_packet(0, Id(11), Some(Id(10)), "pe::op");
         let begin = builder.build_activity_begin_trace_packet(42, Id(11), "add_task (add)", None);
         let correlated_begin =
             builder.build_activity_begin_trace_packet(43, Id(11), "add compute", Some(99));

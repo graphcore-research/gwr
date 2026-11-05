@@ -11,7 +11,7 @@ use gwr_track::Id;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
-/// Bind and spawn the local HTTP API used by the visualisation frontend.
+/// Bind and spawn the embedded frontend and its local HTTP API.
 pub async fn spawn() -> std::io::Result<JoinHandle<()>> {
     spawn_on("127.0.0.1:8000").await
 }
@@ -26,7 +26,7 @@ async fn spawn_on(address: &str) -> std::io::Result<JoinHandle<()>> {
 }
 
 fn router() -> Router {
-    Router::new()
+    let mut router = Router::new()
         .route("/entities", get(entities))
         .route("/capacities", get(capacities))
         .route("/fullnesses", get(fullnesses))
@@ -34,9 +34,74 @@ fn router() -> Router {
         .route("/select/{id}", get(select))
         .route("/selected", get(selected))
         .route("/position", get(position))
-        .route("/seek/{line}", get(seek))
-        .layer(middleware::map_response(add_cors_headers))
+        .route("/seek/{line}", get(seek));
+    for &(path, content_type, source) in FRONTEND_ASSETS {
+        router = router.route(
+            path,
+            get(move || async move { ([(header::CONTENT_TYPE, content_type)], source) }),
+        );
+    }
+    router.layer(middleware::map_response(add_cors_headers))
 }
+
+// Only known frontend files are exposed; requests never access the filesystem.
+const FRONTEND_ASSETS: &[(&str, &str, &str)] = &[
+    (
+        "/",
+        "text/html; charset=utf-8",
+        include_str!("../frontend/index.html"),
+    ),
+    (
+        "/index.html",
+        "text/html; charset=utf-8",
+        include_str!("../frontend/index.html"),
+    ),
+    (
+        "/style.css",
+        "text/css; charset=utf-8",
+        include_str!("../frontend/style.css"),
+    ),
+    (
+        "/main.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../frontend/main.js"),
+    ),
+    (
+        "/lib/d3.v7.min.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../frontend/lib/d3.v7.min.js"),
+    ),
+    (
+        "/lib/jquery-3.4.1.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../frontend/lib/jquery-3.4.1.js"),
+    ),
+    (
+        "/lib/helpers.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../frontend/lib/helpers.js"),
+    ),
+    (
+        "/lib/force_tree.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../frontend/lib/force_tree.js"),
+    ),
+    (
+        "/lib/radial_tidy_tree.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../frontend/lib/radial_tidy_tree.js"),
+    ),
+    (
+        "/lib/sunburst.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../frontend/lib/sunburst.js"),
+    ),
+    (
+        "/lib/tree_map.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../frontend/lib/tree_map.js"),
+    ),
+];
 
 pub(crate) struct SharedState {
     pub(crate) entity_names: Vec<String>,
@@ -207,6 +272,33 @@ mod tests {
 
     fn client() -> AxumClient {
         AxumClient(router())
+    }
+
+    #[tokio::test]
+    async fn frontend_and_all_referenced_assets_are_served_with_browser_content_types() {
+        let client = client();
+        let index = client.get("/").await;
+        assert_eq!(index.status, 200);
+        assert_eq!(index.headers["content-type"], "text/html; charset=utf-8");
+        assert!(index.body.contains("src=\"main.js\""));
+        assert_eq!(client.get("/index.html").await.body, index.body);
+        for (path, content_type) in [
+            ("/style.css", "text/css; charset=utf-8"),
+            ("/main.js", "text/javascript; charset=utf-8"),
+            ("/lib/d3.v7.min.js", "text/javascript; charset=utf-8"),
+            ("/lib/jquery-3.4.1.js", "text/javascript; charset=utf-8"),
+            ("/lib/helpers.js", "text/javascript; charset=utf-8"),
+            ("/lib/force_tree.js", "text/javascript; charset=utf-8"),
+            ("/lib/radial_tidy_tree.js", "text/javascript; charset=utf-8"),
+            ("/lib/sunburst.js", "text/javascript; charset=utf-8"),
+            ("/lib/tree_map.js", "text/javascript; charset=utf-8"),
+        ] {
+            let response = client.get(path).await;
+            assert_eq!(response.status, 200, "{path}");
+            assert_eq!(response.headers["content-type"], content_type, "{path}");
+            assert!(!response.body.is_empty(), "{path}");
+        }
+        assert_eq!(client.get("/Cargo.toml").await.status, 404);
     }
 
     #[tokio::test]

@@ -28,6 +28,7 @@ pub struct TestTracker {
 
     unique_id: RefCell<u64>,
     level: log::Level,
+    monitoring_window: Option<u64>,
 }
 
 impl TestTracker {
@@ -40,7 +41,15 @@ impl TestTracker {
             events: RefCell::new(Vec::new()),
             unique_id: RefCell::new(initial_id),
             level,
+            monitoring_window: None,
         }
+    }
+
+    /// Enable real monitor components in simulations using this test tracker.
+    #[must_use]
+    pub fn with_monitoring_window(mut self, window_ticks: Option<u64>) -> Self {
+        self.monitoring_window = window_ticks;
+        self
     }
 
     fn add_event(&self, event: String) {
@@ -69,7 +78,7 @@ impl Track for TestTracker {
     }
 
     fn monitoring_window_size_for(&self, _id: Id) -> Option<u64> {
-        None
+        self.monitoring_window
     }
 
     fn add_entity(
