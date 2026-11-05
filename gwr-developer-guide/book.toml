@@ -29,11 +29,15 @@ externs = [
   "gwr_track",
 ]
 
+[preprocessor.mermaid]
+command = "mdbook-mermaid"
+
 [output.html]
 smart-punctuation = true
 additional-css = ["theme/custom.css"]
 git-repository-url = "https://github.com/graphcore-research/gwr"
 edit-url-template = "https://github.com/graphcore-research/gwr/edit/main/gwr-developer-guide/{path}"
+additional-js = ["mermaid.min.js", "mermaid-init.js"]
 
 [output.html.playground]
 editable = false
