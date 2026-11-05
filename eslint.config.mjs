@@ -7,6 +7,8 @@ export default [
   {
     ignores: [
       "target/**",
+      "outputs/**",
+      "reports/**",
       "gwr-developer-guide/book/**",
       "gwr-developer-guide/mermaid-init.js",
       "gwr-developer-guide/mermaid.min.js",
