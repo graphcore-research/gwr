@@ -22,6 +22,7 @@ fn create_engine() -> Engine {
 
 pub fn run_engine(mut engine: Engine) {
     engine.run().unwrap();
+    std::mem::forget(engine);
 }
 
 #[must_use]
