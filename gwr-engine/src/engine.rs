@@ -138,7 +138,7 @@ impl Engine {
 
     #[must_use]
     pub fn clock_hz(&mut self, freq_hz: f64) -> Clock {
-        self.executor.get_clock(freq_hz / 1_000_000.0)
+        self.executor.get_clock(freq_hz / 1000.0)
     }
 
     #[must_use]
