@@ -75,6 +75,7 @@ cargo binstall --disable-telemetry --no-confirm --locked   \
   mdbook-cmdrun@0.7.3                                      \
   mdbook-keeper@0.5.0                                      \
   mdbook-linkcheck@0.7.7                                   \
+  mdbook-mermaid@0.16.2                                    \
   typst-cli@0.15.1
 
 if [[ $OSTYPE == "linux"* ]]; then

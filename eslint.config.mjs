@@ -8,6 +8,8 @@ export default [
     ignores: [
       "target/**",
       "gwr-developer-guide/book/**",
+      "gwr-developer-guide/mermaid-init.js",
+      "gwr-developer-guide/mermaid.min.js",
       "gwr-developer-guide/rustdoc_cache/**",
       "gwr-onnx-sys/onnx_src/**",
       "gwr-perfetto-sys/perfetto_src/**",
