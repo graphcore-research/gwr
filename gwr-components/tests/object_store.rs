@@ -82,6 +82,7 @@ mod object_store_harness {
         harness.run_steps(vec![send_rx!(1); NUM_PUTS]);
     }
 }
+
 /// Creating an object store with zero capacity should fail with a SimError.
 ///
 /// This directly exercises the constructor error path.

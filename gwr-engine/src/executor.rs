@@ -59,9 +59,10 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 
+use crate::quiescence::CallbackRegistry;
 use crate::time::clock::Clock;
 use crate::time::simtime::SimTime;
-use crate::types::SimResult;
+use crate::types::{SimError, SimResult};
 
 fn no_op(_: *const ()) {
     unreachable!("borrowed executor waker must not be consumed or dropped");
@@ -196,6 +197,8 @@ struct ExecutorState {
     randomize_task_order: Cell<bool>,
     task_order_rng: RefCell<StdRng>,
     stats: Cell<ExecutorStats>,
+    callbacks: Rc<CallbackRegistry>,
+    running: Cell<bool>,
 }
 
 impl ExecutorState {
@@ -206,6 +209,8 @@ impl ExecutorState {
             randomize_task_order: Cell::new(false),
             task_order_rng: RefCell::new(StdRng::seed_from_u64(rand::random())),
             stats: Cell::new(ExecutorStats::default()),
+            callbacks: Rc::new(CallbackRegistry::default()),
+            running: Cell::new(false),
         }
     }
 }
@@ -221,6 +226,14 @@ impl ExecutorState {
 #[derive(Clone)]
 pub struct Executor {
     state: Rc<ExecutorState>,
+}
+
+struct ExecutionGuard<'a>(&'a Cell<bool>);
+
+impl Drop for ExecutionGuard<'_> {
+    fn drop(&mut self) {
+        self.0.set(false);
+    }
 }
 
 impl Executor {
@@ -265,8 +278,26 @@ impl Executor {
     fn run_internal(
         &self,
         refresh_due: Option<&AtomicBool>,
-        mut observer: impl FnMut(ExecutorSnapshot) -> SimResult,
+        observer: impl FnMut(ExecutorSnapshot) -> SimResult,
     ) -> SimResult {
+        self.run_internal_until(refresh_due, observer, None)
+    }
+
+    pub fn run_until(&self, finished: &Rc<RefCell<bool>>) -> SimResult {
+        self.run_internal_until(None, |_| Ok(()), Some(finished))
+    }
+
+    fn run_internal_until(
+        &self,
+        refresh_due: Option<&AtomicBool>,
+        mut observer: impl FnMut(ExecutorSnapshot) -> SimResult,
+        finished: Option<&Rc<RefCell<bool>>>,
+    ) -> SimResult {
+        self.ensure_can_run()?;
+        self.state.running.set(true);
+        let _execution = ExecutionGuard(&self.state.running);
+        let mut callback_timestamp = None;
+        let mut callback_rounds = 0;
         let mut stats = ExecutorStats::default();
 
         // Reuse the polling buffer across steps. Start with room for 100 tasks
@@ -275,7 +306,10 @@ impl Executor {
 
         let result = (|| {
             loop {
-                self.step(&mut task_queue, &mut stats)?;
+                self.poll_tasks(&mut task_queue, &mut stats, finished)?;
+                if finished.is_some_and(|finished| *finished.borrow()) {
+                    break;
+                }
 
                 if refresh_due.is_some_and(|due| {
                     due.load(Ordering::Relaxed) && due.swap(false, Ordering::Relaxed)
@@ -287,7 +321,35 @@ impl Executor {
                 }
 
                 if self.state.new_tasks.borrow().is_empty() {
+                    // Do not collect until every producer at this timestamp and
+                    // phase has had an opportunity to run, including other
+                    // clocks.
+                    if !self.state.callbacks.is_empty() {
+                        if self.state.time.borrow().has_current_wakes() {
+                            self.advance_time();
+                            continue;
+                        }
+                        if self.state.callbacks.has_pending() {
+                            let timestamp = self.state.time.borrow().timestamp();
+                            if callback_timestamp != Some(timestamp) {
+                                callback_timestamp = Some(timestamp);
+                                callback_rounds = 0;
+                            }
+                            callback_rounds += 1;
+                            if callback_rounds > 10_000 {
+                                return Err(SimError(format!(
+                                    "quiescence round limit at {} ns, phase {}; pending callbacks {:?}",
+                                    timestamp.0,
+                                    timestamp.1,
+                                    self.state.callbacks.pending_ids()
+                                )));
+                            }
+                            self.state.callbacks.run_pending()?;
+                            continue;
+                        }
+                    }
                     if self.state.time.borrow().can_exit() {
+                        self.state.callbacks.check_drained()?;
                         break;
                     }
 
@@ -297,6 +359,7 @@ impl Executor {
                             task_waker.waker.wake();
                         }
                     } else {
+                        self.state.callbacks.check_drained()?;
                         break;
                     }
                 }
@@ -307,12 +370,56 @@ impl Executor {
         result
     }
 
-    // Run a simulation step.
-    //
-    // The caller passes in task_queue as scratch buffer so its allocation can
-    // be reused by each call to step. It is fully drained before step
-    // completes unless there is an error.
-    fn step(&self, task_queue: &mut Vec<Rc<Task>>, stats: &mut ExecutorStats) -> SimResult {
+    fn advance_time(&self) -> bool {
+        let wakers = self.state.time.borrow_mut().advance_time();
+        if let Some(wakers) = wakers {
+            for task_waker in wakers {
+                task_waker.waker.wake();
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn callbacks(&self) -> &Rc<CallbackRegistry> {
+        &self.state.callbacks
+    }
+
+    pub(crate) fn ensure_idle(&self) -> SimResult {
+        if self.state.running.get() {
+            return Err(SimError("executor is already running".into()));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn ensure_can_run(&self) -> SimResult {
+        self.ensure_idle()?;
+        if self.state.callbacks.is_staging() {
+            return Err(SimError(
+                "cannot execute during a registration transaction".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn step(&self, finished: &Rc<RefCell<bool>>) -> SimResult {
+        self.ensure_can_run()?;
+        self.state.running.set(true);
+        let _execution = ExecutionGuard(&self.state.running);
+        let mut stats = self.state.stats.get();
+        let mut task_queue = Vec::with_capacity(100);
+        let result = self.poll_tasks(&mut task_queue, &mut stats, Some(finished));
+        self.state.stats.set(stats);
+        result
+    }
+
+    fn poll_tasks(
+        &self,
+        task_queue: &mut Vec<Rc<Task>>,
+        stats: &mut ExecutorStats,
+        finished: Option<&Rc<RefCell<bool>>>,
+    ) -> SimResult {
         // Append new tasks created since the last step into the task queue
         task_queue.append(&mut self.state.new_tasks.borrow_mut());
         if self.state.randomize_task_order.get() {
@@ -322,6 +429,9 @@ impl Executor {
         // Poll each queued task once. Pending tasks must arrange to be queued
         // again through a saved waker; they are not retained here.
         for task in task_queue.drain(..) {
+            if finished.is_some_and(|finished| *finished.borrow()) {
+                break;
+            }
             let waker = waker_for_task(&task);
             let mut context = Context::from_waker(&waker);
 
@@ -374,7 +484,13 @@ pub struct Spawner {
 }
 
 impl Spawner {
+    /// Queue runtime work. Panics if construction registrations are currently
+    /// staged; constructors must register components rather than spawn futures.
     pub fn spawn(&self, future: impl Future<Output = SimResult> + 'static) {
+        assert!(
+            !self.state.callbacks.is_staging(),
+            "cannot spawn during a registration transaction"
+        );
         self.state
             .new_tasks
             .borrow_mut()
@@ -459,7 +575,9 @@ mod tests {
             assert_eq!(Rc::strong_count(&task), references + 2);
 
             let mut stats = ExecutorStats::default();
-            executor.step(&mut Vec::new(), &mut stats).unwrap();
+            executor
+                .poll_tasks(&mut Vec::new(), &mut stats, None)
+                .unwrap();
             assert!(completed.get());
             assert_eq!(stats.futures_polled, 1);
             assert_eq!(Rc::strong_count(&task), references);
@@ -489,7 +607,7 @@ mod tests {
 
         let mut task_queue = Vec::new();
         executor
-            .step(&mut task_queue, &mut ExecutorStats::default())
+            .poll_tasks(&mut task_queue, &mut ExecutorStats::default(), None)
             .unwrap();
 
         // The test handle and the executor's task handle
@@ -520,13 +638,17 @@ mod tests {
         let mut stats = ExecutorStats::default();
         let mut task_queue = Vec::new();
 
-        executor.step(&mut task_queue, &mut stats).unwrap();
+        executor
+            .poll_tasks(&mut task_queue, &mut stats, None)
+            .unwrap();
         assert_eq!(weak.strong_count(), 1);
         assert!(executor.state.new_tasks.borrow().is_empty());
 
         saved_waker.borrow_mut().take().unwrap().wake();
         assert_eq!(executor.state.new_tasks.borrow().len(), 1);
-        executor.step(&mut task_queue, &mut stats).unwrap();
+        executor
+            .poll_tasks(&mut task_queue, &mut stats, None)
+            .unwrap();
 
         assert_eq!(weak.strong_count(), 0);
         assert_eq!(stats.futures_polled, 2);
@@ -555,7 +677,7 @@ mod tests {
         assert_eq!(executor.state.new_tasks.borrow().len(), 1);
         let mut task_queue = Vec::new();
         executor
-            .step(&mut task_queue, &mut ExecutorStats::default())
+            .poll_tasks(&mut task_queue, &mut ExecutorStats::default(), None)
             .unwrap();
         assert_eq!(weak.strong_count(), 0);
     }
@@ -591,7 +713,7 @@ mod tests {
         let mut task_queue = Vec::new();
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            executor.step(&mut task_queue, &mut ExecutorStats::default())
+            executor.poll_tasks(&mut task_queue, &mut ExecutorStats::default(), None)
         }));
 
         assert!(result.is_err());

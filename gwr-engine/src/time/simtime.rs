@@ -20,6 +20,7 @@ pub struct SimTime {
     entity: Rc<Entity>,
 
     current_ns: f64,
+    current_phase: u32,
 
     /// Clocks are auto-created as required and kept in a HashMap.
     ///
@@ -34,6 +35,7 @@ impl SimTime {
         Self {
             entity: Rc::new(Entity::new(parent, "time")),
             current_ns: 0.0,
+            current_phase: 0,
             clocks: Vec::new(),
         }
     }
@@ -59,6 +61,7 @@ impl SimTime {
                     self.current_ns = next_ns;
                 }
                 next_clock.advance_time(clock_time);
+                self.current_phase = clock_time.phase();
                 next_clock.shared_state.waiting.borrow_mut().pop()
             } else {
                 None
@@ -71,6 +74,19 @@ impl SimTime {
     #[must_use]
     pub fn time_now_ns(&self) -> f64 {
         self.current_ns
+    }
+
+    pub(crate) fn timestamp(&self) -> (f64, u32) {
+        (self.current_ns, self.current_phase)
+    }
+
+    /// Another clock may still have producers at this same time and phase.
+    pub(crate) fn has_current_wakes(&self) -> bool {
+        self.clocks.iter().any(|clock| {
+            !clock.shared_state.waiting_times.borrow().is_empty()
+                && clock.time_of_next() == self.current_ns
+                && clock.phase_of_next() == self.current_phase
+        })
     }
 
     /// The simulation can exit if all scheduled tasks can exit.

@@ -52,6 +52,7 @@ impl<T> Source<T>
 where
     T: SimObject,
 {
+    #[must_use]
     pub fn new_and_register_with_renames(
         engine: &Engine,
         parent: &Rc<Entity>,
@@ -70,6 +71,7 @@ where
         rc_self
     }
 
+    #[must_use]
     pub fn new_and_register(
         engine: &Engine,
         parent: &Rc<Entity>,

@@ -10,11 +10,15 @@ use gwr_track::tracker::stdout_tracker;
 use gwr_track::{Tracker, trace};
 
 use crate::executor::{self, Executor, ExecutorSnapshot, ExecutorStats, Spawner};
+use crate::quiescence::{QuiescenceCallback, QuiescenceHandle};
 use crate::time::clock::Clock;
-use crate::types::{Component, SimResult};
+use crate::types::{Component, Eventable, SimError, SimResult};
 
 /// Use a default clock frequency of 1GHz.
 const DEFAULT_CLOCK_MHZ: f64 = 1000.0;
+
+mod registration;
+pub use registration::RegistrationTransaction;
 
 /// Components registered to be spawned when the simulation starts.
 ///
@@ -25,6 +29,7 @@ const DEFAULT_CLOCK_MHZ: f64 = 1000.0;
 pub struct Registry {
     entity: Rc<Entity>,
     components: RefCell<Vec<Component>>,
+    staged: RefCell<Option<Vec<Component>>>,
 }
 
 impl Registry {
@@ -32,6 +37,7 @@ impl Registry {
         Self {
             entity: Rc::new(Entity::new(parent, "registry")),
             components: RefCell::new(Vec::new()),
+            staged: RefCell::new(None),
         }
     }
 
@@ -46,8 +52,11 @@ impl Registry {
     }
 
     pub fn register(&self, component: Component) {
-        let mut guard = self.components.borrow_mut();
-        guard.push(component);
+        if let Some(staged) = self.staged.borrow_mut().as_mut() {
+            staged.push(component);
+        } else {
+            self.components.borrow_mut().push(component);
+        }
     }
 }
 
@@ -68,7 +77,7 @@ pub struct Engine {
     spawner: Spawner,
     toplevel: Rc<Entity>,
     tracker: Tracker,
-    registry: Registry,
+    registry: Rc<Registry>,
 }
 
 impl Engine {
@@ -76,7 +85,7 @@ impl Engine {
     pub fn new(tracker: &Tracker) -> Self {
         let toplevel = toplevel(tracker, "top");
         let (executor, spawner) = executor::new_executor_and_spawner(&toplevel);
-        let registry = Registry::new(&toplevel);
+        let registry = Rc::new(Registry::new(&toplevel));
         Self {
             executor,
             spawner,
@@ -95,9 +104,59 @@ impl Engine {
         self.registry.register(component);
     }
 
+    /// Register opt-in quiescent work under a stable construction ID. IDs must
+    /// be unique across domains and adapters; registration does not request a
+    /// callback. The engine owns the callback until it is dropped.
+    pub fn register_quiescence(
+        &self,
+        id: u64,
+        callback: Rc<dyn QuiescenceCallback>,
+    ) -> Result<QuiescenceHandle, SimError> {
+        self.executor.callbacks().register(id, callback)
+    }
+
+    /// Suggest the lowest unused callback ID, considering committed and staged
+    /// registrations. This does not reserve the ID: register it before asking
+    /// again. IDs depend on construction order, never on tracing or task polls.
+    pub fn next_quiescence_id(&self) -> Result<u64, SimError> {
+        self.executor.callbacks().next_id()
+    }
+
+    /// Begin an atomic construction transaction. All subsequent component and
+    /// callback registrations use it until commit or drop. Existing
+    /// constructors need no special registration API. No runtime futures
+    /// may be spawned.
+    pub fn registration_transaction(&self) -> Result<RegistrationTransaction, SimError> {
+        self.executor.ensure_idle()?;
+        self.executor.callbacks().begin_staging()?;
+        Ok(RegistrationTransaction::new(
+            self.registry.clone(),
+            self.executor.callbacks().clone(),
+        ))
+    }
+
     pub fn run(&mut self) -> SimResult {
+        self.executor.ensure_can_run()?;
         self.registry.spawn_components(&self.spawner);
         self.executor.run()
+    }
+
+    pub fn run_until<T: Default + Copy + 'static>(&mut self, event: Eventable<T>) -> SimResult {
+        self.executor.ensure_can_run()?;
+        self.registry.spawn_components(&self.spawner);
+
+        // Create an atomic bool that is set to true as soon as the event fires.
+        let finished = Rc::new(RefCell::new(false));
+        {
+            let finished = finished.clone();
+            self.spawner.spawn(async move {
+                event.listen().await;
+                *finished.borrow_mut() = true;
+                Ok(())
+            });
+        }
+
+        self.executor.run_until(&finished)
     }
 
     /// Run the simulation while reporting executor activity after each
@@ -110,6 +169,7 @@ impl Engine {
         interval: Duration,
         observer: impl FnMut(ExecutorSnapshot) -> SimResult,
     ) -> SimResult {
+        self.executor.ensure_can_run()?;
         self.registry.spawn_components(&self.spawner);
         self.executor.run_with_observer(interval, observer)
     }
@@ -192,6 +252,16 @@ impl Default for Engine {
 
 impl Drop for Engine {
     fn drop(&mut self) {
+        self.executor.callbacks().clear();
+        let components = std::mem::take(&mut *self.registry.components.borrow_mut());
+        let staged = self
+            .registry
+            .staged
+            .borrow_mut()
+            .as_mut()
+            .map(std::mem::take);
+        drop(components);
+        drop(staged);
         // The tracker can be using a buffered writer and so it needs to be shut
         // down cleanly to ensure that it is flushed properly.
         self.tracker.shutdown();

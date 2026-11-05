@@ -89,6 +89,7 @@ impl<T> CreditLimiter<T>
 where
     T: SimObject,
 {
+    #[must_use]
     pub fn new_and_register(
         engine: &Engine,
         clock: &Clock,

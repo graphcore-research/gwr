@@ -96,6 +96,10 @@ where
 {
     /// In this case, the `new()` function creates the component from the
     /// parameters provided.
+    #[expect(
+        clippy::must_use_candidate,
+        reason = "Construction registers the actor even when the caller discards its handle"
+    )]
     pub fn new_and_register(
         engine: &Engine,
         clock: &Clock,

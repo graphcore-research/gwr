@@ -42,6 +42,7 @@ impl<T> CreditIssuer<T>
 where
     T: SimObject,
 {
+    #[must_use]
     pub fn new_and_register_with_renames(
         engine: &Engine,
         clock: &Clock,
@@ -63,6 +64,7 @@ where
         rc_self
     }
 
+    #[must_use]
     pub fn new_and_register(
         engine: &Engine,
         clock: &Clock,
