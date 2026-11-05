@@ -186,6 +186,11 @@ impl Platform {
             .collect()
     }
 
+    #[must_use]
+    pub fn pe_idx_by_id(&self) -> HashMap<String, usize> {
+        self.pes_idx_by_id.clone()
+    }
+
     pub fn cache(&self, cache_name: &str) -> Result<&Rc<Cache<MemoryAccess>>, SimError> {
         let idx = self.cache_idx_from_name(cache_name)?;
         Ok(&self.caches[idx])

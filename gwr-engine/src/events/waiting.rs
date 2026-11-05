@@ -32,20 +32,48 @@ impl Waiting {
     }
 
     pub(super) fn remove_listener(&self, listener_id: u64) {
-        let index = self
-            .listeners
-            .borrow()
-            .iter()
-            .position(|listener| listener.id == listener_id);
-        if let Some(index) = index {
-            self.listeners.borrow_mut().remove(index);
-        }
+        let _ = {
+            // Get the listener, if there is one
+            let mut listeners = self.listeners.borrow_mut();
+            let index = listeners
+                .iter()
+                .position(|listener| listener.id == listener_id);
+            let listener = index.map(|i| listeners.remove(i));
+
+            // Drop the listener after releasing the borrow
+            listener
+        };
     }
 
     pub(super) fn wake_all(&self) {
-        for listener in self.listeners.borrow_mut().drain(..) {
+        // This is often called when some resource handle is dropped, to notify
+        // waiters that the resource is now available.
+        //
+        // If those wakers have been cancelled (e.g. because the simulation
+        // engine is being dropped), this may lead to them immediately dropping
+        // the resource request and removing themselves as a listener - i.e.
+        // attempting another mutable borrow of the listener queue.
+
+        // Just take ownership of the current listener queue, to prevent
+        // nested borrows.
+        let mut listeners = self.listeners.borrow_mut();
+        if listeners.is_empty() {
+            return;
+        }
+        let mut current_listeners = std::mem::take(&mut *listeners);
+        drop(listeners);
+
+        for listener in current_listeners.drain(..) {
             listener.waker.wake();
         }
+
+        // Swap the old queue back in to reuse the allocated memory.
+        // We assume the wakers above are consistent with GWR engine; that is,
+        // we assume neither waking nor dropping a waker can cause a new
+        // listener to be added to the queue.
+        let mut listeners = self.listeners.borrow_mut();
+        debug_assert!(listeners.is_empty());
+        *listeners = current_listeners;
     }
 }
 
