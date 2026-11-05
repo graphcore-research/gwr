@@ -38,13 +38,34 @@ impl Waiting {
             .iter()
             .position(|listener| listener.id == listener_id);
         if let Some(index) = index {
-            self.listeners.borrow_mut().remove(index);
+            // Ensure the listener isn't dropped until the mutable borrow is
+            // released.
+            let listener = self.listeners.borrow_mut().remove(index);
+            drop(listener);
         }
     }
 
     pub(super) fn wake_all(&self) {
-        for listener in self.listeners.borrow_mut().drain(..) {
+        // This is often called when some resource handle is dropped, to notify
+        // waiters that the resource is now available.
+        //
+        // If those wakers have been cancelled (e.g. because the simulation
+        // engine is being dropped), this may lead to them immediately dropping
+        // the resource request and removing themselves as a listener - i.e.
+        // attempting another mutable borrow of the listener queue.
+
+        // Just take ownership of the current listener queue, to prevent
+        // recursive borrows.
+        let mut current_listeners = std::mem::take(&mut *self.listeners.borrow_mut());
+        for listener in current_listeners.drain(..) {
             listener.waker.wake();
+        }
+
+        // If nothing registered a new listener, then swap the old queue back in
+        // to reuse the allocated memory.
+        let mut new_listeners = self.listeners.borrow_mut();
+        if new_listeners.is_empty() {
+            *new_listeners = current_listeners;
         }
     }
 }

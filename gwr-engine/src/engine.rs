@@ -24,7 +24,10 @@ const DEFAULT_CLOCK_MHZ: f64 = 1000.0;
 /// before it is called.
 pub struct Registry {
     entity: Rc<Entity>,
+    /// Components to be spawned
     components: RefCell<Vec<Component>>,
+    /// Spawned components, to be torn down
+    teardown_components: RefCell<Vec<Component>>,
 }
 
 impl Registry {
@@ -32,16 +35,24 @@ impl Registry {
         Self {
             entity: Rc::new(Entity::new(parent, "registry")),
             components: RefCell::new(Vec::new()),
+            teardown_components: RefCell::new(Vec::new()),
         }
     }
 
     pub fn spawn_components(&self, spawner: &Spawner) {
         let mut guard = self.components.borrow_mut();
+        let mut teardown_components = self.teardown_components.borrow_mut();
 
         trace!(self.entity ; "Spawning {} components", guard.len());
 
         for component in guard.drain(..) {
-            spawner.spawn(async move { component.run().await });
+            // Start the task
+            let runnable = component.clone();
+            spawner.spawn(async move { runnable.run().await });
+
+            // Stash a handle to the component, so it can be torn down before
+            // it's dropped.
+            teardown_components.push(component.clone());
         }
     }
 
@@ -192,6 +203,14 @@ impl Default for Engine {
 
 impl Drop for Engine {
     fn drop(&mut self) {
+        self.executor.shutdown();
+
+        for component in self.registry.components.borrow_mut().drain(..) {
+            component.teardown();
+        }
+        for component in self.registry.teardown_components.borrow_mut().drain(..) {
+            component.teardown();
+        }
         // The tracker can be using a buffered writer and so it needs to be shut
         // down cleanly to ensure that it is flushed properly.
         self.tracker.shutdown();

@@ -186,6 +186,12 @@ pub type BoxFuture<'a, T> = Pin<std::boxed::Box<dyn Future<Output = T> + 'a>>;
 ///
 /// A default implementation is provided for any component that doesn't have any
 /// active behaviour.
+///
+/// Components can also override [`teardown`](Runnable::teardown). This will be
+/// called by the engine prior to components being dropped. This can be used,
+/// for example, to avoid cirular references between components and other
+/// infrastructure which could prevent the component being dropped when
+/// expected.
 #[async_trait(?Send)]
 pub trait Runnable {
     /// Provides the method that defines the active element of this component.
@@ -194,6 +200,11 @@ pub trait Runnable {
     async fn run(&self) -> SimResult {
         Ok(())
     }
+
+    /// Prepare this component to be dropped.
+    ///
+    /// Default implementation is to do nothing.
+    fn teardown(&self) {}
 }
 
 #[cfg(test)]

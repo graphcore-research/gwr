@@ -43,9 +43,10 @@
 //! keeps the shared executor state alive.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -105,20 +106,14 @@ unsafe fn wake_borrowed_task_by_ref(data: *const ()) {
     // waker_for_task. The queue gets a new reference, leaving that handle
     // intact.
     let task = unsafe { &*data.cast::<Rc<Task>>() };
-    task.executor_state
-        .new_tasks
-        .borrow_mut()
-        .push(task.clone());
+    Task::wake(task);
 }
 
 unsafe fn wake_task_by_ref(data: *const ()) {
     // SAFETY: VTABLE points to an owned reference from Rc::into_raw.
     // ManuallyDrop preserves the source waker's ownership of that reference.
     let task = mem::ManuallyDrop::new(unsafe { Rc::from_raw(data.cast::<Task>()) });
-    task.executor_state
-        .new_tasks
-        .borrow_mut()
-        .push(Rc::clone(&task));
+    Task::wake(&task);
 }
 
 unsafe fn clone_raw_waker(data: *const ()) -> RawWaker {
@@ -138,24 +133,23 @@ unsafe fn wake_task(data: *const ()) {
     // or unwind. The queue receives a separate cloned reference.
     unsafe {
         let rc_task = Rc::from_raw(data as *const Task);
-        let cloned = rc_task.clone();
-        rc_task.executor_state.new_tasks.borrow_mut().push(cloned);
+        Task::wake(&rc_task);
     }
 }
 
 struct Task {
     future: RefCell<Option<Pin<Box<dyn Future<Output = SimResult>>>>>,
-    executor_state: Rc<ExecutorState>,
+    executor_state: Weak<ExecutorState>,
 }
 
 impl Task {
     pub fn new(
         future: impl Future<Output = SimResult> + 'static,
-        executor_state: Rc<ExecutorState>,
+        executor_state: &Rc<ExecutorState>,
     ) -> Task {
         Task {
             future: RefCell::new(Some(Box::pin(future))),
-            executor_state,
+            executor_state: Rc::downgrade(executor_state),
         }
     }
 
@@ -169,6 +163,25 @@ impl Task {
         }
 
         Some(poll_result)
+    }
+
+    fn wake(task: &Rc<Self>) {
+        // Task wakes can legitimately occur while the executor is being shut
+        // down, e.g. if dropping one task releases a resource which another
+        // task is waiting for
+        if let Some(state) = task.executor_state.upgrade()
+            && !state.shutdown.get()
+        {
+            state.new_tasks.borrow_mut().push(task.clone());
+        }
+    }
+}
+
+impl Drop for Task {
+    fn drop(&mut self) {
+        if let Some(state) = self.executor_state.upgrade() {
+            state.tasks.borrow_mut().remove(&std::ptr::from_ref(self));
+        }
     }
 }
 
@@ -191,21 +204,30 @@ pub struct ExecutorSnapshot {
 }
 
 struct ExecutorState {
+    shutdown: Cell<bool>,
     new_tasks: RefCell<Vec<Rc<Task>>>,
     time: RefCell<SimTime>,
     randomize_task_order: Cell<bool>,
     task_order_rng: RefCell<StdRng>,
     stats: Cell<ExecutorStats>,
+
+    /// All active tasks.
+    ///
+    /// Weak references allow completed tasks to be dropped, rather than keeping
+    /// them around. Dropping a task will remove it from this collection.
+    tasks: RefCell<HashMap<*const Task, Weak<Task>>>,
 }
 
 impl ExecutorState {
     pub fn new(top: &Rc<Entity>) -> Self {
         Self {
+            shutdown: Cell::new(false),
             new_tasks: RefCell::new(Vec::new()),
             time: RefCell::new(SimTime::new(top)),
             randomize_task_order: Cell::new(false),
             task_order_rng: RefCell::new(StdRng::seed_from_u64(rand::random())),
             stats: Cell::new(ExecutorStats::default()),
+            tasks: RefCell::new(HashMap::new()),
         }
     }
 }
@@ -224,6 +246,18 @@ pub struct Executor {
 }
 
 impl Executor {
+    pub(crate) fn shutdown(&self) {
+        self.state.shutdown.set(true);
+
+        // Drop all references to tasks, and clear their Futures, to break loops
+        // like: Task -> Future -> Clock -> Waker -> Task
+        let _queued = mem::take(&mut *self.state.new_tasks.borrow_mut());
+        let tasks = mem::take(&mut *self.state.tasks.borrow_mut());
+        for task in tasks.into_values().filter_map(|task| task.upgrade()) {
+            let _future = task.future.borrow_mut().take();
+        }
+    }
+
     /// Run the executor without observing activity.
     pub(crate) fn run(&self) -> SimResult {
         self.run_internal(None, |_| Ok(()))
@@ -375,10 +409,17 @@ pub struct Spawner {
 
 impl Spawner {
     pub fn spawn(&self, future: impl Future<Output = SimResult> + 'static) {
+        assert!(
+            !self.state.shutdown.get(),
+            "task spawn after executor dropped"
+        );
+
+        let task = Rc::new(Task::new(future, &self.state));
         self.state
-            .new_tasks
+            .tasks
             .borrow_mut()
-            .push(Rc::new(Task::new(future, self.state.clone())));
+            .insert(Rc::as_ptr(&task), Rc::downgrade(&task));
+        self.state.new_tasks.borrow_mut().push(task);
     }
 }
 
@@ -447,7 +488,7 @@ mod tests {
                     completion.set(true);
                     Ok(())
                 },
-                executor.state.clone(),
+                &executor.state,
             ));
             let borrowed = waker_for_task(&task);
             let owned = use_owned_waker.then(|| Waker::clone(&borrowed));
@@ -482,7 +523,7 @@ mod tests {
                     observed.set(weak.strong_count());
                     Ok(())
                 },
-                executor.state.clone(),
+                &executor.state,
             )
         });
         executor.state.new_tasks.borrow_mut().push(task.clone());
@@ -514,7 +555,7 @@ mod tests {
                 Poll::Pending
             }
         });
-        let task = Rc::new(Task::new(future, executor.state.clone()));
+        let task = Rc::new(Task::new(future, &executor.state));
         let weak = Rc::downgrade(&task);
         executor.state.new_tasks.borrow_mut().push(task);
         let mut stats = ExecutorStats::default();
@@ -538,7 +579,7 @@ mod tests {
         let tracker = dev_null_tracker();
         let top = toplevel(&tracker, "top");
         let executor = new_executor(&top);
-        let task = Rc::new(Task::new(async { Ok(()) }, executor.state.clone()));
+        let task = Rc::new(Task::new(async { Ok(()) }, &executor.state));
         let weak = Rc::downgrade(&task);
         let owned = {
             let borrowed = waker_for_task(&task);
@@ -565,7 +606,7 @@ mod tests {
         let tracker = dev_null_tracker();
         let top = toplevel(&tracker, "top");
         let executor = new_executor(&top);
-        let task = Rc::new(Task::new(async { Ok(()) }, executor.state.clone()));
+        let task = Rc::new(Task::new(async { Ok(()) }, &executor.state));
         let weak = Rc::downgrade(&task);
         let waker = Waker::clone(&waker_for_task(&task));
         drop(task);
@@ -583,10 +624,7 @@ mod tests {
         let tracker = dev_null_tracker();
         let top = toplevel(&tracker, "top");
         let executor = new_executor(&top);
-        let task = Rc::new(Task::new(
-            async { panic!("poll failed") },
-            executor.state.clone(),
-        ));
+        let task = Rc::new(Task::new(async { panic!("poll failed") }, &executor.state));
         executor.state.new_tasks.borrow_mut().push(task.clone());
         let mut task_queue = Vec::new();
 

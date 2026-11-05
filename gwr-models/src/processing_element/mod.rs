@@ -522,6 +522,14 @@ impl Runnable for ProcessingElement {
         debug!(self.entity ; "PE {pe_name} DONE");
         Ok(())
     }
+
+    fn teardown(&self) {
+        // The dispatcher could own the platform containing this PE - i.e. we
+        // could have a reference loop. Drop the dispatcher here to ensure the
+        // loop is broken, thereby avoiding a memory leak.
+        let dispatcher = self.dispatcher.borrow_mut().take();
+        drop(dispatcher);
+    }
 }
 
 #[derive(Clone)]
