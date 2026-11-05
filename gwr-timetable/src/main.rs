@@ -14,7 +14,6 @@ use gwr_engine::engine::Engine;
 use gwr_engine::executor::ExecutorStats;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::types::SimResult;
-use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_platform::Platform;
 use gwr_timetable::timetable_file::TimetableFile;
 use gwr_timetable::{Timetable, Workload};
@@ -44,7 +43,7 @@ fn main() -> Result<()> {
     let num_edges = timetable_file.edges.len();
     let graph = timetable_file.into_graph()?;
 
-    let timetable = Rc::new(Timetable::new(engine.top(), graph, &platform)?);
+    let timetable = Timetable::new(engine.top(), graph, &platform)?;
     println!("Loaded timetable with {num_nodes} nodes, {num_edges} edges.");
 
     if args.explain {
@@ -55,7 +54,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let dispatcher: Rc<dyn Dispatch> = timetable.clone();
+    let dispatcher = timetable.dispatcher();
     platform.attach_dispatcher(&dispatcher);
 
     let mut progress_bars = None;

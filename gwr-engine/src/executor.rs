@@ -24,8 +24,8 @@
 //!   owner through `Rc::into_raw`. The result uses `VTABLE`, points directly to
 //!   the task, and owns one strong reference. It can outlive the poll. Further
 //!   clones each acquire another reference; dropping an owned waker releases
-//!   its reference. Consuming it with `wake()` queues a task reference and
-//!   releases the reference owned by that waker.
+//!   its reference. Consuming it with `wake()` transfers its reference to the
+//!   run queue, or releases it if the executor has shut down.
 //!
 //! The lifetimes enforce the borrowed context's scope, but choosing the correct
 //! data pointer and vtable is an unsafe-code invariant: only owned-waker
@@ -45,7 +45,7 @@
 use std::cell::{Cell, RefCell};
 use std::future::Future;
 use std::pin::Pin;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -58,6 +58,7 @@ use gwr_track::entity::Entity;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
+use slab::Slab;
 
 use crate::time::clock::Clock;
 use crate::time::simtime::SimTime;
@@ -105,20 +106,24 @@ unsafe fn wake_borrowed_task_by_ref(data: *const ()) {
     // waker_for_task. The queue gets a new reference, leaving that handle
     // intact.
     let task = unsafe { &*data.cast::<Rc<Task>>() };
-    task.executor_state
-        .new_tasks
-        .borrow_mut()
-        .push(task.clone());
+    if !task.executor_state.shutdown.get() {
+        task.executor_state
+            .new_tasks
+            .borrow_mut()
+            .push(task.clone());
+    }
 }
 
 unsafe fn wake_task_by_ref(data: *const ()) {
     // SAFETY: VTABLE points to an owned reference from Rc::into_raw.
     // ManuallyDrop preserves the source waker's ownership of that reference.
     let task = mem::ManuallyDrop::new(unsafe { Rc::from_raw(data.cast::<Task>()) });
-    task.executor_state
-        .new_tasks
-        .borrow_mut()
-        .push(Rc::clone(&task));
+    if !task.executor_state.shutdown.get() {
+        task.executor_state
+            .new_tasks
+            .borrow_mut()
+            .push(Rc::clone(&task));
+    }
 }
 
 unsafe fn clone_raw_waker(data: *const ()) -> RawWaker {
@@ -134,28 +139,36 @@ unsafe fn clone_raw_waker(data: *const ()) -> RawWaker {
 
 unsafe fn wake_task(data: *const ()) {
     // SAFETY: VTABLE supplies an owned task reference created by Rc::into_raw.
-    // Reconstruct it so the consumed waker's reference is released on return
-    // or unwind. The queue receives a separate cloned reference.
-    unsafe {
-        let rc_task = Rc::from_raw(data as *const Task);
-        let cloned = rc_task.clone();
-        rc_task.executor_state.new_tasks.borrow_mut().push(cloned);
+    let task = unsafe { Rc::from_raw(data.cast::<Task>()) };
+    // SAFETY: `task` keeps the executor state alive. Borrowing it this way
+    // lets us move `task` into the queue without cloning it. We reserve
+    // capacity first so that if reservation unwinds, the queue guard drops
+    // before `task`. With spare capacity, `push` transfers `task` into the
+    // queue, where it keeps the state alive until the guard is released.
+    let state = unsafe { &*Rc::as_ptr(&task.executor_state) };
+    if !state.shutdown.get() {
+        let mut queue = state.new_tasks.borrow_mut();
+        queue.reserve(1);
+        queue.push(task);
     }
 }
 
 struct Task {
     future: RefCell<Option<Pin<Box<dyn Future<Output = SimResult>>>>>,
     executor_state: Rc<ExecutorState>,
+    registry_slot: usize,
 }
 
 impl Task {
     pub fn new(
         future: impl Future<Output = SimResult> + 'static,
         executor_state: Rc<ExecutorState>,
+        registry_slot: usize,
     ) -> Task {
         Task {
             future: RefCell::new(Some(Box::pin(future))),
             executor_state,
+            registry_slot,
         }
     }
 
@@ -169,6 +182,16 @@ impl Task {
         }
 
         Some(poll_result)
+    }
+}
+
+impl Drop for Task {
+    fn drop(&mut self) {
+        // Shutdown detaches the registry before cancelling tasks.
+        self.executor_state
+            .task_registry
+            .borrow_mut()
+            .try_remove(self.registry_slot);
     }
 }
 
@@ -191,21 +214,32 @@ pub struct ExecutorSnapshot {
 }
 
 struct ExecutorState {
-    new_tasks: RefCell<Vec<Rc<Task>>>,
+    shutdown: Cell<bool>,
     time: RefCell<SimTime>,
     randomize_task_order: Cell<bool>,
     task_order_rng: RefCell<StdRng>,
     stats: Cell<ExecutorStats>,
+
+    /// Tasks to be polled by the next executor step.
+    new_tasks: RefCell<Vec<Rc<Task>>>,
+
+    /// A registry of all live spawned tasks.
+    ///
+    /// Weak references allow completed tasks to be dropped, rather than keeping
+    /// them around. Dropping a task will remove it from this collection.
+    task_registry: RefCell<Slab<Weak<Task>>>,
 }
 
 impl ExecutorState {
     pub fn new(top: &Rc<Entity>) -> Self {
         Self {
-            new_tasks: RefCell::new(Vec::new()),
+            shutdown: Cell::new(false),
             time: RefCell::new(SimTime::new(top)),
             randomize_task_order: Cell::new(false),
             task_order_rng: RefCell::new(StdRng::seed_from_u64(rand::random())),
             stats: Cell::new(ExecutorStats::default()),
+            new_tasks: RefCell::new(Vec::new()),
+            task_registry: RefCell::new(Slab::new()),
         }
     }
 }
@@ -224,6 +258,21 @@ pub struct Executor {
 }
 
 impl Executor {
+    pub(crate) fn shutdown(&self) {
+        self.state.shutdown.set(true);
+
+        // Drop all references to tasks, and clear their Futures, to break loops
+        // like: Task -> Future -> Clock -> Waker -> Task
+        let queued = self.state.new_tasks.take();
+        let tasks = self.state.task_registry.take();
+        for task in tasks.into_iter().filter_map(|(_, task)| task.upgrade()) {
+            // Note that the future is dropped after the `task.future` borrow is
+            // released.
+            drop(task.future.take());
+        }
+        drop(queued);
+    }
+
     /// Run the executor without observing activity.
     pub(crate) fn run(&self) -> SimResult {
         self.run_internal(None, |_| Ok(()))
@@ -375,15 +424,21 @@ pub struct Spawner {
 
 impl Spawner {
     pub fn spawn(&self, future: impl Future<Output = SimResult> + 'static) {
-        self.state
-            .new_tasks
-            .borrow_mut()
-            .push(Rc::new(Task::new(future, self.state.clone())));
+        assert!(
+            !self.state.shutdown.get(),
+            "task spawn after executor dropped"
+        );
+
+        let task = Rc::new_cyclic(|weak| {
+            let registry_slot = self.state.task_registry.borrow_mut().insert(weak.clone());
+            Task::new(future, self.state.clone(), registry_slot)
+        });
+        self.state.new_tasks.borrow_mut().push(task);
     }
 }
 
 #[must_use]
-pub fn new_executor_and_spawner(top: &Rc<Entity>) -> (Executor, Spawner) {
+pub(crate) fn new_executor_and_spawner(top: &Rc<Entity>) -> (Executor, Spawner) {
     let state = Rc::new(ExecutorState::new(top));
     (
         Executor {
@@ -408,6 +463,13 @@ mod tests {
 
     use super::*;
     use crate::time::clock::TaskWaker;
+
+    /// A placeholder registry slot for tasks created manually by tests.
+    ///
+    /// Generally, the spawner assigns each task a slot in a registry. Tasks are
+    /// provided with the index of this slot, and will use it to release the
+    /// slot when dropped.
+    const UNREGISTERED_SLOT: usize = usize::MAX;
 
     fn new_executor(top: &Rc<Entity>) -> Executor {
         Executor {
@@ -448,6 +510,7 @@ mod tests {
                     Ok(())
                 },
                 executor.state.clone(),
+                UNREGISTERED_SLOT,
             ));
             let borrowed = waker_for_task(&task);
             let owned = use_owned_waker.then(|| Waker::clone(&borrowed));
@@ -483,6 +546,7 @@ mod tests {
                     Ok(())
                 },
                 executor.state.clone(),
+                UNREGISTERED_SLOT,
             )
         });
         executor.state.new_tasks.borrow_mut().push(task.clone());
@@ -514,7 +578,7 @@ mod tests {
                 Poll::Pending
             }
         });
-        let task = Rc::new(Task::new(future, executor.state.clone()));
+        let task = Rc::new(Task::new(future, executor.state.clone(), UNREGISTERED_SLOT));
         let weak = Rc::downgrade(&task);
         executor.state.new_tasks.borrow_mut().push(task);
         let mut stats = ExecutorStats::default();
@@ -538,7 +602,11 @@ mod tests {
         let tracker = dev_null_tracker();
         let top = toplevel(&tracker, "top");
         let executor = new_executor(&top);
-        let task = Rc::new(Task::new(async { Ok(()) }, executor.state.clone()));
+        let task = Rc::new(Task::new(
+            async { Ok(()) },
+            executor.state.clone(),
+            UNREGISTERED_SLOT,
+        ));
         let weak = Rc::downgrade(&task);
         let owned = {
             let borrowed = waker_for_task(&task);
@@ -565,7 +633,11 @@ mod tests {
         let tracker = dev_null_tracker();
         let top = toplevel(&tracker, "top");
         let executor = new_executor(&top);
-        let task = Rc::new(Task::new(async { Ok(()) }, executor.state.clone()));
+        let task = Rc::new(Task::new(
+            async { Ok(()) },
+            executor.state.clone(),
+            UNREGISTERED_SLOT,
+        ));
         let weak = Rc::downgrade(&task);
         let waker = Waker::clone(&waker_for_task(&task));
         drop(task);
@@ -586,6 +658,7 @@ mod tests {
         let task = Rc::new(Task::new(
             async { panic!("poll failed") },
             executor.state.clone(),
+            UNREGISTERED_SLOT,
         ));
         executor.state.new_tasks.borrow_mut().push(task.clone());
         let mut task_queue = Vec::new();

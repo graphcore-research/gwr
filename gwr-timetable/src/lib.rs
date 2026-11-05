@@ -42,7 +42,14 @@ use crate::mermaid::{MermaidNodeStatus, render_mermaid};
 pub struct Timetable {
     entity: Rc<Entity>,
     platform: Rc<Platform>,
+    dispatcher: Rc<TimetableDispatcher>,
+}
+
+// Keep platform ownership on Timetable to avoid cycles through the PEs.
+struct TimetableDispatcher {
+    entity: Rc<Entity>,
     graph: TimetableGraph,
+    pe_indices: HashMap<String, usize>,
     node_pe_indices: Vec<Option<usize>>,
     prepared_tasks: HashMap<usize, Rc<PreparedTask>>,
     completed_node_indices: RefCell<HashSet<usize>>,
@@ -65,17 +72,18 @@ impl Timetable {
         platform: &Rc<Platform>,
     ) -> Result<Self, SimError> {
         let entity = Rc::new(Entity::new(parent, "timetable"));
+        let pe_indices = platform.pe_idx_by_id();
         let mut nodes_per_pe = HashMap::new();
         let mut node_pe_indices = Vec::with_capacity(graph.nodes().len());
 
         for (node_index, node) in graph.nodes().iter().enumerate() {
             let pe_idx = if let Some(pe) = node.pe() {
-                let pe_idx = platform.pe_idx_from_name(pe).map_err(|_| {
-                    SimError(format!(
+                let Some(&pe_idx) = pe_indices.get(pe) else {
+                    return Err(SimError(format!(
                         "Node '{}' contains invalid PE ID '{pe}'",
                         node.id()
-                    ))
-                })?;
+                    )));
+                };
                 nodes_per_pe
                     .entry(pe_idx)
                     .or_insert_with(BTreeSet::new)
@@ -103,12 +111,12 @@ impl Timetable {
             }
         }
 
-        let timetable = Self {
-            entity,
+        let dispatcher = TimetableDispatcher {
+            entity: entity.clone(),
             graph,
+            pe_indices,
             node_pe_indices,
             prepared_tasks,
-            platform: platform.clone(),
             completed_node_indices: RefCell::new(HashSet::new()),
             completed_workload: Cell::new(None),
             active_node_indices: RefCell::new(HashSet::new()),
@@ -119,55 +127,67 @@ impl Timetable {
             ready_nodes_changed: Repeated::new(()),
         };
 
-        timetable.update_complete_tensors();
-        timetable.initialize_scheduler_state();
+        dispatcher.update_complete_tensors();
+        dispatcher.initialize_scheduler_state();
 
-        Ok(timetable)
+        Ok(Self {
+            entity,
+            platform: platform.clone(),
+            dispatcher: Rc::new(dispatcher),
+        })
     }
 
+    /// Return the shared dispatcher to attach to the platform's PEs.
+    #[must_use]
+    pub fn dispatcher(&self) -> Rc<dyn Dispatch> {
+        self.dispatcher.clone()
+    }
+
+    #[must_use]
     pub fn total_tasks(&self) -> usize {
-        self.graph.nodes().len()
+        self.dispatcher.graph.nodes().len()
     }
 
     /// Calculate the planned boundary traffic and node count for this
     /// timetable.
     pub fn workload_totals(&self) -> Result<Workload, SimError> {
-        self.calculate_workload(0..self.graph.nodes().len())
+        self.dispatcher.calculate_workload(0..self.total_tasks())
     }
 
     /// Start tracking completed workload, including nodes already complete.
     pub fn enable_completed_workload_tracking(&self) -> SimResult {
-        let workload =
-            self.calculate_workload(self.completed_node_indices.borrow().iter().copied())?;
-        self.completed_workload.set(Some(workload));
+        let dispatcher = &self.dispatcher;
+        let workload = dispatcher
+            .calculate_workload(dispatcher.completed_node_indices.borrow().iter().copied())?;
+        dispatcher.completed_workload.set(Some(workload));
         Ok(())
     }
 
     /// Return completed workload when tracking is enabled.
     #[must_use]
     pub fn completed_workload(&self) -> Option<Workload> {
-        self.completed_workload.get()
+        self.dispatcher.completed_workload.get()
     }
 
     #[must_use]
     pub fn num_graph_nodes_completed(&self) -> usize {
-        self.completed_node_indices.borrow().len()
+        self.dispatcher.completed_node_indices.borrow().len()
     }
 
     /// Return the number of graph nodes currently executing.
     #[must_use]
     pub fn num_graph_nodes_active(&self) -> usize {
-        self.active_node_indices.borrow().len()
+        self.dispatcher.active_node_indices.borrow().len()
     }
 
     pub fn check_tasks_complete(&self) -> SimResult {
-        let num_active = self.active_node_indices.borrow().len();
+        let num_active = self.num_graph_nodes_active();
         if num_active != 0 {
             return sim_error!("{num_active} tasks still active");
         }
 
-        let num_completed = self.completed_node_indices.borrow().len();
-        let num_tasks = self.graph.nodes().len();
+        let num_completed = self.num_graph_nodes_completed();
+        let num_tasks = self.total_tasks();
         if num_completed != num_tasks {
             return sim_error!(
                 "{num_completed} tasks completed out of a total of {num_tasks} tasks."
@@ -177,38 +197,36 @@ impl Timetable {
         Ok(())
     }
 
+    /// Report planned traffic and platform execution statistics.
     pub fn dump_stats(&self) -> SimResult {
+        let dispatcher = &self.dispatcher;
         let mut total_load_bytes = 0usize;
         let mut total_store_bytes = 0usize;
         let mut planned_load_bytes = 0usize;
         let mut planned_store_bytes = 0usize;
         let mut machine_ops = MachineOpCounts::default();
         let mut peak_pe_sram_bytes = 0usize;
-        let mut pe_names = BTreeSet::new();
         let mut num_compute_nodes = 0;
         let mut num_tensor_nodes = 0;
-        for (index, node) in self.graph.nodes().iter().enumerate() {
+        for (index, node) in dispatcher.graph.nodes().iter().enumerate() {
             if node.is_compute() {
                 {
-                    let (read, written) = self.prepared_tasks[&index].planned_traffic_bytes();
+                    let (read, written) = dispatcher.prepared_tasks[&index].planned_traffic_bytes();
                     add_to_byte_total(&mut planned_load_bytes, read, "planned load")?;
                     add_to_byte_total(&mut planned_store_bytes, written, "planned store")?;
-                }
-                if let Some(pe) = node.pe() {
-                    pe_names.insert(pe);
                 }
                 num_compute_nodes += 1;
             } else {
                 num_tensor_nodes += 1;
             }
         }
-        for pe in pe_names {
-            let element = self.platform.pe(pe)?;
-            machine_ops = machine_ops.checked_add(element.machine_ops())?;
-            let (read, written) = element.memory_traffic_bytes();
+        for pe_name in dispatcher.used_pe_names() {
+            let pe = self.platform.pe(pe_name)?;
+            machine_ops = machine_ops.checked_add(pe.machine_ops())?;
+            let (read, written) = pe.memory_traffic_bytes();
             add_to_byte_total(&mut total_load_bytes, read, "load")?;
             add_to_byte_total(&mut total_store_bytes, written, "store")?;
-            peak_pe_sram_bytes = peak_pe_sram_bytes.max(element.peak_sram_bytes());
+            peak_pe_sram_bytes = peak_pe_sram_bytes.max(pe.peak_sram_bytes());
         }
 
         info!(self.entity ; "Timetable:");
@@ -230,16 +248,18 @@ impl Timetable {
     /// Render a mermaid of the current status of the Timetable
     #[must_use]
     pub fn render_mermaid(&self) -> String {
-        render_mermaid(&self.graph, &self.mermaid_node_statuses())
+        render_mermaid(&self.dispatcher.graph, &self.mermaid_node_statuses())
     }
 
     /// Create map of node ID to status for rendering
     #[must_use]
     pub fn mermaid_node_statuses(&self) -> HashMap<String, MermaidNodeStatus> {
-        let completed = self.completed_node_indices.borrow();
-        let active = self.active_node_indices.borrow();
+        let dispatcher = &self.dispatcher;
+        let completed = dispatcher.completed_node_indices.borrow();
+        let active = dispatcher.active_node_indices.borrow();
 
-        self.graph
+        dispatcher
+            .graph
             .nodes()
             .iter()
             .enumerate()
@@ -258,27 +278,24 @@ impl Timetable {
 
     /// Machine operations completed by the PEs used by this timetable.
     pub fn machine_operations_executed(&self) -> Result<usize, SimError> {
-        let pe_names: BTreeSet<_> = self
-            .graph
-            .nodes()
-            .iter()
-            .filter_map(|node| node.pe())
-            .collect();
-        pe_names.into_iter().try_fold(0usize, |total, name| {
-            let ops = self
-                .platform
-                .pe(name)?
-                .machine_ops()
-                .checked_operation_total()?;
-            total
-                .checked_add(ops)
-                .ok_or_else(|| SimError("Timetable machine operation total overflows".into()))
-        })
+        self.dispatcher
+            .used_pe_names()
+            .into_iter()
+            .try_fold(0usize, |total, pe_name| {
+                let ops = self
+                    .platform
+                    .pe(pe_name)?
+                    .machine_ops()
+                    .checked_operation_total()?;
+                total
+                    .checked_add(ops)
+                    .ok_or_else(|| SimError("Timetable machine operation total overflows".into()))
+            })
     }
 }
 
 #[async_trait(?Send)]
-impl Dispatch for Timetable {
+impl Dispatch for TimetableDispatcher {
     fn task_by_id(&self, task_idx: usize) -> Result<Task, SimError> {
         Ok(Task::PreparedProgram {
             task: self.prepared_task(task_idx)?.clone(),
@@ -352,7 +369,9 @@ impl Dispatch for Timetable {
 
     fn ready_task_indices(&self, pe_id: &str) -> Result<(bool, Vec<usize>), SimError> {
         trace!(self.entity ; "ready_node_indices for {pe_id}");
-        let pe_idx = self.platform.pe_idx_from_name(pe_id)?;
+        let Some(&pe_idx) = self.pe_indices.get(pe_id) else {
+            return sim_error!("No PE '{pe_id}'");
+        };
         let pe_done = self
             .remaining_nodes_per_pe
             .borrow()
@@ -376,7 +395,7 @@ impl Dispatch for Timetable {
     }
 
     fn total_tasks_for_pe(&self, pe_name: &str) -> usize {
-        let Ok(pe_idx) = self.platform.pe_idx_from_name(pe_name) else {
+        let Some(&pe_idx) = self.pe_indices.get(pe_name) else {
             return 0;
         };
         self.nodes_per_pe
@@ -386,7 +405,21 @@ impl Dispatch for Timetable {
     }
 }
 
-impl Timetable {
+impl TimetableDispatcher {
+    fn used_pe_names(&self) -> Vec<&str> {
+        let mut names: Vec<_> = self
+            .pe_indices
+            .iter()
+            .filter_map(|(name, index)| {
+                self.nodes_per_pe
+                    .contains_key(index)
+                    .then_some(name.as_str())
+            })
+            .collect();
+        names.sort_unstable();
+        names
+    }
+
     fn prepared_task(&self, node_idx: usize) -> Result<&Rc<PreparedTask>, SimError> {
         self.prepared_tasks.get(&node_idx).ok_or_else(|| {
             SimError(format!(

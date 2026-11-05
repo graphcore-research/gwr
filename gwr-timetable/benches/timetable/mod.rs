@@ -3,7 +3,6 @@
 use std::rc::Rc;
 
 use gwr_engine::engine::Engine;
-use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_platform::Platform;
 use gwr_platform::types::PlatformConfig;
 use gwr_platform::yaml::platform_to_yaml_str;
@@ -60,7 +59,7 @@ impl Workload {
 pub struct Simulation {
     pub engine: Engine,
     pub platform: Rc<Platform>,
-    pub timetable: Rc<Timetable>,
+    pub timetable: Timetable,
     name: &'static str,
     validate_workload: fn(&Self),
 }
@@ -81,12 +80,9 @@ impl Simulation {
         let graph = timetable_file
             .into_graph()
             .expect("construct benchmark graph");
-        let timetable = Rc::new(
-            Timetable::new(engine.top(), graph, &platform).expect("construct benchmark timetable"),
-        );
-        // Match ordinary application ownership.
-        let dispatcher: Rc<dyn Dispatch> = timetable.clone();
-        platform.attach_dispatcher(&dispatcher);
+        let timetable =
+            Timetable::new(engine.top(), graph, &platform).expect("construct benchmark timetable");
+        platform.attach_dispatcher(&timetable.dispatcher());
         Self {
             engine,
             platform,

@@ -19,21 +19,19 @@ impl Timetable {
             "Preparation summary (logical planned bytes; physical traffic is not observed):\n",
         );
         let mut pe_names = self.platform.pe_names();
-        pe_names.sort();
+        pe_names.sort_unstable();
         for name in pe_names {
             let pe = self.platform.pe(&name).expect("retained PE name");
             writeln!(out, "PE {name}: {}", pe.configuration_description()).unwrap();
         }
-        for (index, node) in self.graph.nodes().iter().enumerate() {
-            let Some(task) = self.prepared_tasks.get(&index) else {
+        let graph = &self.dispatcher.graph;
+        for (index, node) in graph.nodes().iter().enumerate() {
+            let Some(task) = self.dispatcher.prepared_tasks.get(&index) else {
                 continue;
             };
             let program = task.program();
             writeln!(out, "Node {} on PE {}:", node.id(), node.pe().unwrap()).unwrap();
-            let views = self
-                .graph
-                .compute_views(index)
-                .expect("prepared task views");
+            let views = graph.compute_views(index).expect("prepared task views");
             for (names, bindings, direction, arrow) in [
                 (program.input_names(), views.inputs(), "input", "<-"),
                 (program.output_names(), views.outputs(), "output", "->"),

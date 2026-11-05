@@ -2,7 +2,6 @@
 
 use std::path::Path;
 
-use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::tensors::dtype::DataType;
 use gwr_timetable::timetable_file::{
     EdgeKind, EdgeSection, NodeSection, TensorConfigSection, TimetableFile,
@@ -172,7 +171,8 @@ fn tensor_fanout_binds_distinct_named_inputs() {
 
     timetable_file.validate().unwrap();
     let timetable = build_timetable(&top, timetable_file, &platform).unwrap();
-    assert_eq!(timetable.ready_task_indices("pe0").unwrap().1, vec![2]);
+    let dispatcher = timetable.dispatcher();
+    assert_eq!(dispatcher.ready_task_indices("pe0").unwrap().1, vec![2]);
 }
 
 #[test]

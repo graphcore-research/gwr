@@ -1,7 +1,11 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
+use gwr_engine::engine::Engine;
+use gwr_platform::Platform;
+use gwr_timetable::Timetable;
 use gwr_timetable::timetable_file::TimetableFile;
 
 #[allow(
@@ -215,4 +219,54 @@ fn compute_region_emits_tile_activity_on_pe() {
     assert_pe_activity_lanes_created(&events);
     assert_add_tile_activities_emitted(&events);
     assert_tile_activities_share_a_group(&events);
+}
+
+#[test]
+fn dropping_engine_drops_timetable_and_platform() {
+    for run_simulation in [false, true] {
+        let (weak_timetable, weak_platform, weak_pe, weak_clock, weak_dispatcher) = {
+            let tracker = gwr_track::tracker::dev_null_tracker();
+            let mut engine = Engine::new(&tracker);
+            let clock = engine.default_clock();
+
+            let platform = Rc::new(Platform::from_string(&engine, &clock, PLATFORM_YAML).unwrap());
+            let graph = TimetableFile::from_string(TIMETABLE_YAML)
+                .unwrap()
+                .into_graph()
+                .unwrap();
+            let timetable = Rc::new(Timetable::new(engine.top(), graph, &platform).unwrap());
+
+            let dispatcher = timetable.dispatcher();
+            platform.attach_dispatcher(&dispatcher);
+
+            if run_simulation {
+                engine.run().unwrap();
+                timetable.check_tasks_complete().unwrap();
+            }
+
+            assert!(
+                timetable
+                    .preparation_description()
+                    .contains("PE pe0: SRAM capacity: 65536 bytes")
+            );
+            assert_eq!(
+                timetable.machine_operations_executed().unwrap(),
+                if run_simulation { 4 } else { 0 },
+            );
+
+            (
+                Rc::downgrade(&timetable),
+                Rc::downgrade(&platform),
+                Rc::downgrade(platform.pe("pe0").unwrap()),
+                Rc::downgrade(&clock.shared_state),
+                Rc::downgrade(&dispatcher),
+            )
+        };
+
+        assert!(weak_timetable.upgrade().is_none());
+        assert!(weak_platform.upgrade().is_none());
+        assert!(weak_pe.upgrade().is_none());
+        assert!(weak_clock.upgrade().is_none());
+        assert!(weak_dispatcher.upgrade().is_none());
+    }
 }

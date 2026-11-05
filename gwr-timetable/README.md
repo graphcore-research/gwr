@@ -57,10 +57,11 @@ for the precision rules.
 ## Load, prepare, and run in Rust
 
 The normal path loads the platform and timetable, validates graph bindings, then
-prepares every compute node against its PE in `Timetable::new`. Attach the
-retained dispatcher and run the engine. Keep the dispatcher alive through the
-run. This executable uses the matched add/multiply files above and resolves
-paths from the crate directory, so it can run from any working directory:
+prepares every compute node against its PE in `Timetable::new`. Use
+`timetable.dispatcher()` to attach the shared dispatcher to the platform, then
+run the engine. This executable uses the matched add/multiply files above and
+resolves paths from the crate directory, so it can run from any working
+directory:
 
 ```sh
 cargo run -p gwr-timetable --example load_prepare_run
