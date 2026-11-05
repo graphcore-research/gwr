@@ -87,16 +87,6 @@ impl TrackerArgs {
         requested
     }
 
-    /// Return whether any configured tracker will emit messages at `level`.
-    #[must_use]
-    pub fn level_enabled(&self, level: log::Level) -> bool {
-        let shown = (self.stdout && self.stdout_level >= level)
-            || (self.binary && self.binary_level >= level);
-        #[cfg(feature = "perfetto")]
-        let shown = shown || (self.perfetto && self.perfetto_level >= level);
-        shown
-    }
-
     /// Ensure that if the specified feature is enabled then a tracker will be
     /// showing messages of that level
     pub fn ensure_visiblity(&mut self, feature: bool, feature_name: &str, level: log::Level) {
@@ -110,6 +100,16 @@ impl TrackerArgs {
                 self.stdout_level
             );
         }
+    }
+
+    /// Return whether any configured tracker will emit messages at `level`.
+    #[must_use]
+    pub fn level_enabled(&self, level: log::Level) -> bool {
+        let shown = (self.stdout && self.stdout_level >= level)
+            || (self.binary && self.binary_level >= level);
+        #[cfg(feature = "perfetto")]
+        let shown = shown || (self.perfetto && self.perfetto_level >= level);
+        shown
     }
 
     /// Convert these command-line arguments into a [`TrackersConfig`].
@@ -142,146 +142,6 @@ impl TrackerArgs {
             },
         }
     }
-}
-
-/// Configuration options for an individual tracker.
-pub struct TrackerConfig<'a> {
-    /// Enable this tracker.
-    pub enable: bool,
-
-    /// Set the level at which this tracker should be enabled.
-    pub level: log::Level,
-
-    /// A regular expression to match which entities should have this level
-    /// applied.
-    pub filter_regex: &'a str,
-
-    /// If required, the name of the file to which the tracker will write.
-    pub file: Option<&'a str>,
-}
-
-impl Default for TrackerConfig<'_> {
-    fn default() -> Self {
-        Self {
-            enable: true,
-            level: log::Level::Warn,
-            filter_regex: "",
-            file: None,
-        }
-    }
-}
-
-/// Configuration options for monitoring.
-#[derive(Default)]
-pub struct MonitorsConfig<'a> {
-    /// Enable monitoring.
-    pub enable: bool,
-
-    /// Window size in clock ticks to process monitoring.
-    pub window_size_ticks: u64,
-
-    /// Regular expression for which entities should have monitoring enabled.
-    pub filter_regex: &'a str,
-}
-
-/// Configuration options for all tracking/monitoring.
-pub struct TrackersConfig<'a> {
-    /// Configuration for stdout.
-    pub stdout: TrackerConfig<'a>,
-
-    /// Configuration for binary trace file.
-    pub binary: TrackerConfig<'a>,
-
-    #[cfg(feature = "perfetto")]
-    /// Configuration for perfetto trace file.
-    pub perfetto: TrackerConfig<'a>,
-
-    /// Configuration for monitoring.
-    pub monitors: MonitorsConfig<'a>,
-}
-
-/// Create a tracker that prints to stdout
-///
-/// The user can pass a filter regular expression which will set the level only
-/// for matching Entities and set all other Entities to only emit errors.
-fn build_stdout_tracker(
-    config: &TrackerConfig,
-    monitors: &MonitorsConfig,
-) -> Result<Tracker, TrackConfigError> {
-    let default_level = if config.filter_regex.is_empty() {
-        config.level
-    } else {
-        log::Level::Error
-    };
-
-    let mut entity_manager = EntityManager::new(default_level);
-    if !config.filter_regex.is_empty() {
-        entity_manager.add_entity_level_filter(config.filter_regex, config.level)?;
-    }
-
-    if monitors.enable {
-        entity_manager
-            .set_monitor_window_size_for(monitors.filter_regex, monitors.window_size_ticks)?;
-    }
-
-    let stdout_writer = Box::new(std::io::BufWriter::new(io::stdout()));
-    Ok(Rc::new(TextTracker::new(entity_manager, stdout_writer)))
-}
-
-/// Same as the text tracker (see build_stdout_tracker) except will generate a
-/// binary file.
-fn build_binary_tracker(
-    config: &TrackerConfig,
-    monitors: &MonitorsConfig,
-) -> Result<Tracker, TrackConfigError> {
-    let default_level = if config.filter_regex.is_empty() {
-        config.level
-    } else {
-        log::Level::Error
-    };
-    let mut entity_manager = EntityManager::new(default_level);
-    if !config.filter_regex.is_empty() {
-        entity_manager.add_entity_level_filter(config.filter_regex, config.level)?;
-    }
-
-    if monitors.enable {
-        entity_manager
-            .set_monitor_window_size_for(monitors.filter_regex, monitors.window_size_ticks)?;
-    }
-
-    let bin_writer: Writer = Box::new(BufWriter::new(
-        fs::File::create(config.file.unwrap()).unwrap(),
-    ));
-    Ok(Rc::new(CapnProtoTracker::new(entity_manager, bin_writer)))
-}
-
-/// This tracker will produce a Perfetto trace file, which unlike the other
-/// tracker options can be viewed using the Perfetto UI, rather than
-/// gwr-spotter.
-#[cfg(feature = "perfetto")]
-fn build_perfetto_tracker(
-    config: &TrackerConfig,
-    monitors: &MonitorsConfig,
-) -> Result<Tracker, TrackConfigError> {
-    let default_level = if config.filter_regex.is_empty() {
-        config.level
-    } else {
-        log::Level::Error
-    };
-    let mut entity_manager = EntityManager::new(default_level);
-    if !config.filter_regex.is_empty() {
-        entity_manager.add_entity_level_filter(config.filter_regex, config.level)?;
-    }
-
-    if monitors.enable {
-        entity_manager
-            .set_monitor_window_size_for(monitors.filter_regex, monitors.window_size_ticks)?;
-    }
-
-    let bin_writer: Writer = Box::new(BufWriter::new(
-        fs::File::create(config.file.unwrap()).unwrap(),
-    ));
-    Ok(Rc::new(PerfettoTracker::new(entity_manager, bin_writer)))
 }
 
 /// Set up stdout/binary/Perfetto trackers according the the command-line
@@ -353,4 +213,127 @@ pub fn setup_trackers(config: &TrackersConfig) -> Result<Tracker, TrackConfigErr
     } else {
         build_stdout_tracker(&TrackerConfig::default(), &MonitorsConfig::default())
     }
+}
+
+/// Configuration options for all tracking/monitoring.
+pub struct TrackersConfig<'a> {
+    /// Configuration for stdout.
+    pub stdout: TrackerConfig<'a>,
+
+    /// Configuration for binary trace file.
+    pub binary: TrackerConfig<'a>,
+
+    #[cfg(feature = "perfetto")]
+    /// Configuration for perfetto trace file.
+    pub perfetto: TrackerConfig<'a>,
+
+    /// Configuration for monitoring.
+    pub monitors: MonitorsConfig<'a>,
+}
+
+fn build_stdout_tracker(
+    config: &TrackerConfig,
+    monitors: &MonitorsConfig,
+) -> Result<Tracker, TrackConfigError> {
+    let entity_manager = entity_manager(config, monitors, "--stdout-filter-regex")?;
+    let stdout_writer = Box::new(std::io::BufWriter::new(io::stdout()));
+    Ok(Rc::new(TextTracker::new(entity_manager, stdout_writer)))
+}
+
+/// Same as the text tracker (see build_stdout_tracker) except will generate a
+/// binary file.
+fn build_binary_tracker(
+    config: &TrackerConfig,
+    monitors: &MonitorsConfig,
+) -> Result<Tracker, TrackConfigError> {
+    let entity_manager = entity_manager(config, monitors, "--binary-filter-regex")?;
+
+    let bin_writer: Writer = Box::new(BufWriter::new(
+        fs::File::create(config.file.unwrap()).unwrap(),
+    ));
+    Ok(Rc::new(CapnProtoTracker::new(entity_manager, bin_writer)))
+}
+
+/// This tracker will produce a Perfetto trace file, which unlike the other
+/// tracker options can be viewed using the Perfetto UI, rather than
+/// gwr-spotter.
+#[cfg(feature = "perfetto")]
+fn build_perfetto_tracker(
+    config: &TrackerConfig,
+    monitors: &MonitorsConfig,
+) -> Result<Tracker, TrackConfigError> {
+    let entity_manager = entity_manager(config, monitors, "--perfetto-filter-regex")?;
+
+    let bin_writer: Writer = Box::new(BufWriter::new(
+        fs::File::create(config.file.unwrap()).unwrap(),
+    ));
+    Ok(Rc::new(PerfettoTracker::new(entity_manager, bin_writer)))
+}
+
+/// Create a tracker that prints to stdout
+///
+/// The user can pass a filter regular expression which will set the level only
+/// for matching Entities and set all other Entities to only emit errors.
+fn entity_manager(
+    config: &TrackerConfig,
+    monitors: &MonitorsConfig,
+    filter_option: &str,
+) -> Result<EntityManager, TrackConfigError> {
+    let default_level = if config.filter_regex.is_empty() {
+        config.level
+    } else {
+        log::Level::Error
+    };
+    let mut entity_manager = EntityManager::new(default_level);
+    if !config.filter_regex.is_empty() {
+        entity_manager
+            .add_entity_level_filter(config.filter_regex, config.level)
+            .map_err(|error| TrackConfigError(format!("{filter_option}: {error}")))?;
+    }
+    if monitors.enable {
+        entity_manager
+            .set_monitor_window_size_for(monitors.filter_regex, monitors.window_size_ticks)
+            .map_err(|error| TrackConfigError(format!("--monitor-filter-regex: {error}")))?;
+    }
+    Ok(entity_manager)
+}
+
+/// Configuration options for an individual tracker.
+pub struct TrackerConfig<'a> {
+    /// Enable this tracker.
+    pub enable: bool,
+
+    /// Set the level at which this tracker should be enabled.
+    pub level: log::Level,
+
+    /// A regular expression to match which entities should have this level
+    /// applied.
+    pub filter_regex: &'a str,
+
+    /// If required, the name of the file to which the tracker will write.
+    pub file: Option<&'a str>,
+}
+
+impl Default for TrackerConfig<'_> {
+    fn default() -> Self {
+        Self {
+            enable: true,
+            level: log::Level::Warn,
+            filter_regex: "",
+            file: None,
+        }
+    }
+}
+
+/// Configuration options for monitoring.
+#[derive(Default)]
+pub struct MonitorsConfig<'a> {
+    /// Enable monitoring.
+    pub enable: bool,
+
+    /// Window size in clock ticks to process monitoring.
+    pub window_size_ticks: u64,
+
+    /// Regular expression for which entities should have monitoring enabled.
+    pub filter_regex: &'a str,
 }

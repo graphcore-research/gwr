@@ -33,9 +33,24 @@ use crate::entity::Capacity;
 use crate::tracker::aka::AlternativeNames;
 use crate::{Id, ROOT};
 
-/// Error used to return configuration errors
-#[derive(Debug)]
-pub struct TrackConfigError(pub String);
+/// Create a [`Tracker`] that prints all track events to `stdout`.
+#[must_use]
+pub fn stdout_tracker(level: log::Level) -> Tracker {
+    let entity_manger = EntityManager::new(level);
+    let stdout_writer = Box::new(std::io::BufWriter::new(io::stdout()));
+    let tracker: Tracker = Rc::new(TextTracker::new(entity_manger, stdout_writer));
+    tracker
+}
+
+/// Create a [`Tracker`] that suppresses all track events.
+#[must_use]
+pub fn dev_null_tracker() -> Tracker {
+    let tracer: Tracker = Rc::new(DevNullTracker {});
+    tracer
+}
+
+/// The type of a [`Tracker`] that is shared across entities.
+pub type Tracker = Rc<dyn Track>;
 
 /// This is the interface that is supported by all [`Tracker`]s.
 pub trait Track {
@@ -123,25 +138,6 @@ pub trait Track {
 
     /// Perform any pre-exit shutdown/cleanup
     fn shutdown(&self);
-}
-
-/// The type of a [`Tracker`] that is shared across entities.
-pub type Tracker = Rc<dyn Track>;
-
-/// Create a [`Tracker`] that prints all track events to `stdout`.
-#[must_use]
-pub fn stdout_tracker(level: log::Level) -> Tracker {
-    let entity_manger = EntityManager::new(level);
-    let stdout_writer = Box::new(std::io::BufWriter::new(io::stdout()));
-    let tracker: Tracker = Rc::new(TextTracker::new(entity_manger, stdout_writer));
-    tracker
-}
-
-/// Create a [`Tracker`] that suppresses all track events.
-#[must_use]
-pub fn dev_null_tracker() -> Tracker {
-    let tracer: Tracker = Rc::new(DevNullTracker {});
-    tracer
 }
 
 /// The [`EntityManager`] is responsible for determining entity log / trace
@@ -290,7 +286,7 @@ impl EntityManager {
             Ok(regex) => self.regex_to_entity_level.push((regex, level)),
             Err(e) => {
                 return Err(TrackConfigError(format!(
-                    "Failed to parse regex {regex_str}:\n{e}\n"
+                    "invalid regular expression {regex_str:?}:\n{e}"
                 )));
             }
         }
@@ -320,7 +316,7 @@ impl EntityManager {
                 .push((regex, window_size_ticks)),
             Err(e) => {
                 return Err(TrackConfigError(format!(
-                    "Failed to parse regex {regex_str}:\n{e}\n"
+                    "invalid regular expression {regex_str:?}:\n{e}"
                 )));
             }
         }
@@ -328,15 +324,23 @@ impl EntityManager {
     }
 }
 
+/// Error used to return configuration errors
+#[derive(Debug)]
+pub struct TrackConfigError(pub String);
+
+impl std::fmt::Display for TrackConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for TrackConfigError {}
+
 #[cfg(test)]
 mod tests {
     use log::Level;
 
     use super::*;
-
-    fn entity_paths() -> Vec<&'static str> {
-        vec!["top", "top::dev", "top::dev::node0", "top::dev::node1"]
-    }
 
     #[test]
     fn no_filters() {
@@ -426,6 +430,10 @@ mod tests {
         for (i, p) in entity_paths().iter().enumerate() {
             assert_eq!(manager.log_level_for(p, None), expected_levels[i]);
         }
+    }
+
+    fn entity_paths() -> Vec<&'static str> {
+        vec!["top", "top::dev", "top::dev::node0", "top::dev::node1"]
     }
 
     #[test]

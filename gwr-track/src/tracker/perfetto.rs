@@ -1,7 +1,7 @@
 // Copyright (c) 2025 Graphcore Ltd. All rights reserved.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::entity::Capacity;
@@ -18,6 +18,10 @@ pub struct PerfettoTracker {
     trace_builder: RefCell<PerfettoTraceBuilder>,
     group_memberships: RefCell<HashMap<Id, Id>>,
     activity_lanes: RefCell<HashMap<Id, Id>>,
+    /// IDs whose track descriptors have been written to the trace. Filtering
+    /// can remove an ancestor while retaining a child, so parent links must
+    /// only refer to IDs in this set.
+    emitted_descriptors: RefCell<HashSet<Id>>,
 }
 
 impl PerfettoTracker {
@@ -30,7 +34,18 @@ impl PerfettoTracker {
             trace_builder: RefCell::new(PerfettoTraceBuilder::new()),
             group_memberships: RefCell::new(HashMap::new()),
             activity_lanes: RefCell::new(HashMap::new()),
+            emitted_descriptors: RefCell::new(HashSet::new()),
         }
+    }
+
+    /// Omit the parent link when its descriptor was filtered out. Perfetto then
+    /// treats the child as a root track instead of leaving it under an unknown
+    /// parent, which can make the filtered trace appear empty in the UI.
+    fn emitted_parent(&self, parent: Id) -> Option<Id> {
+        self.emitted_descriptors
+            .borrow()
+            .contains(&parent)
+            .then_some(parent)
     }
 }
 
@@ -147,11 +162,12 @@ impl Track for PerfettoTracker {
             let trace_packet = guard.build_enter_exit_track_descriptor_trace_packet(
                 *self.current_time_ns.borrow(),
                 id,
-                created_by,
+                self.emitted_parent(created_by),
                 name,
             );
             let buf = guard.build_trace_to_bytes(vec![trace_packet]);
             self.writer.borrow_mut().write_all(&buf).unwrap();
+            self.emitted_descriptors.borrow_mut().insert(id);
         }
     }
 
@@ -161,11 +177,12 @@ impl Track for PerfettoTracker {
             let trace_packet = guard.build_value_track_descriptor_trace_packet(
                 *self.current_time_ns.borrow(),
                 id,
-                created_by,
+                self.emitted_parent(created_by),
                 name,
             );
             let buf = guard.build_trace_to_bytes(vec![trace_packet]);
             self.writer.borrow_mut().write_all(&buf).unwrap();
+            self.emitted_descriptors.borrow_mut().insert(id);
         }
     }
 
@@ -175,11 +192,12 @@ impl Track for PerfettoTracker {
             let trace_packet = guard.build_activity_track_descriptor_trace_packet(
                 *self.current_time_ns.borrow(),
                 id,
-                created_by,
+                self.emitted_parent(created_by),
                 name,
             );
             let buf = guard.build_trace_to_bytes(vec![trace_packet]);
             self.writer.borrow_mut().write_all(&buf).unwrap();
+            self.emitted_descriptors.borrow_mut().insert(id);
         }
     }
 
@@ -199,11 +217,12 @@ impl Track for PerfettoTracker {
             let trace_packet = guard.build_enter_exit_track_descriptor_trace_packet(
                 *self.current_time_ns.borrow(),
                 id,
-                created_by,
+                self.emitted_parent(created_by),
                 details,
             );
             let buf = guard.build_trace_to_bytes(vec![trace_packet]);
             self.writer.borrow_mut().write_all(&buf).unwrap();
+            self.emitted_descriptors.borrow_mut().insert(id);
         }
     }
 
@@ -228,6 +247,71 @@ impl Track for PerfettoTracker {
     }
 
     fn shutdown(&self) {
-        // todo!()
+        self.writer.borrow_mut().flush().unwrap();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{self, Write};
+
+    use gwr_perfetto::protos::Trace;
+    use gwr_perfetto::protos::trace_packet::Data;
+    use prost::Message;
+
+    use super::*;
+
+    #[test]
+    fn filtered_tracks_have_no_missing_parent_descriptors() {
+        let mut manager = EntityManager::new(log::Level::Error);
+        manager
+            .add_entity_level_filter("^top::pe0($|::lane::)", log::Level::Trace)
+            .unwrap();
+        let bytes = Rc::new(RefCell::new(Vec::new()));
+        let tracker = PerfettoTracker::new(manager, Box::new(CapturedWriter(bytes.clone())));
+
+        tracker.add_entity(Id(2), "top", None);
+        tracker.create_entity(Id(0), Id(2), "top");
+        tracker.add_entity(Id(3), "top::pe0", None);
+        tracker.create_entity(Id(2), Id(3), "top::pe0");
+        tracker.add_entity(Id(4), "top::pe0::lane::compute", None);
+        tracker.create_lane(Id(3), Id(4), "top::pe0::lane::compute");
+        tracker.begin_activity(Id(5), Id(4), "compute");
+        tracker.end_activity(Id(5));
+
+        let trace = Trace::decode(bytes.borrow().as_slice()).unwrap();
+        let descriptors: Vec<_> = trace
+            .packet
+            .iter()
+            .filter_map(|packet| match &packet.data {
+                Some(Data::TrackDescriptor(descriptor)) => Some(descriptor),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(descriptors.len(), 2);
+        assert_eq!(descriptors[0].uuid, Some(3));
+        assert_eq!(descriptors[0].parent_uuid, None);
+        assert_eq!(descriptors[1].uuid, Some(4));
+        assert_eq!(descriptors[1].parent_uuid, Some(3));
+        assert_eq!(
+            trace
+                .packet
+                .iter()
+                .filter(|packet| matches!(packet.data, Some(Data::TrackEvent(_))))
+                .count(),
+            2
+        );
+    }
+    struct CapturedWriter(Rc<RefCell<Vec<u8>>>);
+
+    impl Write for CapturedWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.borrow_mut().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
     }
 }
