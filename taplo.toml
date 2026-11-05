@@ -16,14 +16,9 @@ exclude = ["gwr-developer-guide/Cargo.toml"]
 path = "https://www.schemastore.org/cargo.json"
 
 [[rule]]
-include = ["rustfmt.toml"]
+include = ["prek.toml"]
 [rule.schema]
-path = "https://www.schemastore.org/rustfmt.json"
-
-[[rule]]
-include = ["rust-toolchain.toml"]
-[rule.schema]
-path = "https://www.schemastore.org/rust-toolchain.json"
+path = "https://www.schemastore.org/prek.json"
 
 [[rule]]
 include = ["release-plz.toml"]
@@ -31,11 +26,16 @@ include = ["release-plz.toml"]
 path = "https://raw.githubusercontent.com/MarcoIeni/release-plz/main/.schema/latest.json"
 
 [[rule]]
+include = ["rust-toolchain.toml"]
+[rule.schema]
+path = "https://www.schemastore.org/rust-toolchain.json"
+
+[[rule]]
+include = ["rustfmt.toml"]
+[rule.schema]
+path = "https://www.schemastore.org/rustfmt.json"
+
+[[rule]]
 include = ["taplo.toml"]
 [rule.schema]
 path = "https://www.schemastore.org/taplo.json"
-
-[[rule]]
-include = ["prek.toml"]
-[rule.schema]
-path = "https://www.schemastore.org/prek.json"
