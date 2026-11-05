@@ -31,6 +31,7 @@ priority = 5
 
 [[repos.hooks]]
 id = "check-yaml"
+args = ["--allow-multiple-documents"]
 priority = 5
 
 [[repos.hooks]]

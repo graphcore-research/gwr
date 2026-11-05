@@ -5,6 +5,8 @@ include_fragments = "full"
 
 # Do not check the validity of links in these files
 exclude_path = [
+  # Local design and review records are excluded from source checks.
+  "^\\./docs/superpowers/.*",
   # Links within the developer guide are validated by mdbook-linkcheck
   # which is run after mdbook "links" pre-processes has expanded all
   # {{ #include }} handlebars

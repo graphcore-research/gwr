@@ -1,5 +1,6 @@
 # Copyright (c) 2020 Graphcore Ltd. All rights reserved.
 
+docs/
 target/
 traces/
 flamegraph*
@@ -9,3 +10,11 @@ flamegraph*
 node_modules/
 .lycheecache
 mmdc-config.json
+*.pyc
+reports/
+outputs/
+.superpowers/
+
+# Local generated workloads, evaluation reports, and simulation output.
+/*.pftrace
+/*.log
