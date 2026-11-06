@@ -476,67 +476,100 @@ impl Generator {
             } else {
                 format!("{compute_id}_part{part}")
             };
-            let mut failures = Vec::new();
-            let mut accepted = None;
-            for (pe_idx, accumulator) in
-                self.compute_candidates(template, &part_boundary, &eligible)
-            {
-                let attempt = (|| {
-                    let program =
-                        build_program_for_boundary(template, &part_boundary, accumulator)?;
-                    let tensors = self.allocate_tensors(pe_idx, &part_boundary)?;
-                    let relocated = relocate_boundary(&part_boundary, &tensors)?;
-                    let (tiling, prepared) = find_tiling_for_pe(
-                        &part_id,
-                        &program,
-                        &relocated,
-                        axis,
-                        &self.pes[pe_idx].model,
-                    )?;
-                    let previous = self.prepare_selected(&tensors)?;
-                    Ok::<_, Box<dyn Error>>((tensors, program, tiling, prepared, previous))
-                })();
-                match attempt {
-                    Ok(value) => {
-                        accepted = Some((pe_idx, value));
-                        break;
-                    }
-                    Err(error) => failures.push(format!("{}: {error}", self.pes[pe_idx].name)),
-                }
-            }
-            let Some((pe_idx, (tensors, program, tiling, prepared, previous))) = accepted else {
-                return Err(error_from_str(format!(
-                    "no feasible placement found for this generated mapping ({part_id}): {}",
-                    failures.join("; ")
-                )));
-            };
-            self.tensors = tensors;
-            self.allocated_tensors = self.tensors.len();
-            for (selected, prepared) in self.selected.iter_mut().zip(previous) {
-                selected.prepared = prepared;
-            }
-            let node = self.nodes.len();
-            self.create_compute(
-                &part_id,
-                &part_boundary,
-                input_tensors,
-                output_tensors,
-                ComputeMapping {
-                    pe_idx,
-                    program,
-                    tiling,
-                },
-            )?;
-            self.selected.push(SelectedCompute {
-                node,
-                pe: pe_idx,
-                boundary: part_boundary,
-                prepared,
-            });
-            self.last_pe_idx = (pe_idx + 1) % self.pes.len();
+            let plan = self.plan_partition(&part_id, template, &part_boundary, axis, &eligible)?;
+            self.commit_placement(&part_id, part_boundary, input_tensors, output_tensors, plan);
             offset += length;
         }
         Ok(count)
+    }
+
+    fn plan_partition(
+        &self,
+        id: &str,
+        template: &ProgramTemplate,
+        boundary: &GenerationBoundary,
+        axis: &str,
+        eligible: &[usize],
+    ) -> Result<PlacementPlan> {
+        let mut failures = Vec::new();
+        for candidate in self.compute_candidates(template, boundary, eligible) {
+            match self.try_placement(id, template, boundary, axis, candidate) {
+                Ok(plan) => return Ok(plan),
+                Err(error) => failures.push(format!("{}: {error}", self.pes[candidate.0].name)),
+            }
+        }
+        Err(error_from_str(format!(
+            "no feasible placement found for this generated mapping ({id}): {}",
+            failures.join("; ")
+        )))
+    }
+
+    fn try_placement(
+        &self,
+        id: &str,
+        template: &ProgramTemplate,
+        boundary: &GenerationBoundary,
+        axis: &str,
+        (pe_idx, accumulator): (usize, DataType),
+    ) -> Result<PlacementPlan> {
+        let program = build_program_for_boundary(template, boundary, accumulator)?;
+        let tensors = self.allocate_tensors(pe_idx, boundary)?;
+        let relocated = relocate_boundary(boundary, &tensors)?;
+        let (tiling, prepared) =
+            find_tiling_for_pe(id, &program, &relocated, axis, &self.pes[pe_idx].model)?;
+        let affected_tasks = self.prepare_affected(&tensors)?;
+        Ok(PlacementPlan {
+            pe_idx,
+            program,
+            tensors,
+            tiling,
+            prepared,
+            affected_tasks,
+        })
+    }
+
+    fn commit_placement(
+        &mut self,
+        id: &str,
+        boundary: GenerationBoundary,
+        input_tensors: &[Option<Tensor>],
+        output_tensors: &[Option<Tensor>],
+        plan: PlacementPlan,
+    ) {
+        let PlacementPlan {
+            pe_idx,
+            program,
+            tensors,
+            tiling,
+            prepared,
+            affected_tasks,
+        } = plan;
+        // All allocation, binding and preparation can fail only during the
+        // immutable attempt. Installation below has no fallible steps.
+        self.tensors = tensors;
+        self.allocated_tensors = self.tensors.len();
+        for (index, prepared) in affected_tasks {
+            self.selected[index].prepared = prepared;
+        }
+        let node = self.nodes.len();
+        self.create_compute(
+            id,
+            &boundary,
+            input_tensors,
+            output_tensors,
+            ComputeMapping {
+                pe_idx,
+                program,
+                tiling,
+            },
+        );
+        self.selected.push(SelectedCompute {
+            node,
+            pe: pe_idx,
+            boundary,
+            prepared,
+        });
+        self.last_pe_idx = (pe_idx + 1) % self.pes.len();
     }
 
     fn compute_candidates(
@@ -583,10 +616,35 @@ impl Generator {
             .min(self.remaining_compute_nodes)
     }
 
-    fn prepare_selected(&self, tensors: &[Tensor]) -> Result<Vec<Rc<PreparedTask>>> {
+    fn prepare_affected(&self, tensors: &[Tensor]) -> Result<Vec<(usize, Rc<PreparedTask>)>> {
+        let current: BTreeMap<_, _> = self.tensors.iter().map(|t| (tensor_id(t), t)).collect();
+        let changed: BTreeSet<_> = tensors
+            .iter()
+            .filter_map(|proposed| {
+                let previous = current[tensor_id(proposed)];
+                (previous.addr() != proposed.addr()
+                    || previous.dtype() != proposed.dtype()
+                    || previous.shape() != proposed.shape())
+                .then_some(tensor_id(proposed))
+            })
+            .collect();
         self.selected
             .iter()
-            .map(|selected| {
+            .enumerate()
+            .filter(|(_, selected)| {
+                selected
+                    .boundary
+                    .inputs
+                    .iter()
+                    .chain(&selected.boundary.outputs)
+                    .flatten()
+                    .any(|view| changed.contains(tensor_id(view.tensor())))
+            })
+            .map(|(index, selected)| {
+                // Selection fixes the PE instance, serialized program, tiling,
+                // and view shapes/offsets for the rest of generation. Only
+                // tensor storage can change. Compare authoritative locations
+                // above, not the original boundary's unrelocated addresses.
                 let NodeSection::Compute {
                     id,
                     program,
@@ -596,13 +654,14 @@ impl Generator {
                 else {
                     unreachable!()
                 };
-                prepare_boundary(
+                let prepared = prepare_boundary(
                     &self.pes[selected.pe].model,
                     id,
                     program,
                     tiling.as_ref(),
                     &relocate_boundary(&selected.boundary, tensors)?,
-                )
+                )?;
+                Ok((index, prepared))
             })
             .collect()
     }
@@ -614,7 +673,7 @@ impl Generator {
         input_tensors: &[Option<Tensor>],
         output_tensors: &[Option<Tensor>],
         mapping: ComputeMapping,
-    ) -> Result<()> {
+    ) {
         let pe = self.pes[mapping.pe_idx].name.clone();
         debug!("  Mapping compute node {compute_id} to {pe}");
         let input_views = boundary
@@ -668,7 +727,6 @@ impl Generator {
             input_views: Some(input_views),
             output_views: Some(output_views),
         });
-        Ok(())
     }
 
     fn create_inputs_for_template(
@@ -1234,6 +1292,15 @@ impl LayerBounds {
     }
 }
 
+struct PlacementPlan {
+    pe_idx: usize,
+    program: ProgramSpec,
+    tensors: Vec<Tensor>,
+    tiling: TileSpec,
+    prepared: Rc<PreparedTask>,
+    affected_tasks: Vec<(usize, Rc<PreparedTask>)>,
+}
+
 struct ComputeMapping {
     pe_idx: usize,
     program: ProgramSpec,
@@ -1702,6 +1769,127 @@ connections:
         let mut args = valid_args();
         args.tensor_align_bytes = 1;
         Generator::new(args, &from_str(&yaml).unwrap()).unwrap()
+    }
+
+    fn add_selection(generator: &mut Generator, id: &str, input: &Tensor, output: &Tensor) {
+        use super::*;
+        let inputs = [Some(input.clone()), Some(input.clone())];
+        let outputs = [Some(output.clone())];
+        generator
+            .create_partitioned_compute(
+                id,
+                &ProgramTemplate::Add,
+                &build_full_tensor_boundary(&inputs, &outputs),
+                &inputs,
+                &outputs,
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn placement_attempt_reuses_unchanged_preparation_after_prior_relocation() {
+        use super::*;
+        let mut generator = placement_generator("a, c", "b, c", 16);
+        let x = Tensor::new(&[1], &DataType::Fp32, 0).unwrap().with_id("x");
+        let y = x.clone().with_id("y");
+        let z = x.clone().with_id("z");
+        let w = x.clone().with_id("w");
+        generator.tensors = vec![x.clone(), y.clone()];
+        add_selection(&mut generator, "first", &x, &y);
+        generator.tensors.push(z.clone());
+        add_selection(&mut generator, "relocating", &x, &z);
+        assert_eq!(
+            generator
+                .tensors
+                .iter()
+                .find(|t| t.id() == Some("x"))
+                .unwrap()
+                .addr(),
+            32
+        );
+        let first = generator.selected[0].prepared.clone();
+        let second = generator.selected[1].prepared.clone();
+        generator.tensors.push(w.clone());
+        add_selection(&mut generator, "unchanged", &x, &w);
+        assert!(
+            Rc::ptr_eq(&first, &generator.selected[0].prepared),
+            "unchanged actual bindings must retain their preparation"
+        );
+        assert!(Rc::ptr_eq(&second, &generator.selected[1].prepared));
+    }
+
+    #[test]
+    fn placement_attempt_replaces_preparation_when_shared_binding_moves() {
+        use super::*;
+        let mut generator = placement_generator("a, c", "b, c", 16);
+        let x = Tensor::new(&[1], &DataType::Fp32, 0).unwrap().with_id("x");
+        let y = x.clone().with_id("y");
+        let z = x.clone().with_id("z");
+        generator.tensors = vec![x.clone(), y.clone()];
+        add_selection(&mut generator, "first", &x, &y);
+        let first = generator.selected[0].prepared.clone();
+        assert_eq!(
+            generator
+                .tensors
+                .iter()
+                .find(|t| t.id() == Some("x"))
+                .unwrap()
+                .addr(),
+            0
+        );
+        generator.tensors.push(z.clone());
+        add_selection(&mut generator, "relocating", &x, &z);
+        assert_eq!(
+            generator
+                .tensors
+                .iter()
+                .find(|t| t.id() == Some("x"))
+                .unwrap()
+                .addr(),
+            32
+        );
+        assert!(!Rc::ptr_eq(&first, &generator.selected[0].prepared));
+        assert_eq!(generator.selected[0].prepared.id(), "first");
+        assert_eq!(
+            generator.selected[0].prepared.planned_traffic_bytes(),
+            (8, 4)
+        );
+    }
+
+    #[test]
+    fn placement_attempt_rejection_preserves_committed_state() {
+        use super::*;
+        let mut generator = placement_generator("a", "b", 8);
+        let x = Tensor::new(&[1], &DataType::Fp32, 0).unwrap().with_id("x");
+        let y = x.clone().with_id("y");
+        let z = x.clone().with_id("z");
+        generator.tensors = vec![x.clone(), y.clone()];
+        add_selection(&mut generator, "first", &x, &y);
+        generator.tensors.push(z.clone());
+        let prepared = generator.selected[0].prepared.clone();
+        let tensors = format!("{:?}", generator.tensors);
+        let nodes = yaml_serde::to_string(&generator.nodes).unwrap();
+        let edges = yaml_serde::to_string(&generator.edges).unwrap();
+        let last_pe = generator.last_pe_idx;
+        let inputs = [Some(x.clone()), Some(x)];
+        let outputs = [Some(z)];
+        let error = generator
+            .create_partitioned_compute(
+                "rejected",
+                &ProgramTemplate::Add,
+                &build_full_tensor_boundary(&inputs, &outputs),
+                &inputs,
+                &outputs,
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("no feasible placement"));
+        assert_eq!(format!("{:?}", generator.tensors), tensors);
+        assert_eq!(yaml_serde::to_string(&generator.nodes).unwrap(), nodes);
+        assert_eq!(yaml_serde::to_string(&generator.edges).unwrap(), edges);
+        assert_eq!(generator.allocated_tensors, 2);
+        assert_eq!(generator.last_pe_idx, last_pe);
+        assert_eq!(generator.selected.len(), 1);
+        assert!(Rc::ptr_eq(&prepared, &generator.selected[0].prepared));
     }
 
     #[test]
