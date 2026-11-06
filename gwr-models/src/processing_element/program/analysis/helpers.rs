@@ -127,7 +127,7 @@ mod expression_dtype_contract {
     use super::build_scalar_expression_work;
     use crate::processing_element::compute::{ComputeConfig, ComputeModel, ComputeWork};
     use crate::processing_element::program::syntax::ProgramSpec;
-    use crate::processing_element::program::validate::{RegionBindings, validate_program};
+    use crate::processing_element::program::validate::{ProgramBindings, validate_program};
     use crate::processing_element::tensors::dtype::DataType as D;
     use crate::processing_element::tensors::{Tensor, TensorView};
 
@@ -160,7 +160,7 @@ mod expression_dtype_contract {
             |dtype, address| TensorView::new_full(Tensor::new(&[4], &dtype, address).unwrap());
         let region = validate_program(
             &spec,
-            RegionBindings {
+            ProgramBindings {
                 inputs: vec![view(input, 0)],
                 outputs: vec![view(output, 128)],
             },

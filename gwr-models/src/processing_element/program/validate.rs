@@ -4,8 +4,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use gwr_engine::types::SimError;
+use gwr_engine::sim_error;
+use gwr_engine::types::{SimError, SimResult};
 
+use super::executable::Program;
 use super::syntax::{
     AffineSpec, AssignmentSpec, BoundsMode, ExprSpec, IndexSpec, ProgramSpec, ReductionOp,
 };
@@ -14,12 +16,12 @@ use crate::processing_element::tensors::{HasShape, TensorView};
 
 pub(in crate::processing_element) fn validate_program(
     spec: &ProgramSpec,
-    bindings: RegionBindings,
+    bindings: ProgramBindings,
 ) -> Result<ProgramFacts, SimError> {
     validate_program_header(spec, &bindings)?;
     let producers = build_assignment_producer_map(spec)?;
     let order = order_assignments_by_dependency(spec, &producers)?;
-    let executable = super::executable::Program::bind(spec)?;
+    let executable = Program::bind(spec)?;
     for &index in &order {
         validate_assignment_structure(&spec.assignments[index], spec, &producers)?;
     }
@@ -64,8 +66,8 @@ pub(in crate::processing_element) fn validate_program(
 
 #[derive(Clone, Debug)]
 pub(in crate::processing_element) struct ProgramFacts {
-    pub(in crate::processing_element) program: super::executable::Program,
-    pub(in crate::processing_element) bindings: RegionBindings,
+    pub(in crate::processing_element) program: Program,
+    pub(in crate::processing_element) bindings: ProgramBindings,
     pub(in crate::processing_element) values: BTreeMap<String, TensorSpec>,
     pub(in crate::processing_element) extents: BTreeMap<String, usize>,
     pub(in crate::processing_element) assignment_order: Vec<usize>,
@@ -86,20 +88,20 @@ impl ProgramFacts {
     }
 }
 
-fn validate_program_header(spec: &ProgramSpec, bindings: &RegionBindings) -> Result<(), SimError> {
+fn validate_program_header(spec: &ProgramSpec, bindings: &ProgramBindings) -> SimResult {
     if spec.inputs.len() != bindings.inputs.len() {
-        return Err(err(format!(
+        return sim_error!(
             "program input bindings differ: declared {}, bound {}",
             spec.inputs.len(),
             bindings.inputs.len()
-        )));
+        );
     }
     if spec.outputs.len() != bindings.outputs.len() {
-        return Err(err(format!(
+        return sim_error!(
             "program output bindings differ: declared {}, bound {}",
             spec.outputs.len(),
             bindings.outputs.len()
-        )));
+        );
     }
     let mut names = BTreeSet::new();
     for name in spec.inputs.iter().chain(&spec.outputs) {
@@ -110,7 +112,7 @@ fn validate_program_header(spec: &ProgramSpec, bindings: &RegionBindings) -> Res
     }
     for (axis, extent) in &spec.extents {
         if axis.is_empty() || *extent == 0 {
-            return Err(err(format!("axis {axis} has invalid extent {extent}")));
+            return sim_error!("axis {axis} has invalid extent {extent}");
         }
     }
     Ok(())
@@ -120,7 +122,7 @@ fn build_assignment_producer_map(spec: &ProgramSpec) -> Result<BTreeMap<String, 
     let mut producers = BTreeMap::new();
     for (index, assignment) in spec.assignments.iter().enumerate() {
         if assignment.output.is_none() && assignment.indices_output.is_none() {
-            return Err(err("assignment must name output or indices_output"));
+            return sim_error!("assignment must name output or indices_output");
         }
         if assignment.indices_output.is_some()
             && !matches!(
@@ -131,7 +133,7 @@ fn build_assignment_producer_map(spec: &ProgramSpec) -> Result<BTreeMap<String, 
                 }
             )
         {
-            return Err(err("indices_output requires a min or max reduction"));
+            return sim_error!("indices_output requires a min or max reduction");
         }
         for name in [
             assignment.output.as_ref(),
@@ -141,16 +143,16 @@ fn build_assignment_producer_map(spec: &ProgramSpec) -> Result<BTreeMap<String, 
         .flatten()
         {
             if !spec.outputs.contains(name) && !spec.temporaries.contains_key(name) {
-                return Err(err(format!("assignment targets undeclared value {name}")));
+                return sim_error!("assignment targets undeclared value {name}");
             }
             if producers.insert(name.clone(), index).is_some() {
-                return Err(err(format!("duplicate producer for {name}")));
+                return sim_error!("duplicate producer for {name}");
             }
         }
     }
     for name in spec.outputs.iter().chain(spec.temporaries.keys()) {
         if !producers.contains_key(name) {
-            return Err(err(format!("missing producer for {name}")));
+            return sim_error!("missing producer for {name}");
         }
     }
     Ok(producers)
@@ -174,14 +176,14 @@ fn visit_assignment(
     producers: &BTreeMap<String, usize>,
     visit_states: &mut [AssignmentVisitState],
     order: &mut Vec<usize>,
-) -> Result<(), SimError> {
+) -> SimResult {
     match visit_states[index] {
         AssignmentVisitState::Complete => return Ok(()),
         AssignmentVisitState::InProgress => {
-            return Err(err(format!(
+            return sim_error!(
                 "cycle through assignment {}",
                 spec.assignments[index].primary_result()
-            )));
+            );
         }
         AssignmentVisitState::Unvisited => {}
     }
@@ -191,10 +193,10 @@ fn visit_assignment(
         if let Some(&producer) = producers.get(&read) {
             visit_assignment(producer, spec, producers, visit_states, order)?;
         } else if !spec.inputs.contains(&read) {
-            return Err(err(format!(
+            return sim_error!(
                 "assignment {} reads unknown tensor '{read}'",
                 spec.assignments[index].primary_result()
-            )));
+            );
         }
     }
     visit_states[index] = AssignmentVisitState::Complete;
@@ -211,13 +213,13 @@ enum AssignmentVisitState {
 
 struct AssignmentValidation<'a> {
     spec: &'a ProgramSpec,
-    bindings: &'a RegionBindings,
+    bindings: &'a ProgramBindings,
     values: BTreeMap<String, TensorSpec>,
     extents: BTreeMap<String, usize>,
 }
 
 impl<'a> AssignmentValidation<'a> {
-    fn new(spec: &'a ProgramSpec, bindings: &'a RegionBindings) -> Result<Self, SimError> {
+    fn new(spec: &'a ProgramSpec, bindings: &'a ProgramBindings) -> Result<Self, SimError> {
         let values = spec
             .inputs
             .iter()
@@ -241,7 +243,7 @@ impl<'a> AssignmentValidation<'a> {
         })
     }
 
-    fn validate(&mut self, assignment: &AssignmentSpec) -> Result<(), SimError> {
+    fn validate(&mut self, assignment: &AssignmentSpec) -> SimResult {
         let reduction_axes = self.validate_expression(assignment)?;
         let shape = self.resolve_output_shape(assignment, &reduction_axes)?;
         self.register_outputs(assignment, shape)
@@ -283,10 +285,10 @@ impl<'a> AssignmentValidation<'a> {
         let mut shape = Vec::new();
         for axis in &assignment.axes {
             if !seen.insert(axis) || reduction_axes.contains(axis) {
-                return Err(err(format!(
+                return sim_error!(
                     "assignment {} has duplicate or reduced output axis {axis}",
                     assignment.primary_result()
-                )));
+                );
             }
             shape.push(*self.extents.get(axis).ok_or_else(|| {
                 err(format!(
@@ -297,10 +299,10 @@ impl<'a> AssignmentValidation<'a> {
         }
         for axis in reduction_axes {
             if !self.extents.contains_key(axis) {
-                return Err(err(format!(
+                return sim_error!(
                     "assignment {} has unconstrained reduction axis {axis}",
                     assignment.primary_result()
-                )));
+                );
             }
         }
         shape.iter().try_fold(1usize, |acc, size| {
@@ -310,11 +312,7 @@ impl<'a> AssignmentValidation<'a> {
         Ok(shape)
     }
 
-    fn register_outputs(
-        &mut self,
-        assignment: &AssignmentSpec,
-        shape: Vec<usize>,
-    ) -> Result<(), SimError> {
+    fn register_outputs(&mut self, assignment: &AssignmentSpec, shape: Vec<usize>) -> SimResult {
         if let Some(name) = &assignment.output {
             self.register_value_output(name, &shape)?;
         }
@@ -324,7 +322,7 @@ impl<'a> AssignmentValidation<'a> {
         Ok(())
     }
 
-    fn register_value_output(&mut self, name: &str, shape: &[usize]) -> Result<(), SimError> {
+    fn register_value_output(&mut self, name: &str, shape: &[usize]) -> SimResult {
         let dtype = if let Some(temporary) = self.spec.temporaries.get(name) {
             temporary.dtype
         } else {
@@ -336,10 +334,10 @@ impl<'a> AssignmentValidation<'a> {
                 .unwrap();
             let view = &self.bindings.outputs[output_index];
             if view.shape().dims() != shape {
-                return Err(err(format!(
+                return sim_error!(
                     "assignment {name} shape {shape:?} differs from output {:?}",
                     view.shape().dims()
-                )));
+                );
             }
             *view.dtype()
         };
@@ -353,7 +351,7 @@ impl<'a> AssignmentValidation<'a> {
         Ok(())
     }
 
-    fn register_index_output(&mut self, name: &str, shape: Vec<usize>) -> Result<(), SimError> {
+    fn register_index_output(&mut self, name: &str, shape: Vec<usize>) -> SimResult {
         let dtype = if let Some(temporary) = self.spec.temporaries.get(name) {
             temporary.dtype
         } else {
@@ -365,9 +363,7 @@ impl<'a> AssignmentValidation<'a> {
                 .unwrap();
             let view = &self.bindings.outputs[output_index];
             if view.shape().dims() != shape {
-                return Err(err(format!(
-                    "indices_output {name} must have shape {shape:?}"
-                )));
+                return sim_error!("indices_output {name} must have shape {shape:?}");
             }
             *view.dtype()
         };
@@ -381,7 +377,7 @@ fn validate_assignment_structure(
     assignment: &AssignmentSpec,
     spec: &ProgramSpec,
     producers: &BTreeMap<String, usize>,
-) -> Result<(), SimError> {
+) -> SimResult {
     let expr = &assignment.expr;
     let assignment_error = |error: SimError| {
         err(format!(
@@ -437,7 +433,7 @@ fn validate_assignment_axes(
     assignment: &AssignmentSpec,
     read_axes: &BTreeSet<String>,
     declared_reductions: &BTreeSet<String>,
-) -> Result<(), SimError> {
+) -> SimResult {
     let bound_axes = assignment
         .axes
         .iter()
@@ -445,31 +441,29 @@ fn validate_assignment_axes(
         .chain(declared_reductions.iter().cloned())
         .collect::<BTreeSet<_>>();
     if let Some(unbound) = read_axes.difference(&bound_axes).next() {
-        return Err(err(format!(
+        return sim_error!(
             "assignment {} has unbound read axis {unbound}",
             assignment.primary_result()
-        )));
+        );
     }
     if let Some(unused) = declared_reductions.difference(read_axes).next() {
-        return Err(err(format!(
+        return sim_error!(
             "assignment {} reduction axis {unused} is not read",
             assignment.primary_result()
-        )));
+        );
     }
     Ok(())
 }
 
-fn validate_boundary_overlap(
-    spec: &ProgramSpec,
-    bindings: &RegionBindings,
-) -> Result<(), SimError> {
+fn validate_boundary_overlap(spec: &ProgramSpec, bindings: &ProgramBindings) -> SimResult {
     for (output_index, output) in bindings.outputs.iter().enumerate() {
         for (input_index, input) in bindings.inputs.iter().enumerate() {
             if output.first_overlapping_byte_ranges(input).is_some() {
-                return Err(err(format!(
+                return sim_error!(
                     "output {} overlaps input {}",
-                    spec.outputs[output_index], spec.inputs[input_index]
-                )));
+                    spec.outputs[output_index],
+                    spec.inputs[input_index]
+                );
             }
         }
         for previous in 0..output_index {
@@ -477,35 +471,43 @@ fn validate_boundary_overlap(
                 .first_overlapping_byte_ranges(&bindings.outputs[previous])
                 .is_some()
             {
-                return Err(err(format!(
+                return sim_error!(
                     "output {} overlaps output {}",
-                    spec.outputs[output_index], spec.outputs[previous]
-                )));
+                    spec.outputs[output_index],
+                    spec.outputs[previous]
+                );
             }
         }
     }
     Ok(())
 }
 
+/// Owned boundary tensor views for one program invocation.
+///
+/// Views bind by position in the corresponding [`ProgramSpec::inputs`] and
+/// [`ProgramSpec::outputs`] declarations. Timetable graph edges resolve named
+/// ports into this order before constructing a [`super::PreparedProgram`].
 #[derive(Clone, Debug)]
-pub struct RegionBindings {
+pub struct ProgramBindings {
+    /// Input views in declared input order, including dependency-only inputs.
     pub inputs: Vec<TensorView>,
+    /// Output views in declared output order.
     pub outputs: Vec<TensorView>,
 }
 
 fn validate_unique_input_mapping(
     expr: &ExprSpec,
     mappings: &mut BTreeMap<String, (Vec<IndexSpec>, BoundsMode)>,
-) -> Result<(), SimError> {
+) -> SimResult {
     match expr {
         ExprSpec::Read {
             tensor,
             indices,
             bounds,
         } => match mappings.get(tensor) {
-            Some((previous, mode)) if previous != indices || mode != bounds => Err(err(format!(
-                "tensor {tensor} has multiple index mappings in one program"
-            ))),
+            Some((previous, mode)) if previous != indices || mode != bounds => {
+                sim_error!("tensor {tensor} has multiple index mappings in one program")
+            }
             _ => {
                 mappings.insert(tensor.clone(), (indices.clone(), *bounds));
                 Ok(())
@@ -525,7 +527,7 @@ fn validate_local_reads(
     expr: &ExprSpec,
     spec: &ProgramSpec,
     producers: &BTreeMap<String, usize>,
-) -> Result<(), SimError> {
+) -> SimResult {
     match expr {
         ExprSpec::Read {
             tensor,
@@ -538,9 +540,9 @@ fn validate_local_reads(
                 || indices.iter().zip(&producer.axes).any(|(index, axis)|
                     !matches!(index, IndexSpec::Axis(read_axis) if read_axis == axis))
             {
-                return Err(err(format!(
+                return sim_error!(
                     "internal tensor {tensor} has an unsupported cross-tile dependency"
-                )));
+                );
             }
         }
         ExprSpec::Read { .. } => {}
@@ -561,7 +563,7 @@ fn collect_axes(
     read_axes: &mut BTreeSet<String>,
     reduction_axes: &mut BTreeSet<String>,
     inside_reduction: bool,
-) -> Result<(), SimError> {
+) -> SimResult {
     match expr {
         ExprSpec::Read { indices, .. } => {
             for index in indices {
@@ -584,7 +586,7 @@ fn collect_axes(
         ExprSpec::MatrixMac { args, over, .. } => {
             if !over.is_empty() {
                 if inside_reduction {
-                    return Err(err("nested reduction is unsupported"));
+                    return sim_error!("nested reduction is unsupported");
                 }
                 reduction_axes.extend(over.iter().cloned());
             }
@@ -599,7 +601,7 @@ fn collect_axes(
         }
         ExprSpec::Reduce { over, value, .. } => {
             if inside_reduction {
-                return Err(err("nested reduction is unsupported"));
+                return sim_error!("nested reduction is unsupported");
             }
             reduction_axes.extend(over.iter().cloned());
             collect_axes(value, read_axes, reduction_axes, true)?;
@@ -608,15 +610,12 @@ fn collect_axes(
     Ok(())
 }
 
-pub(super) fn validate_matrix_expression(
-    args: &[ExprSpec],
-    over: &[String],
-) -> Result<(), SimError> {
+pub(super) fn validate_matrix_expression(args: &[ExprSpec], over: &[String]) -> SimResult {
     let direct_read = |value: &ExprSpec| matches!(value, ExprSpec::Read { .. });
     if over.len() != 1 || args.len() != 2 || !args.iter().all(direct_read) {
-        return Err(err(
-            "matrix_mac requires two direct reads, one reduction axis, and no attributes",
-        ));
+        return sim_error!(
+            "matrix_mac requires two direct reads, one reduction axis, and no attributes"
+        );
     }
     for arg in args {
         let ExprSpec::Read {
@@ -633,9 +632,7 @@ pub(super) fn validate_matrix_expression(
                 .iter()
                 .any(|index| matches!(index, IndexSpec::Axis(axis) if axis == &over[0]))
         {
-            return Err(err(
-                "matrix_mac operands must directly index the reduction axis",
-            ));
+            return sim_error!("matrix_mac operands must directly index the reduction axis");
         }
     }
     Ok(())
@@ -647,7 +644,7 @@ fn validate_expr(
     extents: &mut BTreeMap<String, usize>,
     reduction_axes: &mut BTreeSet<String>,
     in_reduction: bool,
-) -> Result<(), SimError> {
+) -> SimResult {
     match expr {
         ExprSpec::Read {
             tensor,
@@ -664,7 +661,7 @@ fn validate_expr(
         ExprSpec::MatrixMac { args, over, .. } => {
             for axis in over {
                 if !reduction_axes.insert(axis.clone()) {
-                    return Err(err(format!("duplicate reduction axis {axis}")));
+                    return sim_error!("duplicate reduction axis {axis}");
                 }
             }
             for arg in args {
@@ -673,11 +670,11 @@ fn validate_expr(
         }
         ExprSpec::Reduce { over, value, .. } => {
             if over.is_empty() {
-                return Err(err("reduction must name at least one axis"));
+                return sim_error!("reduction must name at least one axis");
             }
             for axis in over {
                 if !reduction_axes.insert(axis.clone()) {
-                    return Err(err(format!("duplicate reduction axis {axis}")));
+                    return sim_error!("duplicate reduction axis {axis}");
                 }
             }
             validate_expr(value, values, extents, reduction_axes, true)?;
@@ -693,21 +690,19 @@ fn validate_read_expression(
     values: &BTreeMap<String, TensorSpec>,
     extents: &mut BTreeMap<String, usize>,
     in_reduction: bool,
-) -> Result<(), SimError> {
+) -> SimResult {
     let value = values
         .get(tensor)
         .ok_or_else(|| err(format!("unknown tensor '{tensor}'")))?;
     if indices.len() != value.shape.len() {
-        return Err(err(format!(
+        return sim_error!(
             "tensor {tensor} index rank {} differs from shape rank {}",
             indices.len(),
             value.shape.len()
-        )));
+        );
     }
     if bounds == BoundsMode::Exclude && !in_reduction {
-        return Err(err(format!(
-            "tensor {tensor} uses exclude bounds outside a reduction"
-        )));
+        return sim_error!("tensor {tensor} uses exclude bounds outside a reduction");
     }
     let mut used_axes = BTreeSet::new();
     for (index, size) in indices.iter().zip(&value.shape) {
@@ -722,7 +717,7 @@ fn validate_read_index(
     size: usize,
     used_axes: &mut BTreeSet<String>,
     extents: &mut BTreeMap<String, usize>,
-) -> Result<(), SimError> {
+) -> SimResult {
     match index {
         IndexSpec::Axis(axis) => {
             register_read_axis(tensor, axis, used_axes)?;
@@ -730,15 +725,13 @@ fn validate_read_index(
         }
         IndexSpec::Zero(0) => {
             if size != 1 {
-                return Err(err(format!(
+                return sim_error!(
                     "tensor {tensor} literal-zero index requires a singleton dimension"
-                )));
+                );
             }
         }
         IndexSpec::Zero(_) => {
-            return Err(err(format!(
-                "tensor {tensor} supports only literal-zero indices"
-            )));
+            return sim_error!("tensor {tensor} supports only literal-zero indices");
         }
         IndexSpec::Affine { affine } => {
             validate_affine_axes(tensor, affine, used_axes, extents)?;
@@ -752,32 +745,22 @@ fn validate_affine_axes(
     affine: &AffineSpec,
     used_axes: &mut BTreeSet<String>,
     extents: &BTreeMap<String, usize>,
-) -> Result<(), SimError> {
+) -> SimResult {
     for (axis, coefficient) in &affine.terms {
         register_read_axis(tensor, axis, used_axes)?;
         if *coefficient == 0 {
-            return Err(err(format!(
-                "tensor {tensor} affine coefficient for {axis} is zero"
-            )));
+            return sim_error!("tensor {tensor} affine coefficient for {axis} is zero");
         }
         if !extents.contains_key(axis) {
-            return Err(err(format!(
-                "tensor {tensor} affine axis {axis} has no declared extent"
-            )));
+            return sim_error!("tensor {tensor} affine axis {axis} has no declared extent");
         }
     }
     Ok(())
 }
 
-fn register_read_axis(
-    tensor: &str,
-    axis: &str,
-    used_axes: &mut BTreeSet<String>,
-) -> Result<(), SimError> {
+fn register_read_axis(tensor: &str, axis: &str, used_axes: &mut BTreeSet<String>) -> SimResult {
     if !used_axes.insert(axis.to_owned()) {
-        return Err(err(format!(
-            "tensor {tensor} repeats axis {axis} in one read"
-        )));
+        return sim_error!("tensor {tensor} repeats axis {axis} in one read");
     }
     Ok(())
 }
@@ -786,7 +769,7 @@ fn validate_required_ranges(
     expr: &ExprSpec,
     values: &BTreeMap<String, TensorSpec>,
     extents: &BTreeMap<String, usize>,
-) -> Result<(), SimError> {
+) -> SimResult {
     match expr {
         ExprSpec::Read {
             tensor,
@@ -807,9 +790,7 @@ fn validate_required_ranges(
                         >= i128::try_from(*dimension)
                             .map_err(|_| err("index dimension overflows"))?
                 {
-                    return Err(err(format!(
-                        "tensor {tensor} read index exceeds its dimension"
-                    )));
+                    return sim_error!("tensor {tensor} read index exceeds its dimension");
                 }
             }
         }
@@ -863,7 +844,7 @@ fn validate_extremum_window(
     output_axes: &[String],
     extents: &BTreeMap<String, usize>,
     values: &BTreeMap<String, TensorSpec>,
-) -> Result<(), SimError> {
+) -> SimResult {
     let ExprSpec::Reduce {
         op: ReductionOp::Min | ReductionOp::Max,
         value,
@@ -892,9 +873,7 @@ fn validate_extremum_window(
                 continue;
             }
             if min >= dimension || max < 0 {
-                return Err(err(format!(
-                    "min/max window on {tensor} has an empty valid range"
-                )));
+                return sim_error!("min/max window on {tensor} has an empty valid range");
             }
         }
     }
@@ -957,9 +936,16 @@ fn affine_window_range_at_corner(
     Ok((min, max))
 }
 
+/// Resolved logical shape and element datatype of a program value.
+///
+/// Boundary values inherit their metadata from bound views. Temporary shapes
+/// are inferred from assignment axes and their datatypes are declared in
+/// syntax.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TensorSpec {
+    /// Dimensions in assignment or boundary-view order; empty for a scalar.
     pub shape: Vec<usize>,
+    /// Element datatype used for storage and operation signatures.
     pub dtype: DataType,
 }
 
@@ -968,15 +954,15 @@ fn axis_extent(
     axis: &str,
     size: usize,
     tensor: &str,
-) -> Result<(), SimError> {
+) -> SimResult {
     if size == 1 {
         extents.entry(axis.to_owned()).or_insert(1);
         return Ok(());
     }
     match extents.get(axis) {
-        Some(existing) if *existing != size && *existing != 1 => Err(err(format!(
-            "tensor {tensor} axis {axis} has extent {size}, expected {existing}"
-        ))),
+        Some(existing) if *existing != size && *existing != 1 => {
+            sim_error!("tensor {tensor} axis {axis} has extent {size}, expected {existing}")
+        }
         _ => {
             extents.insert(axis.to_owned(), size);
             Ok(())
@@ -984,11 +970,9 @@ fn axis_extent(
     }
 }
 
-fn register_unique_name(names: &mut BTreeSet<String>, name: &str) -> Result<(), SimError> {
+fn register_unique_name(names: &mut BTreeSet<String>, name: &str) -> SimResult {
     if name.is_empty() || !names.insert(name.to_owned()) {
-        return Err(err(format!(
-            "duplicate or empty program tensor name '{name}'"
-        )));
+        return sim_error!("duplicate or empty program tensor name '{name}'");
     }
     Ok(())
 }
@@ -1004,9 +988,9 @@ pub(super) fn find_common_excluded_read(expr: &ExprSpec) -> Result<Option<&ExprS
             for arg in args {
                 if let Some(read) = find_common_excluded_read(arg)? {
                     if common.is_some_and(|prior| prior != read) {
-                        return Err(err(
-                            "nested extremum operands require a common excluded mapping",
-                        ));
+                        return sim_error!(
+                            "nested extremum operands require a common excluded mapping"
+                        );
                     }
                     common = Some(read);
                 }

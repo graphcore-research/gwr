@@ -5,8 +5,8 @@
 
 use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
+use gwr_models::processing_element::program::TensorSpec;
 use gwr_models::processing_element::program::syntax::ProgramSpec;
-use gwr_models::processing_element::program::validate::TensorSpec;
 use gwr_models::processing_element::tensors::dtype::DataType;
 use gwr_models::processing_element::tensors::{HasShape, Shape, Tensor, TensorView};
 use rand::RngExt;
@@ -195,4 +195,123 @@ fn tensor_spec_from_view(view: &TensorView) -> TensorSpec {
 
 fn sample_optional(ratio: f64, rng: &mut impl RngExt) -> bool {
     ratio >= 1.0 || (ratio > 0.0 && rng.random_bool(ratio))
+}
+
+#[cfg(test)]
+mod tests {
+    use gwr_models::processing_element::tensors::dtype::DataType;
+    use gwr_models::processing_element::tensors::{HasShape, Tensor};
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    use super::ProgramTemplate;
+
+    const OUTPUT_SHAPE: [usize; 2] = [2, 3];
+    const PRIMARY_ADDRESS: u64 = 0x1000;
+    const INDEX_ADDRESS: u64 = 0x2000;
+    const SEED: u64 = 0;
+
+    fn primary_output() -> Option<Tensor> {
+        Some(
+            Tensor::new(&OUTPUT_SHAPE, &DataType::Fp16, PRIMARY_ADDRESS)
+                .unwrap()
+                .with_id("primary"),
+        )
+    }
+
+    fn assert_outputs_unchanged(actual: &[Option<Tensor>], expected: &[Option<Tensor>]) {
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.iter().zip(expected) {
+            match (actual, expected) {
+                (Some(actual), Some(expected)) => {
+                    assert_eq!(actual.shape().dims(), expected.shape().dims());
+                    assert_eq!(actual.dtype(), expected.dtype());
+                    assert_eq!(actual.addr(), expected.addr());
+                    assert_eq!(actual.id(), expected.id());
+                    assert_eq!(actual.num_bytes(), expected.num_bytes());
+                }
+                (None, None) => {}
+                _ => panic!("optional output presence changed"),
+            }
+        }
+    }
+
+    #[test]
+    fn reduce_max_adds_matching_int64_indices_without_changing_primary_output() {
+        let mut outputs = vec![primary_output()];
+        let primary = outputs.clone();
+        let mut rng = StdRng::seed_from_u64(SEED);
+        assert!(
+            ProgramTemplate::ReduceMax
+                .add_optional_outputs(&mut outputs, 1.0, &mut rng)
+                .unwrap()
+        );
+        assert_eq!(outputs.len(), 2);
+        assert_outputs_unchanged(&outputs[..1], &primary);
+        let indices = outputs[1].as_ref().unwrap();
+        assert_eq!(indices.shape().dims(), OUTPUT_SHAPE);
+        assert_eq!(indices.dtype(), &DataType::Int64);
+    }
+
+    #[test]
+    fn other_templates_leave_optional_outputs_unchanged() {
+        for template in [ProgramTemplate::Add, ProgramTemplate::Gemm] {
+            let mut outputs = vec![primary_output()];
+            let before = outputs.clone();
+            let mut rng = StdRng::seed_from_u64(SEED);
+            assert!(
+                !template
+                    .add_optional_outputs(&mut outputs, 1.0, &mut rng)
+                    .unwrap()
+            );
+            assert_outputs_unchanged(&outputs, &before);
+        }
+    }
+
+    #[test]
+    fn reduce_max_keeps_existing_indices_output() {
+        let indices = Tensor::new(&OUTPUT_SHAPE, &DataType::Int64, INDEX_ADDRESS)
+            .unwrap()
+            .with_id("indices");
+        let mut outputs = vec![primary_output(), Some(indices)];
+        let before = outputs.clone();
+        let mut rng = StdRng::seed_from_u64(SEED);
+        assert!(
+            !ProgramTemplate::ReduceMax
+                .add_optional_outputs(&mut outputs, 1.0, &mut rng)
+                .unwrap()
+        );
+        assert_outputs_unchanged(&outputs, &before);
+    }
+
+    #[test]
+    fn zero_optional_output_ratio_keeps_values_only_reduction() {
+        let mut outputs = vec![primary_output()];
+        let before = outputs.clone();
+        let mut rng = StdRng::seed_from_u64(SEED);
+        assert!(
+            !ProgramTemplate::ReduceMax
+                .add_optional_outputs(&mut outputs, 0.0, &mut rng)
+                .unwrap()
+        );
+        assert_outputs_unchanged(&outputs, &before);
+    }
+
+    #[test]
+    fn reduce_max_requires_primary_output_before_adding_indices() {
+        for mut outputs in [vec![], vec![None]] {
+            let before = outputs.clone();
+            let mut rng = StdRng::seed_from_u64(SEED);
+            let error = ProgramTemplate::ReduceMax
+                .add_optional_outputs(&mut outputs, 1.0, &mut rng)
+                .unwrap_err();
+            assert!(
+                error
+                    .0
+                    .contains("generated max reduction output is missing"),
+                "{error}"
+            );
+            assert_outputs_unchanged(&outputs, &before);
+        }
+    }
 }
