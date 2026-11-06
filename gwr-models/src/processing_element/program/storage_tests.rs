@@ -111,8 +111,10 @@ assignments:
     .unwrap();
     let tile = plan_tiles(&region, None).unwrap().tiles().next().unwrap();
     let program = super::prepared::PreparedProgram::from_facts(region, None).unwrap();
-    let allocation =
-        allocate_temporaries(program.group(&program.facts.assignment_order), &tile).unwrap();
+    let super::prepared::Schedule::Flat { group, .. } = &program.schedule else {
+        unreachable!()
+    };
+    let allocation = allocate_temporaries(program.group(group), &tile).unwrap();
     assert_eq!(allocation.arena_bytes, 48);
     assert!(
         allocation
@@ -166,8 +168,10 @@ assignments:
     .unwrap();
     let tile = plan_tiles(&region, None).unwrap().tiles().next().unwrap();
     let program = super::prepared::PreparedProgram::from_facts(region, None).unwrap();
-    let allocation =
-        allocate_temporaries(program.group(&program.facts.assignment_order), &tile).unwrap();
+    let super::prepared::Schedule::Flat { group, .. } = &program.schedule else {
+        unreachable!()
+    };
+    let allocation = allocate_temporaries(program.group(group), &tile).unwrap();
     assert!(
         allocation
             .slots

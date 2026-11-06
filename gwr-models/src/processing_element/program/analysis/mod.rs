@@ -103,7 +103,7 @@ impl PreparedProgram {
         // Preserve the bounded maximum-tile proof for direct slices and
         // nonnegative byte windows. Leading padding and packed reductions
         // require offset-sensitive inspection.
-        let Schedule::Flat(schedule) = &self.schedule else {
+        let Schedule::Flat { tiles, group } = &self.schedule else {
             return Ok(None);
         };
         let packed = self
@@ -136,11 +136,11 @@ impl PreparedProgram {
         if inspect_all {
             return Ok(None);
         }
-        let tile = schedule
+        let tile = tiles
             .tiles()
             .next()
             .ok_or_else(|| SimError("program has no tiles".into()))?;
-        estimate_tile_sram(self.group(&self.facts.assignment_order), &tile).map(Some)
+        estimate_tile_sram(self.group(group), &tile).map(Some)
     }
 }
 
@@ -162,7 +162,7 @@ fn analyze_group_reads(
     for read in collect_initial_input_reads(plan) {
         add_read(&read, &BTreeMap::new())?;
     }
-    for &index in plan.assignments {
+    for &index in &plan.group.assignments {
         let reads = collect_assignment_input_reads(plan, index);
         for invocation in AssignmentInvocations::new(plan.region(), index, tile)? {
             let invocation = invocation?;
@@ -216,7 +216,7 @@ impl ComputeModel {
         let mut compute = PreparedCompute::default();
         let mut counts = MachineOpCounts::default();
         program.visit_groups(&mut |plan, tile, _| {
-            for &index in plan.assignments {
+            for &index in &plan.group.assignments {
                 for invocation in AssignmentInvocations::new(plan.region(), index, tile)? {
                     counts = counts
                         .clone()

@@ -8,8 +8,8 @@ use std::ops::Range;
 use gwr_engine::sim_error;
 use gwr_engine::types::{SimError, SimResult};
 
-use super::access::{build_tile_output_views, input_requires_assignment_reads};
-use super::helpers::{find_first_read_dtype, find_read_indices, slice_view};
+use super::access::build_tile_output_views;
+use super::helpers::{find_first_read_dtype, slice_view};
 use super::window::{max_window_chunk_buffer_bytes, plan_window_chunk_access};
 use crate::processing_element::program::executable::{Assignment, Expr, ScalarExpr};
 use crate::processing_element::program::plan::{LocalAllocation, allocate_temporaries};
@@ -21,8 +21,8 @@ use crate::processing_element::program::storage::{
 use crate::processing_element::program::syntax::{IndexSpec, ReductionOp};
 use crate::processing_element::program::tile::RegionTile;
 use crate::processing_element::program::validate::ProgramFacts;
-use crate::processing_element::tensors::TensorView;
 use crate::processing_element::tensors::dtype::DataType;
+use crate::processing_element::tensors::{BITS_PER_BYTE, TensorView};
 
 pub(in crate::processing_element) fn estimate_tile_sram(
     plan: GroupPlan<'_>,
@@ -83,17 +83,12 @@ fn tile_input_buffer_bytes(
 ) -> Result<usize, SimError> {
     let mut arena = 0usize;
     let region = plan.region();
-    for (name, original) in plan.inputs() {
-        let Some(indices) = plan
-            .assignments()
-            .find_map(|assignment| find_read_indices(&assignment.expr, name))
-        else {
-            continue;
-        };
-        let bytes = if input_requires_assignment_reads(plan, name) {
-            reread_input_buffer_bytes(plan, name, original, tile, region, available_sram)?
+    for input in &plan.group.inputs.buffers {
+        let read = input.read.resolve(region);
+        let bytes = if input.per_assignment {
+            reread_input_buffer_bytes(plan, input.read.input, tile, region, available_sram)?
         } else {
-            mapped_input_buffer_bytes(original, indices, tile, region)?
+            mapped_input_buffer_bytes(read.view, read.indices, tile, region)?
         };
         add_arena_bytes(&mut arena, bytes)?;
     }
@@ -109,37 +104,40 @@ fn add_arena_bytes(arena: &mut usize, bytes: usize) -> SimResult {
 
 fn reread_input_buffer_bytes(
     plan: GroupPlan<'_>,
-    name: &str,
-    original: &TensorView,
+    input: usize,
     tile: &RegionTile,
     region: &ProgramFacts,
     available_sram: usize,
 ) -> Result<usize, SimError> {
-    plan.assignments().try_fold(0usize, |sum, assignment| {
-        let bytes = assignment_input_buffer_bytes(
-            &assignment.expr,
-            name,
-            original,
-            tile,
-            region,
-            available_sram,
-        )?;
-        sum.checked_add(bytes)
-            .ok_or_else(|| SimError("tile input SRAM overflows".into()))
-    })
+    plan.group
+        .assignments
+        .iter()
+        .flat_map(|index| &plan.group.inputs.per_assignment[index])
+        .filter(|read| read.input == input)
+        .try_fold(0usize, |sum, read| {
+            let expr = &region.program.assignments[read.assignment].expr;
+            let read = read.resolve(region);
+            let bytes = assignment_input_buffer_bytes(
+                expr,
+                read.indices,
+                read.view,
+                tile,
+                region,
+                available_sram,
+            )?;
+            sum.checked_add(bytes)
+                .ok_or_else(|| SimError("tile input SRAM overflows".into()))
+        })
 }
 
 fn assignment_input_buffer_bytes(
     expr: &Expr,
-    name: &str,
+    indices: &[IndexSpec],
     original: &TensorView,
     tile: &RegionTile,
     region: &ProgramFacts,
     available_sram: usize,
 ) -> Result<usize, SimError> {
-    let Some(indices) = find_read_indices(expr, name) else {
-        return Ok(0);
-    };
     match expr {
         Expr::Reduce { op, over, .. } => {
             if *op != ReductionOp::Sum
@@ -299,7 +297,7 @@ fn scalar_expression_scratch_bytes(
         elements
             .checked_mul(dtype.num_bits())
             .ok_or_else(|| SimError("scalar expression storage overflows".into()))?
-            .div_ceil(8),
+            .div_ceil(BITS_PER_BYTE),
     )?;
     bytes
         .checked_mul(calls)

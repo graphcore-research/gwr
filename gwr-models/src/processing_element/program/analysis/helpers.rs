@@ -6,17 +6,11 @@ use std::ops::Range;
 use gwr_engine::types::SimError;
 
 use crate::processing_element::compute::{ComputeWork, TypedWork, WorkStage};
-use crate::processing_element::program::executable::{Expr, Read, ScalarExpr};
+use crate::processing_element::program::executable::{Read, ScalarExpr};
 use crate::processing_element::program::syntax::IndexSpec;
 use crate::processing_element::program::validate::ProgramFacts;
 use crate::processing_element::tensors::dtype::DataType;
 use crate::processing_element::tensors::{HasShape, TensorView};
-
-pub(super) fn find_read_indices<'a>(expr: &'a Expr, name: &str) -> Option<&'a [IndexSpec]> {
-    expr.iter_reads()
-        .find(|read| read.tensor == name)
-        .map(|read| read.indices.as_slice())
-}
 
 pub(super) fn slice_axes(
     view: &TensorView,

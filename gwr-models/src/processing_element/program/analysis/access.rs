@@ -7,7 +7,7 @@ use std::ops::Range;
 
 use gwr_engine::types::SimError;
 
-use super::helpers::{find_read_indices, slice_axes, slice_view};
+use super::helpers::{slice_axes, slice_view};
 use super::window::plan_window_chunk_access;
 use crate::processing_element::program::executable::Expr;
 use crate::processing_element::program::prepared::GroupPlan;
@@ -16,63 +16,147 @@ use crate::processing_element::program::tile::RegionTile;
 use crate::processing_element::program::validate::ProgramFacts;
 use crate::processing_element::tensors::TensorView;
 
+/// Owned read locations refer to the original bound grammar, not cloned syntax.
+#[derive(Clone, Copy, Debug)]
+pub(in crate::processing_element) struct InputReadPlan {
+    pub input: usize,
+    pub(super) assignment: usize,
+    read: usize,
+    window: bool,
+}
+
+#[derive(Debug)]
+pub(in crate::processing_element) struct GroupInputs {
+    pub initial: Vec<InputReadPlan>,
+    pub per_assignment: BTreeMap<usize, Vec<InputReadPlan>>,
+    pub buffers: Vec<InputBufferPlan>,
+}
+
+#[derive(Debug)]
+pub(in crate::processing_element) struct InputBufferPlan {
+    pub read: InputReadPlan,
+    pub per_assignment: bool,
+}
+
+impl GroupInputs {
+    pub fn new(region: &ProgramFacts, assignments: &[usize]) -> Self {
+        let mut initial = Vec::new();
+        let mut buffers = Vec::new();
+        let mut per_assignment = assignments
+            .iter()
+            .map(|&i| (i, Vec::new()))
+            .collect::<BTreeMap<_, _>>();
+        // Initial loads and buffers retain boundary input declaration order.
+        for input in 0..region.program.inputs.len() {
+            let reads = assignments
+                .iter()
+                .filter_map(|&assignment| InputReadPlan::new(region, input, assignment))
+                .collect::<Vec<_>>();
+            let Some(&first) = reads.first() else {
+                continue;
+            };
+            let reread = reads
+                .windows(2)
+                .any(|pair| pair[0].resolve(region).indices != pair[1].resolve(region).indices)
+                || reads.iter().any(|read| {
+                    match &region.program.assignments[read.assignment].expr {
+                        Expr::Reduce { .. } => true,
+                        Expr::MatrixMac { over, .. } => !over.is_empty(),
+                        Expr::Scalar(_) => false,
+                    }
+                });
+            if !reread {
+                initial.push(first);
+            }
+            buffers.push(InputBufferPlan {
+                read: first,
+                per_assignment: reread,
+            });
+            for read in reads {
+                let expr = &region.program.assignments[read.assignment].expr;
+                if reread || matches!(expr, Expr::Reduce { .. } | Expr::MatrixMac { .. }) {
+                    per_assignment.get_mut(&read.assignment).unwrap().push(read);
+                }
+            }
+        }
+        // Issue assignment reads in input-name order.
+        for reads in per_assignment.values_mut() {
+            reads.sort_by_key(|read| &region.program.inputs[read.input]);
+        }
+        Self {
+            initial,
+            per_assignment,
+            buffers,
+        }
+    }
+}
+
 /// Inputs loaded once and shared by the assignments in this tile.
 pub(in crate::processing_element) fn collect_initial_input_reads(
     plan: GroupPlan<'_>,
-) -> Vec<InputRead<'_>> {
-    plan.inputs()
-        .filter(|(name, _)| !input_requires_assignment_reads(plan, name))
-        .filter_map(|(name, view)| {
-            plan.assignments()
-                .find_map(|assignment| find_input_read(name, view, &assignment.expr))
-        })
-        .collect()
+) -> impl Iterator<Item = InputRead<'_>> {
+    plan.group
+        .inputs
+        .initial
+        .iter()
+        .map(move |read| read.resolve(plan.region()))
 }
 
-/// Reduction chunks and differing index mappings need their own input reads.
+/// Resolve the prepared read descriptors once for this assignment execution.
 pub(in crate::processing_element) fn collect_assignment_input_reads(
     plan: GroupPlan<'_>,
     assignment: usize,
 ) -> Vec<InputRead<'_>> {
-    let expr = &plan.region().program.assignments[assignment].expr;
-    let reduction = matches!(expr, Expr::Reduce { .. } | Expr::MatrixMac { .. });
-    let mut reads = plan
-        .inputs()
-        .filter(|(name, _)| reduction || input_requires_assignment_reads(plan, name))
-        .filter_map(|(name, view)| find_input_read(name, view, expr))
-        .collect::<Vec<_>>();
-    // Preserve the runner's stable issue order within an assignment.
-    reads.sort_by_key(|read| read.name);
-    reads
+    plan.group.inputs.per_assignment[&assignment]
+        .iter()
+        .map(|read| read.resolve(plan.region()))
+        .collect()
 }
 
-fn find_input_read<'a>(
-    name: &'a str,
-    view: &'a TensorView,
-    expr: &'a Expr,
-) -> Option<InputRead<'a>> {
-    let indices = find_read_indices(expr, name)?;
-    let window = matches!(
-        expr,
-        Expr::Reduce {
-            op: ReductionOp::Min | ReductionOp::Max,
-            ..
+impl InputReadPlan {
+    fn new(region: &ProgramFacts, input: usize, assignment: usize) -> Option<Self> {
+        let expr = &region.program.assignments[assignment].expr;
+        let (read, source) = expr
+            .iter_reads()
+            .enumerate()
+            .find(|(_, read)| read.tensor == region.program.inputs[input])?;
+        let window = matches!(
+            expr,
+            Expr::Reduce {
+                op: ReductionOp::Min | ReductionOp::Max,
+                ..
+            }
+        ) || source
+            .indices
+            .iter()
+            .any(|index| matches!(index, IndexSpec::Affine { .. }));
+        Some(Self {
+            input,
+            assignment,
+            read,
+            window,
+        })
+    }
+
+    pub fn resolve(self, region: &ProgramFacts) -> InputRead<'_> {
+        let source = region.program.assignments[self.assignment]
+            .expr
+            .iter_reads()
+            .nth(self.read)
+            .expect("prepared read location");
+        InputRead {
+            name: &region.program.inputs[self.input],
+            view: &region.bindings.inputs[self.input],
+            indices: &source.indices,
+            window: self.window,
         }
-    ) || indices
-        .iter()
-        .any(|index| matches!(index, IndexSpec::Affine { .. }));
-    Some(InputRead {
-        name,
-        view,
-        indices,
-        window,
-    })
+    }
 }
 
 pub(in crate::processing_element) struct InputRead<'a> {
     pub name: &'a str,
-    view: &'a TensorView,
-    indices: &'a [IndexSpec],
+    pub(super) view: &'a TensorView,
+    pub(super) indices: &'a [IndexSpec],
     window: bool,
 }
 
@@ -128,33 +212,18 @@ pub(in crate::processing_element) fn build_tile_output_views<'a>(
     plan: GroupPlan<'a>,
     tile: &RegionTile,
 ) -> Result<Vec<(&'a str, TensorView)>, SimError> {
-    plan.outputs()
-        .map(|(name, view)| {
-            let assignment = &plan.region().program.assignments[plan.region().producers[name]];
+    plan.group
+        .outputs
+        .iter()
+        .map(|output| {
+            let region = plan.region();
+            let name = &region.program.outputs[output.binding];
+            let view = &region.bindings.outputs[output.binding];
+            let assignment = &region.program.assignments[output.producer];
             Ok((
                 name.as_str(),
                 slice_axes(view, &assignment.axes, &tile.output_intervals)?,
             ))
         })
         .collect()
-}
-
-pub(in crate::processing_element) fn input_requires_assignment_reads(
-    plan: GroupPlan<'_>,
-    name: &str,
-) -> bool {
-    let mappings = plan
-        .assignments()
-        .filter_map(|assignment| find_read_indices(&assignment.expr, name))
-        .collect::<Vec<_>>();
-    if mappings.windows(2).any(|pair| pair[0] != pair[1]) {
-        return true;
-    }
-    plan.assignments().any(|assignment| match &assignment.expr {
-        Expr::Reduce { .. } => find_read_indices(&assignment.expr, name).is_some(),
-        Expr::MatrixMac { over, .. } => {
-            !over.is_empty() && find_read_indices(&assignment.expr, name).is_some()
-        }
-        Expr::Scalar(_) => false,
-    })
 }

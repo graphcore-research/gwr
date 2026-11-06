@@ -8,6 +8,7 @@ use std::ops::Range;
 
 use gwr_engine::types::{SimError, SimResult};
 
+use super::group::GroupMetadata;
 use super::storage::align_sram_slot_bytes;
 use super::syntax::TileSpec;
 use super::tile::RegionTile;
@@ -38,7 +39,7 @@ pub(in crate::processing_element) fn plan_schedule(
         for &assignment in &assignments {
             locations.insert(assignment, path.clone());
         }
-        let step = ScopedStep::Group(assignments);
+        let step = ScopedStep::Group(Box::new(GroupMetadata::new(region, assignments)));
         plan.steps.push(if axes.is_empty() {
             step
         } else {
@@ -236,16 +237,16 @@ fn scope_at_path_mut<'a>(
     scope
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct ScopedSchedule {
+#[derive(Debug)]
+pub(in crate::processing_element) struct ScopedSchedule {
     pub tiles: BTreeMap<String, usize>,
     pub steps: Vec<ScopedStep>,
     pub local_values: Vec<String>,
 }
 
-#[derive(Clone, Debug)]
-pub(crate) enum ScopedStep {
-    Group(Vec<usize>),
+#[derive(Debug)]
+pub(in crate::processing_element) enum ScopedStep {
+    Group(Box<GroupMetadata>),
     Tiles(ScopedSchedule),
 }
 
@@ -267,14 +268,14 @@ pub(in crate::processing_element) fn collect_retained_values(
 pub(in crate::processing_element) fn visit_groups(
     scope: &ScopedSchedule,
     program: &super::prepared::PreparedProgram,
-    visit: &mut impl FnMut(&[usize], &RegionTile, usize) -> SimResult,
+    visit: &mut impl FnMut(&GroupMetadata, &RegionTile, usize) -> SimResult,
 ) -> SimResult {
     fn walk(
         scope: &ScopedSchedule,
         program: &super::prepared::PreparedProgram,
         outer: &Intervals,
         inherited: usize,
-        visit: &mut impl FnMut(&[usize], &RegionTile, usize) -> SimResult,
+        visit: &mut impl FnMut(&GroupMetadata, &RegionTile, usize) -> SimResult,
     ) -> SimResult {
         let region = &program.facts;
         for intervals in scope_intervals(scope, outer, region) {
@@ -284,9 +285,9 @@ pub(in crate::processing_element) fn visit_groups(
                     .checked_add(local)
                     .ok_or_else(|| SimError("schedule working set overflows".into()))?;
                 match step {
-                    ScopedStep::Group(indices) => visit(
-                        indices,
-                        &build_group_tile(indices, &intervals, program)?,
+                    ScopedStep::Group(group) => visit(
+                        group,
+                        &build_group_tile(&group.assignments, &intervals, program)?,
                         bytes,
                     )?,
                     ScopedStep::Tiles(child) => {
@@ -370,7 +371,7 @@ fn calculate_live_local_bytes_by_step(
 
 fn step_uses(step: &ScopedStep, name: &str, region: &ProgramFacts) -> bool {
     match step {
-        ScopedStep::Group(indices) => indices.iter().any(|index| {
+        ScopedStep::Group(group) => group.assignments.iter().any(|index| {
             region.producers.get(name) == Some(index)
                 || region
                     .consumers
@@ -542,7 +543,7 @@ assignments:
         let ScopedStep::Group(indices) = &plan.steps[0] else {
             panic!("row statistics group");
         };
-        assert_eq!(indices, &[2, 1]);
+        assert_eq!(indices.assignments, [2, 1]);
         let ScopedStep::Tiles(output) = &plan.steps[1] else {
             panic!("output loop");
         };
@@ -550,7 +551,7 @@ assignments:
         let ScopedStep::Group(indices) = &output.steps[0] else {
             panic!("output group");
         };
-        assert_eq!(indices, &[0]);
+        assert_eq!(indices.assignments, [0]);
     }
 
     #[test]
@@ -661,7 +662,8 @@ assignments:
             region,
         )
         .unwrap();
-        let allocation = allocate_temporaries(program.group(&[1]), &tile).unwrap();
+        let group = super::GroupMetadata::new(region, vec![1]);
+        let allocation = allocate_temporaries(program.group(&group), &tile).unwrap();
         // One FP32 value occupies an eight-byte aligned SRAM slot.
         assert_eq!(allocation.arena_bytes, 8);
         assert_eq!(allocation.slots[0].values, ["S"]);
@@ -685,14 +687,14 @@ reduce:
         let ScopedStep::Group(statistics) = &plan.steps[0] else {
             panic!("statistics group");
         };
-        assert_eq!(statistics, &[1]);
+        assert_eq!(statistics.assignments, [1]);
         let ScopedStep::Tiles(pipeline) = &plan.steps[1] else {
             panic!("pipeline loop");
         };
         let ScopedStep::Group(chain) = &pipeline.steps[0] else {
             panic!("pipeline group");
         };
-        assert_eq!(chain, &[0, 2]);
+        assert_eq!(chain.assignments, [0, 2]);
         assert!(plan.local_values.is_empty());
     }
 
@@ -717,11 +719,11 @@ reduce:
         let ScopedStep::Group(chain) = &pipeline.steps[0] else {
             panic!("pipeline group");
         };
-        assert_eq!(chain, &[0, 2]);
+        assert_eq!(chain.assignments, [0, 2]);
         let ScopedStep::Group(statistics) = &plan.steps[1] else {
             panic!("dependent statistic group");
         };
-        assert_eq!(statistics, &[1]);
+        assert_eq!(statistics.assignments, [1]);
         assert_eq!(plan.local_values, ["T"]);
     }
 }

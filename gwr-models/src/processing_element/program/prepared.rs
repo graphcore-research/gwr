@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 
 use gwr_engine::types::{SimError, SimResult};
 
+use super::group::GroupMetadata;
 use super::schedule::{ScopedSchedule, plan_schedule};
 use super::syntax::{ProgramSpec, TileSpec};
 use super::tile::{RegionTile, TileSchedule, plan_tiles};
@@ -25,7 +26,10 @@ pub struct PreparedProgram {
 
 #[derive(Debug)]
 pub(in crate::processing_element) enum Schedule {
-    Flat(TileSchedule),
+    Flat {
+        tiles: TileSchedule,
+        group: Box<GroupMetadata>,
+    },
     Scoped(ScopedSchedule),
 }
 
@@ -47,11 +51,18 @@ impl PreparedProgram {
     ) -> Result<Self, SimError> {
         let schedule = match plan_schedule(&facts, tiling)? {
             Some(scope) => Schedule::Scoped(scope),
-            None => Schedule::Flat(plan_tiles(&facts, tiling)?),
+            None => {
+                let mut group = GroupMetadata::new(&facts, facts.assignment_order.clone());
+                group.issue_order.sort_unstable();
+                Schedule::Flat {
+                    tiles: plan_tiles(&facts, tiling)?,
+                    group: Box::new(group),
+                }
+            }
         };
         let retained = match &schedule {
             Schedule::Scoped(scope) => super::schedule::collect_retained_values(scope),
-            Schedule::Flat(_) => BTreeSet::new(),
+            Schedule::Flat { .. } => BTreeSet::new(),
         };
         let reduction_steps = facts
             .extents
@@ -95,11 +106,11 @@ impl PreparedProgram {
     }
     pub(in crate::processing_element) fn group<'a>(
         &'a self,
-        assignments: &'a [usize],
+        group: &'a GroupMetadata,
     ) -> GroupPlan<'a> {
         GroupPlan {
             program: self,
-            assignments,
+            group,
         }
     }
     pub(in crate::processing_element) fn visit_groups(
@@ -107,15 +118,15 @@ impl PreparedProgram {
         visit: &mut impl FnMut(GroupPlan<'_>, &RegionTile, usize) -> SimResult,
     ) -> SimResult {
         match &self.schedule {
-            Schedule::Flat(schedule) => {
-                for tile in schedule.tiles() {
-                    visit(self.group(&self.facts.assignment_order), &tile, 0)?;
+            Schedule::Flat { tiles, group } => {
+                for tile in tiles.tiles() {
+                    visit(self.group(group), &tile, 0)?;
                 }
                 Ok(())
             }
             Schedule::Scoped(scope) => {
-                super::schedule::visit_groups(scope, self, &mut |indices, tile, local| {
-                    visit(self.group(indices), tile, local)
+                super::schedule::visit_groups(scope, self, &mut |group, tile, local| {
+                    visit(self.group(group), tile, local)
                 })
             }
         }
@@ -126,34 +137,16 @@ impl PreparedProgram {
 #[derive(Clone, Copy)]
 pub(in crate::processing_element) struct GroupPlan<'a> {
     pub program: &'a PreparedProgram,
-    pub assignments: &'a [usize],
+    pub group: &'a GroupMetadata,
 }
 impl<'a> GroupPlan<'a> {
     pub fn region(self) -> &'a ProgramFacts {
         &self.program.facts
     }
     pub fn assignments(self) -> impl Iterator<Item = &'a super::executable::Assignment> {
-        self.assignments
+        self.group
+            .assignments
             .iter()
             .map(move |&i| &self.region().program.assignments[i])
-    }
-    pub fn inputs(
-        self,
-    ) -> impl Iterator<Item = (&'a String, &'a super::super::tensors::TensorView)> {
-        self.region()
-            .program
-            .inputs
-            .iter()
-            .zip(&self.region().bindings.inputs)
-    }
-    pub fn outputs(
-        self,
-    ) -> impl Iterator<Item = (&'a String, &'a super::super::tensors::TensorView)> {
-        self.region()
-            .program
-            .outputs
-            .iter()
-            .zip(&self.region().bindings.outputs)
-            .filter(move |(name, _)| self.assignments.contains(&self.region().producers[*name]))
     }
 }
