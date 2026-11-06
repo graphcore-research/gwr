@@ -21,6 +21,7 @@ use gwr_platform::Platform;
 use gwr_track::entity::Entity;
 use gwr_track::{debug, info, trace};
 
+mod explain;
 pub mod graph;
 pub mod mermaid;
 pub mod timetable_file;
@@ -255,44 +256,6 @@ impl Timetable {
             .collect()
     }
 
-    fn prepared_task(&self, node_idx: usize) -> Result<&Rc<PreparedTask>, SimError> {
-        self.prepared_tasks.get(&node_idx).ok_or_else(|| {
-            SimError(format!(
-                "Task Index {node_idx} does not refer to a compute node"
-            ))
-        })
-    }
-
-    fn calculate_workload(
-        &self,
-        node_indices: impl IntoIterator<Item = usize>,
-    ) -> Result<Workload, SimError> {
-        let mut workload = Workload::default();
-        for node_idx in node_indices {
-            self.add_node_workload(node_idx, &mut workload)?;
-        }
-        Ok(workload)
-    }
-
-    fn add_node_workload(&self, node_idx: usize, workload: &mut Workload) -> SimResult {
-        workload.nodes += 1;
-        if let Some(task) = self.prepared_tasks.get(&node_idx) {
-            let (read, written) = task.planned_traffic_bytes();
-            add_to_byte_total(&mut workload.read_bytes, read, "planned load")?;
-            add_to_byte_total(&mut workload.written_bytes, written, "planned store")?;
-        }
-        Ok(())
-    }
-
-    /// Iterate across all active tensors and move those that are now complete
-    fn update_complete_tensors(&self) {
-        for (idx, node) in self.graph.nodes().iter().enumerate() {
-            if node.tensor().is_some() {
-                self.update_complete_tensor(idx);
-            }
-        }
-    }
-
     /// Machine operations completed by the PEs used by this timetable.
     pub fn machine_operations_executed(&self) -> Result<usize, SimError> {
         let pe_names: BTreeSet<_> = self
@@ -311,99 +274,6 @@ impl Timetable {
                 .checked_add(ops)
                 .ok_or_else(|| SimError("Timetable machine operation total overflows".into()))
         })
-    }
-
-    /// Check a given tensor index and move it if it is now complete.
-    fn update_complete_tensor(&self, tensor_idx: usize) -> bool {
-        let mut completed_node_indices = self.completed_node_indices.borrow_mut();
-        if completed_node_indices.contains(&tensor_idx) {
-            return false;
-        }
-
-        let tensor_node = &self.graph.nodes()[tensor_idx];
-
-        // Look for an input node that is not complete
-        for idx in tensor_node.predecessors() {
-            if !completed_node_indices.contains(idx) {
-                return false;
-            }
-        }
-
-        // No active inputs remain, this is now complete
-        self.active_node_indices.borrow_mut().remove(&tensor_idx);
-        completed_node_indices.insert(tensor_idx);
-        if let Some(mut completed_workload) = self.completed_workload.get() {
-            completed_workload.nodes += 1;
-            self.completed_workload.set(Some(completed_workload));
-        }
-        true
-    }
-
-    fn initialize_scheduler_state(&self) {
-        let completed_node_indices = self.completed_node_indices.borrow();
-        let mut unresolved_input_counts = vec![0; self.graph.nodes().len()];
-        let mut ready_nodes_per_pe: HashMap<usize, BTreeSet<usize>> = HashMap::new();
-        let mut remaining_nodes_per_pe = HashMap::new();
-
-        for (pe_idx, node_indices) in &self.nodes_per_pe {
-            let mut remaining_nodes = 0;
-            for node_idx in node_indices {
-                if completed_node_indices.contains(node_idx) {
-                    continue;
-                }
-
-                remaining_nodes += 1;
-                let unresolved_inputs = self.graph.nodes()[*node_idx]
-                    .predecessors()
-                    .iter()
-                    .filter(|input_idx| !completed_node_indices.contains(input_idx))
-                    .count();
-                unresolved_input_counts[*node_idx] = unresolved_inputs;
-                if unresolved_inputs == 0 {
-                    ready_nodes_per_pe
-                        .entry(*pe_idx)
-                        .or_default()
-                        .insert(*node_idx);
-                }
-            }
-            remaining_nodes_per_pe.insert(*pe_idx, remaining_nodes);
-        }
-
-        *self.unresolved_input_counts.borrow_mut() = unresolved_input_counts;
-        *self.ready_nodes_per_pe.borrow_mut() = ready_nodes_per_pe;
-        *self.remaining_nodes_per_pe.borrow_mut() = remaining_nodes_per_pe;
-    }
-
-    fn mark_successors_updated(&self, node_idx: usize) {
-        for output_node_idx in self.graph.nodes()[node_idx].successors() {
-            self.mark_dependency_completed(*output_node_idx);
-        }
-    }
-
-    fn mark_dependency_completed(&self, node_idx: usize) {
-        let Some(pe_idx) = self.node_pe_indices[node_idx] else {
-            return;
-        };
-        if self.completed_node_indices.borrow().contains(&node_idx)
-            || self.active_node_indices.borrow().contains(&node_idx)
-        {
-            return;
-        }
-
-        let mut unresolved_input_counts = self.unresolved_input_counts.borrow_mut();
-        let unresolved_inputs = &mut unresolved_input_counts[node_idx];
-        if *unresolved_inputs == 0 {
-            return;
-        }
-
-        *unresolved_inputs -= 1;
-        if *unresolved_inputs == 0 {
-            self.ready_nodes_per_pe
-                .borrow_mut()
-                .entry(pe_idx)
-                .or_default()
-                .insert(node_idx);
-        }
     }
 }
 
@@ -515,6 +385,140 @@ impl Dispatch for Timetable {
             .unwrap_or_default()
     }
 }
+
+impl Timetable {
+    fn prepared_task(&self, node_idx: usize) -> Result<&Rc<PreparedTask>, SimError> {
+        self.prepared_tasks.get(&node_idx).ok_or_else(|| {
+            SimError(format!(
+                "Task Index {node_idx} does not refer to a compute node"
+            ))
+        })
+    }
+
+    fn calculate_workload(
+        &self,
+        node_indices: impl IntoIterator<Item = usize>,
+    ) -> Result<Workload, SimError> {
+        let mut workload = Workload::default();
+        for node_idx in node_indices {
+            self.add_node_workload(node_idx, &mut workload)?;
+        }
+        Ok(workload)
+    }
+
+    fn add_node_workload(&self, node_idx: usize, workload: &mut Workload) -> SimResult {
+        workload.nodes += 1;
+        if let Some(task) = self.prepared_tasks.get(&node_idx) {
+            let (read, written) = task.planned_traffic_bytes();
+            add_to_byte_total(&mut workload.read_bytes, read, "planned load")?;
+            add_to_byte_total(&mut workload.written_bytes, written, "planned store")?;
+        }
+        Ok(())
+    }
+
+    /// Iterate across all active tensors and move those that are now complete
+    fn update_complete_tensors(&self) {
+        for (idx, node) in self.graph.nodes().iter().enumerate() {
+            if node.tensor().is_some() {
+                self.update_complete_tensor(idx);
+            }
+        }
+    }
+
+    /// Check a given tensor index and move it if it is now complete.
+    fn update_complete_tensor(&self, tensor_idx: usize) -> bool {
+        let mut completed_node_indices = self.completed_node_indices.borrow_mut();
+        if completed_node_indices.contains(&tensor_idx) {
+            return false;
+        }
+
+        let tensor_node = &self.graph.nodes()[tensor_idx];
+
+        // Look for an input node that is not complete
+        for idx in tensor_node.predecessors() {
+            if !completed_node_indices.contains(idx) {
+                return false;
+            }
+        }
+
+        // No active inputs remain, this is now complete
+        self.active_node_indices.borrow_mut().remove(&tensor_idx);
+        completed_node_indices.insert(tensor_idx);
+        if let Some(mut completed_workload) = self.completed_workload.get() {
+            completed_workload.nodes += 1;
+            self.completed_workload.set(Some(completed_workload));
+        }
+        true
+    }
+
+    fn initialize_scheduler_state(&self) {
+        let completed_node_indices = self.completed_node_indices.borrow();
+        let mut unresolved_input_counts = vec![0; self.graph.nodes().len()];
+        let mut ready_nodes_per_pe: HashMap<usize, BTreeSet<usize>> = HashMap::new();
+        let mut remaining_nodes_per_pe = HashMap::new();
+
+        for (pe_idx, node_indices) in &self.nodes_per_pe {
+            let mut remaining_nodes = 0;
+            for node_idx in node_indices {
+                if completed_node_indices.contains(node_idx) {
+                    continue;
+                }
+
+                remaining_nodes += 1;
+                let unresolved_inputs = self.graph.nodes()[*node_idx]
+                    .predecessors()
+                    .iter()
+                    .filter(|input_idx| !completed_node_indices.contains(input_idx))
+                    .count();
+                unresolved_input_counts[*node_idx] = unresolved_inputs;
+                if unresolved_inputs == 0 {
+                    ready_nodes_per_pe
+                        .entry(*pe_idx)
+                        .or_default()
+                        .insert(*node_idx);
+                }
+            }
+            remaining_nodes_per_pe.insert(*pe_idx, remaining_nodes);
+        }
+
+        *self.unresolved_input_counts.borrow_mut() = unresolved_input_counts;
+        *self.ready_nodes_per_pe.borrow_mut() = ready_nodes_per_pe;
+        *self.remaining_nodes_per_pe.borrow_mut() = remaining_nodes_per_pe;
+    }
+
+    fn mark_successors_updated(&self, node_idx: usize) {
+        for output_node_idx in self.graph.nodes()[node_idx].successors() {
+            self.mark_dependency_completed(*output_node_idx);
+        }
+    }
+
+    fn mark_dependency_completed(&self, node_idx: usize) {
+        let Some(pe_idx) = self.node_pe_indices[node_idx] else {
+            return;
+        };
+        if self.completed_node_indices.borrow().contains(&node_idx)
+            || self.active_node_indices.borrow().contains(&node_idx)
+        {
+            return;
+        }
+
+        let mut unresolved_input_counts = self.unresolved_input_counts.borrow_mut();
+        let unresolved_inputs = &mut unresolved_input_counts[node_idx];
+        if *unresolved_inputs == 0 {
+            return;
+        }
+
+        *unresolved_inputs -= 1;
+        if *unresolved_inputs == 0 {
+            self.ready_nodes_per_pe
+                .borrow_mut()
+                .entry(pe_idx)
+                .or_default()
+                .insert(node_idx);
+        }
+    }
+}
+
 impl Debug for Timetable {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("Timetable")

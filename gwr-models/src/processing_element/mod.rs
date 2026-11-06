@@ -217,6 +217,18 @@ impl ProcessingElement {
         Ok(rc_self)
     }
 
+    /// Effective hardware settings retained by this PE after default
+    /// resolution.
+    #[must_use]
+    pub fn configuration_description(&self) -> String {
+        format!(
+            "SRAM capacity: {} bytes; {}; execution units: {}",
+            self.sram_bytes,
+            self.lsu.configuration_description(),
+            self.compute_model.execution_unit_names().join(", "),
+        )
+    }
+
     pub fn set_dispatcher(&self, dispatcher: &Dispatcher) {
         *self.dispatcher.borrow_mut() = Some(dispatcher.clone());
     }

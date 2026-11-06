@@ -18,6 +18,7 @@ use super::validate::{ProgramFacts, RegionBindings, TensorSpec, validate_program
 /// specific PE.
 #[derive(Debug)]
 pub struct PreparedProgram {
+    declared_tile_sizes: std::collections::BTreeMap<String, usize>,
     pub(in crate::processing_element) facts: ProgramFacts,
     pub(in crate::processing_element) schedule: Schedule,
     pub(in crate::processing_element) retained: BTreeSet<String>,
@@ -78,12 +79,28 @@ impl PreparedProgram {
             })
             .collect();
         Ok(Self {
+            declared_tile_sizes: tiling.map(|spec| spec.sizes.clone()).unwrap_or_default(),
             facts,
             schedule,
             retained,
             reduction_steps,
         })
     }
+    /// Explicitly requested tile sizes, in axis name order.
+    #[must_use]
+    pub fn declared_tile_sizes(&self) -> &std::collections::BTreeMap<String, usize> {
+        &self.declared_tile_sizes
+    }
+
+    /// Maximum tile size for each resolved axis, including implicit full
+    /// extents. Final tiles may be smaller. This reads retained steps without
+    /// visiting tiles.
+    pub fn effective_tile_sizes(&self) -> impl Iterator<Item = (&str, usize)> {
+        self.reduction_steps
+            .iter()
+            .map(|(axis, step)| (axis.as_str(), (*step).min(self.facts.extents[axis])))
+    }
+
     /// Declared input names in dense binding order.
     #[must_use]
     pub fn input_names(&self) -> &[String] {

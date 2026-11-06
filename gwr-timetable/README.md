@@ -37,6 +37,32 @@ intermediate store, reload, and dependency between compute nodes.
 To run this optimization, use
 `--timetable gwr-timetable/examples/fused_add_mul.yaml` in the command above.
 
+## Check preparation without simulation
+
+Add `--check` to the run command to construct and validate the same platform and
+timetable, then exit before simulation starts. Preparation errors use the same
+diagnostics and failure status as a normal run. Runtime progress and statistics
+are not emitted.
+
+Use `--explain` to check and print retained preparation facts: named tensor
+bindings and views, PE placement, inferred axis extents, declared and effective
+tile sizes, peak live SRAM, and planned logical boundary traffic per compute
+node. It also reports effective PE SRAM and LSU settings, including defaults,
+and execution unit names. The summary follows graph order, sorts hardware and
+axis names, and grows with graph metadata rather than tile count. Effective tile
+sizes are maxima; the final tile can be smaller.
+
+These modes run no simulated operations, memory requests, SRAM allocations, or
+simulated time. Planned logical boundary bytes precede LSU packetization;
+physical traffic is only observed during a simulation. Trace setup metadata may
+still be emitted when trackers are enabled.
+
+```sh
+cargo run --bin gwr-timetable -- \
+  --platform gwr-timetable/examples/compute_region_platform.yaml \
+  --timetable gwr-timetable/examples/add_mul.yaml --explain
+```
+
 ## File structure
 
 A timetable is a YAML file with two top-level fields:
