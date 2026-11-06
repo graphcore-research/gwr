@@ -32,6 +32,7 @@ impl ProgramTemplate {
         &self,
         inputs: &[Option<TensorView>],
         outputs: &[Option<TensorView>],
+        matrix_accumulator: DataType,
     ) -> Result<ProgramSpec, SimError> {
         let input_specs = inputs
             .iter()
@@ -48,7 +49,7 @@ impl ProgramTemplate {
             .ok_or_else(|| SimError("generated program has no output".into()))?;
         match self {
             Self::Add => build_add_program(&input_specs, output),
-            Self::Gemm => build_gemm_program(&input_specs, output),
+            Self::Gemm => build_gemm_program(&input_specs, output, matrix_accumulator),
             Self::ReduceMax => {
                 let input = input_specs
                     .first()

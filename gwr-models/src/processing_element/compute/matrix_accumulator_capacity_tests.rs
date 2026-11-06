@@ -5,11 +5,15 @@ use std::collections::BTreeMap;
 
 use yaml_serde::{from_str, to_string};
 
+use super::matrix_test_fixture;
 use crate::processing_element::compute::{
-    CapabilityConfig, CapabilityKind, ComputeConfig, ComputeModel, ComputeWork,
-    ExecutionUnitConfig, ExecutionUnitId, MatrixServiceTile, MatrixWorkShape, OperationClass,
+    CapabilityConfig, ComputeConfig, ComputeModel, ComputeWork, ExecutionUnitConfig,
+    ExecutionUnitId, MatrixServiceTile, MatrixWorkShape, OperationClass,
 };
 use crate::processing_element::tensors::dtype::DataType;
+
+const MATRIX_MACS_PER_TICK: f64 = 256.0;
+const FLOPS_PER_MAC: usize = 2;
 
 fn matrix_execution_unit_config(
     capacity: Option<u64>,
@@ -22,15 +26,7 @@ fn matrix_execution_unit_config(
 }
 
 fn matrix_capability(tile: Option<MatrixServiceTile>) -> CapabilityConfig {
-    CapabilityConfig {
-        class: "matrix".into(),
-        input_dtypes: Some(vec![vec![DataType::Bf16; 2]]),
-        ops_per_tick: 256.0,
-        kind: CapabilityKind::Matrix {
-            accumulator: DataType::Fp32,
-            matrix_service_tile: tile,
-        },
-    }
+    matrix_test_fixture::matrix_capability(MATRIX_MACS_PER_TICK, DataType::Fp32, tile)
 }
 
 fn matrix_compute_model(entries: Vec<(&str, ExecutionUnitConfig)>) -> ComputeModel {
@@ -38,14 +34,7 @@ fn matrix_compute_model(entries: Vec<(&str, ExecutionUnitConfig)>) -> ComputeMod
 }
 
 fn matrix_operation_classes() -> BTreeMap<String, OperationClass> {
-    BTreeMap::from([(
-        "matrix".into(),
-        OperationClass {
-            operations: vec!["matrix_mac".into()],
-            arity: 2,
-            flops_per_op: 2,
-        },
-    )])
+    matrix_test_fixture::matrix_operation_classes(FLOPS_PER_MAC)
 }
 
 fn compute_config(entries: Vec<(&str, ExecutionUnitConfig)>) -> ComputeConfig {
@@ -67,8 +56,7 @@ fn matrix_work_with_accumulator(
     k: usize,
     accumulator: DataType,
 ) -> ComputeWork {
-    ComputeWork::matrix_mac(
-        [DataType::Bf16; 2],
+    matrix_test_fixture::matrix_work(
         accumulator,
         MatrixWorkShape {
             batches: 1,
@@ -77,7 +65,6 @@ fn matrix_work_with_accumulator(
             k,
         },
     )
-    .unwrap()
 }
 
 fn assert_lowering_error(model: &ComputeModel, work: &ComputeWork, category: &str) {
