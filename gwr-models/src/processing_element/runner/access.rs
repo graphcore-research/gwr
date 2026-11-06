@@ -7,7 +7,7 @@ use std::ops::Range;
 
 use gwr_engine::types::SimError;
 
-use super::{find_read_indices, plan_window_chunk_access_ranges, slice_axes, slice_view};
+use super::{find_read_indices, plan_window_chunk_access, slice_axes, slice_view};
 use crate::processing_element::program::executable::Expr;
 use crate::processing_element::program::prepared::GroupPlan;
 use crate::processing_element::program::syntax::{IndexSpec, ReductionOp};
@@ -81,9 +81,11 @@ impl InputRead<'_> {
         chunk: &BTreeMap<String, Range<usize>>,
     ) -> Result<InputAccess, SimError> {
         if self.window {
-            let (ranges, bytes) =
-                plan_window_chunk_access_ranges(self.view, self.indices, tile, region, chunk)?;
-            Ok(InputAccess::Window { ranges, bytes })
+            let access = plan_window_chunk_access(self.view, self.indices, tile, region, chunk)?;
+            Ok(InputAccess::Window {
+                ranges: access.ranges,
+                bytes: access.transfer_bytes,
+            })
         } else {
             let mut intervals = tile.output_intervals.clone();
             intervals.extend(chunk.clone());

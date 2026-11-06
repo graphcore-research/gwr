@@ -18,7 +18,7 @@ use super::access::{
 use super::helpers::find_first_read_dtype;
 use super::{
     TaskRunner, build_assignment_dependencies, find_read_indices, max_window_chunk_buffer_bytes,
-    slice_view, window_chunk_packed_bytes,
+    plan_window_chunk_access, slice_view,
 };
 use crate::processing_element::program::executable::{Assignment, Expr, ScalarExpr};
 use crate::processing_element::program::plan::{LocalAllocation, allocate_temporaries};
@@ -404,7 +404,8 @@ fn mapped_input_buffer_bytes(
             .iter()
             .any(|index| matches!(index, IndexSpec::Affine { .. }))
         {
-            window_chunk_packed_bytes(original, indices, tile, region, &BTreeMap::new())?
+            plan_window_chunk_access(original, indices, tile, region, &BTreeMap::new())?
+                .packed_buffer_bytes
         } else {
             slice_view(original, indices, &tile.output_intervals)?.num_packed_bytes()
         },
