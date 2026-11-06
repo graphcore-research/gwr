@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
+use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
 
 use super::helpers::{build_scalar_expression_work, find_first_read_dtype};
@@ -16,13 +17,13 @@ use crate::processing_element::program::tile::{IntervalProduct, RegionTile};
 use crate::processing_element::program::validate::ProgramFacts;
 use crate::processing_element::tensors::TensorView;
 
-pub(super) struct Invocation {
+pub(in crate::processing_element) struct Invocation {
     pub chunk: BTreeMap<String, Range<usize>>,
     pub work: ComputeWork,
     pub read_label: Option<String>,
 }
 
-pub(super) struct AssignmentInvocations<'a> {
+pub(in crate::processing_element) struct AssignmentInvocations<'a> {
     region: &'a ProgramFacts,
     assignment: &'a Assignment,
     tile: &'a RegionTile,
@@ -33,6 +34,43 @@ pub(super) struct AssignmentInvocations<'a> {
     in_range: bool,
     seen: BTreeSet<Vec<usize>>,
     finished: bool,
+}
+
+impl Iterator for AssignmentInvocations<'_> {
+    type Item = Result<Invocation, SimError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+        if let Some(chunk) = self.chunks.next() {
+            return Some(self.chunk(chunk));
+        }
+        self.finished = true;
+        match &self.assignment.expr {
+            Expr::Reduce {
+                op: ReductionOp::Min | ReductionOp::Max,
+                ..
+            } if !self.in_range && self.seen.len() != self.outputs => {
+                Some(sim_error!("empty min/max window"))
+            }
+            Expr::MatrixMac { accumulator, .. }
+                if *accumulator
+                    != self
+                        .region
+                        .value(self.assignment.primary_result())
+                        .unwrap()
+                        .dtype =>
+            {
+                Some(Ok(Invocation {
+                    chunk: BTreeMap::new(),
+                    work: ComputeWork::operation("convert", vec![*accumulator], self.outputs),
+                    read_label: None,
+                }))
+            }
+            _ => None,
+        }
+    }
 }
 
 impl<'a> AssignmentInvocations<'a> {
@@ -153,43 +191,6 @@ impl<'a> AssignmentInvocations<'a> {
             work,
             read_label: Some(label),
         })
-    }
-}
-
-impl Iterator for AssignmentInvocations<'_> {
-    type Item = Result<Invocation, SimError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.finished {
-            return None;
-        }
-        if let Some(chunk) = self.chunks.next() {
-            return Some(self.chunk(chunk));
-        }
-        self.finished = true;
-        match &self.assignment.expr {
-            Expr::Reduce {
-                op: ReductionOp::Min | ReductionOp::Max,
-                ..
-            } if !self.in_range && self.seen.len() != self.outputs => {
-                Some(Err(SimError("empty min/max window".into())))
-            }
-            Expr::MatrixMac { accumulator, .. }
-                if *accumulator
-                    != self
-                        .region
-                        .value(self.assignment.primary_result())
-                        .unwrap()
-                        .dtype =>
-            {
-                Some(Ok(Invocation {
-                    chunk: BTreeMap::new(),
-                    work: ComputeWork::operation("convert", vec![*accumulator], self.outputs),
-                    read_label: None,
-                }))
-            }
-            _ => None,
-        }
     }
 }
 

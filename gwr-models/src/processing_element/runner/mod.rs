@@ -13,19 +13,17 @@ use gwr_engine::time::clock::Clock;
 use gwr_engine::types::{AccessType, SimError, SimResult};
 use gwr_track::entity::{Entity, EntityGroup};
 
-use self::access::InputAccess;
-use self::helpers::{
-    build_assignment_dependencies, eval_index, find_read_indices, slice_axes, slice_view,
-};
-use self::window::{max_window_chunk_buffer_bytes, plan_window_chunk_access};
 use crate::processing_element::activity::{ActivityLanes, ProcessingElementActivityLanes};
-use crate::processing_element::compute::{ComputeModel, ComputeScheduler};
+#[cfg(test)]
+use crate::processing_element::compute::ComputeModel;
+use crate::processing_element::compute::ComputeScheduler;
 use crate::processing_element::flop_monitor::FlopMonitor;
 use crate::processing_element::load_store_unit::LoadStoreUnit;
-use crate::processing_element::program::syntax::{ProgramSpec, TileSpec};
+use crate::processing_element::program::analysis::access::InputAccess;
 use crate::processing_element::program::tile::TileSchedule;
 #[cfg(test)]
 use crate::processing_element::program::tile::plan_tiles;
+#[cfg(test)]
 use crate::processing_element::program::validate::RegionBindings;
 #[cfg(test)]
 use crate::processing_element::program::validate::validate_program;
@@ -34,17 +32,12 @@ use crate::processing_element::task::{ProgramTaskConfig, Task};
 use crate::processing_element::tensors::TensorView;
 use crate::processing_element::{Dispatcher, ProcessingElementStats};
 
-mod access;
 mod assignment;
 mod helpers;
-mod invocation;
 
-mod matrix_shape;
 pub(super) mod schedule;
 
 mod tile;
-mod traffic;
-mod window;
 
 #[derive(Clone)]
 pub(super) struct TaskRunner {
@@ -196,101 +189,6 @@ impl TaskRunner {
             .checked_add(view.layout().num_access_bytes())
             .ok_or_else(|| SimError("PE write traffic overflows".into()))?;
         Ok(())
-    }
-}
-
-/// Bind a raw program and compute the maximum live tile storage.
-pub fn estimate_peak_tile_sram(
-    program: &ProgramSpec,
-    inputs: &[TensorView],
-    outputs: &[TensorView],
-    tiling: &TileSpec,
-) -> Result<usize, SimError> {
-    crate::processing_element::program::PreparedProgram::new(
-        program,
-        RegionBindings {
-            inputs: inputs.to_vec(),
-            outputs: outputs.to_vec(),
-        },
-        Some(tiling),
-    )?
-    .peak_sram_bytes()
-}
-
-impl crate::processing_element::program::PreparedProgram {
-    /// Maximum live storage across the canonical hardware-independent schedule.
-    /// Analysis traverses lazy tiles using bounded memory instead of retaining
-    /// every invocation. Traversal time can still scale with invocation count.
-    pub fn peak_sram_bytes(&self) -> Result<usize, SimError> {
-        use crate::processing_element::program::executable::Expr;
-        use crate::processing_element::program::prepared::Schedule;
-        use crate::processing_element::program::syntax::{BoundsMode, IndexSpec, ReductionOp};
-        // Preserve the bounded maximum-tile proof for direct slices and
-        // nonnegative byte windows. Leading padding and packed reductions
-        // require offset-sensitive inspection.
-        if let Schedule::Flat(schedule) = &self.schedule {
-            let packed = self
-                .facts
-                .bindings
-                .inputs
-                .iter()
-                .any(|view| view.dtype().num_bits() < 8);
-            let inspect_all = self.facts.program.assignments.iter().any(|assignment| {
-                let leading = assignment.expr.iter_reads().any(|read| read.bounds == BoundsMode::Exclude && read.indices.iter().any(|index| matches!(index, IndexSpec::Affine {affine} if affine.offset < 0)));
-                let window = match &assignment.expr {
-                    Expr::Reduce {op: ReductionOp::Min | ReductionOp::Max, ..} => true,
-                    Expr::Reduce {..} => assignment.expr.iter_reads().any(|read| read.indices.iter().any(|index| matches!(index, IndexSpec::Affine {..}))),
-                    _ => false,
-                };
-                leading || (packed && window)
-            });
-            if !inspect_all {
-                let tile = schedule
-                    .tiles()
-                    .next()
-                    .ok_or_else(|| SimError("program has no tiles".into()))?;
-                return tile::estimate_tile_sram(self.group(&self.facts.assignment_order), &tile);
-            }
-        }
-        let mut peak = 0;
-        self.visit_groups(&mut |plan, tile, retained| {
-            peak = peak.max(
-                retained
-                    .checked_add(tile::estimate_tile_sram(plan, tile)?)
-                    .ok_or_else(|| SimError("schedule working set overflows".into()))?,
-            );
-            Ok(())
-        })?;
-        Ok(peak)
-    }
-}
-
-pub(super) fn prepare_compute(
-    model: &ComputeModel,
-    program: &crate::processing_element::program::PreparedProgram,
-) -> Result<crate::processing_element::compute::PreparedCompute, SimError> {
-    let mut compute = crate::processing_element::compute::PreparedCompute::default();
-    let mut counts = super::MachineOpCounts::default();
-    program.visit_groups(&mut |plan, tile, _| {
-        for &index in plan.assignments {
-            for invocation in invocation::AssignmentInvocations::new(plan.region(), index, tile)? {
-                counts = counts
-                    .clone()
-                    .checked_add(compute.prepare(model, &invocation?.work)?)?;
-            }
-        }
-        Ok(())
-    })?;
-    Ok(compute)
-}
-
-impl ComputeModel {
-    /// Check actual invocation counts and geometry without binding to a PE.
-    pub fn validate_program(
-        &self,
-        program: &crate::processing_element::program::PreparedProgram,
-    ) -> SimResult {
-        prepare_compute(self, program).map(drop)
     }
 }
 

@@ -7,7 +7,8 @@ use std::ops::Range;
 
 use gwr_engine::types::SimError;
 
-use super::{find_read_indices, plan_window_chunk_access, slice_axes, slice_view};
+use super::helpers::{find_read_indices, slice_axes, slice_view};
+use super::window::plan_window_chunk_access;
 use crate::processing_element::program::executable::Expr;
 use crate::processing_element::program::prepared::GroupPlan;
 use crate::processing_element::program::syntax::{IndexSpec, ReductionOp};
@@ -16,7 +17,9 @@ use crate::processing_element::program::validate::ProgramFacts;
 use crate::processing_element::tensors::TensorView;
 
 /// Inputs loaded once and shared by the assignments in this tile.
-pub(super) fn collect_initial_input_reads(plan: GroupPlan<'_>) -> Vec<InputRead<'_>> {
+pub(in crate::processing_element) fn collect_initial_input_reads(
+    plan: GroupPlan<'_>,
+) -> Vec<InputRead<'_>> {
     plan.inputs()
         .filter(|(name, _)| !input_requires_assignment_reads(plan, name))
         .filter_map(|(name, view)| {
@@ -27,7 +30,7 @@ pub(super) fn collect_initial_input_reads(plan: GroupPlan<'_>) -> Vec<InputRead<
 }
 
 /// Reduction chunks and differing index mappings need their own input reads.
-pub(super) fn collect_assignment_input_reads(
+pub(in crate::processing_element) fn collect_assignment_input_reads(
     plan: GroupPlan<'_>,
     assignment: usize,
 ) -> Vec<InputRead<'_>> {
@@ -66,7 +69,7 @@ fn find_input_read<'a>(
     })
 }
 
-pub(super) struct InputRead<'a> {
+pub(in crate::processing_element) struct InputRead<'a> {
     pub name: &'a str,
     view: &'a TensorView,
     indices: &'a [IndexSpec],
@@ -94,7 +97,7 @@ impl InputRead<'_> {
     }
 }
 
-pub(super) enum InputAccess {
+pub(in crate::processing_element) enum InputAccess {
     View(TensorView),
     Window {
         ranges: Vec<Range<u128>>,
@@ -121,19 +124,25 @@ impl InputAccess {
     }
 }
 
-pub(super) fn build_tile_output_views(
-    plan: GroupPlan<'_>,
+pub(in crate::processing_element) fn build_tile_output_views<'a>(
+    plan: GroupPlan<'a>,
     tile: &RegionTile,
-) -> Result<Vec<TensorView>, SimError> {
+) -> Result<Vec<(&'a str, TensorView)>, SimError> {
     plan.outputs()
         .map(|(name, view)| {
             let assignment = &plan.region().program.assignments[plan.region().producers[name]];
-            slice_axes(view, &assignment.axes, &tile.output_intervals)
+            Ok((
+                name.as_str(),
+                slice_axes(view, &assignment.axes, &tile.output_intervals)?,
+            ))
         })
         .collect()
 }
 
-pub(super) fn input_requires_assignment_reads(plan: GroupPlan<'_>, name: &str) -> bool {
+pub(in crate::processing_element) fn input_requires_assignment_reads(
+    plan: GroupPlan<'_>,
+    name: &str,
+) -> bool {
     let mappings = plan
         .assignments()
         .filter_map(|assignment| find_read_indices(&assignment.expr, name))
