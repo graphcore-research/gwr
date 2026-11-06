@@ -45,10 +45,18 @@ fn main() -> Result<()> {
     let graph = timetable_file.into_graph()?;
 
     let timetable = Rc::new(Timetable::new(engine.top(), graph, &platform)?);
+    println!("Loaded timetable with {num_nodes} nodes, {num_edges} edges.");
+
+    if args.explain {
+        print!("{}", timetable.preparation_description());
+    }
+    if args.check || args.explain {
+        println!("Preparation successful; simulation was not run.");
+        return Ok(());
+    }
+
     let dispatcher: Rc<dyn Dispatch> = timetable.clone();
     platform.attach_dispatcher(&dispatcher);
-
-    println!("Loaded timetable with {num_nodes} nodes, {num_edges} edges.");
 
     let mut progress_bars = None;
     if args.progress {
@@ -115,6 +123,15 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 struct Cli {
     #[command(flatten)]
     tracker: TrackerArgs,
+
+    /// Prepare and validate the platform and timetable without running
+    /// simulation.
+    #[arg(long)]
+    check: bool,
+
+    /// Print retained preparation facts and exit without running simulation.
+    #[arg(long)]
+    explain: bool,
 
     /// Show runtime progress for completed nodes, memory traffic, compute,
     /// active timetable nodes and executor activity. Executor task counts do

@@ -114,7 +114,7 @@ impl PreparedTask {
     pub fn peak_sram_bytes(&self) -> usize {
         self.peak_sram_bytes
     }
-    /// Planned physical boundary read and write bytes.
+    /// Planned logical boundary read and write bytes, before LSU packetization.
     #[must_use]
     pub fn planned_traffic_bytes(&self) -> (usize, usize) {
         self.traffic_bytes
