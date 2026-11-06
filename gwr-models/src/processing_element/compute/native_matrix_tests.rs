@@ -518,6 +518,17 @@ fn raw_dispatch_preparation_rejections_have_no_side_effects() {
             None,
         ),
         (
+            "intrinsic_serial_duration",
+            "[i]",
+            vec![2],
+            "exp: [{exp: [{read: {tensor: A, indices: [i]}}]}]",
+            "2e-19",
+            "duration",
+            64,
+            1,
+            None,
+        ),
+        (
             "program_accounting",
             "[i]",
             vec![2],
