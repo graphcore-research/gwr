@@ -19,14 +19,17 @@ use crate::processing_element::compute::ComputeModel;
 use crate::processing_element::compute::ComputeScheduler;
 use crate::processing_element::flop_monitor::FlopMonitor;
 use crate::processing_element::load_store_unit::LoadStoreUnit;
+#[cfg(test)]
+use crate::processing_element::program::ProgramBindings;
 use crate::processing_element::program::analysis::access::InputAccess;
+use crate::processing_element::program::group::GroupMetadata;
+use crate::processing_element::program::prepared::Schedule;
 use crate::processing_element::program::tile::TileSchedule;
 #[cfg(test)]
 use crate::processing_element::program::tile::plan_tiles;
 #[cfg(test)]
-use crate::processing_element::program::validate::RegionBindings;
-#[cfg(test)]
 use crate::processing_element::program::validate::validate_program;
+use crate::processing_element::task::PreparedTask;
 #[cfg(test)]
 use crate::processing_element::task::{ProgramTaskConfig, Task};
 use crate::processing_element::tensors::TensorView;
@@ -56,16 +59,12 @@ pub(super) struct TaskRunner {
 }
 
 impl TaskRunner {
-    pub(super) async fn run(
-        &self,
-        task_idx: usize,
-        task: Rc<crate::processing_element::task::PreparedTask>,
-    ) -> SimResult {
+    pub(super) async fn run(&self, task_idx: usize, task: Rc<PreparedTask>) -> SimResult {
         match &task.program().schedule {
-            crate::processing_element::program::prepared::Schedule::Scoped(schedule) => {
+            Schedule::Scoped(schedule) => {
                 self.run_scoped_program(&task, schedule).await?;
             }
-            crate::processing_element::program::prepared::Schedule::Flat { tiles, group } => {
+            Schedule::Flat { tiles, group } => {
                 self.run_flat_program(&task, tiles, group).await?;
             }
         }
@@ -76,7 +75,7 @@ impl TaskRunner {
     async fn run_program(&self, task_idx: usize, config: &ProgramTaskConfig) -> SimResult {
         let program = Rc::new(crate::processing_element::program::PreparedProgram::new(
             &config.program,
-            RegionBindings {
+            ProgramBindings {
                 inputs: config.inputs.clone(),
                 outputs: config.outputs.clone(),
             },
@@ -95,9 +94,9 @@ impl TaskRunner {
 
     async fn run_flat_program(
         &self,
-        task: &crate::processing_element::task::PreparedTask,
+        task: &PreparedTask,
         schedule: &TileSchedule,
-        group: &crate::processing_element::program::group::GroupMetadata,
+        group: &GroupMetadata,
     ) -> SimResult {
         let plan = task.program().group(group);
         // At most one tile waits for SRAM admission. Already admitted tiles

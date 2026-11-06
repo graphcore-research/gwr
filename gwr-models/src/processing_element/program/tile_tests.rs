@@ -5,10 +5,11 @@ use std::collections::BTreeMap;
 use yaml_serde::from_str;
 
 use crate::processing_element::estimate_peak_tile_sram;
+use crate::processing_element::program::schedule::plan_schedule;
 use crate::processing_element::program::syntax::{ExprSpec, IndexSpec, ProgramSpec, TileSpec};
 use crate::processing_element::program::tile::plan_tiles;
 use crate::processing_element::program::validate::{
-    ProgramFacts, RegionBindings, validate_program,
+    ProgramBindings, ProgramFacts, validate_program,
 };
 use crate::processing_element::task::ProgramTaskConfig;
 use crate::processing_element::tensors::dtype::DataType;
@@ -31,7 +32,7 @@ assignments:
     .unwrap();
     validate_program(
         &program,
-        RegionBindings {
+        ProgramBindings {
             inputs: vec![view(&[10], 0), view(&[10], 100)],
             outputs: vec![view(&[10], 200)],
         },
@@ -128,7 +129,7 @@ assignments:
     .unwrap();
     let region = validate_program(
         &program,
-        RegionBindings {
+        ProgramBindings {
             inputs: vec![view(&[10, 5], 0), view(&[5, 9], 1000)],
             outputs: vec![view(&[10, 9], 2000)],
         },
@@ -189,7 +190,7 @@ assignments:
     .unwrap();
     let region = validate_program(
         &program,
-        RegionBindings {
+        ProgramBindings {
             inputs: vec![view(&[8], 0), view(&[8], 64)],
             outputs: vec![view(&[8], 128), view(&[8], 192)],
         },
@@ -198,7 +199,7 @@ assignments:
     let tiling = TileSpec {
         sizes: BTreeMap::from([("i".into(), 4)]),
     };
-    crate::processing_element::program::schedule::plan_schedule(&region, Some(&tiling)).unwrap();
+    plan_schedule(&region, Some(&tiling)).unwrap();
     let task = ProgramTaskConfig {
         id: "independent_axes".into(),
         program,
