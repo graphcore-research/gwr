@@ -5,7 +5,7 @@ use gwr_timetable::ComputeTensorDirection;
 use gwr_timetable::timetable_file::TimetableFile;
 
 #[test]
-fn graph_resolves_tensor_connections_and_implicit_edge_indices() {
+fn graph_resolves_named_tensor_connections() {
     let graph = TimetableFile::from_string(
         r"
 nodes:
@@ -19,9 +19,9 @@ nodes:
       outputs: []
       assignments: []
     input_views:
-      - { offsets: [0, 1], shape: [2, 1] }
+      A: { offsets: [0, 1], shape: [2, 1] }
 edges:
-  - { from: input, to: compute, kind: data }
+  - { from: input, to: compute.A, kind: data }
 ",
     )
     .unwrap()
@@ -36,9 +36,9 @@ edges:
 
     let edge = &graph.edges()[0];
     assert_eq!(edge.from().node(), 0);
-    assert_eq!(edge.from().edge_index(), Some(0));
+    assert_eq!(edge.from_port_name(&graph), None);
     assert_eq!(edge.to().node(), 1);
-    assert_eq!(edge.to().edge_index(), Some(0));
+    assert_eq!(edge.to_port_name(&graph), Some("A"));
 
     let connection = edge.tensor_connection().unwrap();
     assert_eq!(connection.tensor_node(), 0);

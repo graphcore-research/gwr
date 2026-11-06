@@ -37,9 +37,9 @@ nodes:
     tiling: { sizes: { t: 2, h: 4 } }
   - { id: hidden, kind: tensor, config: { addr: 256, dtype: fp32, shape: [4, 8] } }
 edges:
-  - { from: tokens, to: embedding.0, kind: data }
-  - { from: weight, to: embedding.1, kind: data }
-  - { from: embedding, to: hidden, kind: data }
+  - { from: tokens, to: embedding.A, kind: data }
+  - { from: weight, to: embedding.B, kind: data }
+  - { from: embedding.Y, to: hidden, kind: data }
 ",
     )
     .unwrap();
@@ -70,8 +70,8 @@ nodes:
                   indices: [m, n]
   - { id: output, kind: tensor, config: { addr: 64, dtype: fp32, shape: [4, 4] } }
 edges:
-  - { from: input, to: compute, kind: data }
-  - { from: compute, to: output, kind: data }
+  - { from: input, to: compute.A, kind: data }
+  - { from: compute.Y, to: output, kind: data }
 ",
     )
     .unwrap();
@@ -115,8 +115,8 @@ nodes:
                   bounds: exclude
   - {{ id: output, kind: tensor, config: {{ addr: 2, dtype: int8, shape: [1] }} }}
 edges:
-  - {{ from: input, to: window, kind: data }}
-  - {{ from: window, to: output, kind: data }}
+  - {{ from: input, to: window.A, kind: data }}
+  - {{ from: window.Y, to: output, kind: data }}
 ",
         max = usize::MAX,
     ))

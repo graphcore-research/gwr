@@ -35,13 +35,13 @@ nodes:
 
 edges:
   - from: tensor_A
-    to: add.0
+    to: add.A
     kind: data
 
   - from: tensor_A
-    to: add.1
+    to: add.B
     kind: data
 
-  - from: add
+  - from: add.Y
     to: tensor_C
     kind: data

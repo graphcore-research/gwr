@@ -26,7 +26,7 @@ nodes:
     tiling: { sizes: { i: 4 } }
   - { id: Y, kind: tensor, config: { addr: 0x5000, dtype: fp32, shape: [8] } }
 edges:
-  - { from: A, to: fused.0, kind: data }
-  - { from: B, to: fused.1, kind: data }
-  - { from: C, to: fused.2, kind: data }
-  - { from: fused.0, to: Y, kind: data }
+  - { from: A, to: fused.A, kind: data }
+  - { from: B, to: fused.B, kind: data }
+  - { from: C, to: fused.C, kind: data }
+  - { from: fused.Y, to: Y, kind: data }
