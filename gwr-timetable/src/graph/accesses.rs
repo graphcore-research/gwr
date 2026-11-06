@@ -314,11 +314,11 @@ nodes:
       outputs: []
       assignments: []
 edges:
-  - { from: initial, to: compute0, kind: data }
-  - { from: compute0, to: tensor0, kind: data }
-  - { from: tensor0, to: compute1, kind: data }
-  - { from: compute1, to: tensor1, kind: data }
-  - { from: tensor1, to: compute2, kind: data }
+  - { from: initial, to: compute0.A, kind: data }
+  - { from: compute0.Y, to: tensor0, kind: data }
+  - { from: tensor0, to: compute1.A, kind: data }
+  - { from: compute1.Y, to: tensor1, kind: data }
+  - { from: tensor1, to: compute2.A, kind: data }
 ",
         )
         .unwrap();
@@ -330,9 +330,12 @@ edges:
         for edge in file.edges {
             let from = nodes
                 .iter()
-                .position(|node| node.id() == edge.from)
+                .position(|node| node.id() == edge.from_node_id())
                 .unwrap();
-            let to = nodes.iter().position(|node| node.id() == edge.to).unwrap();
+            let to = nodes
+                .iter()
+                .position(|node| node.id() == edge.to_node_id())
+                .unwrap();
             nodes[from].successors.push(to);
             nodes[to].predecessors.push(from);
         }

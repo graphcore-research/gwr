@@ -23,8 +23,8 @@ fn disjoint_partitions(partition_count: usize) -> TimetableFile {
             vec![view(&[index], &[1])],
         ));
         nodes.push(read_only_source_tensor(&source_id, DataType::Int8, &[1]));
-        edges.push(data_edge(&compute_id, "output"));
-        edges.push(data_edge(&source_id, &compute_id));
+        edges.push(data_edge(&format!("{compute_id}.output0"), "output"));
+        edges.push(data_edge(&source_id, &format!("{compute_id}.input0")));
     }
     nodes.push(tensor("output", 0, DataType::Int8, &[partition_count]));
 
@@ -66,19 +66,22 @@ fn ordered_alias_writes(writer_count: usize) -> TimetableFile {
         ));
         nodes.push(tensor(&output_id, 0, DataType::Int8, &[1]));
         if index != 0 {
-            edges.push(data_edge(&format!("gate{}", index - 1), &compute_id));
+            edges.push(data_edge(
+                &format!("gate{}", index - 1),
+                &format!("{compute_id}.input0"),
+            ));
         }
 
         edges.push(data_edge(
             &source0,
-            &format!("{compute_id}.{first_source_port}"),
+            &format!("{compute_id}.input{first_source_port}"),
         ));
         edges.push(data_edge(
             &source1,
-            &format!("{compute_id}.{}", first_source_port + 1),
+            &format!("{compute_id}.input{}", first_source_port + 1),
         ));
-        edges.push(data_edge(&format!("{compute_id}.0"), &gate_id));
-        edges.push(data_edge(&format!("{compute_id}.1"), &output_id));
+        edges.push(data_edge(&format!("{compute_id}.output0"), &gate_id));
+        edges.push(data_edge(&format!("{compute_id}.output1"), &output_id));
     }
 
     timetable(nodes, edges)
@@ -109,7 +112,7 @@ fn interleaved_dependency_chains(chain_count: usize, step_count: usize) -> Timet
                 nodes.push(read_only_source_tensor(&source_id, DataType::Int8, &[1]));
                 edges.push(data_edge(
                     &source_id,
-                    &format!("{compute_id}.{source_port}"),
+                    &format!("{compute_id}.input{source_port}"),
                 ));
             }
         }
@@ -119,8 +122,11 @@ fn interleaved_dependency_chains(chain_count: usize, step_count: usize) -> Timet
             let gate = format!("gate{chain}_{step}");
             let address = (step * chain_count + chain) as u64;
             nodes.push(tensor(&gate, address, DataType::Int8, &[1]));
-            edges.push(data_edge(&format!("compute{chain}_{step}"), &gate));
-            edges.push(data_edge(&gate, &format!("compute{chain}_{}", step + 1)));
+            edges.push(data_edge(&format!("compute{chain}_{step}.output0"), &gate));
+            edges.push(data_edge(
+                &gate,
+                &format!("compute{chain}_{}.input0", step + 1),
+            ));
         }
     }
 
@@ -180,8 +186,8 @@ fn rejects_overlapping_reads_and_writes() {
             tensor("output", 0x1008, DataType::Fp32, &[4]),
         ],
         vec![
-            data_edge("input", "compute"),
-            data_edge("compute", "output"),
+            data_edge("input", "compute.input0"),
+            data_edge("compute.output0", "output"),
         ],
     );
 
@@ -204,8 +210,8 @@ fn accepts_views_in_adjacent_bytes() {
             tensor("output", 0x1000, DataType::Int4, &[4]),
         ],
         vec![
-            data_edge("input", "compute"),
-            data_edge("compute", "output"),
+            data_edge("input", "compute.input0"),
+            data_edge("compute.output0", "output"),
         ],
     );
 
@@ -226,8 +232,8 @@ fn accepts_disjoint_strided_views() {
             tensor("output", 0x1000, DataType::Int8, &[2, 4]),
         ],
         vec![
-            data_edge("input", "compute"),
-            data_edge("compute", "output"),
+            data_edge("input", "compute.input0"),
+            data_edge("compute.output0", "output"),
         ],
     );
 
@@ -248,8 +254,8 @@ fn rejects_overlapping_strided_views() {
             tensor("output", 0x1000, DataType::Int8, &[2, 4]),
         ],
         vec![
-            data_edge("input", "compute"),
-            data_edge("compute", "output"),
+            data_edge("input", "compute.input0"),
+            data_edge("compute.output0", "output"),
         ],
     );
 
@@ -271,8 +277,8 @@ fn rejects_overlapping_large_strided_views() {
             tensor("output", 0x1000, DataType::Int8, &[100_000_000, 2]),
         ],
         vec![
-            data_edge("input", "compute"),
-            data_edge("compute", "output"),
+            data_edge("input", "compute.input0"),
+            data_edge("compute.output0", "output"),
         ],
     );
 
@@ -294,8 +300,8 @@ fn rejects_views_sharing_a_packed_byte() {
             tensor("output", 0x1000, DataType::Int4, &[2]),
         ],
         vec![
-            data_edge("input", "compute"),
-            data_edge("compute", "output"),
+            data_edge("input", "compute.input0"),
+            data_edge("compute.output0", "output"),
         ],
     );
 
@@ -318,9 +324,9 @@ fn rejects_overlapping_packed_views_with_multiple_odd_strides() {
             read_only_source_tensor("source", DataType::Int8, &[1]),
         ],
         vec![
-            data_edge("input", "compute"),
-            data_edge("compute", "output"),
-            data_edge("source", "compute.1"),
+            data_edge("input", "compute.input0"),
+            data_edge("compute.output0", "output"),
+            data_edge("source", "compute.input1"),
         ],
     );
 
@@ -346,10 +352,10 @@ fn rejects_overlapping_outputs_from_one_compute_node() {
             tensor("output1", 0x1004, DataType::Fp32, &[2]),
         ],
         vec![
-            data_edge("source0", "compute.0"),
-            data_edge("source1", "compute.1"),
-            data_edge("compute.0", "output0"),
-            data_edge("compute.1", "output1"),
+            data_edge("source0", "compute.input0"),
+            data_edge("source1", "compute.input1"),
+            data_edge("compute.output0", "output0"),
+            data_edge("compute.output1", "output1"),
         ],
     );
 
@@ -374,10 +380,10 @@ fn accepts_adjacent_outputs_from_one_compute_node() {
             tensor("output1", 0x1004, DataType::Fp32, &[1]),
         ],
         vec![
-            data_edge("source0", "compute.0"),
-            data_edge("source1", "compute.1"),
-            data_edge("compute.0", "output0"),
-            data_edge("compute.1", "output1"),
+            data_edge("source0", "compute.input0"),
+            data_edge("source1", "compute.input1"),
+            data_edge("compute.output0", "output0"),
+            data_edge("compute.output1", "output1"),
         ],
     );
 
@@ -405,10 +411,10 @@ fn rejects_unordered_writers_to_one_tensor() {
             tensor("result", 0x1000, DataType::Int8, &[4]),
         ],
         vec![
-            data_edge("source0", "producer0"),
-            data_edge("source1", "producer1"),
-            data_edge("producer0", "result.0"),
-            data_edge("producer1", "result.1"),
+            data_edge("source0", "producer0.input0"),
+            data_edge("source1", "producer1.input0"),
+            data_edge("producer0.output0", "result"),
+            data_edge("producer1.output0", "result"),
         ],
     );
 
@@ -438,10 +444,10 @@ fn accepts_disjoint_unordered_writers_to_one_tensor() {
             tensor("result", 0x1000, DataType::Int8, &[4]),
         ],
         vec![
-            data_edge("source0", "producer0"),
-            data_edge("source1", "producer1"),
-            data_edge("producer0", "result.0"),
-            data_edge("producer1", "result.1"),
+            data_edge("source0", "producer0.input0"),
+            data_edge("source1", "producer1.input0"),
+            data_edge("producer0.output0", "result"),
+            data_edge("producer1.output0", "result"),
         ],
     );
 
@@ -469,10 +475,10 @@ fn rejects_unordered_writers_sharing_a_packed_byte() {
             tensor("result", 0x1000, DataType::Int4, &[2]),
         ],
         vec![
-            data_edge("source0", "producer0"),
-            data_edge("source1", "producer1"),
-            data_edge("producer0", "result.0"),
-            data_edge("producer1", "result.1"),
+            data_edge("source0", "producer0.input0"),
+            data_edge("source1", "producer1.input0"),
+            data_edge("producer0.output0", "result"),
+            data_edge("producer1.output0", "result"),
         ],
     );
 
@@ -502,12 +508,12 @@ fn accepts_dependency_ordered_writers_to_one_tensor() {
             tensor("result", 0x1000, DataType::Int8, &[4]),
         ],
         vec![
-            data_edge("source0", "producer0.0"),
-            data_edge("source1", "producer0.1"),
-            data_edge("producer0.0", "gate"),
-            data_edge("producer0.1", "result.0"),
-            data_edge("gate", "producer1"),
-            data_edge("producer1", "result.1"),
+            data_edge("source0", "producer0.input0"),
+            data_edge("source1", "producer0.input1"),
+            data_edge("producer0.output0", "gate"),
+            data_edge("producer0.output1", "result"),
+            data_edge("gate", "producer1.input0"),
+            data_edge("producer1.output0", "result"),
         ],
     );
 
@@ -536,10 +542,10 @@ fn rejects_unordered_writers_to_aliased_tensors() {
             tensor("output1", 0x1002, DataType::Int8, &[4]),
         ],
         vec![
-            data_edge("source0", "producer0"),
-            data_edge("source1", "producer1"),
-            data_edge("producer0", "output0"),
-            data_edge("producer1", "output1"),
+            data_edge("source0", "producer0.input0"),
+            data_edge("source1", "producer1.input0"),
+            data_edge("producer0.output0", "output0"),
+            data_edge("producer1.output0", "output1"),
         ],
     );
 
@@ -572,10 +578,10 @@ fn accepts_disjoint_writers_to_aliased_tensors() {
             tensor("output1", 0x1000, DataType::Int8, &[4]),
         ],
         vec![
-            data_edge("source0", "producer0"),
-            data_edge("source1", "producer1"),
-            data_edge("producer0", "output0"),
-            data_edge("producer1", "output1"),
+            data_edge("source0", "producer0.input0"),
+            data_edge("source1", "producer1.input0"),
+            data_edge("producer0.output0", "output0"),
+            data_edge("producer1.output0", "output1"),
         ],
     );
 
@@ -606,10 +612,10 @@ fn accepts_wide_finite_stride_writers() {
             tensor("output1", 2, DataType::Int8, &[COUNT, 1_000_000_005]),
         ],
         vec![
-            data_edge("source0", "producer0"),
-            data_edge("source1", "producer1"),
-            data_edge("producer0", "output0"),
-            data_edge("producer1", "output1"),
+            data_edge("source0", "producer0.input0"),
+            data_edge("source1", "producer1.input0"),
+            data_edge("producer0.output0", "output0"),
+            data_edge("producer1.output0", "output1"),
         ],
     );
 
@@ -638,10 +644,10 @@ fn rejects_aliased_tensor_views_sharing_a_packed_byte() {
             tensor("output1", 0x1000, DataType::Int4, &[2]),
         ],
         vec![
-            data_edge("source0", "producer0"),
-            data_edge("source1", "producer1"),
-            data_edge("producer0", "output0"),
-            data_edge("producer1", "output1"),
+            data_edge("source0", "producer0.input0"),
+            data_edge("source1", "producer1.input0"),
+            data_edge("producer0.output0", "output0"),
+            data_edge("producer1.output0", "output1"),
         ],
     );
 
@@ -671,10 +677,10 @@ fn rejects_overlapping_strided_writes_to_aliased_tensors() {
             tensor("output1", 0x1000, DataType::Int8, &[2, 4]),
         ],
         vec![
-            data_edge("source0", "producer0"),
-            data_edge("source1", "producer1"),
-            data_edge("producer0", "output0"),
-            data_edge("producer1", "output1"),
+            data_edge("source0", "producer0.input0"),
+            data_edge("source1", "producer1.input0"),
+            data_edge("producer0.output0", "output0"),
+            data_edge("producer1.output0", "output1"),
         ],
     );
 
@@ -706,13 +712,13 @@ fn accepts_dependency_ordered_writes_to_aliased_tensors() {
             tensor("output1", 0x1000, DataType::Int8, &[4]),
         ],
         vec![
-            data_edge("source0", "producer0.0"),
-            data_edge("source1", "producer0.1"),
-            data_edge("source2", "producer1.1"),
-            data_edge("producer0.0", "gate"),
-            data_edge("producer0.1", "output0"),
-            data_edge("gate", "producer1"),
-            data_edge("producer1", "output1"),
+            data_edge("source0", "producer0.input0"),
+            data_edge("source1", "producer0.input1"),
+            data_edge("source2", "producer1.input1"),
+            data_edge("producer0.output0", "gate"),
+            data_edge("producer0.output1", "output0"),
+            data_edge("gate", "producer1.input0"),
+            data_edge("producer1.output0", "output1"),
         ],
     );
 
@@ -740,9 +746,9 @@ fn rejects_unordered_readers_and_writers_to_aliased_tensors() {
             read_only_source_tensor("source", DataType::Int8, &[4]),
         ],
         vec![
-            data_edge("input", "reader"),
-            data_edge("writer", "output"),
-            data_edge("source", "writer"),
+            data_edge("input", "reader.input0"),
+            data_edge("writer.output0", "output"),
+            data_edge("source", "writer.input0"),
         ],
     );
 
@@ -776,12 +782,12 @@ fn accepts_dependency_ordered_readers_and_writers_to_aliased_tensors() {
             ),
         ],
         vec![
-            data_edge("source0", "writer.0"),
-            data_edge("source1", "writer.1"),
-            data_edge("writer.0", "gate"),
-            data_edge("writer.1", "output"),
-            data_edge("gate", "reader.0"),
-            data_edge("input", "reader.1"),
+            data_edge("source0", "writer.input0"),
+            data_edge("source1", "writer.input1"),
+            data_edge("writer.output0", "gate"),
+            data_edge("writer.output1", "output"),
+            data_edge("gate", "reader.input0"),
+            data_edge("input", "reader.input1"),
         ],
     );
 

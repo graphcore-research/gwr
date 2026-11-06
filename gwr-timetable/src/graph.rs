@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
@@ -14,7 +14,8 @@ use gwr_models::processing_element::tensors::{Tensor, TensorView};
 
 use self::accesses::validate;
 use crate::timetable_file::{
-    EdgeKind, NodeSection, TensorViewSection, TimetableFile, parse_edge_end,
+    EdgeKind, NodeSection, TensorViewSection, TimetableFile, parse_edge_end, validate_node_id,
+    validate_port_name,
 };
 
 mod accesses;
@@ -40,14 +41,14 @@ impl TimetableGraph {
             nodes.push(node);
             view_sections.push(views);
         }
-        let mut used_inputs = vec![EdgeIndexUsage::default(); nodes.len()];
-        let mut used_outputs = vec![EdgeIndexUsage::default(); nodes.len()];
+        let mut used_inputs = vec![0; nodes.len()];
+        let mut used_outputs = vec![0; nodes.len()];
         let mut edges = Vec::with_capacity(file.edges.len());
 
         for section in file.edges {
             let edge_index = edges.len();
-            let (from_id, requested_from_index) = parse_edge_end(&section.from)?;
-            let (to_id, requested_to_index) = parse_edge_end(&section.to)?;
+            let (from_id, requested_from_port) = parse_edge_end(&section.from)?;
+            let (to_id, requested_to_port) = parse_edge_end(&section.to)?;
             let from_node = node_indices.get(from_id).copied().ok_or_else(|| {
                 SimError(format!(
                     "Edge contains invalid from Node ID '{}'",
@@ -59,12 +60,11 @@ impl TimetableGraph {
             })?;
 
             if section.kind == EdgeKind::Control {
-                edges.push(TimetableEdge {
-                    kind: section.kind,
-                    from: EdgeEndpoint::new(from_node, requested_from_index),
-                    to: EdgeEndpoint::new(to_node, requested_to_index),
-                    tensor: None,
-                });
+                edges.push(resolve_control_edge(
+                    &nodes,
+                    (from_node, requested_from_port),
+                    (to_node, requested_to_port),
+                )?);
                 continue;
             }
 
@@ -77,13 +77,13 @@ impl TimetableGraph {
             let from_index = resolve_edge_index(
                 &nodes[from_node],
                 EdgeDirection::Output,
-                requested_from_index,
+                requested_from_port,
                 &mut used_outputs[from_node],
             )?;
             let to_index = resolve_edge_index(
                 &nodes[to_node],
                 EdgeDirection::Input,
-                requested_to_index,
+                requested_to_port,
                 &mut used_inputs[to_node],
             )?;
 
@@ -188,6 +188,28 @@ impl TimetableEdge {
         self.to
     }
 
+    /// Declared source output port, or `None` for a plain node endpoint.
+    /// Pass the graph that owns this edge.
+    #[must_use]
+    pub fn from_port_name<'a>(&self, graph: &'a TimetableGraph) -> Option<&'a str> {
+        let program = graph.nodes.get(self.from.node)?.program()?;
+        program
+            .output_names()
+            .get(self.from.edge_index?)
+            .map(String::as_str)
+    }
+
+    /// Declared destination input port, or `None` for a plain node endpoint.
+    /// Pass the graph that owns this edge.
+    #[must_use]
+    pub fn to_port_name<'a>(&self, graph: &'a TimetableGraph) -> Option<&'a str> {
+        let program = graph.nodes.get(self.to.node)?.program()?;
+        program
+            .input_names()
+            .get(self.to.edge_index?)
+            .map(String::as_str)
+    }
+
     #[must_use]
     pub fn tensor_connection(&self) -> Option<&TensorConnection> {
         self.tensor.as_ref()
@@ -208,11 +230,6 @@ impl EdgeEndpoint {
     #[must_use]
     pub fn node(&self) -> usize {
         self.node
-    }
-
-    #[must_use]
-    pub fn edge_index(&self) -> Option<usize> {
-        self.edge_index
     }
 }
 
@@ -274,6 +291,7 @@ fn node_indices(nodes: &[NodeSection]) -> Result<HashMap<String, usize>, SimErro
     let mut indices = HashMap::new();
     let mut duplicates = Vec::new();
     for (index, node) in nodes.iter().enumerate() {
+        validate_node_id(node.id())?;
         if indices.insert(node.id().to_string(), index).is_some() {
             duplicates.push(format!("Duplicate Node ID '{}'", node.id()));
         }
@@ -284,69 +302,96 @@ fn node_indices(nodes: &[NodeSection]) -> Result<HashMap<String, usize>, SimErro
     Ok(indices)
 }
 
+fn resolve_control_edge(
+    nodes: &[NodeDraft],
+    from: (usize, Option<&str>),
+    to: (usize, Option<&str>),
+) -> Result<TimetableEdge, SimError> {
+    let from_port = resolve_port(&nodes[from.0], EdgeDirection::Output, from.1, false)?;
+    let to_port = resolve_port(&nodes[to.0], EdgeDirection::Input, to.1, false)?;
+    Ok(TimetableEdge {
+        kind: EdgeKind::Control,
+        from: EdgeEndpoint::new(from.0, from_port),
+        to: EdgeEndpoint::new(to.0, to_port),
+        tensor: None,
+    })
+}
+
+fn resolve_port(
+    node: &NodeDraft,
+    direction: EdgeDirection,
+    requested: Option<&str>,
+    required: bool,
+) -> Result<Option<usize>, SimError> {
+    let DraftKind::Compute { program, .. } = &node.kind else {
+        if requested.is_some() {
+            return sim_error!(
+                "Tensor node '{}' endpoint must be a plain node ID",
+                node.id()
+            );
+        }
+        return Ok(None);
+    };
+    let Some(name) = requested else {
+        if required {
+            return sim_error!(
+                "Compute node '{}' requires a named {direction} port",
+                node.id()
+            );
+        }
+        return Ok(None);
+    };
+    let names = direction.names(program);
+    names
+        .iter()
+        .position(|port| port == name)
+        .map(Some)
+        .ok_or_else(|| {
+            SimError(format!(
+                "Node '{}' has unknown {direction} port '{name}'",
+                node.id()
+            ))
+        })
+}
+
 fn resolve_edge_index(
     node: &NodeDraft,
     direction: EdgeDirection,
-    requested_index: Option<usize>,
-    used: &mut EdgeIndexUsage,
+    requested: Option<&str>,
+    next_tensor_index: &mut usize,
 ) -> Result<usize, SimError> {
-    used.claim(node, direction, requested_index)
-}
-
-#[derive(Clone, Default)]
-struct EdgeIndexUsage {
-    occupied_indices: HashSet<usize>,
-    next_free_index: usize,
-}
-
-impl EdgeIndexUsage {
-    fn claim(
-        &mut self,
-        node: &NodeDraft,
-        direction: EdgeDirection,
-        requested_index: Option<usize>,
-    ) -> Result<usize, SimError> {
-        let limit = match direction {
-            EdgeDirection::Input => node.is_compute().then_some(node.input_edges.len()),
-            EdgeDirection::Output => node.is_compute().then_some(node.output_edges.len()),
-        };
-        let tensor_index = requested_index.unwrap_or(self.next_free_index);
-        if let Some(limit) = limit
-            && tensor_index >= limit
-        {
-            return sim_error!(
-                "Node '{}' {direction} tensor index {tensor_index} is out of range for {limit} declared {direction} tensors",
-                node.id()
-            );
-        }
-        if !self.occupied_indices.insert(tensor_index) {
-            return sim_error!(
-                "Node '{}' {direction} tensor index {tensor_index} is connected more than once",
-                node.id()
-            );
-        }
-
-        if tensor_index == self.next_free_index {
-            loop {
-                self.next_free_index = self.next_free_index.checked_add(1).ok_or_else(|| {
-                    SimError(format!(
-                        "Node '{}' {direction} tensor index overflows",
-                        node.id()
-                    ))
-                })?;
-                if !self.occupied_indices.contains(&self.next_free_index) {
-                    break;
-                }
-            }
-        }
-        Ok(tensor_index)
+    let Some(index) = resolve_port(node, direction, requested, true)? else {
+        let index = *next_tensor_index;
+        *next_tensor_index += 1;
+        return Ok(index);
+    };
+    let edges = match direction {
+        EdgeDirection::Input => &node.input_edges,
+        EdgeDirection::Output => &node.output_edges,
+    };
+    if edges[index].is_some() {
+        return sim_error!(
+            "Node '{}' {direction} port '{}' is connected more than once",
+            node.id(),
+            requested.expect("resolved port")
+        );
     }
+    Ok(index)
 }
 
 #[derive(Clone, Copy)]
 enum EdgeDirection {
     Input,
     Output,
+}
+
+impl EdgeDirection {
+    fn names(self, program: &ProgramSpec) -> &[String] {
+        match self {
+            Self::Input => &program.inputs,
+            Self::Output => &program.outputs,
+        }
+    }
 }
 
 impl Display for EdgeDirection {
@@ -367,14 +412,15 @@ fn validate_disconnected_views(
             continue;
         };
         for (direction, views, edges) in [
-            ("input", &sections.inputs, &node.input_edges),
-            ("output", &sections.outputs, &node.output_edges),
+            (EdgeDirection::Input, &sections.inputs, &node.input_edges),
+            (EdgeDirection::Output, &sections.outputs, &node.output_edges),
         ] {
             for (tensor_index, (view, edge)) in views.iter().zip(edges).enumerate() {
                 if view.is_some() && edge.is_none() {
                     return sim_error!(
-                        "Compute node '{}' declares an {direction} view for disconnected tensor index {tensor_index}",
-                        node.id()
+                        "Compute node '{}' declares an {direction} view for disconnected port '{}'",
+                        node.id(),
+                        node.port_names(direction)[tensor_index]
                     );
                 }
             }
@@ -494,11 +540,21 @@ impl NodeDraft {
                 output_views,
             } => {
                 let program = *program;
-                let input_views = input_views.unwrap_or_else(|| vec![None; program.inputs.len()]);
+                let mut names = HashSet::new();
+                for name in program.inputs.iter().chain(&program.outputs) {
+                    validate_port_name(name)?;
+                    if !names.insert(name) {
+                        return sim_error!(
+                            "Compute node '{id}' has duplicate program port '{name}'"
+                        );
+                    }
+                }
+                let input_views =
+                    resolve_views(&id, &program.inputs, input_views, EdgeDirection::Input)?;
                 let output_views =
-                    output_views.unwrap_or_else(|| vec![None; program.outputs.len()]);
-                let num_inputs = input_views.len();
-                let num_outputs = output_views.len();
+                    resolve_views(&id, &program.outputs, output_views, EdgeDirection::Output)?;
+                let num_inputs = program.inputs.len();
+                let num_outputs = program.outputs.len();
                 (
                     id,
                     DraftKind::Compute {
@@ -537,8 +593,11 @@ impl NodeDraft {
     fn id(&self) -> &str {
         &self.id
     }
-    fn is_compute(&self) -> bool {
-        matches!(self.kind, DraftKind::Compute { .. })
+    fn port_names(&self, direction: EdgeDirection) -> &[String] {
+        match &self.kind {
+            DraftKind::Compute { program, .. } => direction.names(program),
+            DraftKind::Tensor(_) => &[],
+        }
     }
     fn tensor(&self) -> Option<&Tensor> {
         match &self.kind {
@@ -547,22 +606,23 @@ impl NodeDraft {
         }
     }
     fn bind(self, edges: &[TimetableEdge]) -> Result<TimetableNode, SimError> {
-        let dense_edges = |ports: Vec<Option<usize>>, direction: &str| {
+        let dense_edges = |ports: &[Option<usize>], direction: EdgeDirection| {
             ports
-                .into_iter()
+                .iter()
                 .enumerate()
                 .map(|(port, edge)| {
                     edge.ok_or_else(|| {
                         SimError(format!(
-                            "Compute node '{}' has an unbound program {direction} at index {port}",
-                            self.id
+                            "Compute node '{}' has an unbound program {direction} '{}'",
+                            self.id,
+                            self.port_names(direction)[port]
                         ))
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()
         };
-        let input_edges = dense_edges(self.input_edges, "input")?;
-        let output_edges = dense_edges(self.output_edges, "output")?;
+        let input_edges = dense_edges(&self.input_edges, EdgeDirection::Input)?;
+        let output_edges = dense_edges(&self.output_edges, EdgeDirection::Output)?;
         let kind = match self.kind {
             DraftKind::Compute {
                 program,
@@ -700,6 +760,19 @@ enum TimetableNodeKind {
         views: ComputeTensorViews,
     },
     Tensor(Tensor),
+}
+
+fn resolve_views(
+    id: &str,
+    names: &[String],
+    mut views: BTreeMap<String, TensorViewSection>,
+    direction: EdgeDirection,
+) -> Result<Vec<Option<TensorViewSection>>, SimError> {
+    let resolved = names.iter().map(|name| views.remove(name)).collect();
+    if let Some(name) = views.keys().next() {
+        return sim_error!("Node '{id}' has unknown {direction} view port '{name}'");
+    }
+    Ok(resolved)
 }
 
 struct ComputeViewSections {
