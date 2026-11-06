@@ -10,14 +10,14 @@ use super::eval_index;
 use crate::processing_element::program::storage::align_sram_slot_bytes;
 use crate::processing_element::program::syntax::IndexSpec;
 use crate::processing_element::program::tile::RegionTile;
-use crate::processing_element::program::validate::ValidatedRegion;
+use crate::processing_element::program::validate::ProgramFacts;
 use crate::processing_element::tensors::{HasShape, TensorView};
 
 pub(super) fn max_window_chunk_buffer_bytes(
     view: &TensorView,
     indices: &[IndexSpec],
     tile: &RegionTile,
-    region: &ValidatedRegion,
+    region: &ProgramFacts,
     over: &[String],
     available_sram: usize,
 ) -> Result<usize, SimError> {
@@ -51,7 +51,7 @@ fn window_chunk_minimum_bytes(
     view: &TensorView,
     indices: &[IndexSpec],
     tile: &RegionTile,
-    region: &ValidatedRegion,
+    region: &ProgramFacts,
     chunk: &BTreeMap<String, Range<usize>>,
 ) -> Result<usize, SimError> {
     let elements = indices.iter().zip(view.shape().dims()).try_fold(
@@ -74,7 +74,7 @@ fn window_chunk_minimum_bytes(
 fn max_varying_axis_length(
     index: &IndexSpec,
     tile: &RegionTile,
-    region: &ValidatedRegion,
+    region: &ProgramFacts,
     chunk: &BTreeMap<String, Range<usize>>,
 ) -> usize {
     let axes = match index {
@@ -97,7 +97,7 @@ pub(super) fn plan_window_chunk_access_ranges(
     view: &TensorView,
     indices: &[IndexSpec],
     tile: &RegionTile,
-    region: &ValidatedRegion,
+    region: &ProgramFacts,
     chunk: &BTreeMap<String, Range<usize>>,
 ) -> Result<(Vec<Range<u128>>, usize), SimError> {
     plan_window_chunk_access(view, indices, tile, region, chunk)
@@ -109,7 +109,7 @@ pub(super) fn window_chunk_packed_bytes(
     view: &TensorView,
     indices: &[IndexSpec],
     tile: &RegionTile,
-    region: &ValidatedRegion,
+    region: &ProgramFacts,
     chunk: &BTreeMap<String, Range<usize>>,
 ) -> Result<usize, SimError> {
     plan_window_chunk_access(view, indices, tile, region, chunk).map(|(_, _, bytes)| bytes)
@@ -119,7 +119,7 @@ fn plan_window_chunk_access(
     view: &TensorView,
     indices: &[IndexSpec],
     tile: &RegionTile,
-    region: &ValidatedRegion,
+    region: &ProgramFacts,
     chunk: &BTreeMap<String, Range<usize>>,
 ) -> Result<(Vec<Range<u128>>, usize, usize), SimError> {
     if !is_dense_window(indices, tile, region, chunk) {
@@ -139,7 +139,7 @@ fn plan_window_chunk_access(
 fn is_dense_window(
     indices: &[IndexSpec],
     tile: &RegionTile,
-    region: &ValidatedRegion,
+    region: &ProgramFacts,
     chunk: &BTreeMap<String, Range<usize>>,
 ) -> bool {
     indices.iter().all(|index| {
@@ -185,7 +185,7 @@ fn enumerate_window_access(
     view: &TensorView,
     indices: &[IndexSpec],
     tile: &RegionTile,
-    region: &ValidatedRegion,
+    region: &ProgramFacts,
     chunk: &BTreeMap<String, Range<usize>>,
 ) -> Result<(Vec<Range<u128>>, usize, usize), SimError> {
     let ranges = collect_window_coordinate_ranges(indices, tile, region, chunk);
@@ -224,7 +224,7 @@ fn enumerate_window_access(
 fn collect_window_coordinate_ranges(
     indices: &[IndexSpec],
     tile: &RegionTile,
-    region: &ValidatedRegion,
+    region: &ProgramFacts,
     chunk: &BTreeMap<String, Range<usize>>,
 ) -> Vec<(String, Range<usize>)> {
     let mut axes = BTreeSet::new();
@@ -311,7 +311,7 @@ pub(super) fn build_window_input_view(
     view: &TensorView,
     indices: &[IndexSpec],
     tile: &RegionTile,
-    region: &ValidatedRegion,
+    region: &ProgramFacts,
     chunk: &BTreeMap<String, Range<usize>>,
 ) -> Result<Option<TensorView>, SimError> {
     let mut shape = view.shape().dims().to_vec();
@@ -344,7 +344,7 @@ pub(super) fn build_window_input_view(
 pub(super) fn window_indices_are_in_range(
     indices: &[IndexSpec],
     tile: &RegionTile,
-    region: &ValidatedRegion,
+    region: &ProgramFacts,
     input: &TensorView,
 ) -> Result<bool, SimError> {
     let (low, high) = build_window_coordinate_corners(tile, region, &BTreeMap::new());
@@ -365,7 +365,7 @@ pub(super) fn window_indices_are_in_range(
 
 fn build_window_coordinate_corners(
     tile: &RegionTile,
-    region: &ValidatedRegion,
+    region: &ProgramFacts,
     chunk: &BTreeMap<String, Range<usize>>,
 ) -> (BTreeMap<String, usize>, BTreeMap<String, usize>) {
     let mut low_coords = BTreeMap::new();
@@ -390,7 +390,7 @@ pub(super) fn count_window_chunk_operations(
     output_axes: &[String],
     reduction_axes: &[String],
     tile: &RegionTile,
-    region: &ValidatedRegion,
+    region: &ProgramFacts,
     chunk: &BTreeMap<String, Range<usize>>,
     first_chunk: bool,
     all_in_range: bool,
@@ -557,7 +557,7 @@ mod tests {
         dtype: DataType,
         coefficient: usize,
         offset: i32,
-    ) -> (ProgramSpec, TensorView, ValidatedRegion) {
+    ) -> (ProgramSpec, TensorView, ProgramFacts) {
         let length = 7 + coefficient * 4;
         let input = TensorView::new(
             Tensor::new(&[2, length + 3], &dtype, 0).unwrap(),
@@ -569,7 +569,7 @@ mod tests {
         let program = window_program(coefficient, offset);
         let region = validate_program(
             &program,
-            &RegionBindings {
+            RegionBindings {
                 inputs: vec![input.clone()],
                 outputs: vec![output],
             },

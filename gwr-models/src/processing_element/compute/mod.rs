@@ -16,10 +16,11 @@ use serde::{Deserialize, Deserializer, Serialize};
 use super::tensors::dtype::DataType;
 
 mod lower;
+pub(in crate::processing_element) use lower::PreparedCompute;
 mod scheduler;
 mod work;
 pub(super) use scheduler::{ComputeReservation, ComputeScheduler};
-pub(super) use work::{CapabilityKey, ComputeBatch, ExecutionPlan, TypedWork, WorkStage};
+pub(super) use work::{ComputeBatch, ExecutionPlan, TypedWork, WorkStage};
 pub use work::{ComputeWork, MatrixWorkShape};
 
 /// Pure, validated compute model; mutable arbitration belongs to the scheduler.
@@ -130,7 +131,7 @@ impl ComputeModel {
         &self.names
     }
 
-    fn select(&self, key: &CapabilityKey) -> Vec<ComputeCandidate> {
+    fn select(&self, key: &TypedWork) -> Vec<ComputeCandidate> {
         let Some(matches) = self.capabilities.get(key.op()) else {
             return vec![];
         };
@@ -418,12 +419,12 @@ impl CapabilityKind {
         }
     }
 
-    fn matches(self, key: &CapabilityKey) -> bool {
+    fn matches(self, key: &TypedWork) -> bool {
         match (self, key) {
-            (Self::Scalar, CapabilityKey::Operation { .. }) => true,
+            (Self::Scalar, TypedWork::Operation { .. }) => true,
             (
                 Self::Matrix { accumulator, .. },
-                CapabilityKey::MatrixMac {
+                TypedWork::MatrixMac {
                     accumulator: required,
                     ..
                 },

@@ -2,33 +2,34 @@
 
 //! Stable SRAM slot allocation for values local to one output tile.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
-use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
 
+use super::prepared::GroupPlan;
 use super::storage::align_sram_slot_bytes;
 use super::tile::RegionTile;
-use super::validate::ValidatedRegion;
+use super::validate::ProgramFacts;
 
 pub(in crate::processing_element) fn allocate_temporaries(
-    region: &ValidatedRegion,
+    plan: GroupPlan<'_>,
     tile: &RegionTile,
 ) -> Result<LocalAllocation, SimError> {
-    let layers = calculate_assignment_layers(region)?;
-    let last_use = last_consumer_layer_by_value(region, &layers);
+    let region = plan.region();
+    let layers = calculate_assignment_layers(plan)?;
+    let last_use = last_consumer_layer_by_value(plan, &layers);
     let mut slots = Vec::<LocalSlot>::new();
     let mut occupied_until = Vec::<usize>::new();
-    for index in &region.assignment_order {
+    for index in plan.assignments {
         let assignment = &region.program.assignments[*index];
         let elements = count_assignment_tile_elements(&assignment.axes, region, tile)?;
-        for name in [
-            assignment.output.as_ref(),
-            assignment.indices_output.as_ref(),
-        ]
-        .into_iter()
-        .flatten()
+        for name in [assignment.output(), assignment.indices_output()]
+            .into_iter()
+            .flatten()
         {
+            if plan.program.retained.contains(name) {
+                continue;
+            }
             let Some(temp) = region.program.temporaries.get(name) else {
                 continue;
             };
@@ -51,25 +52,25 @@ pub(in crate::processing_element) fn allocate_temporaries(
 }
 
 fn last_consumer_layer_by_value(
-    region: &ValidatedRegion,
+    plan: GroupPlan<'_>,
     layers: &BTreeMap<usize, usize>,
 ) -> BTreeMap<String, usize> {
-    let mut last_use = BTreeMap::new();
-    for (index, assignment) in region.program.assignments.iter().enumerate() {
-        let dependencies = assignment.expr.collect_read_tensor_names();
-        for name in dependencies {
-            last_use
-                .entry(name)
-                .and_modify(|last: &mut usize| *last = (*last).max(layers[&index]))
-                .or_insert(layers[&index]);
-        }
-    }
-    last_use
+    plan.region()
+        .consumers
+        .iter()
+        .filter_map(|(name, consumers)| {
+            consumers
+                .iter()
+                .filter_map(|i| layers.get(i))
+                .max()
+                .map(|last| (name.clone(), *last))
+        })
+        .collect()
 }
 
 fn count_assignment_tile_elements(
     axes: &[String],
-    region: &ValidatedRegion,
+    region: &ProgramFacts,
     tile: &RegionTile,
 ) -> Result<usize, SimError> {
     axes.iter().try_fold(1usize, |count, axis| {
@@ -110,51 +111,15 @@ fn assign_local_slot(
 }
 
 /// Dependencies without a producer in this group belong to an enclosing scope.
-fn calculate_assignment_layers(
-    region: &ValidatedRegion,
-) -> Result<BTreeMap<usize, usize>, SimError> {
-    let produced = region
-        .program
-        .assignments
-        .iter()
-        .flat_map(|assignment| {
-            assignment
-                .output
-                .iter()
-                .chain(assignment.indices_output.iter())
-                .cloned()
-        })
-        .collect::<BTreeSet<_>>();
+fn calculate_assignment_layers(plan: GroupPlan<'_>) -> Result<BTreeMap<usize, usize>, SimError> {
     let mut layers = BTreeMap::new();
-    let mut done = BTreeSet::new();
-    let mut remaining = region.assignment_order.clone();
-    let mut layer = 0usize;
-    while !remaining.is_empty() {
-        let ready = remaining
+    for &index in plan.assignments {
+        let layer = plan.region().dependencies[index]
             .iter()
-            .copied()
-            .filter(|index| {
-                region.program.assignments[*index]
-                    .expr
-                    .iter_read_tensor_names()
-                    .all(|name| !produced.contains(name) || done.contains(name))
-            })
-            .collect::<Vec<_>>();
-        if ready.is_empty() {
-            return sim_error!("local assignments cannot be scheduled");
-        }
-        for index in &ready {
-            let assignment = &region.program.assignments[*index];
-            layers.insert(*index, layer);
-            done.insert(assignment.primary_result().clone());
-            if let Some(index_output) = &assignment.indices_output {
-                done.insert(index_output.clone());
-            }
-        }
-        remaining.retain(|index| !ready.contains(index));
-        layer = layer
-            .checked_add(1)
-            .ok_or_else(|| SimError("assignment layer overflows".into()))?;
+            .filter_map(|dependency| layers.get(dependency).copied())
+            .max()
+            .map_or(0, |layer: usize| layer + 1);
+        layers.insert(index, layer);
     }
     Ok(layers)
 }

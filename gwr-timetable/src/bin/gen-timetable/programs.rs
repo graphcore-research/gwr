@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 
 use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
+#[cfg(test)]
+use gwr_models::processing_element::program::PreparedProgram;
 use gwr_models::processing_element::program::syntax::{
     AssignmentSpec, BoundsMode, ExprSpec, IndexSpec, ProgramSpec, ReductionOp, TemporarySpec,
 };
@@ -251,7 +253,7 @@ fn build_tensor_read_expression(tensor: &str, indices: Vec<IndexSpec>) -> ExprSp
 
 #[cfg(test)]
 mod tests {
-    use gwr_models::processing_element::program::validate::{RegionBindings, validate_program};
+    use gwr_models::processing_element::program::validate::RegionBindings;
     use gwr_models::processing_element::tensors::dtype::DataType;
     use gwr_models::processing_element::tensors::{Tensor, TensorView};
 
@@ -275,15 +277,16 @@ mod tests {
             with_indices.assignments[0].indices_output.as_deref(),
             Some("I")
         );
-        let region = validate_program(
+        let region = PreparedProgram::new(
             &with_indices,
-            &RegionBindings {
+            RegionBindings {
                 inputs: vec![view(&[2, 3, 4], DataType::Fp32, 0)],
                 outputs: vec![
                     view(&[2, 3], DataType::Fp32, 128),
                     view(&[2, 3], DataType::Int64, 256),
                 ],
             },
+            None,
         )
         .unwrap();
         assert_eq!(region.extent("k"), Some(4));
@@ -309,15 +312,16 @@ mod tests {
             },
         )
         .unwrap();
-        validate_program(
+        PreparedProgram::new(
             &add,
-            &RegionBindings {
+            RegionBindings {
                 inputs: vec![
                     view(&[3, 4], DataType::Fp32, 0),
                     view(&[3, 4], DataType::Fp32, 100),
                 ],
                 outputs: vec![view(&[3, 4], DataType::Fp32, 200)],
             },
+            None,
         )
         .unwrap();
     }
@@ -341,15 +345,16 @@ mod tests {
             },
         )
         .unwrap();
-        let region = validate_program(
+        let region = PreparedProgram::new(
             &gemm,
-            &RegionBindings {
+            RegionBindings {
                 inputs: vec![
                     view(&[2, 4], DataType::Fp16, 300),
                     view(&[4, 3], DataType::Fp16, 400),
                 ],
                 outputs: vec![view(&[2, 3], DataType::Fp32, 500)],
             },
+            None,
         )
         .unwrap();
         assert_eq!(region.extent("k"), Some(4));
@@ -377,9 +382,9 @@ mod tests {
             dtype: DataType::Fp32,
         };
         let program = build_gemm_program(&inputs, &output).unwrap();
-        let region = validate_program(
+        let region = PreparedProgram::new(
             &program,
-            &RegionBindings {
+            RegionBindings {
                 inputs: vec![
                     view(&inputs[0].shape, inputs[0].dtype, 0),
                     view(&inputs[1].shape, inputs[1].dtype, 512),
@@ -387,6 +392,7 @@ mod tests {
                 ],
                 outputs: vec![view(&output.shape, output.dtype, 2048)],
             },
+            None,
         )
         .unwrap();
         assert_eq!(region.value("product").unwrap().shape, output.shape);

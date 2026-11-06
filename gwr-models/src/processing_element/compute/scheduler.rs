@@ -7,7 +7,6 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
-use futures::future::select_all;
 use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
 
@@ -36,61 +35,18 @@ impl ComputeScheduler {
         }
     }
 
-    /// Wait for the first available eligible execution unit. Pending requests
-    /// for the other execution units are cancelled when one is granted.
-    #[cfg(test)]
-    pub(in crate::processing_element) async fn acquire_any(
+    /// Acquire one unit from prepared alternatives in preference order, with
+    /// its service duration. Capacity-ineligible alternatives are filtered
+    /// before queuing one logical request.
+    #[must_use = "an acquisition must be awaited"]
+    pub(in crate::processing_element) fn acquire(
         &self,
-        execution_units: &[ExecutionUnitId],
-    ) -> Result<ComputeReservation, SimError> {
-        if execution_units.is_empty() {
-            return sim_error!("no eligible execution units");
-        }
-        let (reservation, _, pending) = select_all(
-            execution_units
-                .iter()
-                .map(|execution_unit| self.acquire(*execution_unit))
-                .collect::<Vec<_>>(),
-        )
-        .await;
-        drop(pending);
-        reservation
-    }
-
-    /// Wait for an exclusive execution unit whose optional logical accumulator
-    /// budget can hold this batch. Rejects invalid candidate lists and filters
-    /// capacity-ineligible alternatives independently.
-    pub(in crate::processing_element) async fn acquire_any_with_accumulator(
-        &self,
-        execution_units: &[ExecutionUnitId],
-        bytes: u64,
-    ) -> Result<ComputeReservation, SimError> {
-        let eligible = self
-            .state
-            .borrow()
-            .eligible_accumulator_units(execution_units, bytes)?;
-        if eligible.is_empty() {
-            return sim_error!("matrix accumulator capacity cannot hold batch");
-        }
-        let (reservation, _, pending) = select_all(
-            eligible
-                .iter()
-                .map(|execution_unit| self.acquire_with_accumulator(*execution_unit, bytes))
-                .collect::<Vec<_>>(),
-        )
-        .await;
-        drop(pending);
-        reservation
-    }
-
-    fn acquire_with_accumulator(
-        &self,
-        execution_unit: ExecutionUnitId,
+        alternatives: &[(ExecutionUnitId, u64)],
         bytes: u64,
     ) -> AcquireBatch {
         AcquireBatch {
             state: self.state.clone(),
-            execution_unit,
+            alternatives: alternatives.to_vec(),
             bytes,
             id: None,
             done: false,
@@ -107,29 +63,13 @@ impl ComputeScheduler {
             state.requests.len(),
         )
     }
-
-    /// Request exclusive use of an execution unit for one batch.
-    #[cfg(test)]
-    #[must_use = "an acquisition must be awaited"]
-    pub(in crate::processing_element) fn acquire(
-        &self,
-        execution_unit: ExecutionUnitId,
-    ) -> AcquireBatch {
-        AcquireBatch {
-            state: self.state.clone(),
-            execution_unit,
-            bytes: 0,
-            id: None,
-            done: false,
-        }
-    }
 }
 
 /// Cancellation-safe acquisition future. Repeated polling does not enqueue
 /// twice.
 pub(in crate::processing_element) struct AcquireBatch {
     state: Rc<RefCell<ComputeSchedulerState>>,
-    execution_unit: ExecutionUnitId,
+    alternatives: Vec<(ExecutionUnitId, u64)>,
     bytes: u64,
     id: Option<u64>,
     done: bool,
@@ -142,14 +82,14 @@ impl Future for AcquireBatch {
         let this = self.get_mut();
         assert!(!this.done, "completed compute acquisition polled again");
         let mut state = this.state.borrow_mut();
-        if let Err(error) = state.validate_request(this.execution_unit, this.bytes) {
-            this.done = true;
-            return Poll::Ready(Err(error));
-        }
         let id = if let Some(id) = this.id {
             id
         } else {
-            let id = match state.enqueue_request(this.execution_unit, this.bytes, cx.waker()) {
+            let id = match state.enqueue_request(
+                std::mem::take(&mut this.alternatives),
+                this.bytes,
+                cx.waker(),
+            ) {
                 Ok(id) => id,
                 Err(error) => {
                     this.done = true;
@@ -167,17 +107,18 @@ impl Future for AcquireBatch {
             .clone_from(cx.waker());
         let wake = state.admit();
         let granted = state.requests[&id].granted;
-        if granted {
+        if granted.is_some() {
             state.requests.remove(&id);
             this.id = None;
             this.done = true;
         }
         drop(state);
         wake_all(wake);
-        if granted {
+        if let Some((execution_unit, ticks)) = granted {
             Poll::Ready(Ok(ComputeReservation {
                 state: this.state.clone(),
-                execution_unit: this.execution_unit,
+                execution_unit,
+                ticks,
             }))
         } else {
             Poll::Pending
@@ -190,9 +131,9 @@ impl Drop for AcquireBatch {
         if let Some(id) = self.id {
             let mut state = self.state.borrow_mut();
             if let Some(request) = state.requests.remove(&id)
-                && request.granted
+                && let Some((execution_unit, _)) = request.granted
             {
-                state.release(request.execution_unit);
+                state.release(execution_unit);
             }
             let wake = state.admit();
             drop(state);
@@ -205,9 +146,14 @@ impl Drop for AcquireBatch {
 pub(in crate::processing_element) struct ComputeReservation {
     state: Rc<RefCell<ComputeSchedulerState>>,
     execution_unit: ExecutionUnitId,
+    ticks: u64,
 }
 
 impl ComputeReservation {
+    pub(in crate::processing_element) fn ticks(&self) -> u64 {
+        self.ticks
+    }
+
     #[must_use]
     pub(in crate::processing_element) fn execution_unit(&self) -> ExecutionUnitId {
         self.execution_unit
@@ -234,22 +180,13 @@ struct ComputeSchedulerState {
 }
 
 impl ComputeSchedulerState {
-    fn validate_request(&self, unit: ExecutionUnitId, bytes: u64) -> Result<(), SimError> {
-        if unit.0 >= self.used.len() {
-            return sim_error!("unknown execution unit ID");
-        }
-        if self.capacities[unit.0].is_some_and(|capacity| bytes > capacity) {
-            return sim_error!("matrix accumulator capacity cannot hold batch");
-        }
-        Ok(())
-    }
-
     fn enqueue_request(
         &mut self,
-        execution_unit: ExecutionUnitId,
+        alternatives: Vec<(ExecutionUnitId, u64)>,
         bytes: u64,
         waker: &Waker,
     ) -> Result<u64, SimError> {
+        let alternatives = self.eligible_alternatives(alternatives, bytes)?;
         let id = self.next_id;
         self.next_id = id
             .checked_add(1)
@@ -257,25 +194,25 @@ impl ComputeSchedulerState {
         self.requests.insert(
             id,
             Request {
-                execution_unit,
+                alternatives,
                 bytes,
-                granted: false,
+                granted: None,
                 waker: waker.clone(),
             },
         );
         Ok(id)
     }
 
-    fn eligible_accumulator_units(
+    fn eligible_alternatives(
         &self,
-        execution_units: &[ExecutionUnitId],
+        alternatives: Vec<(ExecutionUnitId, u64)>,
         bytes: u64,
-    ) -> Result<Vec<ExecutionUnitId>, SimError> {
-        if execution_units.is_empty() {
+    ) -> Result<Vec<(ExecutionUnitId, u64)>, SimError> {
+        if alternatives.is_empty() {
             return sim_error!("no eligible execution units");
         }
         let mut seen = BTreeSet::new();
-        for execution_unit in execution_units {
+        for (execution_unit, _) in &alternatives {
             if execution_unit.0 >= self.used.len() {
                 return sim_error!("unknown execution unit ID");
             }
@@ -283,29 +220,33 @@ impl ComputeSchedulerState {
                 return sim_error!("duplicate execution unit ID");
             }
         }
-        Ok(execution_units
-            .iter()
-            .copied()
-            .filter(|execution_unit| {
-                self.capacities[execution_unit.0].is_none_or(|capacity| bytes <= capacity)
-            })
-            .collect::<Vec<_>>())
+        let eligible: Vec<_> = alternatives
+            .into_iter()
+            .filter(|(unit, _)| self.capacities[unit.0].is_none_or(|capacity| bytes <= capacity))
+            .collect();
+        if eligible.is_empty() {
+            return sim_error!("matrix accumulator capacity cannot hold batch");
+        }
+        Ok(eligible)
     }
 
     fn admit(&mut self) -> Vec<Waker> {
         let mut wake = Vec::new();
         for request in self.requests.values_mut() {
-            if request.granted {
+            if request.granted.is_some() {
                 continue;
             }
-            let execution_unit = request.execution_unit.0;
-            if !self.used[execution_unit] {
-                self.used[execution_unit] = true;
-                // One exclusive batch: assign its demand, never sum contenders.
-                self.current_bytes[execution_unit] = request.bytes;
-                self.peak_bytes[execution_unit] =
-                    self.peak_bytes[execution_unit].max(request.bytes);
-                request.granted = true;
+            // Older requests choose first, but blocked requests do not prevent
+            // later requests from using disjoint available units.
+            if let Some(&(unit, ticks)) = request
+                .alternatives
+                .iter()
+                .find(|(unit, _)| !self.used[unit.0])
+            {
+                self.used[unit.0] = true;
+                self.current_bytes[unit.0] = request.bytes;
+                self.peak_bytes[unit.0] = self.peak_bytes[unit.0].max(request.bytes);
+                request.granted = Some((unit, ticks));
                 wake.push(request.waker.clone());
             }
         }
@@ -319,9 +260,9 @@ impl ComputeSchedulerState {
 }
 
 struct Request {
-    execution_unit: ExecutionUnitId,
+    alternatives: Vec<(ExecutionUnitId, u64)>,
     bytes: u64,
-    granted: bool,
+    granted: Option<(ExecutionUnitId, u64)>,
     waker: Waker,
 }
 
@@ -349,7 +290,8 @@ mod matrix_accumulator_tests {
         // All valid IDs fit the demand, so capacity cannot mask roster
         // validation.
         let s = scheduler_with_accumulator_capacities(vec![Some(256), Some(256), None]);
-        let mut request = Box::pin(s.acquire_any_with_accumulator(ids, 256));
+        let alternatives: Vec<_> = ids.iter().map(|id| (*id, 1)).collect();
+        let mut request = Box::pin(s.acquire(&alternatives, 256));
         let Poll::Ready(Err(error)) = poll_future_once(&mut request) else {
             panic!("invalid execution unit list must be rejected")
         };
@@ -398,8 +340,8 @@ mod matrix_accumulator_tests {
     #[test]
     fn no_fitting_accumulator_candidate_is_rejected() {
         let s = scheduler_with_accumulator_capacities(vec![Some(128), Some(256), None]);
-        let too_small = [ExecutionUnitId(0)];
-        let mut rejected = Box::pin(s.acquire_any_with_accumulator(&too_small, 256));
+        let too_small = [(ExecutionUnitId(0), 1)];
+        let mut rejected = Box::pin(s.acquire(&too_small, 256));
         let Poll::Ready(Err(error)) = poll_future_once(&mut rejected) else {
             panic!("no eligible capacity")
         };
@@ -409,8 +351,8 @@ mod matrix_accumulator_tests {
     #[test]
     fn a_too_small_candidate_does_not_suppress_a_fitting_candidate() {
         let s = scheduler_with_accumulator_capacities(vec![Some(128), Some(256), None]);
-        let ids = [ExecutionUnitId(0), ExecutionUnitId(1)];
-        let mut request = Box::pin(s.acquire_any_with_accumulator(&ids, 256));
+        let ids = [(ExecutionUnitId(0), 1), (ExecutionUnitId(1), 1)];
+        let mut request = Box::pin(s.acquire(&ids, 256));
         let Poll::Ready(Ok(guard)) = poll_future_once(&mut request) else {
             panic!("eligible candidate suppressed")
         };
@@ -425,7 +367,7 @@ mod matrix_accumulator_tests {
     #[test]
     fn unbounded_execution_unit_admits_accumulator_demand() {
         let s = scheduler_with_accumulator_capacities(vec![Some(128), Some(256), None]);
-        let mut request = s.acquire_with_accumulator(ExecutionUnitId(2), 512);
+        let mut request = s.acquire(&[(ExecutionUnitId(2), 1)], 512);
         let Poll::Ready(Ok(guard)) = poll_future_once(&mut request) else {
             panic!("unbounded alternative")
         };
@@ -437,11 +379,11 @@ mod matrix_accumulator_tests {
     #[test]
     fn dropping_a_pending_request_preserves_the_active_demand() {
         let s = scheduler_with_accumulator_capacities(vec![Some(256)]);
-        let mut first = s.acquire_with_accumulator(ExecutionUnitId(0), 256);
+        let mut first = s.acquire(&[(ExecutionUnitId(0), 1)], 256);
         let Poll::Ready(Ok(guard)) = poll_future_once(&mut first) else {
             panic!("first")
         };
-        let mut pending = s.acquire_with_accumulator(ExecutionUnitId(0), 128);
+        let mut pending = s.acquire(&[(ExecutionUnitId(0), 1)], 128);
         assert!(poll_future_once(&mut pending).is_pending());
         drop(pending);
         assert_eq!(s.state.borrow().current_bytes[0], 256);
@@ -452,21 +394,30 @@ mod matrix_accumulator_tests {
     #[test]
     fn dropping_a_granted_unconsumed_request_releases_its_demand() {
         let s = scheduler_with_accumulator_capacities(vec![Some(256)]);
-        let mut first = s.acquire_with_accumulator(ExecutionUnitId(0), 256);
+        let mut first = s.acquire(&[(ExecutionUnitId(0), 1)], 256);
         let Poll::Ready(Ok(guard)) = poll_future_once(&mut first) else {
             panic!("first")
         };
-        let mut alternative = s.acquire_with_accumulator(ExecutionUnitId(0), 128);
+        let mut alternative = s.acquire(&[(ExecutionUnitId(0), 1)], 128);
         assert!(poll_future_once(&mut alternative).is_pending());
         drop(guard);
         // Releasing the execution unit grants the waiting request; its consumer
         // never polls again.
-        assert!(s.state.borrow().requests.values().next().unwrap().granted);
+        assert!(
+            s.state
+                .borrow()
+                .requests
+                .values()
+                .next()
+                .unwrap()
+                .granted
+                .is_some()
+        );
         assert_eq!(s.state.borrow().current_bytes[0], 128);
         drop(alternative);
         assert_scheduler_resources_released(&s);
         assert_eq!(s.state.borrow().peak_bytes[0], 256);
-        let mut next_request = s.acquire_with_accumulator(ExecutionUnitId(0), 256);
+        let mut next_request = s.acquire(&[(ExecutionUnitId(0), 1)], 256);
         let Poll::Ready(Ok(guard)) = poll_future_once(&mut next_request) else {
             panic!("released execution unit must accept another request")
         };
@@ -477,8 +428,8 @@ mod matrix_accumulator_tests {
     #[test]
     fn independent_execution_units_hold_separate_demands() {
         let s = scheduler_with_accumulator_capacities(vec![Some(256), Some(512)]);
-        let mut first = s.acquire_with_accumulator(ExecutionUnitId(0), 256);
-        let mut second = s.acquire_with_accumulator(ExecutionUnitId(1), 512);
+        let mut first = s.acquire(&[(ExecutionUnitId(0), 1)], 256);
+        let mut second = s.acquire(&[(ExecutionUnitId(1), 1)], 512);
         let Poll::Ready(Ok(first)) = poll_future_once(&mut first) else {
             panic!("first")
         };
@@ -494,8 +445,8 @@ mod matrix_accumulator_tests {
     fn scheduler_instances_hold_separate_demands() {
         let first = scheduler_with_accumulator_capacities(vec![Some(256)]);
         let second = scheduler_with_accumulator_capacities(vec![Some(256)]);
-        let mut first_request = first.acquire_with_accumulator(ExecutionUnitId(0), 256);
-        let mut second_request = second.acquire_with_accumulator(ExecutionUnitId(0), 128);
+        let mut first_request = first.acquire(&[(ExecutionUnitId(0), 1)], 256);
+        let mut second_request = second.acquire(&[(ExecutionUnitId(0), 1)], 128);
         let Poll::Ready(Ok(first_guard)) = poll_future_once(&mut first_request) else {
             panic!("first")
         };
@@ -513,7 +464,7 @@ mod matrix_accumulator_tests {
     fn request_id_overflow_is_rejected() {
         let s = scheduler_with_accumulator_capacities(vec![Some(256)]);
         s.state.borrow_mut().next_id = u64::MAX;
-        let mut request = s.acquire_with_accumulator(ExecutionUnitId(0), 256);
+        let mut request = s.acquire(&[(ExecutionUnitId(0), 1)], 256);
         let Poll::Ready(Err(error)) = poll_future_once(&mut request) else {
             panic!("overflow")
         };
@@ -527,8 +478,8 @@ mod matrix_accumulator_tests {
         let scheduler = scheduler_with_accumulator_capacities(vec![Some(256)]);
         let inspect = scheduler.clone();
         engine.spawner().spawn(async move {
-            let ids = [ExecutionUnitId(0)];
-            let guard = scheduler.acquire_any_with_accumulator(&ids, 256).await?;
+            let ids = [(ExecutionUnitId(0), 1)];
+            let guard = scheduler.acquire(&ids, 256).await?;
             assert_eq!(scheduler.state.borrow().current_bytes[0], 256);
             let wait_clock = clock.clone();
             let mut service = Box::pin(async move {
@@ -543,7 +494,7 @@ mod matrix_accumulator_tests {
             assert!(clock.tick_now().tick() < 10);
             drop(service);
             assert_scheduler_resources_released(&scheduler);
-            let next_reservation = scheduler.acquire_any_with_accumulator(&ids, 128).await?;
+            let next_reservation = scheduler.acquire(&ids, 128).await?;
             assert_eq!(scheduler.state.borrow().current_bytes[0], 128);
             drop(next_reservation);
             assert_scheduler_resources_released(&scheduler);

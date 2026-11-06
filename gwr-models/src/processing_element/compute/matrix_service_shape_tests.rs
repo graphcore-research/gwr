@@ -10,7 +10,6 @@ use crate::processing_element::MachineOpCounts;
 use crate::processing_element::compute::{
     CapabilityConfig, CapabilityKind, ComputeConfig, ComputeModel, ComputeWork, ExecutionPlan,
     ExecutionUnitConfig, ExecutionUnitId, MatrixServiceTile, MatrixWorkShape, OperationClass,
-    TypedWork,
 };
 use crate::processing_element::tensors::dtype::DataType;
 
@@ -78,7 +77,7 @@ fn compute_config(entries: Vec<(&str, CapabilityConfig)>) -> ComputeConfig {
 
 fn matrix_work(m: usize, n: usize, k: usize) -> ComputeWork {
     ComputeWork::matrix_mac(
-        vec![DataType::Bf16; 2],
+        [DataType::Bf16; 2],
         DataType::Fp32,
         matrix_work_shape(m, n, k),
     )
@@ -280,7 +279,7 @@ fn matrix_work_rejects_zero_dimensions() {
         },
     ] {
         assert!(dims.logical_macs().is_err());
-        assert!(ComputeWork::matrix_mac(vec![DataType::Bf16; 2], DataType::Fp32, dims).is_err());
+        assert!(ComputeWork::matrix_mac([DataType::Bf16; 2], DataType::Fp32, dims).is_err());
     }
 }
 
@@ -288,46 +287,44 @@ fn matrix_work_rejects_zero_dimensions() {
 fn matrix_work_rejects_logical_mac_count_overflow() {
     let dims = matrix_work_shape(usize::MAX, 2, 1);
     assert!(dims.logical_macs().is_err());
-    assert!(ComputeWork::matrix_mac(vec![DataType::Bf16; 2], DataType::Fp32, dims).is_err());
+    assert!(ComputeWork::matrix_mac([DataType::Bf16; 2], DataType::Fp32, dims).is_err());
 }
 
 #[test]
-fn matrix_work_requires_two_operands() {
-    assert!(
-        ComputeWork::matrix_mac(
-            vec![DataType::Bf16],
-            DataType::Fp32,
-            matrix_work_shape(1, 1, 1)
-        )
-        .is_err()
-    );
-}
-
-#[test]
-fn service_shape_rejects_mismatched_logical_work_even_when_count_is_zero() {
-    let model = matrix_compute_model(vec![(
-        "matrix",
-        matrix_capability(Some(matrix_service_tile(M, N, K))),
-    )]);
-    let mut mismatch = matrix_work(M, N, K);
-    mismatch.stages[0].operations[0].count -= 1;
-    assert!(model.lower(&mismatch).is_err());
-    mismatch.stages[0].operations[0].count = 0;
-    assert!(
-        model.lower(&mismatch).is_err(),
-        "zero count must not skip malformed shape validation"
-    );
-}
-
-#[test]
-fn service_shape_rejects_padded_mac_count_overflow() {
-    // Macro itself fits usize; rounding a 2x2 matrix overflows service count
-    // only.
-    let overflow = matrix_compute_model(vec![(
-        "matrix",
-        matrix_capability(Some(matrix_service_tile(usize::MAX, 1, 1))),
-    )]);
-    assert!(overflow.lower(&matrix_work(2, 2, 1)).is_err());
+fn service_shape_overflow_only_disqualifies_the_affected_candidate() {
+    // The service tile itself fits usize; padding a logical 2x2 matrix does
+    // not.
+    let padded = matrix_capability(Some(matrix_service_tile(usize::MAX, 1, 1)));
+    let plain = matrix_capability(None);
+    for (name, entries, expected_ticks) in [
+        ("padded_only", vec![("padded", padded.clone())], None),
+        ("plain_only", vec![("plain", plain.clone())], Some(1)),
+        (
+            "plain_and_padded",
+            vec![("plain", plain), ("padded", padded.clone())],
+            Some(1),
+        ),
+        (
+            "all_padded",
+            vec![("padded", padded.clone()), ("padded2", padded)],
+            None,
+        ),
+    ] {
+        let result = matrix_compute_model(entries).lower(&matrix_work(2, 2, 1));
+        if let Some(ticks) = expected_ticks {
+            let plan = result.unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert_eq!(plan.service_ticks().unwrap(), ticks, "{name}");
+            assert_eq!(plan.stages[0][0].alternatives.len(), 1, "{name}");
+            let counts = machine_operation_counts(&plan);
+            assert_eq!(counts.by_operation["matrix_mac"], 4, "{name}");
+            assert_eq!(counts.flop_equivalents(), 8, "{name}");
+        } else {
+            assert!(
+                result.unwrap_err().to_string().contains("overflows"),
+                "{name}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -435,21 +432,6 @@ fn omitted_service_tile_stays_omitted_after_yaml_round_trip() {
 }
 
 #[test]
-fn scalar_work_round_trips_without_matrix_geometry() {
-    let scalar_work = ComputeWork::operation("add", vec![DataType::Fp32; 2], 4096);
-    let demand = &scalar_work.stages[0].operations[0];
-    let encoded_demand = to_value(demand).unwrap();
-    assert!(
-        !encoded_demand
-            .as_mapping()
-            .unwrap()
-            .contains_key("matrix_shape")
-    );
-    let decoded: TypedWork = from_value(encoded_demand.clone()).unwrap();
-    assert_eq!(to_value(decoded).unwrap(), encoded_demand);
-}
-
-#[test]
 fn matrix_work_without_service_tiles_uses_logical_mac_count_for_timing() {
     let model = matrix_compute_model(vec![("matrix", matrix_capability(None))]);
     let shape = matrix_work_shape(1, SKINNY_COLUMNS, K);
@@ -476,7 +458,7 @@ fn batched_matrix_service_rounds_each_matrix_before_multiplying_by_batch_count()
         n: 5,
         k: 7,
     };
-    let work = ComputeWork::matrix_mac(vec![DataType::Bf16; 2], DataType::Fp32, shape).unwrap();
+    let work = ComputeWork::matrix_mac([DataType::Bf16; 2], DataType::Fp32, shape).unwrap();
     let model = matrix_compute_model(vec![(
         "matrix",
         matrix_capability(Some(matrix_service_tile(M, N, K))),
@@ -499,5 +481,5 @@ fn matrix_batch_count_overflow_is_rejected() {
         batches: usize::MAX,
         ..matrix_work_shape(2, 1, 1)
     };
-    assert!(ComputeWork::matrix_mac(vec![DataType::Bf16; 2], DataType::Fp32, shape).is_err());
+    assert!(ComputeWork::matrix_mac([DataType::Bf16; 2], DataType::Fp32, shape).is_err());
 }
