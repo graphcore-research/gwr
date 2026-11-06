@@ -12,11 +12,12 @@ use gwr_engine::types::{AccessType, SimError, SimResult};
 use gwr_track::entity::EntityGroup;
 
 use super::TaskRunner;
-use super::helpers::build_assignment_dependencies;
+use super::helpers::build_slot_dependencies;
 use crate::processing_element::program::analysis::access::collect_initial_input_reads;
 use crate::processing_element::program::analysis::tile_storage::{TileStorage, build_tile_storage};
+use crate::processing_element::program::group::GroupMetadata;
 use crate::processing_element::program::plan::LocalAllocation;
-use crate::processing_element::program::prepared::{GroupPlan, Schedule};
+use crate::processing_element::program::prepared::GroupPlan;
 use crate::processing_element::program::tile::RegionTile;
 use crate::processing_element::task::PreparedTask;
 use crate::processing_element::tensors::TensorView;
@@ -61,7 +62,7 @@ impl TaskRunner {
             ..
         } = storage;
         let mut active = self.start_tile_input_reads(task, plan, &tile, &group);
-        let mut progress = TileProgress::new(plan, &local_allocation)?;
+        let mut progress = TileProgress::new(plan, &local_allocation);
         let tile_ref = &tile;
         let group_ref = &group;
         while progress.has_pending_work() || !active.is_empty() {
@@ -132,55 +133,25 @@ impl TaskRunner {
 
 type TileActions<'a> = FuturesUnordered<LocalBoxFuture<'a, Result<TileCompletion, SimError>>>;
 
-struct TileProgress {
-    dependencies: BTreeMap<usize, BTreeSet<usize>>,
-    input_dependencies: Vec<BTreeSet<String>>,
+struct TileProgress<'a> {
+    group: &'a GroupMetadata,
+    slot_dependencies: BTreeMap<usize, BTreeSet<usize>>,
     pending: Vec<usize>,
     completed: BTreeSet<usize>,
     loaded: BTreeSet<String>,
     pending_stores: BTreeSet<usize>,
-    output_producers: Vec<usize>,
 }
 
-impl TileProgress {
-    fn new(plan: GroupPlan<'_>, allocation: &LocalAllocation) -> Result<Self, SimError> {
-        let output_producers = plan
-            .outputs()
-            .map(|(name, _)| plan.region().producers[name])
-            .collect::<Vec<_>>();
-        let initial_inputs = collect_initial_input_reads(plan)
-            .into_iter()
-            .map(|read| read.name.to_owned())
-            .collect::<BTreeSet<_>>();
-        let input_dependencies = plan
-            .region()
-            .program
-            .assignments
-            .iter()
-            .map(|assignment| {
-                assignment
-                    .expr
-                    .collect_read_tensor_names()
-                    .intersection(&initial_inputs)
-                    .cloned()
-                    .collect()
-            })
-            .collect();
-        let mut pending = plan.assignments.to_vec();
-        // Flat tiles historically issue ready assignments in source order;
-        // scoped groups issue in their planned topological group order.
-        if matches!(plan.program.schedule, Schedule::Flat(_)) {
-            pending.sort_unstable();
-        }
-        Ok(Self {
-            dependencies: build_assignment_dependencies(plan, allocation)?,
-            input_dependencies,
-            pending,
+impl<'a> TileProgress<'a> {
+    fn new(plan: GroupPlan<'a>, allocation: &LocalAllocation) -> Self {
+        Self {
+            group: plan.group,
+            slot_dependencies: build_slot_dependencies(plan, allocation),
+            pending: plan.group.issue_order.clone(),
             completed: BTreeSet::new(),
             loaded: BTreeSet::new(),
-            pending_stores: (0..output_producers.len()).collect(),
-            output_producers,
-        })
+            pending_stores: (0..plan.group.outputs.len()).collect(),
+        }
     }
 
     fn has_pending_work(&self) -> bool {
@@ -190,8 +161,12 @@ impl TileProgress {
     fn take_ready_assignments(&mut self) -> Vec<usize> {
         let mut ready = Vec::new();
         self.pending.retain(|index| {
-            let available = self.dependencies[index].is_subset(&self.completed)
-                && self.input_dependencies[*index].is_subset(&self.loaded);
+            let available = self.group.dependencies[index].is_subset(&self.completed)
+                && self
+                    .slot_dependencies
+                    .get(index)
+                    .is_none_or(|dependencies| dependencies.is_subset(&self.completed))
+                && self.group.input_dependencies[index].is_subset(&self.loaded);
             if available {
                 ready.push(*index);
             }
@@ -205,7 +180,10 @@ impl TileProgress {
             .pending_stores
             .iter()
             .copied()
-            .filter(|index| self.completed.contains(&self.output_producers[*index]))
+            .filter(|index| {
+                self.completed
+                    .contains(&self.group.outputs[*index].producer)
+            })
             .collect::<Vec<_>>();
         for index in &ready {
             self.pending_stores.remove(index);
