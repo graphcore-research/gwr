@@ -9,6 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
+use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
 
 use crate::processing_element::compute::{ComputeWork, MatrixWorkShape};
@@ -17,7 +18,7 @@ use crate::processing_element::program::syntax::IndexSpec;
 use crate::processing_element::program::validate::ProgramFacts;
 use crate::processing_element::tensors::dtype::DataType;
 
-pub(super) fn build_matrix_work(
+pub(in crate::processing_element) fn build_matrix_work(
     assignment: &Assignment,
     region: &ProgramFacts,
     intervals: &BTreeMap<String, Range<usize>>,
@@ -31,9 +32,9 @@ pub(super) fn build_matrix_work(
     else {
         return Ok(None);
     };
-    let (lhs, lhs_axes) = resolve_matrix_operand(&args[0], region, &over[0])?;
-    let (rhs, rhs_axes) = resolve_matrix_operand(&args[1], region, &over[0])?;
-    let inputs = [lhs, rhs];
+    let (lhs_dtype, lhs_axes) = resolve_matrix_operand(&args[0], region, &over[0])?;
+    let (rhs_dtype, rhs_axes) = resolve_matrix_operand(&args[1], region, &over[0])?;
+    let inputs = [lhs_dtype, rhs_dtype];
     let operand_axes = [lhs_axes, rhs_axes];
     let shape =
         derive_matrix_work_shape(&assignment.axes, &operand_axes, &over[0], region, intervals)?;
@@ -99,9 +100,7 @@ fn resolve_matrix_axis_length(
         .ok_or_else(|| SimError(format!("unknown matrix axis {axis}")))?;
     let interval = intervals.get(axis).cloned().unwrap_or(0..extent);
     if interval.start >= interval.end || interval.end > extent {
-        return Err(SimError(
-            "matrix interval is outside resolved extent".into(),
-        ));
+        return sim_error!("matrix interval is outside resolved extent");
     }
     Ok(interval.len())
 }
