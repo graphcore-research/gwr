@@ -17,9 +17,7 @@ use self::access::InputAccess;
 use self::helpers::{
     build_assignment_dependencies, eval_index, find_read_indices, slice_axes, slice_view,
 };
-use self::window::{
-    max_window_chunk_buffer_bytes, plan_window_chunk_access_ranges, window_chunk_packed_bytes,
-};
+use self::window::{max_window_chunk_buffer_bytes, plan_window_chunk_access};
 use crate::processing_element::activity::{ActivityLanes, ProcessingElementActivityLanes};
 use crate::processing_element::compute::{ComputeModel, ComputeScheduler};
 use crate::processing_element::flop_monitor::FlopMonitor;
