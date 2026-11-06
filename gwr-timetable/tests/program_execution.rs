@@ -139,9 +139,9 @@ nodes:
               - read: {{ tensor: B, indices: [k,n] }}
    tiling: {{ sizes: {{ k: {MATRIX_REDUCTION_CHUNK} }} }}
 edges:
- - {{ from: A, to: gemm.0, kind: data }}
- - {{ from: B, to: gemm.1, kind: data }}
- - {{ from: gemm.0, to: Y, kind: data }}
+ - {{ from: A, to: gemm.A, kind: data }}
+ - {{ from: B, to: gemm.B, kind: data }}
+ - {{ from: gemm.Y, to: Y, kind: data }}
 "
     )
 }
@@ -200,8 +200,8 @@ nodes:
             - read: {{ tensor: S, indices: [r] }}
    tiling: {{ sizes: {{ r: 1, k: {SOFTMAX_CHUNK} }} }}
 edges:
- - {{ from: A, to: softmax.0, kind: data }}
- - {{ from: softmax.0, to: Y, kind: data }}
+ - {{ from: A, to: softmax.A, kind: data }}
+ - {{ from: softmax.Y, to: Y, kind: data }}
 "
     )
 }
@@ -244,8 +244,8 @@ nodes:
             - read: {{ tensor: S, indices: [r] }}
    tiling: {{ sizes: {{ r: 1, k: {LOCAL_CHUNK} }} }}
 edges:
- - {{ from: A, to: statistics.0, kind: data }}
- - {{ from: statistics.0, to: Y, kind: data }}
+ - {{ from: A, to: statistics.A, kind: data }}
+ - {{ from: statistics.Y, to: Y, kind: data }}
 "
     )
 }
@@ -304,8 +304,8 @@ nodes:
 {output_expr}
    tiling: {{ sizes: {{ r: 1, k: {LOCAL_CHUNK} }} }}
 edges:
- - {{ from: A, to: local.0, kind: data }}
- - {{ from: local.0, to: Y, kind: data }}
+ - {{ from: A, to: local.A, kind: data }}
+ - {{ from: local.Y, to: Y, kind: data }}
 "
     )
 }
@@ -393,15 +393,15 @@ nodes:
             - read: {{ tensor: S, indices: [r] }}
    tiling: {{ sizes: {{ k: {SOFTMAX_CHUNK} }} }}
 edges:
- - {{ from: A, to: row_max.0, kind: data }}
- - {{ from: row_max.0, to: M, kind: data }}
- - {{ from: A, to: row_sum.0, kind: data }}
- - {{ from: M, to: row_sum.1, kind: data }}
- - {{ from: row_sum.0, to: S, kind: data }}
- - {{ from: A, to: normalize.0, kind: data }}
- - {{ from: M, to: normalize.1, kind: data }}
- - {{ from: S, to: normalize.2, kind: data }}
- - {{ from: normalize.0, to: Y, kind: data }}
+ - {{ from: A, to: row_max.A, kind: data }}
+ - {{ from: row_max.M, to: M, kind: data }}
+ - {{ from: A, to: row_sum.A, kind: data }}
+ - {{ from: M, to: row_sum.M, kind: data }}
+ - {{ from: row_sum.S, to: S, kind: data }}
+ - {{ from: A, to: normalize.A, kind: data }}
+ - {{ from: M, to: normalize.M, kind: data }}
+ - {{ from: S, to: normalize.S, kind: data }}
+ - {{ from: normalize.Y, to: Y, kind: data }}
 "
     )
 }
@@ -449,9 +449,9 @@ nodes:
                     - read: {{ tensor: Neg, indices: [] }}
    tiling: {{ sizes: {{ k: {ABSMAX_CHUNK} }} }}
 edges:
- - {{ from: A, to: absmax.0, kind: data }}
- - {{ from: Neg, to: absmax.1, kind: data }}
- - {{ from: absmax.0, to: Y, kind: data }}
+ - {{ from: A, to: absmax.A, kind: data }}
+ - {{ from: Neg, to: absmax.Neg, kind: data }}
+ - {{ from: absmax.Y, to: Y, kind: data }}
 "
     )
 }
@@ -512,9 +512,9 @@ nodes:
                     - read: {{ tensor: Neg, indices: [] }}
    tiling: {{ sizes: {{ b: 1, k: {ABSMAX_TAIL_CHUNK} }} }}
 edges:
- - {{ from: A, to: absmax_tail.0, kind: data }}
- - {{ from: Neg, to: absmax_tail.1, kind: data }}
- - {{ from: absmax_tail.0, to: Y, kind: data }}
+ - {{ from: A, to: absmax_tail.A, kind: data }}
+ - {{ from: Neg, to: absmax_tail.Neg, kind: data }}
+ - {{ from: absmax_tail.Y, to: Y, kind: data }}
 "
     )
 }
@@ -560,9 +560,9 @@ nodes:
               {body}
    tiling: {{ sizes: {{ k: {chunk} }} }}
 edges:
- - {{ from: A, to: sum.0, kind: data }}
- - {{ from: B, to: sum.1, kind: data }}
- - {{ from: sum.0, to: Y, kind: data }}
+ - {{ from: A, to: sum.A, kind: data }}
+ - {{ from: B, to: sum.B, kind: data }}
+ - {{ from: sum.Y, to: Y, kind: data }}
 "
     )
 }
@@ -625,8 +625,8 @@ nodes:
             - read: {{ tensor: T3, indices: [i] }}
             - read: {{ tensor: T2, indices: [i] }}
 edges:
- - {{ from: A, to: lifetime.0, kind: data }}
- - {{ from: lifetime.0, to: Y, kind: data }}
+ - {{ from: A, to: lifetime.A, kind: data }}
+ - {{ from: lifetime.Y, to: Y, kind: data }}
 "
     )
 }
@@ -855,8 +855,7 @@ fn automatic_schedule_retains_a_consumed_boundary_output_in_local_storage() {
         )
         .replace("outputs: [Y]", "outputs: [T,Y]")
         .replace("     temporaries: { T: { dtype: fp32 } }\n", "")
-        .replace("from: local.0, to: Y", "from: local.1, to: Y")
-        + " - { from: local.0, to: T, kind: data }\n";
+        + " - { from: local.T, to: T, kind: data }\n";
     let platform = simulate_timetable(&source);
     let pe = platform.pe("pe0").unwrap();
     let elements = LOCAL_ROWS * LOCAL_ELEMENTS;
@@ -1016,9 +1015,9 @@ nodes:
         expr: {{ reduce: {{op: sum, over: [i], value: {{read: {{tensor: T, indices: [i]}}}}}} }}
 {tiling}
 edges:
- - {{from: A, to: forward.0, kind: data}}
- - {{from: forward.0, to: Y, kind: data}}
- - {{from: forward.1, to: Z, kind: data}}
+ - {{from: A, to: forward.A, kind: data}}
+ - {{from: forward.Y, to: Y, kind: data}}
+ - {{from: forward.Z, to: Z, kind: data}}
 "
         );
         let (_, events) = simulate_timetable_on_platform_with_events(&source, &platform_source);

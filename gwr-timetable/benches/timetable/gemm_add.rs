@@ -212,8 +212,8 @@ impl GraphBuilder {
         expr: ExprSpec,
         pe: usize,
         tiling: Option<TileSpec>,
-        input_views: Option<Vec<Option<TensorViewSection>>>,
-        output_views: Option<Vec<Option<TensorViewSection>>>,
+        input_views: BTreeMap<String, TensorViewSection>,
+        output_views: BTreeMap<String, TensorViewSection>,
     ) {
         self.file.nodes.push(NodeSection::Compute {
             id: id.to_owned(),
@@ -311,15 +311,15 @@ fn timetable_file() -> TimetableFile {
                     },
                     2 * lane + branch,
                     tiling.clone(),
-                    None,
-                    Some(vec![Some(half_view(m, n, branch))]),
+                    BTreeMap::new(),
+                    BTreeMap::from([("Y".to_owned(), half_view(m, n, branch))]),
                 );
-                builder.edge(&input, format!("{gemm}.0"));
+                builder.edge(&input, format!("{gemm}.A"));
                 builder.edge(
                     format!("weight{n}_{}", (lane + branch) % BANKS),
-                    format!("{gemm}.1"),
+                    format!("{gemm}.B"),
                 );
-                builder.edge(gemm, &joined);
+                builder.edge(format!("{gemm}.Y"), &joined);
             }
 
             // Create the elementwise add operations.
@@ -332,12 +332,15 @@ fn timetable_file() -> TimetableFile {
                 },
                 2 * lane + block % 2,
                 tiling.clone(),
-                Some(vec![Some(half_view(m, n, 0)), Some(half_view(m, n, 1))]),
-                None,
+                BTreeMap::from([
+                    ("A".to_owned(), half_view(m, n, 0)),
+                    ("B".to_owned(), half_view(m, n, 1)),
+                ]),
+                BTreeMap::new(),
             );
-            builder.edge(&joined, format!("{add}.0"));
-            builder.edge(&joined, format!("{add}.1"));
-            builder.edge(add, output);
+            builder.edge(&joined, format!("{add}.A"));
+            builder.edge(&joined, format!("{add}.B"));
+            builder.edge(format!("{add}.Y"), output);
         }
     }
     builder.file

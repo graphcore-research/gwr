@@ -60,17 +60,17 @@ nodes:
               - read: { tensor: B, indices: [i] }
     pe: pe0
     input_views:
-      - { offsets: [1], shape: [2] }
-      - { offsets: [1], shape: [2] }
+      A: { offsets: [1], shape: [2] }
+      B: { offsets: [1], shape: [2] }
     output_views:
-      - { offsets: [1], shape: [2] }
+      Y: { offsets: [1], shape: [2] }
   - id: output
     kind: tensor
     config: { addr: 0x100000020, dtype: int4, shape: [4] }
 edges:
-  - { from: input0, to: add.0, kind: data }
-  - { from: input1, to: add.1, kind: data }
-  - { from: add, to: output, kind: data }
+  - { from: input0, to: add.A, kind: data }
+  - { from: input1, to: add.B, kind: data }
+  - { from: add.Y, to: output, kind: data }
 ";
 
 #[test]
