@@ -760,3 +760,146 @@ fn generator_emits_valid_add_and_matrix_programs() {
         assert_generated_operation(&file, name);
     }
 }
+
+const SMALL_ADD_ARGS: &[(&str, &str)] = &[
+    ("--depth", "1"),
+    ("--max-compute-nodes", "1"),
+    ("--weight-add", "1"),
+    ("--weight-gemm", "0"),
+    ("--weight-reduce-max", "0"),
+    ("--init-rank-min", "1"),
+    ("--init-rank-max", "1"),
+    ("--init-dim-min", "4"),
+    ("--init-dim-max", "4"),
+    ("--tensor-align-bytes", "32"),
+];
+
+#[test]
+fn generator_tries_later_pe_when_first_pe_cannot_fit() {
+    let yaml = three_pe_platform().replacen(
+        "    config:\n      compute:",
+        "    config:\n      sram_bytes: 1\n      compute:",
+        1,
+    );
+    let fixture = GeneratorFixture::new(&yaml);
+    let file = fixture.generate(SMALL_ADD_ARGS);
+    assert_pe_assignments(&file, &["pe1"]);
+    fixture.run_to_completion(file);
+}
+
+#[test]
+fn generator_allocates_in_selected_pe_map() {
+    let yaml = PLATFORM_YAML.replace("memories:\n", "memories:\n  - name: unused\n    kind: hbm\n    base_address: 0\n    config: { capacity_bytes: 4096 }\n").replace("    base_address: 0\n    config:\n", "    base_address: 4096\n    config:\n");
+    let yaml = yaml.replace("connections:\n  - connect: [pe.pe0, mem.hbm0]", "fabrics:\n  - name: fabric0\n    kind: functional\n    columns: 3\n    rows: 1\n    config: {}\nconnections:\n  - connect: [pe.pe0, 'fabric.fabric0@(0,0)']\n  - connect: [mem.hbm0, 'fabric.fabric0@(1,0)']\n  - connect: [mem.unused, 'fabric.fabric0@(2,0)']");
+    let fixture = GeneratorFixture::new(&yaml);
+    let file = fixture.generate(SMALL_ADD_ARGS);
+    let mut addresses = file
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            NodeSection::Tensor { config, .. } => Some(config.addr),
+            NodeSection::Compute { .. } => None,
+        })
+        .collect::<Vec<_>>();
+    addresses.sort_unstable();
+    assert_eq!(addresses, [4096, 4128, 4160]);
+    fixture.run_to_completion(file);
+}
+
+#[test]
+fn generator_checks_physical_capacity_and_exact_fit() {
+    for (capacity, succeeds) in [(64, false), (80, true)] {
+        let yaml = PLATFORM_YAML
+            .replace(
+                "capacity_bytes: 0x1000_0000",
+                &format!("capacity_bytes: {capacity}"),
+            )
+            .replace(
+                "    config:\n      compute:",
+                "    config:\n      lsu_access_bytes: 1\n      compute:",
+            );
+        let fixture = GeneratorFixture::new(&yaml);
+        if succeeds {
+            let file = fixture.generate(SMALL_ADD_ARGS);
+            let mut addresses = file
+                .nodes
+                .iter()
+                .filter_map(|node| match node {
+                    NodeSection::Tensor { config, .. } => Some(config.addr),
+                    NodeSection::Compute { .. } => None,
+                })
+                .collect::<Vec<_>>();
+            addresses.sort_unstable();
+            assert_eq!(addresses, [0, 32, 64]);
+            fixture.run_to_completion(file);
+        } else {
+            assert_generation_failed(&fixture.run_generator(SMALL_ADD_ARGS), "placement");
+            assert!(!fixture.timetable_path.exists());
+        }
+    }
+}
+
+#[test]
+fn generator_preserves_shared_rhs_across_selected_memory_maps() {
+    let yaml = matrix_capacity_platform(64, 64)
+        .replace("  - name: default\n    devices: [hbm0]", "  - { name: first, devices: [a, c] }\n  - { name: second, devices: [b, c] }\n  - { name: unused, devices: [d] }")
+        .replacen("memory_map: default", "memory_map: first", 1)
+        .replacen("memory_map: default", "memory_map: second", 1)
+        .replace("fabrics:\n", "  - name: unused\n    memory_map: unused\n    config:\n      compute:\n        execution_units:\n          vector:\n            capabilities: [{ class: add, ops_per_tick: 1 }]\nfabrics:\n")
+        .replace("operation_classes:\n", "operation_classes:\n  add: { operations: [add], arity: 2 }\n")
+        .replace("columns: 3", "columns: 7")
+        .replace("  - name: hbm0\n    kind: hbm\n    base_address: 0\n    config: { capacity_bytes: 1GiB }", "  - { name: a, kind: hbm, base_address: 0, config: { capacity_bytes: 4096 } }\n  - { name: b, kind: hbm, base_address: 4096, config: { capacity_bytes: 4096 } }\n  - { name: c, kind: hbm, base_address: 8192, config: { capacity_bytes: 4096 } }\n  - { name: d, kind: hbm, base_address: 12288, config: { capacity_bytes: 4096 } }")
+        .replace("  - connect: [mem.hbm0, 'fabric.fabric0@(2,0)']", "  - connect: [pe.unused, 'fabric.fabric0@(2,0)']\n  - connect: [mem.a, 'fabric.fabric0@(3,0)']\n  - connect: [mem.b, 'fabric.fabric0@(4,0)']\n  - connect: [mem.c, 'fabric.fabric0@(5,0)']\n  - connect: [mem.d, 'fabric.fabric0@(6,0)']");
+    let fixture = GeneratorFixture::new(&yaml);
+    let file = generate_square_gemm(&fixture, 2);
+    assert_pe_assignments(&file, &["pe0", "pe1"]);
+    assert_gemm_partitions_share_rhs(&file);
+    let rhs_ids = compute_nodes(&file)
+        .map(|node| {
+            let NodeSection::Compute { id, .. } = node else {
+                unreachable!()
+            };
+            &file
+                .edges
+                .iter()
+                .find(|edge| edge.to == format!("{id}.1"))
+                .unwrap()
+                .from
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(rhs_ids[0], rhs_ids[1]);
+    let rhs = tensor_config(&file, rhs_ids[0]);
+    assert_eq!(rhs.shape, [4, 4]);
+    assert!(
+        (8192..=12224).contains(&rhs.addr),
+        "shared 64-byte RHS must fit memory c: {rhs:?}"
+    );
+    assert_eq!(
+        file.nodes
+            .iter()
+            .filter(|node| matches!(node, NodeSection::Tensor { id, .. } if id == rhs_ids[0]))
+            .count(),
+        1
+    );
+    fixture.run_to_completion(file);
+}
+
+#[test]
+fn generator_reports_all_resource_infeasible_pe_candidates() {
+    let yaml = three_pe_platform().replace(
+        "    config:\n      compute:",
+        "    config:\n      sram_bytes: 1\n      compute:",
+    );
+    let fixture = GeneratorFixture::new(&yaml);
+    let output = fixture.run_generator(SMALL_ADD_ARGS);
+    assert_generation_failed(
+        &output,
+        "no feasible placement found for this generated mapping",
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    for pe in ["pe0", "pe1", "pe2"] {
+        assert!(stderr.contains(&format!("{pe}:")), "{stderr}");
+    }
+    assert!(stderr.contains("SRAM bytes, available 1"), "{stderr}");
+    assert!(!fixture.timetable_path.exists());
+}
