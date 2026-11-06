@@ -2,6 +2,13 @@
 
 //! Structured tensor programs executed by a processing element.
 //!
+//! Bind [`syntax::ProgramSpec`] and owned [`ProgramBindings`] with
+//! [`PreparedProgram::new`]. The prepared program exposes resolved
+//! [`TensorSpec`] metadata and hardware-independent traffic and storage
+//! estimates. Prepare it against a specific [`super::ProcessingElement`] to
+//! obtain a [`super::task::PreparedTask`] for dispatch. Validation and lazy
+//! tile planning are implementation details.
+//!
 //! A boundary tensor may have a distinct mapping in each assignment. Reads
 //! inside reductions are streamed in bounded chunks; subsequent consumers
 //! reread their own mapped views after their producer dependencies complete.
@@ -43,8 +50,9 @@ pub(crate) mod schedule;
 pub(super) mod storage;
 pub use storage::SRAM_SLOT_ALIGNMENT_BYTES;
 pub mod syntax;
-pub mod tile;
-pub mod validate;
+pub(in crate::processing_element) mod tile;
+pub(in crate::processing_element) mod validate;
+pub use validate::{ProgramBindings, TensorSpec};
 
 #[cfg(test)]
 mod storage_tests;

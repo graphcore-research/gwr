@@ -14,7 +14,7 @@ use crate::processing_element::dispatch::Dispatch;
 use crate::processing_element::matrix_test_fixture::*;
 use crate::processing_element::program::syntax::TileSpec;
 use crate::processing_element::program::tile::plan_tiles;
-use crate::processing_element::program::validate::{RegionBindings, validate_program};
+use crate::processing_element::program::validate::{ProgramBindings, validate_program};
 use crate::processing_element::task::{ProgramTaskConfig, Task};
 use crate::processing_element::tensors::dtype::DataType;
 use crate::processing_element::tensors::{Tensor, TensorView};
@@ -318,7 +318,7 @@ fn matrix_service_tiles_round_each_reduction_chunk_independently() {
     // Check the logical output tile and contraction intervals first.
     let region = validate_program(
         &chunked.program,
-        RegionBindings {
+        ProgramBindings {
             inputs: chunked.inputs.clone(),
             outputs: chunked.outputs.clone(),
         },

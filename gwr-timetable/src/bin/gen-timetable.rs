@@ -20,13 +20,16 @@
 //! element. The new tensors are added as possible expansion points. The
 //! generator iterates until the compute-node budget is exhausted.
 
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs::{read_to_string, write};
+use std::iter::once;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::result::Result as StdResult;
 use std::{fmt, io};
 
 use byte_unit::{Byte, UnitType};
@@ -35,9 +38,8 @@ use gwr_engine::engine::Engine;
 use gwr_engine::types::SimError;
 use gwr_models::processing_element::ProcessingElement;
 use gwr_models::processing_element::compute::ComputeWork;
-use gwr_models::processing_element::program::PreparedProgram;
 use gwr_models::processing_element::program::syntax::{ProgramSpec, TileSpec};
-use gwr_models::processing_element::program::validate::RegionBindings;
+use gwr_models::processing_element::program::{PreparedProgram, ProgramBindings};
 use gwr_models::processing_element::task::PreparedTask;
 use gwr_models::processing_element::tensors::dtype::DataType;
 use gwr_models::processing_element::tensors::{HasShape, Shape, Tensor, TensorView};
@@ -211,7 +213,7 @@ impl Generator {
                     memory_ranges,
                 })
             })
-            .collect::<std::result::Result<Vec<_>, SimError>>()?;
+            .collect::<StdResult<Vec<_>, SimError>>()?;
         if pes.is_empty() {
             return Err(error_from_str("platform contains zero processing elements"));
         }
@@ -988,11 +990,12 @@ fn template_name(template: &ProgramTemplate) -> &'static str {
 }
 
 fn build_program_for_boundary(
-    op: &ProgramTemplate,
+    template: &ProgramTemplate,
     boundary: &GenerationBoundary,
     matrix_accumulator: DataType,
 ) -> Result<ProgramSpec> {
-    op.build_program(&boundary.inputs, &boundary.outputs, matrix_accumulator)
+    template
+        .build_program(&boundary.inputs, &boundary.outputs, matrix_accumulator)
         .map_err(boxed_error)
 }
 
@@ -1261,10 +1264,6 @@ impl Display for ExpansionPoint {
     }
 }
 
-fn tensor_id(tensor: &Tensor) -> &str {
-    tensor.id().expect("generated tensors must have ids")
-}
-
 #[derive(Debug, Clone, Copy)]
 struct LayerBounds {
     min: isize,
@@ -1330,14 +1329,6 @@ fn build_full_tensor_boundary(
     }
 }
 
-fn slice_view(view: &TensorView, dim: usize, offset: usize, length: usize) -> Result<TensorView> {
-    let mut shape = view.shape().dims().to_vec();
-    let mut offsets = view.offsets().to_vec();
-    shape[dim] = length;
-    offsets[dim] += offset;
-    TensorView::new(view.tensor().clone(), &shape, &offsets).map_err(boxed_error)
-}
-
 fn find_tiling_for_pe(
     compute_id: &str,
     program: &ProgramSpec,
@@ -1381,29 +1372,6 @@ fn find_tiling_for_pe(
         };
         tiling = smaller;
     }
-}
-
-fn bind_boundary(
-    program: &ProgramSpec,
-    tiling: Option<&TileSpec>,
-    boundary: &GenerationBoundary,
-) -> Result<PreparedProgram> {
-    let collect = |views: &[Option<TensorView>]| {
-        views
-            .iter()
-            .cloned()
-            .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| error_from_str("generated program has an unbound port"))
-    };
-    PreparedProgram::new(
-        program,
-        RegionBindings {
-            inputs: collect(&boundary.inputs)?,
-            outputs: collect(&boundary.outputs)?,
-        },
-        tiling,
-    )
-    .map_err(boxed_error)
 }
 
 fn prepare_boundary(
@@ -1486,7 +1454,7 @@ impl Generator {
             .selected
             .iter()
             .map(|selected| (selected.pe, &selected.boundary))
-            .chain(std::iter::once((proposed_pe, proposed)))
+            .chain(once((proposed_pe, proposed)))
         {
             for view in boundary.inputs.iter().chain(&boundary.outputs).flatten() {
                 users
@@ -1521,7 +1489,7 @@ impl Generator {
         tensors[keep..].sort_by_key(|tensor| {
             (
                 !users.contains_key(tensor_id(tensor)),
-                std::cmp::Reverse(tensor.num_bytes()),
+                Reverse(tensor.num_bytes()),
                 tensor_id(tensor).to_string(),
             )
         });
@@ -1626,18 +1594,11 @@ impl Generator {
     }
 }
 
-fn error_from_str(message: impl Into<String>) -> Box<dyn Error> {
-    boxed_error(io::Error::other(message.into()))
-}
-
-fn boxed_error(error: impl Error + 'static) -> Box<dyn Error> {
-    Box::new(error)
-}
-
 struct GenerationBoundary {
     inputs: Vec<Option<TensorView>>,
     outputs: Vec<Option<TensorView>>,
 }
+
 impl GenerationBoundary {
     fn partition(
         &self,
@@ -1661,6 +1622,49 @@ impl GenerationBoundary {
 }
 
 type TemplateIo = (Vec<Option<Tensor>>, Vec<Option<Tensor>>);
+
+fn tensor_id(tensor: &Tensor) -> &str {
+    tensor.id().expect("generated tensors must have ids")
+}
+
+fn slice_view(view: &TensorView, dim: usize, offset: usize, length: usize) -> Result<TensorView> {
+    let mut shape = view.shape().dims().to_vec();
+    let mut offsets = view.offsets().to_vec();
+    shape[dim] = length;
+    offsets[dim] += offset;
+    TensorView::new(view.tensor().clone(), &shape, &offsets).map_err(boxed_error)
+}
+
+fn bind_boundary(
+    program: &ProgramSpec,
+    tiling: Option<&TileSpec>,
+    boundary: &GenerationBoundary,
+) -> Result<PreparedProgram> {
+    let collect = |views: &[Option<TensorView>]| {
+        views
+            .iter()
+            .cloned()
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| error_from_str("generated program has an unbound port"))
+    };
+    PreparedProgram::new(
+        program,
+        ProgramBindings {
+            inputs: collect(&boundary.inputs)?,
+            outputs: collect(&boundary.outputs)?,
+        },
+        tiling,
+    )
+    .map_err(boxed_error)
+}
+
+fn error_from_str(message: impl Into<String>) -> Box<dyn Error> {
+    boxed_error(io::Error::other(message.into()))
+}
+
+fn boxed_error(error: impl Error + 'static) -> Box<dyn Error> {
+    Box::new(error)
+}
 
 #[cfg(test)]
 mod tests {
@@ -1695,6 +1699,12 @@ mod tests {
             init_dim_max: 4,
             tensor_align_bytes: 256,
         }
+    }
+
+    fn args_with_weights(weights: [f64; 3]) -> Cli {
+        let mut args = valid_args();
+        [args.weight_add, args.weight_gemm, args.weight_reduce_max] = weights;
+        args
     }
 
     fn generator_platform() -> PlatformConfig {
@@ -2119,12 +2129,107 @@ connections:
 
     #[test]
     fn validate_args_rejects_invalid_expand_ratio() {
+        for ratio in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut args = valid_args();
+            args.expand_ratio = ratio;
+            let error = validate_args(&args).unwrap_err();
+            assert!(
+                error.to_string().contains("--expand-ratio"),
+                "{ratio}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_args_rejects_nonfinite_or_negative_template_weights() {
+        for (index, name) in [
+            (0, "--weight-add"),
+            (1, "--weight-gemm"),
+            (2, "--weight-reduce-max"),
+        ] {
+            for weight in [-1.0, f64::NAN, f64::INFINITY] {
+                let mut weights = [1.0; 3];
+                weights[index] = weight;
+                let error = validate_args(&args_with_weights(weights)).unwrap_err();
+                assert!(error.to_string().contains(name), "{name}={weight}: {error}");
+            }
+        }
+    }
+
+    #[test]
+    fn validate_args_requires_a_nonzero_template_weight() {
+        let error = validate_args(&args_with_weights([0.0; 3])).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("at least one template weight must be non-zero"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn validate_args_rejects_invalid_initial_rank_ranges() {
+        for (minimum, maximum) in [(0, 4), (4, 3)] {
+            let mut args = valid_args();
+            args.init_rank_min = minimum;
+            args.init_rank_max = maximum;
+            let error = validate_args(&args).unwrap_err();
+            assert!(
+                error.to_string().contains("invalid initial rank range"),
+                "{minimum}..={maximum}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_args_rejects_invalid_initial_dimension_ranges() {
+        for (minimum, maximum) in [(0, 4), (4, 3)] {
+            let mut args = valid_args();
+            args.init_dim_min = minimum;
+            args.init_dim_max = maximum;
+            let error = validate_args(&args).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("invalid initial dimension range"),
+                "{minimum}..={maximum}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_args_rejects_zero_tensor_alignment() {
         let mut args = valid_args();
-        args.expand_ratio = 0.0;
+        args.tensor_align_bytes = 0;
+        let error = validate_args(&args).unwrap_err();
+        assert!(
+            error.to_string().contains("--tensor-align-bytes"),
+            "{error}"
+        );
+    }
 
-        let err = validate_args(&args).unwrap_err();
+    #[test]
+    fn validate_args_requires_rank_two_for_enabled_matrix_and_reduction_templates() {
+        for (weights, name) in [
+            ([0.0, 1.0, 0.0], "--weight-gemm"),
+            ([0.0, 0.0, 1.0], "--weight-reduce-max"),
+        ] {
+            let mut args = args_with_weights(weights);
+            args.init_rank_min = 1;
+            args.init_rank_max = 1;
+            let error = validate_args(&args).unwrap_err();
+            assert!(error.to_string().contains(name), "{error}");
+            args.init_rank_max = 2;
+            validate_args(&args).unwrap();
+        }
+    }
 
-        assert!(format!("{err}").contains("--expand-ratio"));
+    #[test]
+    fn validate_args_accepts_rank_one_for_add_only_generation() {
+        let mut args = args_with_weights([1.0, 0.0, 0.0]);
+        args.init_rank_min = 1;
+        args.init_rank_max = 1;
+        validate_args(&args).unwrap();
     }
 
     #[test]

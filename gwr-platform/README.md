@@ -204,9 +204,44 @@ separate constraints.
 
 ### Repeated configurations
 
-Execution units are declared in the PE configuration. Use YAML anchors to share
-repeated configurations across PEs. See `gwr-platform/examples/platform.yaml`
-for an example.
+Execution units are declared in the PE configuration. The optional `defaults`
+section stores YAML anchors; it does not automatically apply or merge a PE or
+cache configuration. Reference an anchor explicitly at each resource that needs
+it:
+
+```yaml
+defaults:
+  pe_config: &shared_pe
+    lsu_access_bytes: 32
+    sram_bytes: 64KiB
+    compute:
+      execution_units:
+        vector:
+          capabilities:
+            - { class: add, input_dtypes: [[fp32, fp32]], ops_per_tick: 32 }
+processing_elements:
+  - { name: pe0, memory_map: mm, config: *shared_pe }
+  - { name: pe1, memory_map: mm, config: *shared_pe }
+```
+
+This fragment assumes `mm` and the `add` operation class exist. Each alias
+reuses the entire anchored mapping. Repeat a configuration with explicit changes
+when PEs need different settings. See `examples/platform.yaml` for a complete
+multi-PE platform using whole-configuration aliases.
+
+Omitted fields in a PE's actual `config` receive built-in field defaults:
+`num_active_requests: 8`, `lsu_access_bytes: 32`, `overhead_size_bytes: 8`, and
+`sram_bytes: 1MiB`. These apply independently of `defaults`; `compute` must
+always be supplied. `--explain` on `gwr-timetable` prints effective PE settings.
+
+For matched runnable recipes, use
+`gwr-timetable/examples/compute_region_platform.yaml` with `add_mul.yaml` or
+`fused_add_mul.yaml` from the same directory. Use
+`gwr-timetable/examples/destination_precision_platform.yaml` with
+`destination_precision.yaml` for nested FP32 work and BF16 output conversion.
+The [timetable run commands](../gwr-timetable/README.md#run-an-example) and
+[Rust example](../gwr-timetable/README.md#load-prepare-and-run-in-rust) load
+these pairs.
 
 ## Memories and address maps
 
@@ -368,9 +403,18 @@ sin:
 ```
 
 Operand datatypes come from the program's tensors and intermediate expressions.
-Output datatypes come from its tensor and temporary declarations. Output
-datatypes do not select execution units. The simulator does not check every
-operation's output datatype against its inputs.
+Output datatypes come from its tensor and temporary declarations. Every scalar
+call result, including nested calls, uses its assignment destination dtype;
+reads retain their declared dtype. FP32 leaves do not promote intermediate
+results. Implicit scalar result transitions add no `convert` work. Output
+datatypes do not select execution units. For FP32 arithmetic before a BF16
+store, use a FP32 temporary and a separate explicit `convert` assignment;
+wrapping a nested expression in `convert` does not create a child dtype scope.
+See
+[Destination precision](../gwr-timetable/README.md#destination-precision-and-nested-calls)
+and the
+[operation cost table](../gwr-timetable/README.md#modeled-operation-costs). The
+simulator does not check every operation's output datatype against its inputs.
 
 Statistics report named operation counts and weighted FLOP equivalents. For
 example, 16 matrix MACs with `flops_per_op: 2` contribute 32 FLOPs. The model

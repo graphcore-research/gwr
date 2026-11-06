@@ -7,9 +7,8 @@ use std::rc::Rc;
 
 use gwr_engine::sim_error;
 use gwr_engine::types::{SimError, SimResult};
-use gwr_models::processing_element::program::PreparedProgram;
 use gwr_models::processing_element::program::syntax::{ProgramSpec, TileSpec};
-use gwr_models::processing_element::program::validate::RegionBindings;
+use gwr_models::processing_element::program::{PreparedProgram, ProgramBindings};
 use gwr_models::processing_element::tensors::{Tensor, TensorView};
 
 use self::accesses::validate;
@@ -139,16 +138,20 @@ impl TimetableGraph {
         Ok(graph)
     }
 
+    /// Nodes in their original timetable-file order.
     #[must_use]
     pub fn nodes(&self) -> &[TimetableNode] {
         &self.nodes
     }
 
+    /// Resolved data and control edges in timetable-file order.
     #[must_use]
     pub fn edges(&self) -> &[TimetableEdge] {
         &self.edges
     }
 
+    /// Node indices ordered by data dependencies; control edges do not
+    /// participate.
     #[must_use]
     pub fn topological_order(&self) -> &[usize] {
         &self.topological_order
@@ -164,6 +167,7 @@ impl TimetableGraph {
     }
 }
 
+/// A resolved data or control relationship between two graph nodes.
 #[derive(Debug)]
 pub struct TimetableEdge {
     kind: EdgeKind,
@@ -173,16 +177,19 @@ pub struct TimetableEdge {
 }
 
 impl TimetableEdge {
+    /// Whether the edge transfers data or records a control relationship.
     #[must_use]
     pub fn kind(&self) -> EdgeKind {
         self.kind
     }
 
+    /// Source node and its resolved output endpoint.
     #[must_use]
     pub fn from(&self) -> EdgeEndpoint {
         self.from
     }
 
+    /// Destination node and its resolved input endpoint.
     #[must_use]
     pub fn to(&self) -> EdgeEndpoint {
         self.to
@@ -210,12 +217,14 @@ impl TimetableEdge {
             .map(String::as_str)
     }
 
+    /// Tensor binding for a data edge, or `None` for a control edge.
     #[must_use]
     pub fn tensor_connection(&self) -> Option<&TensorConnection> {
         self.tensor.as_ref()
     }
 }
 
+/// A graph node and its optional resolved port index.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EdgeEndpoint {
     node: usize,
@@ -227,12 +236,14 @@ impl EdgeEndpoint {
         Self { node, edge_index }
     }
 
+    /// Index of this endpoint's node in the owning graph.
     #[must_use]
     pub fn node(&self) -> usize {
         self.node
     }
 }
 
+/// A data edge connecting one tensor to a declared compute port and view.
 #[derive(Debug)]
 pub struct TensorConnection {
     tensor_node: usize,
@@ -243,32 +254,38 @@ pub struct TensorConnection {
 }
 
 impl TensorConnection {
+    /// Index of the bound tensor node.
     #[must_use]
     pub fn tensor_node(&self) -> usize {
         self.tensor_node
     }
 
+    /// Index of the compute node using this binding.
     #[must_use]
     pub fn compute_node(&self) -> usize {
         self.compute_node
     }
 
+    /// Position of the binding in the program's declared input or output list.
     #[must_use]
     pub fn compute_tensor_index(&self) -> usize {
         self.compute_tensor_index
     }
 
+    /// Whether the compute node reads or writes the bound view.
     #[must_use]
     pub fn direction(&self) -> ComputeTensorDirection {
         self.direction
     }
 
+    /// Resolved view of the bound tensor.
     #[must_use]
     pub fn view(&self) -> &TensorView {
         &self.view
     }
 }
 
+/// Dense tensor views ordered by the program's declared port names.
 #[derive(Debug)]
 pub struct ComputeTensorViews {
     inputs: Vec<TensorView>,
@@ -276,11 +293,13 @@ pub struct ComputeTensorViews {
 }
 
 impl ComputeTensorViews {
+    /// Input views in declared program input order.
     #[must_use]
     pub fn inputs(&self) -> &[TensorView] {
         &self.inputs
     }
 
+    /// Output views in declared program output order.
     #[must_use]
     pub fn outputs(&self) -> &[TensorView] {
         &self.outputs
@@ -315,6 +334,31 @@ fn resolve_control_edge(
         to: EdgeEndpoint::new(to.0, to_port),
         tensor: None,
     })
+}
+
+fn resolve_edge_index(
+    node: &NodeDraft,
+    direction: EdgeDirection,
+    requested: Option<&str>,
+    next_tensor_index: &mut usize,
+) -> Result<usize, SimError> {
+    let Some(index) = resolve_port(node, direction, requested, true)? else {
+        let index = *next_tensor_index;
+        *next_tensor_index += 1;
+        return Ok(index);
+    };
+    let edges = match direction {
+        EdgeDirection::Input => &node.input_edges,
+        EdgeDirection::Output => &node.output_edges,
+    };
+    if edges[index].is_some() {
+        return sim_error!(
+            "Node '{}' {direction} port '{}' is connected more than once",
+            node.id(),
+            requested.expect("resolved port")
+        );
+    }
+    Ok(index)
 }
 
 fn resolve_port(
@@ -352,31 +396,6 @@ fn resolve_port(
                 node.id()
             ))
         })
-}
-
-fn resolve_edge_index(
-    node: &NodeDraft,
-    direction: EdgeDirection,
-    requested: Option<&str>,
-    next_tensor_index: &mut usize,
-) -> Result<usize, SimError> {
-    let Some(index) = resolve_port(node, direction, requested, true)? else {
-        let index = *next_tensor_index;
-        *next_tensor_index += 1;
-        return Ok(index);
-    };
-    let edges = match direction {
-        EdgeDirection::Input => &node.input_edges,
-        EdgeDirection::Output => &node.output_edges,
-    };
-    if edges[index].is_some() {
-        return sim_error!(
-            "Node '{}' {direction} port '{}' is connected more than once",
-            node.id(),
-            requested.expect("resolved port")
-        );
-    }
-    Ok(index)
 }
 
 #[derive(Clone, Copy)]
@@ -590,21 +609,6 @@ impl NodeDraft {
         ))
     }
 
-    fn id(&self) -> &str {
-        &self.id
-    }
-    fn port_names(&self, direction: EdgeDirection) -> &[String] {
-        match &self.kind {
-            DraftKind::Compute { program, .. } => direction.names(program),
-            DraftKind::Tensor(_) => &[],
-        }
-    }
-    fn tensor(&self) -> Option<&Tensor> {
-        match &self.kind {
-            DraftKind::Tensor(tensor) => Some(tensor),
-            DraftKind::Compute { .. } => None,
-        }
-    }
     fn bind(self, edges: &[TimetableEdge]) -> Result<TimetableNode, SimError> {
         let dense_edges = |ports: &[Option<usize>], direction: EdgeDirection| {
             ports
@@ -648,7 +652,7 @@ impl NodeDraft {
                 };
                 let program = PreparedProgram::new(
                     &program,
-                    RegionBindings {
+                    ProgramBindings {
                         inputs: views.inputs.clone(),
                         outputs: views.outputs.clone(),
                     },
@@ -671,6 +675,24 @@ impl NodeDraft {
             predecessors: self.predecessors,
             successors: self.successors,
         })
+    }
+
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn port_names(&self, direction: EdgeDirection) -> &[String] {
+        match &self.kind {
+            DraftKind::Compute { program, .. } => direction.names(program),
+            DraftKind::Tensor(_) => &[],
+        }
+    }
+
+    fn tensor(&self) -> Option<&Tensor> {
+        match &self.kind {
+            DraftKind::Tensor(tensor) => Some(tensor),
+            DraftKind::Compute { .. } => None,
+        }
     }
 }
 
@@ -696,11 +718,13 @@ pub struct TimetableNode {
 }
 
 impl TimetableNode {
+    /// Node identifier from the timetable file.
     #[must_use]
     pub fn id(&self) -> &str {
         &self.id
     }
 
+    /// Selected processing-element name, or `None` for a tensor node.
     #[must_use]
     pub fn pe(&self) -> Option<&str> {
         match &self.kind {
@@ -718,11 +742,13 @@ impl TimetableNode {
         }
     }
 
+    /// Whether this node contains a prepared tensor program.
     #[must_use]
     pub fn is_compute(&self) -> bool {
         matches!(self.kind, TimetableNodeKind::Compute { .. })
     }
 
+    /// Physical tensor descriptor, or `None` for a compute node.
     #[must_use]
     pub fn tensor(&self) -> Option<&Tensor> {
         match &self.kind {
@@ -731,21 +757,25 @@ impl TimetableNode {
         }
     }
 
+    /// Data edge indices in declared input order for compute nodes.
     #[must_use]
     pub fn input_edges(&self) -> &[usize] {
         &self.input_edges
     }
 
+    /// Data edge indices in declared output order for compute nodes.
     #[must_use]
     pub fn output_edges(&self) -> &[usize] {
         &self.output_edges
     }
 
+    /// Node indices connected by incoming data dependencies.
     #[must_use]
     pub fn predecessors(&self) -> &[usize] {
         &self.predecessors
     }
 
+    /// Node indices connected by outgoing data dependencies.
     #[must_use]
     pub fn successors(&self) -> &[usize] {
         &self.successors
@@ -780,9 +810,12 @@ struct ComputeViewSections {
     outputs: Vec<Option<TensorViewSection>>,
 }
 
+/// Direction of a tensor binding relative to its compute node.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ComputeTensorDirection {
+    /// The compute node reads the tensor view.
     Input,
+    /// The compute node writes the tensor view.
     Output,
 }
 

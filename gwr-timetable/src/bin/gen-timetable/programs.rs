@@ -8,10 +8,10 @@ use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
 #[cfg(test)]
 use gwr_models::processing_element::program::PreparedProgram;
+use gwr_models::processing_element::program::TensorSpec;
 use gwr_models::processing_element::program::syntax::{
     AssignmentSpec, BoundsMode, ExprSpec, IndexSpec, ProgramSpec, ReductionOp, TemporarySpec,
 };
-use gwr_models::processing_element::program::validate::TensorSpec;
 use gwr_models::processing_element::tensors::dtype::DataType;
 
 pub(super) fn build_reduce_max_program(
@@ -255,7 +255,7 @@ fn build_tensor_read_expression(tensor: &str, indices: Vec<IndexSpec>) -> ExprSp
 
 #[cfg(test)]
 mod tests {
-    use gwr_models::processing_element::program::validate::RegionBindings;
+    use gwr_models::processing_element::program::ProgramBindings;
     use gwr_models::processing_element::tensors::dtype::DataType;
     use gwr_models::processing_element::tensors::{Tensor, TensorView};
 
@@ -281,7 +281,7 @@ mod tests {
         );
         let region = PreparedProgram::new(
             &with_indices,
-            RegionBindings {
+            ProgramBindings {
                 inputs: vec![view(&[2, 3, 4], DataType::Fp32, 0)],
                 outputs: vec![
                     view(&[2, 3], DataType::Fp32, 128),
@@ -316,7 +316,7 @@ mod tests {
         .unwrap();
         PreparedProgram::new(
             &add,
-            RegionBindings {
+            ProgramBindings {
                 inputs: vec![
                     view(&[3, 4], DataType::Fp32, 0),
                     view(&[3, 4], DataType::Fp32, 100),
@@ -350,7 +350,7 @@ mod tests {
         .unwrap();
         let region = PreparedProgram::new(
             &gemm,
-            RegionBindings {
+            ProgramBindings {
                 inputs: vec![
                     view(&[2, 4], DataType::Fp16, 300),
                     view(&[4, 3], DataType::Fp16, 400),
@@ -387,7 +387,7 @@ mod tests {
         let program = build_gemm_program(&inputs, &output, DataType::Fp32).unwrap();
         let region = PreparedProgram::new(
             &program,
-            RegionBindings {
+            ProgramBindings {
                 inputs: vec![
                     view(&inputs[0].shape, inputs[0].dtype, 0),
                     view(&inputs[1].shape, inputs[1].dtype, 512),

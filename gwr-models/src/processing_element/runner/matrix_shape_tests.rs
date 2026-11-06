@@ -10,7 +10,7 @@ use super::matrix_test_fixture::*;
 use super::*;
 use crate::memory::Memory;
 use crate::memory::memory_access::MemoryAccess;
-use crate::processing_element::compute::MatrixWorkShape;
+use crate::processing_element::compute::{MatrixWorkShape, TypedWork};
 use crate::processing_element::program::analysis::invocation::AssignmentInvocations;
 use crate::processing_element::program::analysis::matrix_shape::build_matrix_work;
 use crate::processing_element::program::storage::SRAM_SLOT_ALIGNMENT_BYTES;
@@ -278,7 +278,7 @@ fn streamed_compute_validation_uses_chunk_service_cost_when_full_reduction_would
     task.tiling = Some(from_str("sizes: {k: 1}").unwrap());
     let region = validate_program(
         &task.program,
-        RegionBindings {
+        ProgramBindings {
             inputs: task.inputs.clone(),
             outputs: task.outputs.clone(),
         },
@@ -313,7 +313,7 @@ fn matrix_service_shape_uses_operand_indices_when_output_axes_are_reordered() {
     let task = transposed_asymmetric_program();
     let region = validate_program(
         &task.program,
-        RegionBindings {
+        ProgramBindings {
             inputs: task.inputs,
             outputs: task.outputs,
         },
@@ -326,9 +326,7 @@ fn matrix_service_shape_uses_operand_indices_when_output_axes_are_reordered() {
     let work = build_matrix_work(&region.program.assignments[0], &region, &BTreeMap::new())
         .unwrap()
         .unwrap();
-    let crate::processing_element::compute::TypedWork::MatrixMac { shape, .. } =
-        &work.stages[0].operations[0]
-    else {
+    let TypedWork::MatrixMac { shape, .. } = &work.stages[0].operations[0] else {
         panic!("matrix work")
     };
     assert_eq!(

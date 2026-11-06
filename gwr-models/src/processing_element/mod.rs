@@ -39,8 +39,7 @@ use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::debug;
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
-use program::PreparedProgram;
-use program::validate::RegionBindings;
+use program::{PreparedProgram, ProgramBindings};
 use serde::{Deserialize, Serialize};
 use task::{PreparedTask, ProgramTaskConfig, Task};
 
@@ -50,6 +49,7 @@ use crate::memory::memory_map::MemoryMap;
 use crate::processing_element::dispatch::Dispatch;
 use crate::processing_element::flop_monitor::FlopMonitor;
 use crate::processing_element::load_store_unit::LoadStoreUnit;
+use crate::processing_element::tensors::TensorView;
 
 mod activity;
 use activity::{ActivityLanes, ProcessingElementActivityLanes};
@@ -249,6 +249,7 @@ impl ProcessingElement {
         }
     }
 
+    /// Retained FLOP-equivalent count for completed compute work.
     #[must_use]
     pub fn total_flops(&self) -> usize {
         self.stats.borrow().machine_ops.flop_equivalents()
@@ -270,6 +271,7 @@ impl ProcessingElement {
         self.stats.borrow().written_bytes
     }
 
+    /// Completed logical read and write bytes, before LSU packetization.
     #[must_use]
     pub fn memory_traffic_bytes(&self) -> (usize, usize) {
         let stats = self.stats.borrow();
@@ -283,7 +285,7 @@ impl ProcessingElement {
     ) -> Result<Rc<PreparedTask>, SimError> {
         let program = Rc::new(PreparedProgram::new(
             &config.program,
-            RegionBindings {
+            ProgramBindings {
                 inputs: config.inputs,
                 outputs: config.outputs,
             },
@@ -303,7 +305,7 @@ impl ProcessingElement {
     }
 
     /// Check the actual touched bytes of a view against this PE's map.
-    pub fn validate_mapped_view(&self, view: &tensors::TensorView) -> SimResult {
+    pub fn validate_mapped_view(&self, view: &TensorView) -> SimResult {
         self.lsu.validate_mapped_view(view)
     }
 
@@ -328,6 +330,7 @@ impl ProcessingElement {
         )
     }
 
+    /// Maximum simultaneous SRAM reservation observed during execution.
     pub fn peak_sram_bytes(&self) -> usize {
         self.stats.borrow().peak_sram_bytes
     }
@@ -418,6 +421,8 @@ pub struct ProcessingElementConfig {
 
     /// Typed execution units.
     pub compute: ComputeConfig,
+    /// Named operation signatures and accounting costs shared by execution
+    /// units.
     pub operation_classes: BTreeMap<String, OperationClass>,
 }
 
@@ -445,10 +450,14 @@ struct ProcessingElementStats {
     peak_sram_bytes: usize,
 }
 
+/// Logical operation counts and their separately accumulated FLOP equivalents.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct MachineOpCounts {
+    /// Logical operation counts keyed by declared operation name.
     pub by_operation: BTreeMap<String, usize>,
+    /// Sum of each logical operation count multiplied by its declared FLOP
+    /// cost.
     pub flop_equivalents: usize,
 }
 
@@ -462,11 +471,13 @@ impl MachineOpCounts {
         })
     }
 
+    /// Return the retained FLOP-equivalent contribution.
     #[must_use]
     pub fn flop_equivalents(&self) -> usize {
         self.flop_equivalents
     }
 
+    /// Sum named logical operation counts, rejecting an overflowing total.
     pub fn checked_operation_total(&self) -> Result<usize, SimError> {
         self.by_operation.values().try_fold(0usize, |total, count| {
             total
@@ -475,6 +486,8 @@ impl MachineOpCounts {
         })
     }
 
+    /// Merge counts, rejecting overflow of any operation or FLOP-equivalent
+    /// sum.
     pub fn checked_add(self, other: Self) -> Result<Self, SimError> {
         let mut by_operation = self.by_operation;
         for (op, count) in other.by_operation {

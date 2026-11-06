@@ -4,14 +4,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
 use gwr_engine::sim_error;
-use gwr_engine::types::SimError;
+use gwr_engine::types::{SimError, SimResult};
 
 use super::helpers::eval_index;
 use crate::processing_element::program::storage::align_sram_slot_bytes;
 use crate::processing_element::program::syntax::IndexSpec;
 use crate::processing_element::program::tile::RegionTile;
 use crate::processing_element::program::validate::ProgramFacts;
-use crate::processing_element::tensors::{HasShape, TensorView};
+use crate::processing_element::tensors::{BITS_PER_BYTE, HasShape, TensorView};
 
 pub(super) fn max_window_chunk_buffer_bytes(
     view: &TensorView,
@@ -26,7 +26,7 @@ pub(super) fn max_window_chunk_buffer_bytes(
     // Full unpadded windows differ only by a coordinate translation; trailing
     // partial chunks are subsets. Retain exhaustive inspection for padding
     // and packed inputs, whose selected-element storage is checked per chunk.
-    let chunks = if unpadded && view.dtype().num_bits().is_multiple_of(8) {
+    let chunks = if unpadded && view.dtype().num_bits().is_multiple_of(BITS_PER_BYTE) {
         1
     } else {
         usize::MAX
@@ -67,7 +67,7 @@ fn window_chunk_minimum_bytes(
     Ok(elements
         .checked_mul(view.dtype().num_bits())
         .ok_or_else(|| SimError("window SRAM lower bound overflows".into()))?
-        .div_ceil(8))
+        .div_ceil(BITS_PER_BYTE))
 }
 
 fn max_varying_axis_length(
@@ -184,7 +184,7 @@ fn enumerate_window_access(
         let Some(element) = resolve_window_element(view, indices, coords)? else {
             return Ok(());
         };
-        if view.dtype().num_bits() < 8 {
+        if view.dtype().num_bits() < BITS_PER_BYTE {
             packed_elements.insert(element.layout().first_element());
         }
         for range in element.address_ranges() {
@@ -197,12 +197,12 @@ fn enumerate_window_access(
         .map(|(start, end)| start..end)
         .collect::<Vec<_>>();
     let bytes = address_range_bytes(&ranges)?;
-    let storage_bytes = if view.dtype().num_bits() < 8 {
+    let storage_bytes = if view.dtype().num_bits() < BITS_PER_BYTE {
         packed_elements
             .len()
             .checked_mul(view.dtype().num_bits())
             .ok_or_else(|| SimError("window storage size overflows".into()))?
-            .div_ceil(8)
+            .div_ceil(BITS_PER_BYTE)
     } else {
         bytes
     };
@@ -520,8 +520,8 @@ pub(super) fn for_each_coordinate(
     ranges: &[(String, Range<usize>)],
     position: usize,
     coords: &mut BTreeMap<String, usize>,
-    visit: &mut impl FnMut(&BTreeMap<String, usize>) -> Result<(), SimError>,
-) -> Result<(), SimError> {
+    visit: &mut impl FnMut(&BTreeMap<String, usize>) -> SimResult,
+) -> SimResult {
     if position == ranges.len() {
         return visit(coords);
     }
@@ -541,7 +541,7 @@ mod tests {
     use super::*;
     use crate::processing_element::program::syntax::{ExprSpec, ProgramSpec, TileSpec};
     use crate::processing_element::program::tile::plan_tiles;
-    use crate::processing_element::program::validate::{RegionBindings, validate_program};
+    use crate::processing_element::program::validate::{ProgramBindings, validate_program};
     use crate::processing_element::tensors::Tensor;
     use crate::processing_element::tensors::dtype::DataType;
 
@@ -561,7 +561,7 @@ mod tests {
         let program = window_program(coefficient, offset);
         let region = validate_program(
             &program,
-            RegionBindings {
+            ProgramBindings {
                 inputs: vec![input.clone()],
                 outputs: vec![output],
             },
@@ -685,7 +685,7 @@ assignments:
             let input = TensorView::new_full(Tensor::new(&[16 * stride], &dtype, 0).unwrap());
             let region = validate_program(
                 &program,
-                RegionBindings {
+                ProgramBindings {
                     inputs: vec![input.clone()],
                     outputs: vec![TensorView::new_full(
                         Tensor::new(&[], &dtype, 4096).unwrap(),

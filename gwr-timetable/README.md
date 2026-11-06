@@ -37,6 +37,77 @@ intermediate store, reload, and dependency between compute nodes.
 To run this optimization, use
 `--timetable gwr-timetable/examples/fused_add_mul.yaml` in the command above.
 
+### Destination precision
+
+The matched pair `examples/destination_precision_platform.yaml` and
+`examples/destination_precision.yaml` models nested FP32 arithmetic followed by
+an explicit BF16 output conversion:
+
+```sh
+cargo run --bin gwr-timetable -- \
+  --platform gwr-timetable/examples/destination_precision_platform.yaml \
+  --timetable gwr-timetable/examples/destination_precision.yaml --dump-stats
+```
+
+It counts eight `add`, eight `exp`, and eight `convert` operations. The planned
+boundary payload is 64 read bytes and 16 written bytes. The FP32 temporary stays
+in SRAM. See [Destination precision](#destination-precision-and-nested-calls)
+for the precision rules.
+
+## Load, prepare, and run in Rust
+
+The normal path loads the platform and timetable, validates graph bindings, then
+prepares every compute node against its PE in `Timetable::new`. Attach the
+retained dispatcher and run the engine. Keep the dispatcher alive through the
+run. This executable uses the matched add/multiply files above and resolves
+paths from the crate directory, so it can run from any working directory:
+
+```sh
+cargo run -p gwr-timetable --example load_prepare_run
+```
+
+The source is [load_prepare_run.rs](examples/load_prepare_run.rs). The same code
+is compiled and run as a documentation example:
+
+```rust
+{{#include examples/load_prepare_run.rs:example}}
+```
+
+### Custom dispatch
+
+For custom task selection, first bind syntax and owned views into
+`gwr_models::processing_element::program::PreparedProgram`. `ProgramBindings`
+and `TensorSpec` are public at the same module root. Binding order follows the
+program's declared input/output lists; a timetable resolves its named graph
+edges into that order. `PreparedProgram` exposes resolved value metadata and
+hardware-independent SRAM and logical boundary-traffic estimates.
+
+Then call `ProcessingElement::prepare_program` to obtain an immutable
+`PreparedTask` for that exact PE instance. Return the retained handle as
+`Task::PreparedProgram` from your dispatcher. This checks compute capabilities,
+durations, touched addresses, and SRAM capacity before activation or memory
+requests. A handle cannot execute on another PE, even one with the same name.
+
+This single-task dispatcher demonstrates both stages and completion
+notification:
+
+```sh
+cargo run -p gwr-timetable --example custom_dispatch
+```
+
+The source is [custom_dispatch.rs](examples/custom_dispatch.rs):
+
+```rust
+{{#include examples/custom_dispatch.rs:example}}
+```
+
+For a raw task, `ProgramTaskConfig` owns syntax, optional tiling, and input and
+output views in declaration order. `pe.prepare_program_task(config)` is the
+one-call preparation convenience. A custom dispatcher may instead return
+`Task::ProgramTask { config: Box::new(config) }`; the PE performs the same
+preparation before marking that task active. Use `Timetable` for ordinary graph
+scheduling and dependencies.
+
 ## Check preparation without simulation
 
 Add `--check` to the run command to construct and validate the same platform and
@@ -339,6 +410,68 @@ Calls can nest, including inside reduction bodies. Use a named temporary when
 several assignments need the same intermediate. The simulator counts operations
 but does not evaluate their numerical results. It does not validate every
 operation's output datatype against its inputs.
+
+### Destination precision and nested calls
+
+A scalar read keeps its tensor's declared datatype. Every scalar call result,
+including a nested call, uses the enclosing assignment's destination datatype.
+FP32 inputs do not promote intermediate call results. For example, if `Y` is
+BF16, `Y = exp(add(A, B))` with FP32 inputs matches `add` with ordered inputs
+`[fp32, fp32]`, then `exp` with `[bf16]`. Neither implicit result transition
+adds `convert` work. This describes modeled work and storage; the simulator does
+not calculate numerical tensor values.
+
+Wrapping the expression in `convert` does not give its child a separate FP32
+scope. To model FP32 intermediate arithmetic followed by a BF16 store, give the
+arithmetic a named FP32 temporary and explicitly convert that temporary in the
+BF16 assignment:
+
+```yaml
+program:
+  inputs: [A, B]
+  outputs: [Y]
+  temporaries: { T: { dtype: fp32 } }
+  assignments:
+    - output: T
+      axes: [i]
+      expr:
+        exp:
+          - add:
+              - { read: { tensor: A, indices: [i] } }
+              - { read: { tensor: B, indices: [i] } }
+    - output: Y
+      axes: [i]
+      expr:
+        convert:
+          - { read: { tensor: T, indices: [i] } }
+```
+
+Connect FP32 inputs and a BF16 output, and supply `add` on `[fp32, fp32]`, `exp`
+on `[fp32]`, and `convert` on `[fp32]`. Output precision does not select an
+execution unit. The matched destination-precision recipe above supplies all
+three capabilities.
+
+### Modeled operation costs
+
+For each output, let `N` be its number of included reduction samples. Chunking
+preserves the total `N - 1` combines for a nonempty reduction; the first sample
+initializes the partial result. Excluded samples add no body or combine work.
+
+| Expression                                  | Named work                                                                     | Datatype signature and result                                                                                                                                     |
+| ------------------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Scalar call `op(args...)`                   | One `op` per evaluated element, plus nested calls.                             | Ordered operand dtypes; result uses assignment destination dtype.                                                                                                 |
+| `reduce: { op: sum, ... }`                  | `N - 1` `add` operations per output, plus body calls for each included sample. | `add` uses two destination-dtype operands; scalar reads retain their dtype. No implicit `convert` work.                                                           |
+| `min` or `max` of a direct read             | `N - 1` `compare` operations per output.                                       | Two operands of the read tensor's dtype. A differing value output dtype adds no conversion. Optional indices add storage/traffic, not comparisons or conversions. |
+| `matrix_mac`                                | One `matrix_mac` per logical contraction product.                              | Ordered read dtypes and explicit accumulator dtype. Service-tile padding affects time only.                                                                       |
+| Matrix result with a different output dtype | One final `convert` per output after all contraction chunks.                   | Input is the accumulator dtype. Matching accumulator/output dtypes add no conversion.                                                                             |
+| Explicit `convert` call                     | One `convert` per evaluated element, plus child calls.                         | Input is the child result dtype; result uses assignment destination dtype.                                                                                        |
+
+A min/max reduction can also contain scalar body calls. Body-call results use
+the value destination dtype; an indices-only assignment uses its first read's
+dtype for that body and its comparisons. The index destination dtype controls
+index storage. Reads alone add no named compute work. The platform must declare
+all named operations and matching capabilities, including `add`, `compare`, or
+`convert` when the program requires them.
 
 ### Matrix products and accumulators
 

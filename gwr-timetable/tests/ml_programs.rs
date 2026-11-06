@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
-use gwr_models::processing_element::program::PreparedProgram;
 use gwr_models::processing_element::program::syntax::ProgramSpec;
-use gwr_models::processing_element::program::validate::RegionBindings;
+use gwr_models::processing_element::program::{PreparedProgram, ProgramBindings};
 use gwr_models::processing_element::tensors::dtype::DataType;
 use gwr_models::processing_element::tensors::{Tensor, TensorView};
 use yaml_serde::from_str;
@@ -14,7 +13,7 @@ fn view(shape: &[usize], addr: u64) -> TensorView {
 fn validates_rmsnorm_with_row_reduction_scalar_inputs_and_external_scale() {
     // Row-wise RMS normalization. Scalar inputs carry epsilon and reciprocal
     // row length without introducing memory-sized constant tensors.
-    let p: ProgramSpec = from_str(
+    let program: ProgramSpec = from_str(
         r"
 inputs: [A, W, Inv, Eps]
 outputs: [Y]
@@ -53,8 +52,8 @@ assignments:
     )
     .unwrap();
     let region = PreparedProgram::new(
-        &p,
-        RegionBindings {
+        &program,
+        ProgramBindings {
             inputs: vec![
                 view(&[1, 1024], 0),
                 view(&[1024], 8192),
@@ -67,6 +66,6 @@ assignments:
     )
     .unwrap();
     assert_eq!(region.extent("k"), Some(1024));
-    assert_eq!(p.inputs, ["A", "W", "Inv", "Eps"]);
-    assert!(format!("{p:?}").contains("rsqrt"));
+    assert_eq!(program.inputs, ["A", "W", "Inv", "Eps"]);
+    assert!(format!("{program:?}").contains("rsqrt"));
 }

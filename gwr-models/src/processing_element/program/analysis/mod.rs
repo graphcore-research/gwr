@@ -18,10 +18,10 @@ use super::executable::Expr;
 use super::prepared::{GroupPlan, Schedule};
 use super::syntax::{BoundsMode, IndexSpec, ProgramSpec, ReductionOp, TileSpec};
 use super::tile::RegionTile;
-use super::validate::RegionBindings;
+use super::validate::ProgramBindings;
 use crate::processing_element::MachineOpCounts;
 use crate::processing_element::compute::{ComputeModel, ComputeWork, PreparedCompute};
-use crate::processing_element::tensors::TensorView;
+use crate::processing_element::tensors::{BITS_PER_BYTE, TensorView};
 
 pub(in crate::processing_element) mod access;
 mod helpers;
@@ -111,7 +111,7 @@ impl PreparedProgram {
             .bindings
             .inputs
             .iter()
-            .any(|view| view.dtype().num_bits() < 8);
+            .any(|view| view.dtype().num_bits() < BITS_PER_BYTE);
         let inspect_all = self.facts.program.assignments.iter().any(|assignment| {
             let leading = assignment.expr.iter_reads().any(|read| {
                 read.bounds == BoundsMode::Exclude
@@ -201,7 +201,7 @@ pub fn estimate_peak_tile_sram(
 ) -> Result<usize, SimError> {
     PreparedProgram::new(
         program,
-        RegionBindings {
+        ProgramBindings {
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
         },
