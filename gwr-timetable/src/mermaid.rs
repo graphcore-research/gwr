@@ -117,7 +117,7 @@ fn render_node_label(graph: &TimetableGraph, node_index: usize, node: &Timetable
         "[\"{}\"]",
         escape_mermaid_label(&format!(
             "{input_str}\n{} assignments\n{}\n{pe}\n\n{output_str}",
-            program.assignments.len(),
+            program.assignment_count(),
             node.id()
         ))
     )
@@ -129,22 +129,15 @@ fn escape_mermaid_label(s: &str) -> String {
         .replace('\n', "<br/>")
 }
 
-fn create_view_string(prefix: &str, views: &[Option<TensorView>]) -> String {
+fn create_view_string(prefix: &str, views: &[TensorView]) -> String {
     let mut result = String::new();
-    for (idx, maybe_view) in views.iter().enumerate() {
-        match maybe_view {
-            None => {
-                let _ = writeln!(result, "{prefix}{idx}: None");
-            }
-            Some(view) => {
-                let _ = writeln!(
-                    result,
-                    "{prefix}{idx}: {} @ {}",
-                    shape_string(view.shape().dims()),
-                    shape_string(view.offsets())
-                );
-            }
-        }
+    for (idx, view) in views.iter().enumerate() {
+        let _ = writeln!(
+            result,
+            "{prefix}{idx}: {} @ {}",
+            shape_string(view.shape().dims()),
+            shape_string(view.offsets())
+        );
     }
     result
 }

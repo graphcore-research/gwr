@@ -306,3 +306,78 @@ fn class_rejects_uppercase_operations() {
     .unwrap_err();
     assert!(error.to_string().contains("lowercase"), "{error}");
 }
+
+#[test]
+fn zero_count_scalar_work_requires_no_capability_or_service() {
+    let model = predicate_model();
+    for (op, inputs) in [("is_nan", vec![DataType::Fp32]), ("undeclared", vec![])] {
+        let work = ComputeWork::operation(op, inputs, 0);
+        model.validate_work(&work).unwrap();
+        let plan = model.lower(&work).unwrap();
+        assert!(plan.stages.iter().flatten().next().is_none());
+        assert_eq!(plan.service_ticks().unwrap(), 0);
+    }
+}
+
+#[test]
+fn unrepresentable_candidate_duration_does_not_poison_serviceable_units() {
+    for (name, units, copies, expected) in [
+        ("slow_only", vec![("slow", 1e-19)], 1, None),
+        ("fast_only", vec![("fast", 1.0)], 1, Some((2, 2))),
+        (
+            "fast_and_slow",
+            vec![("fast", 1.0), ("slow", 1e-19)],
+            1,
+            Some((2, 2)),
+        ),
+        (
+            "all_slow",
+            vec![("slow", 1e-19), ("slower", 8e-20)],
+            1,
+            None,
+        ),
+        // Three 2-op items at rate 10 coalesce to ceil(0.6) = 1 tick.
+        ("fast_batched", vec![("fast", 10.0)], 3, Some((1, 6))),
+        (
+            "fast_batched_with_slow",
+            vec![("fast", 10.0), ("slow", 1e-19)],
+            3,
+            Some((1, 6)),
+        ),
+    ] {
+        let classes = BTreeMap::from([("exp".into(), operation_class(&["exp"], 1, 1))]);
+        let units = units
+            .into_iter()
+            .map(|(name, rate)| (name, vec![operation_class_capability("exp", None, rate)]))
+            .collect::<Vec<_>>();
+        let model = compute_model(&classes, &units);
+        let result = model.lower(&ComputeWork::parallel(vec![
+            ComputeWork::operation(
+                "exp",
+                vec![DataType::Fp32],
+                2
+            );
+            copies
+        ]));
+        if let Some((ticks, ops)) = expected {
+            let plan = result.unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert_eq!(plan.service_ticks().unwrap(), ticks, "{name}");
+            assert_eq!(plan.stages[0].len(), 1, "{name}");
+            let batch = &plan.stages[0][0];
+            assert_eq!(batch.alternatives.len(), 1, "{name}");
+            assert_eq!(batch.alternatives[0].1, ticks, "{name}");
+            assert_eq!(
+                model.execution_unit_names()[batch.alternatives[0].0.0],
+                "fast",
+                "{name}"
+            );
+            assert_eq!(batch.machine_ops.by_operation["exp"], ops, "{name}");
+            assert_eq!(batch.machine_ops.flop_equivalents(), ops, "{name}");
+        } else {
+            assert!(
+                result.unwrap_err().to_string().contains("duration"),
+                "{name}"
+            );
+        }
+    }
+}

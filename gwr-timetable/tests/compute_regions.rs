@@ -3,10 +3,8 @@
 use std::rc::Rc;
 
 use gwr_engine::engine::Engine;
-use gwr_engine::time::clock::Clock;
 use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::program::SRAM_SLOT_ALIGNMENT_BYTES;
-use gwr_models::processing_element::program::syntax::{ExprSpec, ProgramSpec};
 use gwr_models::processing_element::task::Task;
 use gwr_platform::Platform;
 use gwr_timetable::Timetable;
@@ -14,29 +12,12 @@ use gwr_timetable::timetable_file::{NodeSection, TimetableFile};
 use gwr_track::log::Level;
 use gwr_track::test_helpers::TestTracker;
 use gwr_track::{Tracker, test_init};
-use yaml_serde::{from_str, to_string};
+
+mod common;
+use common::{Simulation, assert_rejected_before_loading, run_timetable};
 
 const MATRIX_EPILOGUE_SRAM_BYTES: usize = 16 * 1024;
 const MATRIX_EPILOGUE_TILE_BYTES: usize = 5192;
-
-const LOCAL_TEMPORARY_PROGRAM: &str = r"
-inputs: [A, B, C]
-outputs: [Y]
-temporaries: { T: { dtype: fp32 } }
-assignments:
-  - output: T
-    axes: [i]
-    expr:
-      add:
-        - read: { tensor: A, indices: [i] }
-        - read: { tensor: B, indices: [i] }
-  - output: Y
-    axes: [i]
-    expr:
-      mul:
-        - read: { tensor: T, indices: [i] }
-        - read: { tensor: C, indices: [i] }
-";
 
 fn run_vector_timetable_with_sram(source: &str, sram_bytes: usize) -> (u64, Vec<String>) {
     let platform_source = include_str!("../examples/compute_region_platform.yaml").replace(
@@ -51,32 +32,6 @@ fn run_vector_timetable_with_sram(source: &str, sram_bytes: usize) -> (u64, Vec<
         simulation.clock.tick_now().tick(),
         simulation.tracker.events(),
     )
-}
-
-fn run_timetable(platform_source: &str, file: TimetableFile) -> Simulation {
-    let tracker = Rc::new(TestTracker::new(1000, Level::Trace));
-    let tracking: Tracker = tracker.clone();
-    let mut engine = Engine::new(&tracking);
-    let clock = engine.default_clock();
-    let platform = Rc::new(Platform::from_string(&engine, &clock, platform_source).unwrap());
-    let timetable =
-        Rc::new(Timetable::new(engine.top(), file.into_graph().unwrap(), &platform).unwrap());
-    let dispatcher: Rc<dyn Dispatch> = timetable.clone();
-    platform.attach_dispatcher(&dispatcher);
-    engine.run().unwrap();
-    timetable.check_tasks_complete().unwrap();
-    let planned = timetable.workload_totals().unwrap();
-    assert_eq!(
-        platform.pe("pe0").unwrap().memory_traffic_bytes(),
-        (planned.read_bytes, planned.written_bytes),
-        "planned boundary traffic must match completed execution",
-    );
-    Simulation {
-        platform,
-        tracker,
-        clock,
-        timetable,
-    }
 }
 
 fn local_max_reduction_timetable() -> TimetableFile {
@@ -690,13 +645,6 @@ fn assert_matrix_epilogue_operation_counts(simulation: &Simulation) {
     );
 }
 
-struct Simulation {
-    platform: Rc<Platform>,
-    tracker: Rc<TestTracker>,
-    clock: Clock,
-    timetable: Rc<Timetable>,
-}
-
 fn memory_request_bytes(events: &[String], kind: &str) -> usize {
     events
         .iter()
@@ -720,24 +668,6 @@ fn memory_request_bytes(events: &[String], kind: &str) -> usize {
                 .unwrap()
         })
         .sum()
-}
-
-fn assert_rejected_before_loading(platform_source: &str, file: TimetableFile, expected: &str) {
-    let tracker = Rc::new(TestTracker::new(1000, Level::Trace));
-    let tracking: Tracker = tracker.clone();
-    let mut engine = Engine::new(&tracking);
-    let clock = engine.default_clock();
-    let platform = Rc::new(Platform::from_string(&engine, &clock, platform_source).unwrap());
-    let error = Timetable::new(engine.top(), file.into_graph().unwrap(), &platform)
-        .err()
-        .unwrap();
-    assert!(error.0.contains(expected), "{error:?}");
-    assert!(
-        !tracker
-            .events()
-            .iter()
-            .any(|event| event.contains("MemoryAccess:"))
-    );
 }
 
 fn sum_reduction_timetable(reduction_body: &str, uses_local_temporary: bool) -> String {
@@ -1068,63 +998,6 @@ fn replicated_vector_execution_unit_configuration_executes_both_add_nodes() {
 }
 
 #[test]
-fn parses_a_program_with_a_local_temporary() {
-    let program: ProgramSpec = from_str(LOCAL_TEMPORARY_PROGRAM).unwrap();
-    assert_eq!(program.inputs, ["A", "B", "C"]);
-    assert_eq!(program.outputs, ["Y"]);
-    assert!(program.temporaries.contains_key("T"));
-    assert_eq!(program.assignments.len(), 2);
-    assert_eq!(program.assignments[0].output.as_deref(), Some("T"));
-    assert!(matches!(&program.assignments[0].expr, ExprSpec::Call { op, .. } if op == "add"));
-    assert!(matches!(&program.assignments[1].expr, ExprSpec::Call { op, .. } if op == "mul"));
-}
-
-#[test]
-fn program_serialization_round_trip_preserves_assignments() {
-    let program: ProgramSpec = from_str(LOCAL_TEMPORARY_PROGRAM).unwrap();
-    let round_trip: ProgramSpec = from_str(&to_string(&program).unwrap()).unwrap();
-    assert_eq!(round_trip, program);
-}
-
-#[test]
-fn rejects_ambiguous_or_incomplete_expressions() {
-    for expression in [
-        r"
-add:
-  wrong: []
-",
-        r"
-read: { tensor: A, indices: [i] }
-mul:
-  - read: { tensor: A, indices: [i] }
-  - read: { tensor: A, indices: [i] }
-",
-        r"
-reduce:
-  op: sum
-  over: [i]
-",
-    ] {
-        let expression = expression.trim().replace('\n', "\n      ");
-        let source = format!(
-            r"
-inputs: [A]
-outputs: [Y]
-assignments:
-  - output: Y
-    axes: [i]
-    expr:
-      {expression}
-"
-        );
-        assert!(
-            from_str::<ProgramSpec>(&source).is_err(),
-            "accepted {expression}"
-        );
-    }
-}
-
-#[test]
 fn timetable_compute_node_carries_its_program_and_tiling() {
     let timetable = TimetableFile::from_string(
         r"
@@ -1383,19 +1256,19 @@ fn shared_sram_admits_two_fused_tiles_only_when_both_arenas_fit() {
 }
 
 #[test]
-fn a_tile_one_byte_larger_than_sram_fails_before_loading() {
+fn invalid_downstream_placement_precedes_earlier_preparation_failure() {
     let platform_source = include_str!("../examples/compute_region_platform.yaml")
-        .replace("sram_bytes: 256", "sram_bytes: 79");
-    let file = TimetableFile::from_string(include_str!("../examples/fused_add_mul.yaml")).unwrap();
-    assert_rejected_before_loading(&platform_source, file, "requires 80 SRAM bytes");
-}
-
-#[test]
-fn missing_typed_execution_unit_fails_before_loading() {
-    let platform_source = include_str!("../examples/compute_region_platform.yaml")
-        .replace("class: mul", "class: compare");
-    let file = TimetableFile::from_string(include_str!("../examples/fused_add_mul.yaml")).unwrap();
-    assert_rejected_before_loading(&platform_source, file, "unsupported capability");
+        .replace("class: add", "class: compare");
+    let mut file = TimetableFile::from_string(include_str!("../examples/add_mul.yaml")).unwrap();
+    let NodeSection::Compute { pe, .. } = &mut file.nodes[5] else {
+        panic!("expected downstream multiply node")
+    };
+    *pe = Some("missing".to_owned());
+    assert_rejected_before_loading(
+        &platform_source,
+        file,
+        &["Node 'multiply' contains invalid PE ID 'missing'"],
+    );
 }
 
 #[test]
@@ -1734,10 +1607,10 @@ fn dilated_window_transfers_only_accessed_elements() {
         })
         .sum::<usize>();
     assert_eq!(read_bytes, 96);
-    let Task::ProgramTask { config } = simulation.timetable.task_by_id(1).unwrap() else {
+    let Task::PreparedProgram { task } = simulation.timetable.task_by_id(1).unwrap() else {
         panic!("expected program task")
     };
-    assert_eq!(config.planned_traffic_bytes().unwrap(), (12, 4));
+    assert_eq!(task.planned_traffic_bytes(), (12, 4));
     assert_eq!(
         simulation
             .platform
@@ -1796,6 +1669,124 @@ fn tiled_fused_matrix_epilogue_runs_with_working_set_larger_than_sram() {
     assert_rejected_before_loading(
         &too_small,
         file,
-        &format!("requires {MATRIX_EPILOGUE_TILE_BYTES} SRAM bytes"),
+        &[&format!("requires {MATRIX_EPILOGUE_TILE_BYTES} SRAM bytes")],
     );
+}
+
+#[test]
+fn dispatch_retains_prepared_handles() {
+    let simulation = run_timetable(
+        include_str!("../examples/compute_region_platform.yaml"),
+        affine_sum_window_timetable(),
+    );
+    let Task::PreparedProgram { task: first } = simulation.timetable.task_by_id(2).unwrap() else {
+        panic!("timetable must return a retained prepared task")
+    };
+    let Task::PreparedProgram { task: second } = simulation.timetable.task_by_id(2).unwrap() else {
+        panic!("timetable must return a retained prepared task")
+    };
+    assert!(Rc::ptr_eq(&first, &second));
+}
+
+#[test]
+fn dispatch_rejects_noncompute_and_invalid_indices() {
+    let simulation = run_timetable(
+        include_str!("../examples/compute_region_platform.yaml"),
+        affine_sum_window_timetable(),
+    );
+    let timetable = &simulation.timetable;
+    let pe = simulation.platform.pe("pe0").unwrap();
+    timetable.enable_completed_workload_tracking().unwrap();
+    let before = (
+        timetable.num_graph_nodes_completed(),
+        timetable.num_graph_nodes_active(),
+        timetable.completed_workload(),
+        timetable.ready_task_indices("pe0").unwrap(),
+        simulation.clock.tick_now().tick(),
+        pe.memory_traffic_bytes(),
+        pe.peak_sram_bytes(),
+        pe.machine_ops().checked_operation_total().unwrap(),
+    );
+    for (case, index) in [("tensor", 0), ("outside graph", usize::MAX)] {
+        assert!(timetable.task_by_id(index).is_err(), "{case}: lookup");
+        assert!(
+            timetable.set_task_active(index).is_err(),
+            "{case}: activate"
+        );
+        assert!(
+            timetable.set_task_completed(index).is_err(),
+            "{case}: complete"
+        );
+    }
+    // A real compute node still accepts repeated completion without accounting
+    // or scheduler changes.
+    timetable.set_task_completed(2).unwrap();
+    let after = (
+        timetable.num_graph_nodes_completed(),
+        timetable.num_graph_nodes_active(),
+        timetable.completed_workload(),
+        timetable.ready_task_indices("pe0").unwrap(),
+        simulation.clock.tick_now().tick(),
+        pe.memory_traffic_bytes(),
+        pe.peak_sram_bytes(),
+        pe.machine_ops().checked_operation_total().unwrap(),
+    );
+    assert_eq!(after, before);
+}
+
+#[test]
+fn constructor_rejections_have_no_side_effects() {
+    let platform = include_str!("../examples/compute_region_platform.yaml");
+    let unsupported = platform.replace("class: mul", "class: compare");
+    for (name, platform, source, expected) in [
+        (
+            "flat_fused_sram_79_of_80",
+            platform.replace("sram_bytes: 256", "sram_bytes: 79"),
+            include_str!("../examples/fused_add_mul.yaml"),
+            &["requires 80 SRAM bytes"][..],
+        ),
+        (
+            "flat_fused_missing_mul",
+            unsupported.clone(),
+            include_str!("../examples/fused_add_mul.yaml"),
+            &["unsupported capability"][..],
+        ),
+        (
+            "downstream_missing_mul",
+            unsupported,
+            include_str!("../examples/add_mul.yaml"),
+            &["multiply", "unsupported capability"][..],
+        ),
+        (
+            "unmapped_output",
+            platform.to_owned(),
+            r"
+nodes:
+ - { id: A, kind: tensor, config: { addr: 4096, dtype: fp32, shape: [4] } }
+ - { id: Y, kind: tensor, config: { addr: 2000000, dtype: fp32, shape: [4] } }
+ - id: copy
+   kind: compute
+   pe: pe0
+   program:
+     inputs: [A]
+     outputs: [Y]
+     assignments:
+       - output: Y
+         axes: [i]
+         expr:
+           read: { tensor: A, indices: [i] }
+edges:
+ - { from: A, to: copy, kind: data }
+ - { from: copy, to: Y, kind: data }
+",
+            &["copy", "unmapped touched bytes"][..],
+        ),
+    ] {
+        println!("case: {name}");
+        assert_rejected_before_loading(
+            &platform,
+            TimetableFile::from_string(source).unwrap(),
+            expected,
+        );
+    }
 }

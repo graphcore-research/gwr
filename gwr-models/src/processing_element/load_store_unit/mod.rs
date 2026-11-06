@@ -38,7 +38,6 @@ use gwr_track::debug;
 use gwr_track::entity::{Entity, EntityGroup};
 use gwr_track::tracker::aka::Aka;
 
-use super::task::ProgramTaskConfig;
 use crate::processing_element::tensors::TensorView;
 
 mod request_arbiter;
@@ -142,16 +141,10 @@ impl LoadStoreUnit {
         port_rx!(self.rx, state)
     }
 
-    pub(crate) fn validate_program_views(&self, config: &ProgramTaskConfig) -> SimResult {
-        for view in config.inputs.iter().chain(&config.outputs) {
-            self.validate_mapped_view(view)?;
-        }
-        Ok(())
+    pub(crate) fn memory_map(&self) -> &MemoryMap {
+        &self.state.memory_map
     }
 
-    /// Check every physical byte touched by a view is mapped. Untouched
-    /// strided holes need not be mapped; packed elements count unique bytes.
-    /// This is independent of request issuing and allocates no request slots.
     pub(crate) fn validate_mapped_view(&self, view: &TensorView) -> SimResult {
         let mapped = self
             .state

@@ -1,12 +1,10 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use gwr_engine::types::SimError;
 use yaml_serde::from_str;
 
 use crate::processing_element::program::plan::allocate_temporaries;
 use crate::processing_element::program::storage::{
-    ReductionStateBinding, select_reduction_state_binding,
-    select_reduction_state_binding_for_optional_output,
+    ReductionStateBinding, select_reduction_state_binding_for_optional_output,
 };
 use crate::processing_element::program::syntax::ProgramSpec;
 use crate::processing_element::program::tile::plan_tiles;
@@ -14,63 +12,51 @@ use crate::processing_element::program::validate::{RegionBindings, validate_prog
 use crate::processing_element::tensors::dtype::DataType;
 use crate::processing_element::tensors::{Tensor, TensorView};
 
-fn single_input_reduction_state_binding(
-    input: DataType,
-    output: DataType,
-    output_elements: usize,
-    persistent: bool,
-) -> Result<ReductionStateBinding, SimError> {
-    select_reduction_state_binding(&[input], output, output_elements, persistent)
-}
-
 #[test]
-fn nonpersistent_reduction_state_uses_execution_unit_transient_storage() {
-    assert_eq!(
-        single_input_reduction_state_binding(DataType::Fp16, DataType::Fp16, 16, false).unwrap(),
-        ReductionStateBinding::EngineTransient
-    );
-}
-
-#[test]
-fn persistent_reduction_state_uses_destination_when_input_and_output_widths_match() {
-    assert_eq!(
-        single_input_reduction_state_binding(DataType::Fp16, DataType::Fp16, 16, true).unwrap(),
-        ReductionStateBinding::Destination
-    );
-}
-
-#[test]
-fn persistent_reduction_state_uses_destination_when_output_is_wider_than_input() {
-    assert_eq!(
-        single_input_reduction_state_binding(DataType::Fp16, DataType::Fp32, 16, true).unwrap(),
-        ReductionStateBinding::Destination
-    );
-}
-
-#[test]
-fn persistent_reduction_state_uses_input_width_scratch_when_output_is_narrower() {
-    assert_eq!(
-        single_input_reduction_state_binding(DataType::Fp16, DataType::Fp8, 2, true).unwrap(),
-        ReductionStateBinding::Scratch { bytes: 4 }
-    );
-}
-
-#[test]
-fn persistent_reduction_without_output_rounds_packed_scratch_up_to_whole_bytes() {
-    assert_eq!(
-        select_reduction_state_binding_for_optional_output(&[DataType::Bool], None, 9, true)
+fn reduction_state_binding_cases() {
+    use DataType::{Bool, Fp8, Fp16, Fp32, Int64};
+    use ReductionStateBinding::{Destination, EngineTransient, Scratch};
+    for (name, (inputs, output, elements, persistent), expected) in [
+        (
+            "transient",
+            (&[Fp16][..], Some(Fp16), 16, false),
+            EngineTransient,
+        ),
+        (
+            "same_width_destination",
+            (&[Fp16][..], Some(Fp16), 16, true),
+            Destination,
+        ),
+        (
+            "wider_destination",
+            (&[Fp16][..], Some(Fp32), 16, true),
+            Destination,
+        ),
+        (
+            "narrower_scratch",
+            (&[Fp16][..], Some(Fp8), 2, true),
+            Scratch { bytes: 4 },
+        ),
+        (
+            "packed_no_output",
+            (&[Bool][..], None, 9, true),
+            Scratch { bytes: 2 },
+        ),
+        (
+            "widest_operand",
+            (&[Fp16, Int64][..], Some(Fp16), 4, true),
+            Scratch { bytes: 32 },
+        ),
+    ] {
+        assert_eq!(
+            select_reduction_state_binding_for_optional_output(
+                inputs, output, elements, persistent
+            )
             .unwrap(),
-        ReductionStateBinding::Scratch { bytes: 2 }
-    );
-}
-
-#[test]
-fn persistent_reduction_scratch_uses_the_widest_operand_width() {
-    assert_eq!(
-        select_reduction_state_binding(&[DataType::Fp16, DataType::Int64], DataType::Fp16, 4, true)
-            .unwrap(),
-        ReductionStateBinding::Scratch { bytes: 32 }
-    );
+            expected,
+            "{name}"
+        );
+    }
 }
 
 #[test]
@@ -117,14 +103,16 @@ assignments:
     let view = |addr| TensorView::new_full(Tensor::new(&[4], &DataType::Fp32, addr).unwrap());
     let region = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![view(0)],
             outputs: vec![view(128)],
         },
     )
     .unwrap();
     let tile = plan_tiles(&region, None).unwrap().tiles().next().unwrap();
-    let allocation = allocate_temporaries(&region, &tile).unwrap();
+    let program = super::prepared::PreparedProgram::from_facts(region, None).unwrap();
+    let allocation =
+        allocate_temporaries(program.group(&program.facts.assignment_order), &tile).unwrap();
     assert_eq!(allocation.arena_bytes, 48);
     assert!(
         allocation
@@ -167,7 +155,7 @@ assignments:
     };
     let region = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![view(&[2, 3], DataType::Fp32, 0)],
             outputs: vec![
                 view(&[2], DataType::Fp32, 128),
@@ -177,7 +165,9 @@ assignments:
     )
     .unwrap();
     let tile = plan_tiles(&region, None).unwrap().tiles().next().unwrap();
-    let allocation = allocate_temporaries(&region, &tile).unwrap();
+    let program = super::prepared::PreparedProgram::from_facts(region, None).unwrap();
+    let allocation =
+        allocate_temporaries(program.group(&program.facts.assignment_order), &tile).unwrap();
     assert!(
         allocation
             .slots

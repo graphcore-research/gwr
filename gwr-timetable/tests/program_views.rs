@@ -63,7 +63,6 @@ fn omitted_view_lists_cover_every_resolved_program_port() {
         assert_eq!(views.inputs().len(), 2);
         assert_eq!(views.outputs().len(), 1);
         for view in views.inputs().iter().chain(views.outputs()) {
-            let view = view.as_ref().unwrap();
             assert_eq!(view.shape().dims(), &[shape]);
             assert_eq!(view.offsets(), &[0]);
         }
@@ -94,8 +93,6 @@ fn either_view_list_can_be_omitted_independently() {
         let views = graph.compute_views(index).unwrap();
         assert_eq!(views.inputs().len(), 2);
         assert_eq!(views.outputs().len(), 1);
-        assert!(views.inputs().iter().all(Option::is_some));
-        assert!(views.outputs().iter().all(Option::is_some));
     }
 }
 

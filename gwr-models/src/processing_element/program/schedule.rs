@@ -4,14 +4,17 @@
 //! dependencies.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Range;
 
-use gwr_engine::types::SimError;
+use gwr_engine::types::{SimError, SimResult};
 
-use super::syntax::{ExprSpec, TileSpec};
-use super::validate::ValidatedRegion;
+use super::storage::align_sram_slot_bytes;
+use super::syntax::TileSpec;
+use super::tile::RegionTile;
+use super::validate::ProgramFacts;
 
-pub(crate) fn plan_schedule(
-    region: &ValidatedRegion,
+pub(in crate::processing_element) fn plan_schedule(
+    region: &ProgramFacts,
     tiling: Option<&TileSpec>,
 ) -> Result<Option<ScopedSchedule>, SimError> {
     validate_sizes(region, tiling)?;
@@ -50,7 +53,7 @@ pub(crate) fn plan_schedule(
     Ok(Some(plan))
 }
 
-fn needs_phased_schedule(region: &ValidatedRegion, tiling: Option<&TileSpec>) -> bool {
+fn needs_phased_schedule(region: &ProgramFacts, tiling: Option<&TileSpec>) -> bool {
     tiling.is_some_and(|tiling| {
         tiling.sizes.iter().any(|(axis, step)| {
             *step < region.extents[axis]
@@ -68,7 +71,7 @@ fn needs_phased_schedule(region: &ValidatedRegion, tiling: Option<&TileSpec>) ->
     })
 }
 
-fn find_common_output_axes(region: &ValidatedRegion) -> BTreeSet<String> {
+fn find_common_output_axes(region: &ProgramFacts) -> BTreeSet<String> {
     let first = &region.program.assignments[region.assignment_order[0]];
     first
         .axes
@@ -88,11 +91,11 @@ fn find_common_output_axes(region: &ValidatedRegion) -> BTreeSet<String> {
 /// Otherwise start with the ready group having the fewest free output axes,
 /// keeping the validated topological order as the deterministic tie breaker.
 fn plan_assignment_groups(
-    region: &ValidatedRegion,
+    region: &ProgramFacts,
     common: &BTreeSet<String>,
 ) -> Vec<(BTreeSet<String>, Vec<usize>)> {
     let axes = collect_assignment_group_axes(region, common);
-    let dependencies = build_assignment_dependency_sets(region);
+    let dependencies = &region.dependencies;
     let mut pending = region.assignment_order.clone();
     let mut done = BTreeSet::new();
     let mut groups = Vec::<(BTreeSet<String>, Vec<usize>)>::new();
@@ -119,7 +122,7 @@ fn plan_assignment_groups(
 }
 
 fn collect_assignment_group_axes(
-    region: &ValidatedRegion,
+    region: &ProgramFacts,
     common: &BTreeSet<String>,
 ) -> Vec<BTreeSet<String>> {
     region
@@ -137,47 +140,14 @@ fn collect_assignment_group_axes(
         .collect::<Vec<_>>()
 }
 
-fn build_assignment_dependency_sets(region: &ValidatedRegion) -> Vec<BTreeSet<usize>> {
-    let producers = region
-        .program
-        .assignments
-        .iter()
-        .enumerate()
-        .flat_map(|(index, assignment)| {
-            assignment
-                .output
-                .iter()
-                .chain(assignment.indices_output.iter())
-                .map(move |name| (name.clone(), index))
-        })
-        .collect::<BTreeMap<_, _>>();
-    region
-        .program
-        .assignments
-        .iter()
-        .map(|assignment| {
-            assignment
-                .expr
-                .collect_read_tensor_names()
-                .iter()
-                .filter_map(|name| producers.get(name).copied())
-                .collect::<BTreeSet<_>>()
-        })
-        .collect::<Vec<_>>()
-}
-
-fn validate_sizes(region: &ValidatedRegion, tiling: Option<&TileSpec>) -> Result<(), SimError> {
+fn validate_sizes(region: &ProgramFacts, tiling: Option<&TileSpec>) -> Result<(), SimError> {
     let Some(tiling) = tiling else {
         return Ok(());
     };
     let mut known = BTreeSet::new();
     for assignment in &region.program.assignments {
         known.extend(assignment.axes.iter().cloned());
-        for expr in assignment.expr.walk() {
-            if let ExprSpec::Reduce { over, .. } | ExprSpec::MatrixMac { over, .. } = expr {
-                known.extend(over.iter().cloned());
-            }
-        }
+        known.extend(assignment.expr.reduction_axes().iter().cloned());
     }
     for (axis, step) in &tiling.sizes {
         if !known.contains(axis) {
@@ -192,7 +162,7 @@ fn validate_sizes(region: &ValidatedRegion, tiling: Option<&TileSpec>) -> Result
 
 fn resolve_axis_tile_sizes(
     axes: &BTreeSet<String>,
-    region: &ValidatedRegion,
+    region: &ProgramFacts,
     tiling: Option<&TileSpec>,
 ) -> BTreeMap<String, usize> {
     axes.iter()
@@ -211,27 +181,19 @@ fn resolve_axis_tile_sizes(
 fn retain_cross_group_values(
     plan: &mut ScopedSchedule,
     locations: &BTreeMap<usize, Vec<usize>>,
-    region: &ValidatedRegion,
+    region: &ProgramFacts,
 ) {
     for (producer, assignment) in region.program.assignments.iter().enumerate() {
         for name in assignment
-            .output
-            .iter()
-            .chain(assignment.indices_output.iter())
+            .output()
+            .into_iter()
+            .chain(assignment.indices_output())
         {
             let consumers = region
-                .program
-                .assignments
-                .iter()
-                .enumerate()
-                .filter(|(_, consumer)| {
-                    consumer
-                        .expr
-                        .iter_read_tensor_names()
-                        .any(|read| read == name.as_str())
-                })
-                .map(|(index, _)| index)
-                .collect::<Vec<_>>();
+                .consumers
+                .get(name)
+                .map(|set| set.iter().copied().collect::<Vec<_>>())
+                .unwrap_or_default();
             if let Some(owner) = find_retained_value_scope_path(producer, &consumers, locations) {
                 scope_at_path_mut(plan, &owner)
                     .local_values
@@ -287,6 +249,170 @@ pub(crate) enum ScopedStep {
     Tiles(ScopedSchedule),
 }
 
+pub(in crate::processing_element) fn collect_retained_values(
+    scope: &ScopedSchedule,
+) -> BTreeSet<String> {
+    let mut result = scope.local_values.iter().cloned().collect::<BTreeSet<_>>();
+    for step in &scope.steps {
+        if let ScopedStep::Tiles(child) = step {
+            result.extend(collect_retained_values(child));
+        }
+    }
+    result
+}
+
+/// Traverse the same assignment invocations used by execution. Traffic
+/// estimation and compute validation use this traversal, including every
+/// clipped tail and row scope.
+pub(in crate::processing_element) fn visit_groups(
+    scope: &ScopedSchedule,
+    program: &super::prepared::PreparedProgram,
+    visit: &mut impl FnMut(&[usize], &RegionTile, usize) -> SimResult,
+) -> SimResult {
+    fn walk(
+        scope: &ScopedSchedule,
+        program: &super::prepared::PreparedProgram,
+        outer: &Intervals,
+        inherited: usize,
+        visit: &mut impl FnMut(&[usize], &RegionTile, usize) -> SimResult,
+    ) -> SimResult {
+        let region = &program.facts;
+        for intervals in scope_intervals(scope, outer, region) {
+            let live = calculate_live_local_bytes_by_step(scope, &intervals, region)?;
+            for (step, local) in scope.steps.iter().zip(live) {
+                let bytes = inherited
+                    .checked_add(local)
+                    .ok_or_else(|| SimError("schedule working set overflows".into()))?;
+                match step {
+                    ScopedStep::Group(indices) => visit(
+                        indices,
+                        &build_group_tile(indices, &intervals, program)?,
+                        bytes,
+                    )?,
+                    ScopedStep::Tiles(child) => {
+                        walk(child, program, &intervals, bytes, visit)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    walk(scope, program, &Intervals::new(), 0, visit)
+}
+
+pub(in crate::processing_element) fn scope_intervals<'a>(
+    scope: &ScopedSchedule,
+    outer: &'a Intervals,
+    region: &ProgramFacts,
+) -> impl Iterator<Item = Intervals> + 'a {
+    let axes = scope
+        .tiles
+        .iter()
+        .map(|(axis, step)| super::tile::AxisStep {
+            name: axis.clone(),
+            extent: region.extents[axis],
+            step: *step,
+        })
+        .collect();
+    super::tile::IntervalProduct::new(axes).map(|intervals| {
+        let mut result = outer.clone();
+        result.extend(intervals);
+        result
+    })
+}
+
+pub(in crate::processing_element) fn build_group_tile(
+    indices: &[usize],
+    intervals: &Intervals,
+    program: &super::prepared::PreparedProgram,
+) -> Result<RegionTile, SimError> {
+    let region = &program.facts;
+    let mut reductions = BTreeMap::new();
+    for &index in indices {
+        {
+            for axis in region.program.assignments[index].expr.reduction_axes() {
+                let step = program.reduction_steps[axis];
+                reductions.insert(axis.clone(), step);
+            }
+        }
+    }
+    RegionTile::new(intervals.clone(), reductions, region)
+}
+
+/// Live local bytes at each step. Parent scopes keep a tensor across completed
+/// child loops; a temporary used only inside a child is owned by that child.
+fn calculate_live_local_bytes_by_step(
+    scope: &ScopedSchedule,
+    intervals: &Intervals,
+    region: &ProgramFacts,
+) -> Result<Vec<usize>, SimError> {
+    let mut live = vec![0usize; scope.steps.len()];
+    for name in &scope.local_values {
+        let bytes = local_value_bytes(name, intervals, region)?;
+        let first = scope
+            .steps
+            .iter()
+            .position(|step| step_uses(step, name, region))
+            .unwrap();
+        let last = scope
+            .steps
+            .iter()
+            .rposition(|step| step_uses(step, name, region))
+            .unwrap();
+        for total in &mut live[first..=last] {
+            *total = total
+                .checked_add(bytes)
+                .ok_or_else(|| SimError("schedule local storage overflows".into()))?;
+        }
+    }
+    Ok(live)
+}
+
+fn step_uses(step: &ScopedStep, name: &str, region: &ProgramFacts) -> bool {
+    match step {
+        ScopedStep::Group(indices) => indices.iter().any(|index| {
+            region.producers.get(name) == Some(index)
+                || region
+                    .consumers
+                    .get(name)
+                    .is_some_and(|consumers| consumers.contains(index))
+        }),
+        ScopedStep::Tiles(child) => child.steps.iter().any(|step| step_uses(step, name, region)),
+    }
+}
+
+fn local_value_bytes(
+    name: &str,
+    intervals: &Intervals,
+    region: &ProgramFacts,
+) -> Result<usize, SimError> {
+    let producer = &region.program.assignments[region.producers[name]];
+    let value = &region.values[name];
+    let elements =
+        producer
+            .axes
+            .iter()
+            .zip(&value.shape)
+            .try_fold(1usize, |count, (axis, dim)| {
+                let len = if *dim == 1 {
+                    1
+                } else {
+                    intervals.get(axis).map_or(*dim, Range::len)
+                };
+                count
+                    .checked_mul(len)
+                    .ok_or_else(|| SimError("schedule local shape overflows".into()))
+            })?;
+    align_sram_slot_bytes(
+        elements
+            .checked_mul(value.dtype.num_bits())
+            .ok_or_else(|| SimError("schedule local storage overflows".into()))?
+            .div_ceil(8),
+    )
+}
+
+pub(in crate::processing_element) type Intervals = BTreeMap<String, Range<usize>>;
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -294,16 +420,16 @@ mod tests {
     use yaml_serde::from_str;
 
     use super::super::plan::allocate_temporaries;
-    use super::super::tile::{RegionTile, plan_tiles, validate_tiling};
+    use super::super::tile::RegionTile;
     use super::{ScopedStep, plan_schedule};
     use crate::processing_element::program::syntax::{ProgramSpec, TileSpec};
     use crate::processing_element::program::validate::{
-        RegionBindings, ValidatedRegion, validate_program,
+        ProgramFacts, RegionBindings, validate_program,
     };
     use crate::processing_element::tensors::dtype::DataType;
     use crate::processing_element::tensors::{Tensor, TensorView};
 
-    fn row_region() -> ValidatedRegion {
+    fn row_config() -> (ProgramSpec, RegionBindings) {
         let program: ProgramSpec = from_str(
             r"
 inputs: [A]
@@ -335,14 +461,18 @@ assignments:
         .unwrap();
         let view =
             |addr| TensorView::new_full(Tensor::new(&[3, 9], &DataType::Fp32, addr).unwrap());
-        validate_program(
-            &program,
-            &RegionBindings {
+        (
+            program,
+            RegionBindings {
                 inputs: vec![view(0)],
                 outputs: vec![view(512)],
             },
         )
-        .unwrap()
+    }
+
+    fn row_region() -> ProgramFacts {
+        let (program, bindings) = row_config();
+        validate_program(&program, bindings).unwrap()
     }
 
     fn row_tiling() -> TileSpec {
@@ -350,7 +480,7 @@ assignments:
             sizes: BTreeMap::from([("r".into(), 1), ("k".into(), 4)]),
         }
     }
-    fn pipeline_with_statistic(statistic: &str) -> ValidatedRegion {
+    fn pipeline_with_statistic(statistic: &str) -> ProgramFacts {
         let statistic = statistic.trim().replace('\n', "\n     ");
         let program: ProgramSpec = from_str(&format!(
             r"
@@ -378,7 +508,7 @@ assignments:
         };
         validate_program(
             &program,
-            &RegionBindings {
+            RegionBindings {
                 inputs: vec![view(&[9], 0), view(&[4], 128)],
                 outputs: vec![view(&[], 256), view(&[9], 512)],
             },
@@ -403,9 +533,9 @@ assignments:
 
     #[test]
     fn equal_output_axes_keep_topological_assignments_in_one_group() {
-        let mut region = row_region();
-        region.program.assignments.swap(0, 2);
-        region = validate_program(&region.program, &region.bindings).unwrap();
+        let (mut program, bindings) = row_config();
+        program.assignments.swap(0, 2);
+        let region = validate_program(&program, bindings).unwrap();
         let plan = plan_schedule(&region, Some(&row_tiling()))
             .unwrap()
             .unwrap();
@@ -437,14 +567,14 @@ assignments:
 
     #[test]
     fn consumed_boundary_outputs_are_retained_across_groups() {
-        let mut region = row_region();
-        region.program.temporaries.remove("S");
-        region.program.outputs.insert(0, "S".into());
-        region.bindings.outputs.insert(
+        let (mut program, mut bindings) = row_config();
+        program.temporaries.remove("S");
+        program.outputs.insert(0, "S".into());
+        bindings.outputs.insert(
             0,
             TensorView::new_full(Tensor::new(&[3], &DataType::Fp32, 256).unwrap()),
         );
-        region = validate_program(&region.program, &region.bindings).unwrap();
+        let region = validate_program(&program, bindings).unwrap();
         let plan = plan_schedule(&region, Some(&row_tiling()))
             .unwrap()
             .unwrap();
@@ -494,40 +624,44 @@ assignments:
     }
 
     #[test]
-    fn tiling_validation_rejects_zero_tile_sizes() {
-        let mut tiling = row_tiling();
-        tiling.sizes.insert("k".into(), 0);
-        let error = validate_tiling(&row_region(), Some(&tiling)).unwrap_err();
-        assert!(error.0.contains("positive"), "{error}");
+    fn invalid_tile_sizes_are_rejected() {
+        for (name, axis, size, expected) in [
+            ("zero_k", "k", 0, "positive"),
+            ("unknown_axis", "missing", 4, "unknown tile axis"),
+        ] {
+            let (spec, bindings) = row_config();
+            let mut tiling = row_tiling();
+            tiling.sizes.insert(axis.into(), size);
+            let error =
+                super::super::prepared::PreparedProgram::new(&spec, bindings, Some(&tiling))
+                    .unwrap_err();
+            assert!(error.0.contains(expected), "{name}: {error}");
+        }
     }
 
     #[test]
-    fn tiling_validation_rejects_unknown_tile_axes() {
-        let mut tiling = row_tiling();
-        tiling.sizes.insert("missing".into(), 4);
-        let error = validate_tiling(&row_region(), Some(&tiling)).unwrap_err();
-        assert!(error.0.contains("unknown tile axis"), "{error}");
-    }
-
-    #[test]
-    fn flat_tile_iteration_rejects_a_phased_plan() {
-        let error = plan_tiles(&row_region(), Some(&row_tiling())).unwrap_err();
-        assert!(error.0.contains("phased schedule"), "{error}");
+    fn canonical_schedule_classifies_phased_execution() {
+        let program =
+            super::super::prepared::PreparedProgram::from_facts(row_region(), Some(&row_tiling()))
+                .unwrap();
+        assert!(matches!(
+            program.schedule,
+            super::super::prepared::Schedule::Scoped(_)
+        ));
     }
 
     #[test]
     fn group_allocator_treats_external_local_producers_as_available() {
-        let mut region = row_region();
-        region.program.assignments = vec![region.program.assignments[1].clone()];
-        region.program.temporaries.retain(|name, _| name == "S");
-        region.assignment_order = vec![0];
+        let program =
+            super::super::prepared::PreparedProgram::from_facts(row_region(), None).unwrap();
+        let region = &program.facts;
         let tile = RegionTile::new(
             BTreeMap::from([("r".into(), 0..1)]),
             BTreeMap::new(),
-            &region,
+            region,
         )
         .unwrap();
-        let allocation = allocate_temporaries(&region, &tile).unwrap();
+        let allocation = allocate_temporaries(program.group(&[1]), &tile).unwrap();
         // One FP32 value occupies an eight-byte aligned SRAM slot.
         assert_eq!(allocation.arena_bytes, 8);
         assert_eq!(allocation.slots[0].values, ["S"]);

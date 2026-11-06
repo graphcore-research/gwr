@@ -32,8 +32,9 @@ use clap::Parser;
 use gwr_engine::types::SimError;
 use gwr_models::processing_element::compute::{ComputeModel, ComputeWork, MatrixWorkShape};
 use gwr_models::processing_element::estimate_peak_tile_sram;
+use gwr_models::processing_element::program::PreparedProgram;
 use gwr_models::processing_element::program::syntax::{ProgramSpec, TileSpec};
-use gwr_models::processing_element::program::validate::{RegionBindings, validate_program};
+use gwr_models::processing_element::program::validate::RegionBindings;
 use gwr_models::processing_element::tensors::dtype::DataType;
 use gwr_models::processing_element::tensors::{HasShape, Shape, Tensor, TensorView};
 use gwr_platform::types::PlatformConfig;
@@ -764,7 +765,7 @@ impl Generator {
                         // generated tile sizes are checked during tiling.
                         let work = if *op == "matrix_mac" {
                             ComputeWork::matrix_mac(
-                                vec![dtype, dtype],
+                                [dtype, dtype],
                                 dtype,
                                 MatrixWorkShape {
                                     batches: 1,
@@ -1263,12 +1264,13 @@ fn find_tiling_for_pe(
         .cloned()
         .collect::<Option<Vec<_>>>()
         .ok_or_else(|| error_from_str("generated program has an unbound output"))?;
-    let region = validate_program(
+    let region = PreparedProgram::new(
         program,
-        &RegionBindings {
+        RegionBindings {
             inputs: inputs.clone(),
             outputs: outputs.clone(),
         },
+        None,
     )
     .map_err(boxed_error)?;
     let mut tiling = TileSpec {
@@ -1280,7 +1282,16 @@ fn find_tiling_for_pe(
     loop {
         let required =
             estimate_peak_tile_sram(program, &inputs, &outputs, &tiling).map_err(boxed_error)?;
-        let compute_error = compute_model.validate_program(&region, Some(&tiling)).err();
+        let tiled = PreparedProgram::new(
+            program,
+            RegionBindings {
+                inputs: inputs.clone(),
+                outputs: outputs.clone(),
+            },
+            Some(&tiling),
+        )
+        .map_err(boxed_error)?;
+        let compute_error = compute_model.validate_program(&tiled).err();
         if required <= sram_bytes && compute_error.is_none() {
             return Ok(tiling);
         }

@@ -31,7 +31,7 @@ fn matrix_operation_classes() -> BTreeMap<String, OperationClass> {
     from_str("matrix: { operations: [matrix_mac], arity: 2 }").unwrap()
 }
 
-fn matrix_work_with_accumulator(inputs: Vec<DataType>, accumulator: DataType) -> ComputeWork {
+fn matrix_work_with_accumulator(inputs: [DataType; 2], accumulator: DataType) -> ComputeWork {
     ComputeWork::matrix_mac(
         inputs,
         accumulator,
@@ -53,7 +53,7 @@ fn matrix_accumulator_dtype_selects_the_matching_capability() {
     )
     .unwrap();
     for (accumulator, macs_per_tick) in [(DataType::Fp32, 4), (DataType::Bf16, 8)] {
-        let work = matrix_work_with_accumulator(vec![DataType::Bf16; 2], accumulator);
+        let work = matrix_work_with_accumulator([DataType::Bf16; 2], accumulator);
         let plan = model.lower(&work).unwrap();
         assert_eq!(
             plan.service_ticks().unwrap(),
@@ -69,7 +69,7 @@ fn matrix_work_rejects_an_unsupported_accumulator_dtype() {
         &matrix_operation_classes(),
     )
     .unwrap();
-    let work = matrix_work_with_accumulator(vec![DataType::Bf16; 2], DataType::Int32);
+    let work = matrix_work_with_accumulator([DataType::Bf16; 2], DataType::Int32);
     assert!(
         model
             .lower(&work)
@@ -89,7 +89,7 @@ fn matrix_work_rejects_unsupported_operand_dtypes() {
     assert!(
         model
             .lower(&matrix_work_with_accumulator(
-                vec![DataType::Fp16; 2],
+                [DataType::Fp16; 2],
                 DataType::Fp32
             ))
             .unwrap_err()

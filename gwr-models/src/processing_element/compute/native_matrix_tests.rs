@@ -63,6 +63,7 @@ fn execute_matrix_program(task: ProgramTaskConfig, matrix_service_tiles_enabled:
         .insert("matrix".into(), matrix);
     let (pe, memory) = processing_element_and_memory_fixture(&mut engine, &config, "hbm");
     let dispatch = Rc::new(OneTask {
+        fetched: Cell::new(false),
         task: Task::ProgramTask {
             config: Box::new(task),
         },
@@ -83,12 +84,17 @@ fn execute_matrix_program(task: ProgramTaskConfig, matrix_service_tiles_enabled:
 
 struct OneTask {
     task: Task,
+    fetched: Cell<bool>,
     state: Cell<TaskState>,
 }
 
 #[async_trait(?Send)]
 impl Dispatch for OneTask {
     fn task_by_id(&self, _: usize) -> Result<Task, SimError> {
+        assert!(
+            !self.fetched.replace(true),
+            "dispatch task must be fetched exactly once"
+        );
         Ok(self.task.clone())
     }
 
@@ -312,7 +318,7 @@ fn matrix_service_tiles_round_each_reduction_chunk_independently() {
     // Check the logical output tile and contraction intervals first.
     let region = validate_program(
         &chunked.program,
-        &RegionBindings {
+        RegionBindings {
             inputs: chunked.inputs.clone(),
             outputs: chunked.outputs.clone(),
         },
@@ -495,4 +501,123 @@ fn batched_matrix_execution_handles_partial_batch_and_contraction_tiles() {
     let input_bytes = BATCHES * (ROWS + COLUMNS) * REDUCTION_ELEMENTS * BYTES_PER_BF16;
     let output_bytes = BATCHES * ROWS * COLUMNS * BYTES_PER_FP32;
     assert_eq!(observed.traffic, (input_bytes, output_bytes));
+}
+
+#[test]
+fn raw_dispatch_preparation_rejections_have_no_side_effects() {
+    for (name, axes, output_shape, expression, rate, expected, sram_bytes, flop_cost, tile) in [
+        (
+            "actual_duration",
+            "[i]",
+            vec![2],
+            "exp: [{read: {tensor: A, indices: [i]}}]",
+            "1e-19",
+            "duration",
+            16,
+            1,
+            None,
+        ),
+        (
+            "program_accounting",
+            "[i]",
+            vec![2],
+            "exp: [{read: {tensor: A, indices: [i]}}]",
+            "1",
+            "FLOP-equivalent count overflows",
+            32,
+            usize::MAX / 2 + 1,
+            Some(1),
+        ),
+        (
+            "scalar_empty",
+            "[]",
+            vec![],
+            "reduce: {op: max, over: [k], value: {read: {tensor: A, indices: [{affine: {terms: {k: 3}, offset: -1}}], bounds: exclude}}}",
+            "1",
+            "empty",
+            64,
+            1,
+            None,
+        ),
+        (
+            "interior_empty",
+            "[i]",
+            vec![3],
+            "reduce: {op: max, over: [k], value: {read: {tensor: A, indices: [{affine: {terms: {i: 1, k: 3}, offset: -2}}], bounds: exclude}}}",
+            "1",
+            "empty",
+            64,
+            1,
+            None,
+        ),
+    ] {
+        println!("case: {name}");
+        let mut engine = Engine::default();
+        let clock = engine.default_clock();
+        let mut config = matrix_processing_element_config(1, false, None, false);
+        config.compute = from_str(&format!("execution_units: {{scalar: {{capabilities: [{{class: exp, input_dtypes: [[fp32]], ops_per_tick: {rate}}}, {{class: compare, input_dtypes: [[fp32,fp32]], ops_per_tick: 1}}]}}}}")).unwrap();
+        config.operation_classes = from_str(
+            "exp: {operations: [exp], arity: 1}\ncompare: {operations: [compare], arity: 2}",
+        )
+        .unwrap();
+        config
+            .operation_classes
+            .get_mut("exp")
+            .unwrap()
+            .flops_per_op = flop_cost;
+        config.sram_bytes = sram_bytes;
+        let (pe, memory) = processing_element_and_memory_fixture(&mut engine, &config, "memory");
+        let task = ProgramTaskConfig {
+            id: "preflight".into(), tiling: tile.map(|size| TileSpec { sizes: BTreeMap::from([("i".into(), size)]) }),
+            program: from_str(&format!("inputs: [A]\noutputs: [Y]\nextents: {{k: 2, i: {}}}\nassignments:\n - output: Y\n   axes: {axes}\n   expr: {{{expression}}}\n", output_shape.first().copied().unwrap_or(1))).unwrap(),
+            inputs: vec![full_tensor_view(&[2], DataType::Fp32, LHS_BASE_ADDRESS)],
+            outputs: vec![full_tensor_view(&output_shape, DataType::Fp32, OUTPUT_BASE_ADDRESS)],
+        };
+        let dispatch = Rc::new(OneTask {
+            fetched: Cell::new(false),
+            task: Task::ProgramTask {
+                config: Box::new(task),
+            },
+            state: Cell::new(TaskState::Pending),
+        });
+        let dyn_dispatch: Rc<dyn Dispatch> = dispatch.clone();
+        pe.set_dispatcher(&dyn_dispatch);
+        let error = engine.run().unwrap_err();
+        assert!(error.0.contains(expected), "{error}");
+        assert_eq!(dispatch.state.get(), TaskState::Pending);
+        assert_eq!(clock.tick_now().tick(), 0);
+        assert_eq!(pe.machine_ops().checked_operation_total().unwrap(), 0);
+        assert_eq!(pe.machine_ops().flop_equivalents(), 0);
+        assert_eq!(pe.peak_sram_bytes(), 0);
+        assert_eq!(pe.memory_traffic_bytes(), (0, 0));
+        assert_eq!((memory.bytes_read(), memory.bytes_written()), (0, 0));
+    }
+}
+
+#[test]
+fn prepared_task_rejects_another_pe_with_the_same_name_before_activation() {
+    let config = matrix_processing_element_config(1, false, None, false);
+    let mut original_engine = Engine::default();
+    let (original, _) =
+        processing_element_and_memory_fixture(&mut original_engine, &config, "memory");
+    let prepared = original
+        .prepare_program_task(matrix_program_task(1, 1, 1))
+        .unwrap();
+    let mut engine = Engine::default();
+    let (other, memory) = processing_element_and_memory_fixture(&mut engine, &config, "memory");
+    let dispatch = Rc::new(OneTask {
+        fetched: Cell::new(false),
+        task: Task::PreparedProgram { task: prepared },
+        state: Cell::new(TaskState::Pending),
+    });
+    let dyn_dispatch: Rc<dyn Dispatch> = dispatch.clone();
+    other.set_dispatcher(&dyn_dispatch);
+    let error = engine.run().unwrap_err();
+    assert!(error.0.contains("another processing element"), "{error}");
+    assert_eq!(dispatch.state.get(), TaskState::Pending);
+    assert_eq!(engine.default_clock().tick_now().tick(), 0);
+    assert_eq!(other.peak_sram_bytes(), 0);
+    assert_eq!(other.machine_ops().checked_operation_total().unwrap(), 0);
+    assert_eq!(other.memory_traffic_bytes(), (0, 0));
+    assert_eq!((memory.bytes_read(), memory.bytes_written()), (0, 0));
 }

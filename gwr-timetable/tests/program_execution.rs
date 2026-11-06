@@ -1,24 +1,18 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 use std::rc::Rc;
 
-use gwr_engine::engine::Engine;
-use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::program::SRAM_SLOT_ALIGNMENT_BYTES;
-use gwr_models::processing_element::task::ProgramTaskConfig;
 use gwr_platform::Platform;
-use gwr_timetable::Timetable;
 use gwr_timetable::timetable_file::TimetableFile;
-use gwr_track::Tracker;
-use gwr_track::log::Level;
-use gwr_track::test_helpers::TestTracker;
-use yaml_serde::from_str;
+
+mod common;
+use common::{assert_rejected_before_loading, run_timetable};
 
 // Fixture dimensions and storage sizes are shared by the timetables and
 // assertions.
 const FP16_BYTES: usize = 2;
 const FP32_BYTES: usize = 4;
 const SRAM_BYTES: usize = 2304;
-const TRACKER_INITIAL_ID: u64 = 10_000;
 const MATRIX_ROWS: usize = 2;
 const MATRIX_COLUMNS: usize = 3;
 const MATRIX_REDUCTION_ELEMENTS: usize = 5;
@@ -46,35 +40,6 @@ const SECOND_READ_OFFSET: usize = 2;
 const OUTSIDE_READ_OFFSET: usize = EXCLUDED_SUM_EXTENT;
 const COMPUTE_OPS_PER_TICK: usize = 8;
 const SLOW_UNARY_OPS_PER_TICK: f64 = 0.01;
-
-fn assert_schedule_sram_rejected_without_execution(source: &str, sram_bytes: usize) {
-    let tracker = Rc::new(TestTracker::new(TRACKER_INITIAL_ID, Level::Trace));
-    let tracking: Tracker = tracker.clone();
-    let mut engine = Engine::new(&tracking);
-    let clock = engine.default_clock();
-    let platform = Rc::new(
-        Platform::from_string(&engine, &clock, &compute_platform_yaml(sram_bytes)).unwrap(),
-    );
-    let file = TimetableFile::from_string(source).unwrap();
-    let result = Timetable::new(engine.top(), file.into_graph().unwrap(), &platform);
-    let error = match result {
-        Ok(_) => panic!("automatic schedule must exceed {sram_bytes} bytes of SRAM"),
-        Err(error) => error,
-    };
-    assert!(error.to_string().contains("SRAM"), "{error}");
-    let pe = platform.pe("pe0").unwrap();
-    assert_eq!(pe.memory_traffic_bytes(), (0, 0));
-    assert_eq!(pe.peak_sram_bytes(), 0);
-    assert!(pe.machine_ops().by_operation.is_empty());
-}
-
-fn validation_platform(sram_bytes: usize) -> Platform {
-    let tracker = Rc::new(TestTracker::new(TRACKER_INITIAL_ID, Level::Trace));
-    let tracking: Tracker = tracker;
-    let mut engine = Engine::new(&tracking);
-    let clock = engine.default_clock();
-    Platform::from_string(&engine, &clock, &compute_platform_yaml(sram_bytes)).unwrap()
-}
 
 fn simulate_timetable(source: &str) -> Rc<Platform> {
     simulate_timetable_with_events(source).0
@@ -126,25 +91,8 @@ fn simulate_timetable_on_platform_with_events(
     source: &str,
     platform_source: &str,
 ) -> (Rc<Platform>, Vec<String>) {
-    let tracker = Rc::new(TestTracker::new(TRACKER_INITIAL_ID, Level::Trace));
-    let tracking: Tracker = tracker.clone();
-    let mut engine = Engine::new(&tracking);
-    let clock = engine.default_clock();
-    let platform = Rc::new(Platform::from_string(&engine, &clock, platform_source).unwrap());
-    let file = TimetableFile::from_string(source).unwrap();
-    let timetable =
-        Rc::new(Timetable::new(engine.top(), file.into_graph().unwrap(), &platform).unwrap());
-    let dispatcher: Rc<dyn Dispatch> = timetable.clone();
-    platform.attach_dispatcher(&dispatcher);
-    engine.run().unwrap();
-    timetable.check_tasks_complete().unwrap();
-    let planned = timetable.workload_totals().unwrap();
-    assert_eq!(
-        platform.pe("pe0").unwrap().memory_traffic_bytes(),
-        (planned.read_bytes, planned.written_bytes),
-        "planned boundary traffic must match completed execution",
-    );
-    (platform, tracker.events())
+    let simulation = run_timetable(platform_source, TimetableFile::from_string(source).unwrap());
+    (simulation.platform, simulation.tracker.events())
 }
 
 fn matrix_cast_timetable() -> String {
@@ -615,47 +563,6 @@ edges:
     )
 }
 
-fn matrix_validation_config() -> ProgramTaskConfig {
-    use std::collections::BTreeMap;
-
-    use gwr_models::processing_element::program::syntax::{ProgramSpec, TileSpec};
-    use gwr_models::processing_element::tensors::dtype::DataType;
-    use gwr_models::processing_element::tensors::{Tensor, TensorView};
-
-    let program: ProgramSpec = from_str(
-        r"
-inputs: [A,B]
-outputs: [Y]
-assignments:
- - output: Y
-   axes: [m,n]
-   expr:
-     matrix_mac:
-       accumulator: fp32
-       over: [k]
-       args:
-         - read: { tensor: A, indices: [m,k] }
-         - read: { tensor: B, indices: [k,n] }
-",
-    )
-    .unwrap();
-    let view = |shape: &[usize], addr| {
-        TensorView::new_full(Tensor::new(shape, &DataType::Fp16, addr).unwrap())
-    };
-    ProgramTaskConfig {
-        id: "matrix_validation".into(),
-        program,
-        tiling: Some(TileSpec {
-            sizes: BTreeMap::from([("k".into(), MATRIX_REDUCTION_CHUNK)]),
-        }),
-        inputs: vec![
-            view(&[MATRIX_ROWS, MATRIX_REDUCTION_ELEMENTS], 0x1000),
-            view(&[MATRIX_REDUCTION_ELEMENTS, MATRIX_COLUMNS], 0x2000),
-        ],
-        outputs: vec![view(&[MATRIX_ROWS, MATRIX_COLUMNS], 0x3000)],
-    }
-}
-
 fn branched_lifetime_timetable() -> String {
     format!(
         r"
@@ -962,70 +869,20 @@ fn automatic_schedule_retains_a_consumed_boundary_output_in_local_storage() {
 }
 
 #[test]
-fn softmax_sram_rejection_precedes_memory_requests() {
-    assert_schedule_sram_rejected_without_execution(&softmax_timetable(1), 1);
-}
-
-#[test]
-fn materialized_row_sram_rejection_precedes_memory_requests() {
-    assert_schedule_sram_rejected_without_execution(
-        &local_temporary_timetable(false),
-        LOCAL_CHUNK_SRAM_BYTES,
-    );
-}
-
-#[test]
-fn program_validation_rejects_insufficient_sram_before_execution() {
-    // Inputs, output and persistent fp32 accumulator each reserve an aligned
-    // slot.
-    let aligned = |bytes: usize| bytes.next_multiple_of(SRAM_SLOT_ALIGNMENT_BYTES);
-    let output_elements = MATRIX_ROWS * MATRIX_COLUMNS;
-    let required_sram = aligned(MATRIX_ROWS * MATRIX_REDUCTION_CHUNK * FP16_BYTES)
-        + aligned(MATRIX_REDUCTION_CHUNK * MATRIX_COLUMNS * FP16_BYTES)
-        + aligned(output_elements * FP16_BYTES)
-        + aligned(output_elements * FP32_BYTES);
-    let platform = validation_platform(required_sram - 1);
-    let config = matrix_validation_config();
-    let pe = platform.pe("pe0").unwrap();
-    let error = pe.validate_program_task(&config).unwrap_err();
-    assert!(
-        error.0.contains(&format!("{required_sram} SRAM bytes")),
-        "{error}"
-    );
-    assert_eq!(pe.memory_traffic_bytes(), (0, 0));
-    assert_eq!(pe.peak_sram_bytes(), 0);
-    assert!(pe.machine_ops().by_operation.is_empty());
-}
-
-#[test]
-fn program_validation_rejects_unsupported_accumulator_before_execution() {
-    use gwr_models::processing_element::program::syntax::ExprSpec;
-    use gwr_models::processing_element::tensors::dtype::DataType;
-
-    // Provide enough SRAM so only the unsupported accumulator can reject this
-    // task.
-    let platform = validation_platform(SRAM_BYTES);
-    let mut config = matrix_validation_config();
-    let ExprSpec::MatrixMac { accumulator, .. } = &mut config.program.assignments[0].expr else {
-        panic!("matrix fixture must contain a matrix_mac assignment");
-    };
-    *accumulator = DataType::Int32;
-    let pe = platform.pe("pe0").unwrap();
-    let error = pe.validate_program_task(&config).unwrap_err();
-    assert!(error.0.contains("unsupported capability"), "{error}");
-    assert_eq!(pe.memory_traffic_bytes(), (0, 0));
-    assert_eq!(pe.peak_sram_bytes(), 0);
-    assert!(pe.machine_ops().by_operation.is_empty());
-}
-
-#[test]
 fn reused_slot_waits_for_the_slow_consumer_on_an_independent_branch() {
     let (platform, events) = simulate_timetable_on_platform_with_events(
         &branched_lifetime_timetable(),
-        &compute_platform_yaml(SRAM_BYTES).replace(
-            &format!("class: unary, ops_per_tick: {COMPUTE_OPS_PER_TICK}"),
-            &format!("class: unary, ops_per_tick: {SLOW_UNARY_OPS_PER_TICK}"),
-        ),
+        // Keep slow unary work independent of the fast binary branch so a
+        // shared execution unit cannot mask a missing slot anti-dependency.
+        &compute_platform_yaml(SRAM_BYTES)
+            .replace(
+                &format!("class: unary, ops_per_tick: {COMPUTE_OPS_PER_TICK}"),
+                &format!("class: unary, ops_per_tick: {SLOW_UNARY_OPS_PER_TICK}"),
+            )
+            .replace(
+                "             - { class: binary",
+                "         binary:\n           capabilities:\n             - { class: binary",
+            ),
     );
     let slow_finished = events
         .iter()
@@ -1039,6 +896,8 @@ fn reused_slot_waits_for_the_slow_consumer_on_an_independent_branch() {
         slow_finished < reuse_started,
         "T3 reuses T0 storage only after both branch consumers finish"
     );
+    // A and Y plus three temporary slots, each holding four FP32 elements.
+    assert_eq!(platform.pe("pe0").unwrap().peak_sram_bytes(), 80);
     assert_eq!(
         platform
             .pe("pe0")
@@ -1103,4 +962,115 @@ fn nested_absmax_excludes_tail_elements_from_arithmetic_and_comparisons() {
         pe.machine_ops().by_operation.get("compare"),
         Some(&comparisons)
     );
+}
+
+#[test]
+fn forward_reference_producer_preserves_scoped_and_flat_issue_order() {
+    // U and independent Z compete for the unary unit. T consumes U on a
+    // separate binary unit, so issuing U first lets T overlap Z's service.
+    let platform_source = compute_platform_yaml(SRAM_BYTES).replace(
+        &format!("             - {{ class: binary, ops_per_tick: {COMPUTE_OPS_PER_TICK} }}"),
+        &format!("         binary:\n           capabilities:\n             - {{ class: binary, ops_per_tick: {COMPUTE_OPS_PER_TICK} }}"),
+    );
+    for scoped in [false, true] {
+        let tiling = if scoped {
+            "   tiling: { sizes: { i: 2 } }"
+        } else {
+            ""
+        };
+        let source = format!(
+            r"
+nodes:
+ - id: A
+   kind: tensor
+   config: {{ addr: 0x1000, dtype: fp32, shape: [4] }}
+ - id: Y
+   kind: tensor
+   config: {{ addr: 0x2000, dtype: fp32, shape: [] }}
+ - id: Z
+   kind: tensor
+   config: {{ addr: 0x3000, dtype: fp32, shape: [4] }}
+ - id: forward
+   kind: compute
+   pe: pe0
+   program:
+     inputs: [A]
+     outputs: [Y, Z]
+     temporaries: {{ T: {{dtype: fp32}}, U: {{dtype: fp32}} }}
+     assignments:
+      - output: T
+        axes: [i]
+        expr: {{ add: [{{read: {{tensor: U, indices: [i]}}}}, {{read: {{tensor: U, indices: [i]}}}}] }}
+      - output: Z
+        axes: [i]
+        expr: {{ exp: [{{read: {{tensor: A, indices: [i]}}}}] }}
+      - output: U
+        axes: [i]
+        expr: {{ exp: [{{read: {{tensor: A, indices: [i]}}}}] }}
+      - output: Y
+        axes: []
+        expr: {{ reduce: {{op: sum, over: [i], value: {{read: {{tensor: T, indices: [i]}}}}}} }}
+{tiling}
+edges:
+ - {{from: A, to: forward.0, kind: data}}
+ - {{from: forward.0, to: Y, kind: data}}
+ - {{from: forward.1, to: Z, kind: data}}
+"
+        );
+        let (_, events) = simulate_timetable_on_platform_with_events(&source, &platform_source);
+        let position = |marker: &str| {
+            events
+                .iter()
+                .position(|event| event.contains(marker))
+                .unwrap()
+        };
+        let producer_first = position("assignment U begin") < position("assignment Z begin");
+        assert_eq!(
+            producer_first, scoped,
+            "scoped={scoped}: preserve the execution policy's issue order"
+        );
+        let consumer_overlaps = position("assignment T begin") < position("assignment Z end");
+        assert_eq!(
+            consumer_overlaps, scoped,
+            "scoped={scoped}: consumer overlap follows producer admission"
+        );
+    }
+}
+
+#[test]
+fn scoped_and_matrix_preparation_rejections_have_no_side_effects() {
+    // Aligned FP16 A 2x2=8, B 2x3=16, Y 2x3=16, FP32 partials 2x3=24: 64 bytes.
+    for (name, source, sram_bytes, expected) in [
+        (
+            "softmax_retained_scalar",
+            softmax_timetable(1),
+            1,
+            &["SRAM"][..],
+        ),
+        (
+            "materialized_full_row",
+            local_temporary_timetable(false),
+            LOCAL_CHUNK_SRAM_BYTES,
+            &["SRAM"][..],
+        ),
+        (
+            "matrix_fp32_partials_63_of_64",
+            matrix_cast_timetable(),
+            63,
+            &["requires 64 SRAM bytes"][..],
+        ),
+        (
+            "matrix_unsupported_int32_accumulator",
+            matrix_cast_timetable().replace("accumulator: fp32", "accumulator: int32"),
+            SRAM_BYTES,
+            &["gemm", "unsupported capability"][..],
+        ),
+    ] {
+        println!("case: {name}");
+        assert_rejected_before_loading(
+            &compute_platform_yaml(sram_bytes),
+            TimetableFile::from_string(&source).unwrap(),
+            expected,
+        );
+    }
 }

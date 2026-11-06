@@ -39,13 +39,10 @@ use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::debug;
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
-use program::schedule::plan_schedule;
-use program::tile::plan_tiles;
-use program::validate::{RegionBindings, validate_program};
-use runner::schedule::estimate_scoped_peak_sram;
-use runner::validate_program_compute_support;
+use program::PreparedProgram;
+use program::validate::RegionBindings;
 use serde::{Deserialize, Serialize};
-use task::{ProgramTaskConfig, Task};
+use task::{PreparedTask, ProgramTaskConfig, Task};
 
 use crate::log_stats;
 use crate::memory::memory_access::MemoryAccess;
@@ -109,12 +106,20 @@ impl Runnable for ProcessingElement {
             } else {
                 // Spawn all so they can run in parallel
                 for task_idx in ready_node_indices.drain(..) {
-                    match dispatcher.task_by_id(task_idx)? {
-                        Task::ProgramTask { config } => {
-                            self.validate_program_task(&config)?;
+                    let task = match dispatcher.task_by_id(task_idx)? {
+                        Task::ProgramTask { config } => self.prepare_program_task(*config)?,
+                        Task::PreparedProgram { task } => {
+                            if !task.belongs_to(&self.entity) {
+                                return sim_error!(
+                                    "prepared task belongs to another processing element"
+                                );
+                            }
+                            task
                         }
-                        Task::SyncTask { .. } => (),
-                    }
+                        Task::SyncTask { .. } => {
+                            return sim_error!("synchronization tasks are unsupported");
+                        }
+                    };
                     dispatcher.set_task_active(task_idx)?;
 
                     let runner = TaskRunner {
@@ -122,6 +127,7 @@ impl Runnable for ProcessingElement {
                         clock: self.clock.clone(),
                         dispatcher: dispatcher.clone(),
                         lsu: self.lsu.clone(),
+                        #[cfg(test)]
                         compute_model: self.compute_model.clone(),
                         compute_scheduler: self.compute_scheduler.clone(),
                         sram: self.sram.clone(),
@@ -131,7 +137,7 @@ impl Runnable for ProcessingElement {
                         flop_monitor: self.flop_monitor.clone(),
                     };
                     self.spawner
-                        .spawn(async move { runner.run(task_idx).await });
+                        .spawn(async move { runner.run(task_idx, task).await });
                 }
             }
 
@@ -258,35 +264,56 @@ impl ProcessingElement {
         (stats.read_bytes, stats.written_bytes)
     }
 
-    /// Validate typed operations and peak tile storage without issuing requests
-    /// or reserving execution units. This uses the same lowering and admission
-    /// rules as execution, so unsupported modes fail before publishing a
-    /// workload.
-    pub fn validate_program_task(&self, config: &ProgramTaskConfig) -> SimResult {
-        self.lsu.validate_program_views(config)?;
-        let region = validate_program(
+    /// Bind raw syntax and prepare it for this exact PE, without side effects.
+    pub fn prepare_program_task(
+        &self,
+        config: ProgramTaskConfig,
+    ) -> Result<Rc<PreparedTask>, SimError> {
+        let program = Rc::new(PreparedProgram::new(
             &config.program,
-            &RegionBindings {
-                inputs: config.inputs.clone(),
-                outputs: config.outputs.clone(),
+            RegionBindings {
+                inputs: config.inputs,
+                outputs: config.outputs,
             },
-        )?;
-        let peak = if let Some(schedule) = plan_schedule(&region, config.tiling.as_ref())? {
-            estimate_scoped_peak_sram(config, &region, &schedule, Some(&self.compute_model))?
-        } else {
-            let schedule = plan_tiles(&region, config.tiling.as_ref())?;
-            validate_program_compute_support(&self.compute_model, &region, &schedule)?;
-            let tiling = config.tiling.clone().unwrap_or_default();
-            estimate_peak_tile_sram(&config.program, &config.inputs, &config.outputs, &tiling)?
-        };
-        if peak > self.sram_bytes {
-            return sim_error!(
-                "{} tile requires {peak} SRAM bytes, available {}",
-                config.id,
-                self.sram_bytes
-            );
-        }
-        Ok(())
+            config.tiling.as_ref(),
+        )?);
+        self.prepare_program(config.id, program)
+    }
+
+    /// Immutable compute capabilities used for workload selection.
+    pub fn compute_model(&self) -> &ComputeModel {
+        &self.compute_model
+    }
+
+    /// Physical regions addressable by this processing element.
+    pub fn memory_map(&self) -> &MemoryMap {
+        self.lsu.memory_map()
+    }
+
+    /// Check the actual touched bytes of a view against this PE's map.
+    pub fn validate_mapped_view(&self, view: &tensors::TensorView) -> SimResult {
+        self.lsu.validate_mapped_view(view)
+    }
+
+    /// Prepare a shared bound program for this exact PE instance.
+    ///
+    /// Checks actual invocations, durations, touched memory mappings and SRAM
+    /// capacity before activation, without issuing requests. Retain the
+    /// returned handle for dispatch and accounting; it cannot execute on
+    /// another PE.
+    pub fn prepare_program(
+        &self,
+        id: String,
+        program: Rc<PreparedProgram>,
+    ) -> Result<Rc<PreparedTask>, SimError> {
+        PreparedTask::prepare(
+            id,
+            program,
+            self.entity.clone(),
+            &self.lsu,
+            &self.compute_model,
+            self.sram_bytes,
+        )
     }
 
     pub fn peak_sram_bytes(&self) -> usize {

@@ -503,7 +503,17 @@ checks programs, memory conflicts, and cycles across data edges. Creating a
 runnable timetable checks that named PEs exist in the platform. It also checks
 every compute node against its PE capabilities, tile SRAM limits, and memory
 mappings. These checks run automatically in `Timetable::new()`. They issue no
-memory requests. The runner also validates compute nodes as they execute.
+memory requests.
+
+Raw program syntax and owned tensor bindings become an immutable
+`PreparedProgram`. Hardware-independent SRAM and traffic analysis traverses its
+lazy schedule using bounded memory; traversal time can still scale with the
+number of invocations. Preparing that program against a PE checks actual compute
+work and durations, touched addresses, and SRAM capacity. The resulting shared
+`PreparedTask` belongs to that exact PE instance, including when another PE has
+the same name. The timetable retains this handle for dispatch and accounting.
+Custom dispatchers can supply raw `ProgramTaskConfig` tasks; the PE prepares
+them before activation or any memory request.
 
 ## Generate a timetable
 

@@ -16,7 +16,7 @@ use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::EntityGet;
 use gwr_models::processing_element::MachineOpCounts;
 use gwr_models::processing_element::dispatch::Dispatch;
-use gwr_models::processing_element::task::{ProgramTaskConfig, Task};
+use gwr_models::processing_element::task::{PreparedTask, Task};
 use gwr_platform::Platform;
 use gwr_track::entity::Entity;
 use gwr_track::{debug, info, trace};
@@ -43,6 +43,7 @@ pub struct Timetable {
     platform: Rc<Platform>,
     graph: TimetableGraph,
     node_pe_indices: Vec<Option<usize>>,
+    prepared_tasks: HashMap<usize, Rc<PreparedTask>>,
     completed_node_indices: RefCell<HashSet<usize>>,
     completed_workload: Cell<Option<Workload>>,
     active_node_indices: RefCell<HashSet<usize>>,
@@ -85,10 +86,27 @@ impl Timetable {
             node_pe_indices.push(pe_idx);
         }
 
+        let mut prepared_tasks = HashMap::new();
+        for (node_index, node) in graph.nodes().iter().enumerate() {
+            if let Some(program) = node.program() {
+                let pe_name = node
+                    .pe()
+                    .ok_or_else(|| SimError(format!("Task '{}' has no PE placement", node.id())))?;
+                let task = platform
+                    .pe(pe_name)?
+                    .prepare_program(node.id().to_owned(), program.clone())
+                    .map_err(|error| {
+                        SimError(format!("Node '{}' on PE '{pe_name}': {error}", node.id()))
+                    })?;
+                prepared_tasks.insert(node_index, task);
+            }
+        }
+
         let timetable = Self {
             entity,
             graph,
             node_pe_indices,
+            prepared_tasks,
             platform: platform.clone(),
             completed_node_indices: RefCell::new(HashSet::new()),
             completed_workload: Cell::new(None),
@@ -100,32 +118,10 @@ impl Timetable {
             ready_nodes_changed: Repeated::new(()),
         };
 
-        timetable.validate_compute_nodes()?;
-
         timetable.update_complete_tensors();
         timetable.initialize_scheduler_state();
 
         Ok(timetable)
-    }
-
-    fn validate_compute_nodes(&self) -> SimResult {
-        for (index, node) in self.graph.nodes().iter().enumerate() {
-            if !node.is_compute() {
-                continue;
-            }
-            let pe_name = node
-                .pe()
-                .ok_or_else(|| SimError(format!("Task '{}' has no PE placement", node.id())))?;
-            let pe = self.platform.pe(pe_name)?;
-            match self.task_by_id(index)? {
-                Task::ProgramTask { config } => pe.validate_program_task(&config),
-                Task::SyncTask { .. } => Ok(()),
-            }
-            .map_err(|error| {
-                SimError(format!("Node '{}' on PE '{pe_name}': {error}", node.id()))
-            })?;
-        }
-        Ok(())
     }
 
     pub fn total_tasks(&self) -> usize {
@@ -193,10 +189,7 @@ impl Timetable {
         for (index, node) in self.graph.nodes().iter().enumerate() {
             if node.is_compute() {
                 {
-                    let (read, written) = match self.task_by_id(index)? {
-                        Task::ProgramTask { config } => config.planned_traffic_bytes()?,
-                        Task::SyncTask { .. } => (0, 0),
-                    };
+                    let (read, written) = self.prepared_tasks[&index].planned_traffic_bytes();
                     add_to_byte_total(&mut planned_load_bytes, read, "planned load")?;
                     add_to_byte_total(&mut planned_store_bytes, written, "planned store")?;
                 }
@@ -262,6 +255,14 @@ impl Timetable {
             .collect()
     }
 
+    fn prepared_task(&self, node_idx: usize) -> Result<&Rc<PreparedTask>, SimError> {
+        self.prepared_tasks.get(&node_idx).ok_or_else(|| {
+            SimError(format!(
+                "Task Index {node_idx} does not refer to a compute node"
+            ))
+        })
+    }
+
     fn calculate_workload(
         &self,
         node_indices: impl IntoIterator<Item = usize>,
@@ -275,11 +276,8 @@ impl Timetable {
 
     fn add_node_workload(&self, node_idx: usize, workload: &mut Workload) -> SimResult {
         workload.nodes += 1;
-        if self.graph.nodes()[node_idx].is_compute() {
-            let (read, written) = match self.task_by_id(node_idx)? {
-                Task::ProgramTask { config } => config.planned_traffic_bytes()?,
-                Task::SyncTask { .. } => (0, 0),
-            };
+        if let Some(task) = self.prepared_tasks.get(&node_idx) {
+            let (read, written) = task.planned_traffic_bytes();
             add_to_byte_total(&mut workload.read_bytes, read, "planned load")?;
             add_to_byte_total(&mut workload.written_bytes, written, "planned store")?;
         }
@@ -407,50 +405,18 @@ impl Timetable {
                 .insert(node_idx);
         }
     }
-
-    fn compute_views(&self, node_idx: usize) -> Result<ComputeTensorViews, SimError> {
-        self.graph.compute_views(node_idx).ok_or_else(|| {
-            SimError(format!(
-                "node {} is not a compute node",
-                self.graph.nodes()[node_idx].id()
-            ))
-        })
-    }
 }
 
 #[async_trait(?Send)]
 impl Dispatch for Timetable {
     fn task_by_id(&self, task_idx: usize) -> Result<Task, SimError> {
-        let node = &self.graph.nodes()[task_idx];
-        if !node.is_compute() {
-            return sim_error!("Task Index {task_idx} refers to a Tensor node");
-        }
-        let (inputs, outputs) = self.compute_views(task_idx)?.into_parts();
-        if let Some(program) = node.program() {
-            return Ok(Task::ProgramTask {
-                config: Box::new(ProgramTaskConfig {
-                    id: node.id().to_owned(),
-                    program: program.clone(),
-                    tiling: node.tiling().cloned(),
-                    inputs: inputs
-                        .into_iter()
-                        .collect::<Option<Vec<_>>>()
-                        .ok_or_else(|| {
-                            SimError(format!("program {} has unbound input", node.id()))
-                        })?,
-                    outputs: outputs
-                        .into_iter()
-                        .collect::<Option<Vec<_>>>()
-                        .ok_or_else(|| {
-                            SimError(format!("program {} has unbound output", node.id()))
-                        })?,
-                }),
-            });
-        }
-        sim_error!("compute node '{}' has no program", node.id())
+        Ok(Task::PreparedProgram {
+            task: self.prepared_task(task_idx)?.clone(),
+        })
     }
 
     fn set_task_active(&self, node_idx: usize) -> SimResult {
+        self.prepared_task(node_idx)?;
         debug!(self.entity; "task{node_idx}: active");
         if let Some(pe_idx) = self.node_pe_indices[node_idx] {
             self.ready_nodes_per_pe
@@ -465,6 +431,7 @@ impl Dispatch for Timetable {
     }
 
     fn set_task_completed(&self, node_idx: usize) -> SimResult {
+        self.prepared_task(node_idx)?;
         debug!(self.entity; "task{node_idx}: completed");
 
         if self.completed_node_indices.borrow().contains(&node_idx) {

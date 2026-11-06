@@ -9,54 +9,75 @@ use gwr_engine::types::SimError;
 use super::syntax::{
     AffineSpec, AssignmentSpec, BoundsMode, ExprSpec, IndexSpec, ProgramSpec, ReductionOp,
 };
-use crate::processing_element::compute::is_lowercase_operation;
 use crate::processing_element::tensors::dtype::DataType;
 use crate::processing_element::tensors::{HasShape, TensorView};
 
-pub fn validate_program(
+pub(in crate::processing_element) fn validate_program(
     spec: &ProgramSpec,
-    bindings: &RegionBindings,
-) -> Result<ValidatedRegion, SimError> {
-    validate_program_header(spec, bindings)?;
+    bindings: RegionBindings,
+) -> Result<ProgramFacts, SimError> {
+    validate_program_header(spec, &bindings)?;
     let producers = build_assignment_producer_map(spec)?;
     let order = order_assignments_by_dependency(spec, &producers)?;
+    let executable = super::executable::Program::bind(spec)?;
     for &index in &order {
         validate_assignment_structure(&spec.assignments[index], spec, &producers)?;
     }
-    let mut validation = AssignmentValidation::new(spec, bindings)?;
+    let mut validation = AssignmentValidation::new(spec, &bindings)?;
     for &index in &order {
         validation.validate(&spec.assignments[index])?;
     }
-    validate_boundary_overlap(spec, bindings)?;
-    let region = ValidatedRegion {
-        program: spec.clone(),
-        bindings: bindings.clone(),
-        values: validation.values,
-        extents: validation.extents,
+    validate_boundary_overlap(spec, &bindings)?;
+    let AssignmentValidation {
+        values, extents, ..
+    } = validation;
+    let region = ProgramFacts {
+        program: executable,
+        bindings,
+        values,
+        extents,
+        dependencies: spec
+            .assignments
+            .iter()
+            .map(|assignment| {
+                assignment
+                    .expr
+                    .iter_read_tensor_names()
+                    .filter_map(|name| producers.get(name).copied())
+                    .collect()
+            })
+            .collect(),
+        consumers: {
+            let mut consumers = BTreeMap::<String, BTreeSet<usize>>::new();
+            for (index, assignment) in spec.assignments.iter().enumerate() {
+                for name in assignment.expr.iter_read_tensor_names() {
+                    consumers.entry(name.to_owned()).or_default().insert(index);
+                }
+            }
+            consumers
+        },
+        producers,
         assignment_order: order,
     };
     Ok(region)
 }
 
 #[derive(Clone, Debug)]
-pub struct ValidatedRegion {
-    pub(in crate::processing_element) program: ProgramSpec,
+pub(in crate::processing_element) struct ProgramFacts {
+    pub(in crate::processing_element) program: super::executable::Program,
     pub(in crate::processing_element) bindings: RegionBindings,
     pub(in crate::processing_element) values: BTreeMap<String, TensorSpec>,
     pub(in crate::processing_element) extents: BTreeMap<String, usize>,
     pub(in crate::processing_element) assignment_order: Vec<usize>,
+    pub(in crate::processing_element) producers: BTreeMap<String, usize>,
+    pub(in crate::processing_element) consumers: BTreeMap<String, BTreeSet<usize>>,
+    pub(in crate::processing_element) dependencies: Vec<BTreeSet<usize>>,
 }
 
-impl ValidatedRegion {
+impl ProgramFacts {
     #[must_use]
     pub fn value(&self, name: &str) -> Option<&TensorSpec> {
         self.values.get(name)
-    }
-
-    /// Resolved axis extents, available for inspection without mutation.
-    #[must_use]
-    pub fn extents(&self) -> &BTreeMap<String, usize> {
-        &self.extents
     }
 
     #[must_use]
@@ -375,7 +396,6 @@ fn validate_assignment_structure(
     let mut declared_reductions = BTreeSet::new();
     collect_axes(expr, &mut read_axes, &mut declared_reductions, false)
         .map_err(assignment_error)?;
-    validate_executable_expr(expr).map_err(assignment_error)?;
     validate_assignment_axes(assignment, &read_axes, &declared_reductions)
 }
 
@@ -588,41 +608,10 @@ fn collect_axes(
     Ok(())
 }
 
-fn validate_executable_expr(expr: &ExprSpec) -> Result<(), SimError> {
-    let direct_read = |value: &ExprSpec| matches!(value, ExprSpec::Read { .. });
-    match expr {
-        ExprSpec::Read { .. } => Ok(()),
-        ExprSpec::Call { op, .. } if !is_lowercase_operation(op) => {
-            Err(err(format!("operation '{op}' must be lowercase")))
-        }
-        ExprSpec::Call { op, .. } if matches!(op.as_str(), "read" | "reduce" | "matrix_mac") => {
-            Err(err(format!(
-                "operation '{op}' uses a reserved expression name"
-            )))
-        }
-        ExprSpec::MatrixMac { args, over, .. } => validate_matrix_expression(args, over),
-        ExprSpec::Call { args, .. } if !args.is_empty() => {
-            args.iter().try_for_each(validate_executable_expr)
-        }
-        ExprSpec::Reduce {
-            op: ReductionOp::Sum,
-            value,
-            ..
-        } if direct_read(value) || matches!(&**value, ExprSpec::Call { .. }) => {
-            validate_executable_expr(value)
-        }
-        ExprSpec::Reduce { value, .. } if direct_read(value) => Ok(()),
-        ExprSpec::Reduce { value, .. } if matches!(&**value, ExprSpec::Call { .. }) => {
-            find_common_excluded_read(value)?;
-            validate_executable_expr(value)
-        }
-        _ => Err(err(
-            "unsupported nested arithmetic; use an explicit temporary assignment",
-        )),
-    }
-}
-
-fn validate_matrix_expression(args: &[ExprSpec], over: &[String]) -> Result<(), SimError> {
+pub(super) fn validate_matrix_expression(
+    args: &[ExprSpec],
+    over: &[String],
+) -> Result<(), SimError> {
     let direct_read = |value: &ExprSpec| matches!(value, ExprSpec::Read { .. });
     if over.len() != 1 || args.len() != 2 || !args.iter().all(direct_read) {
         return Err(err(
@@ -1004,7 +993,7 @@ fn register_unique_name(names: &mut BTreeSet<String>, name: &str) -> Result<(), 
     Ok(())
 }
 
-fn find_common_excluded_read(expr: &ExprSpec) -> Result<Option<&ExprSpec>, SimError> {
+pub(super) fn find_common_excluded_read(expr: &ExprSpec) -> Result<Option<&ExprSpec>, SimError> {
     match expr {
         ExprSpec::Read {
             bounds: BoundsMode::Exclude,

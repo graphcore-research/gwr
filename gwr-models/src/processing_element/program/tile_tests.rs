@@ -6,15 +6,15 @@ use yaml_serde::from_str;
 
 use crate::processing_element::estimate_peak_tile_sram;
 use crate::processing_element::program::syntax::{ExprSpec, IndexSpec, ProgramSpec, TileSpec};
-use crate::processing_element::program::tile::{plan_tiles, validate_tiling};
+use crate::processing_element::program::tile::plan_tiles;
 use crate::processing_element::program::validate::{
-    RegionBindings, ValidatedRegion, validate_program,
+    ProgramFacts, RegionBindings, validate_program,
 };
 use crate::processing_element::task::ProgramTaskConfig;
 use crate::processing_element::tensors::dtype::DataType;
 use crate::processing_element::tensors::{Tensor, TensorView};
 
-fn elementwise_region() -> ValidatedRegion {
+fn elementwise_region() -> ProgramFacts {
     let program: ProgramSpec = from_str(
         r"
 inputs: [A, B]
@@ -31,7 +31,7 @@ assignments:
     .unwrap();
     validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![view(&[10], 0), view(&[10], 100)],
             outputs: vec![view(&[10], 200)],
         },
@@ -128,7 +128,7 @@ assignments:
     .unwrap();
     let region = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![view(&[10, 5], 0), view(&[5, 9], 1000)],
             outputs: vec![view(&[10, 9], 2000)],
         },
@@ -166,32 +166,6 @@ fn no_tiling_is_one_complete_tile() {
 }
 
 #[test]
-fn rejects_zero_tile_size() {
-    assert!(
-        plan_tiles(
-            &elementwise_region(),
-            Some(&TileSpec {
-                sizes: BTreeMap::from([("i".into(), 0)])
-            })
-        )
-        .is_err()
-    );
-}
-
-#[test]
-fn rejects_unknown_tile_axis() {
-    assert!(
-        plan_tiles(
-            &elementwise_region(),
-            Some(&TileSpec {
-                sizes: BTreeMap::from([("other".into(), 4)])
-            })
-        )
-        .is_err()
-    );
-}
-
-#[test]
 fn independent_assignments_can_tile_different_output_axes() {
     let program: ProgramSpec = from_str(
         r"
@@ -215,7 +189,7 @@ assignments:
     .unwrap();
     let region = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![view(&[8], 0), view(&[8], 64)],
             outputs: vec![view(&[8], 128), view(&[8], 192)],
         },
@@ -224,7 +198,7 @@ assignments:
     let tiling = TileSpec {
         sizes: BTreeMap::from([("i".into(), 4)]),
     };
-    validate_tiling(&region, Some(&tiling)).unwrap();
+    crate::processing_element::program::schedule::plan_schedule(&region, Some(&tiling)).unwrap();
     let task = ProgramTaskConfig {
         id: "independent_axes".into(),
         program,

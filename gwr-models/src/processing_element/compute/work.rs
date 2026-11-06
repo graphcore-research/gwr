@@ -18,30 +18,26 @@ pub struct ComputeWork {
 
 impl ComputeWork {
     /// Matrix work with checked logical geometry; service shape is selected per
-    /// candidate.
+    /// candidate. Rejects zero dimensions or an overflowing logical MAC count.
     pub fn matrix_mac(
-        inputs: Vec<DataType>,
+        inputs: [DataType; 2],
         accumulator: DataType,
         shape: MatrixWorkShape,
     ) -> Result<Self, SimError> {
-        if inputs.len() != 2 {
-            return Err(SimError("matrix shape requires two operands".into()));
-        }
-        let count = shape.logical_macs()?;
+        let shape = CheckedMatrixShape::new(shape)?;
         Ok(Self {
             stages: vec![WorkStage {
-                operations: vec![TypedWork {
-                    signature: CapabilityKey::MatrixMac {
-                        inputs,
-                        accumulator,
-                    },
-                    count,
-                    matrix_shape: Some(shape),
+                operations: vec![TypedWork::MatrixMac {
+                    inputs,
+                    accumulator,
+                    shape,
                 }],
             }],
         })
     }
 
+    /// Scalar work of one exact operand signature. A zero count needs no
+    /// service and is valid even when the model does not support the operation.
     #[must_use]
     pub fn operation(op: impl Into<String>, inputs: Vec<DataType>, count: usize) -> Self {
         Self {
@@ -70,25 +66,25 @@ impl ComputeWork {
 }
 
 /// Independent work; a barrier separates consecutive stages.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug)]
 pub(in crate::processing_element) struct WorkStage {
-    /// Independent typed demands, grouped into compute batches during lowering.
     pub(in crate::processing_element) operations: Vec<TypedWork>,
 }
 
-/// A number of operations of one exact signature.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(in crate::processing_element) struct TypedWork {
-    /// Exact capability required.
-    pub(in crate::processing_element) signature: CapabilityKey,
-    /// Logical operation count.
-    pub(in crate::processing_element) count: usize,
-    /// Logical batch count, output tile dimensions and contraction chunk
-    /// length.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(in crate::processing_element) matrix_shape: Option<MatrixWorkShape>,
+/// Scalar demands carry a count; matrix demands derive it from checked
+/// geometry.
+#[derive(Clone, Debug)]
+pub(in crate::processing_element) enum TypedWork {
+    Operation {
+        op: String,
+        inputs: Vec<DataType>,
+        count: usize,
+    },
+    MatrixMac {
+        inputs: [DataType; 2],
+        accumulator: DataType,
+        shape: CheckedMatrixShape,
+    },
 }
 
 impl TypedWork {
@@ -98,18 +94,56 @@ impl TypedWork {
         inputs: Vec<DataType>,
         count: usize,
     ) -> Self {
-        Self {
-            signature: CapabilityKey::Operation {
-                op: op.into(),
-                inputs,
-            },
+        Self::Operation {
+            op: op.into(),
+            inputs,
             count,
-            matrix_shape: None,
+        }
+    }
+
+    pub(in crate::processing_element) fn count(&self) -> usize {
+        match self {
+            Self::Operation { count, .. } => *count,
+            Self::MatrixMac { shape, .. } => shape.count,
+        }
+    }
+
+    pub(in crate::processing_element) fn op(&self) -> &str {
+        match self {
+            Self::Operation { op, .. } => op,
+            Self::MatrixMac { .. } => "matrix_mac",
+        }
+    }
+
+    pub(in crate::processing_element) fn inputs(&self) -> &[DataType] {
+        match self {
+            Self::Operation { inputs, .. } => inputs,
+            Self::MatrixMac { inputs, .. } => inputs,
         }
     }
 
     pub(crate) fn machine_ops(&self, flops_per_op: usize) -> Result<MachineOpCounts, SimError> {
-        MachineOpCounts::single(self.signature.op(), self.count, flops_per_op)
+        MachineOpCounts::single(self.op(), self.count(), flops_per_op)
+    }
+}
+
+/// Only construction in this module can pair geometry with its checked count.
+#[derive(Clone, Copy, Debug)]
+pub(in crate::processing_element) struct CheckedMatrixShape {
+    geometry: MatrixWorkShape,
+    count: usize,
+}
+
+impl CheckedMatrixShape {
+    fn new(geometry: MatrixWorkShape) -> Result<Self, SimError> {
+        Ok(Self {
+            count: geometry.logical_macs()?,
+            geometry,
+        })
+    }
+
+    pub(in crate::processing_element) fn geometry(self) -> MatrixWorkShape {
+        self.geometry
     }
 }
 
@@ -135,38 +169,6 @@ impl MatrixWorkShape {
             .and_then(|bm| bm.checked_mul(self.n))
             .and_then(|mn| mn.checked_mul(self.k))
             .ok_or_else(|| SimError("matrix shape MAC count overflows".into()))
-    }
-}
-
-/// An exact typed operation, used for runtime matching (never contains sets).
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(in crate::processing_element) enum CapabilityKey {
-    Operation {
-        op: String,
-        inputs: Vec<DataType>,
-    },
-    MatrixMac {
-        inputs: Vec<DataType>,
-        accumulator: DataType,
-    },
-}
-
-impl CapabilityKey {
-    #[must_use]
-    pub(in crate::processing_element) fn op(&self) -> &str {
-        match self {
-            Self::Operation { op, .. } => op,
-            Self::MatrixMac { .. } => "matrix_mac",
-        }
-    }
-
-    /// Ordered arithmetic operands.
-    #[must_use]
-    pub(in crate::processing_element) fn inputs(&self) -> &[DataType] {
-        match self {
-            Self::Operation { inputs, .. } | Self::MatrixMac { inputs, .. } => inputs,
-        }
     }
 }
 

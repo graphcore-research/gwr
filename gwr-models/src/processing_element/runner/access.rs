@@ -8,25 +8,19 @@ use std::ops::Range;
 use gwr_engine::types::SimError;
 
 use super::{find_read_indices, plan_window_chunk_access_ranges, slice_axes, slice_view};
-use crate::processing_element::program::syntax::{ExprSpec, IndexSpec, ReductionOp};
+use crate::processing_element::program::executable::Expr;
+use crate::processing_element::program::prepared::GroupPlan;
+use crate::processing_element::program::syntax::{IndexSpec, ReductionOp};
 use crate::processing_element::program::tile::RegionTile;
-use crate::processing_element::program::validate::ValidatedRegion;
-use crate::processing_element::task::ProgramTaskConfig;
+use crate::processing_element::program::validate::ProgramFacts;
 use crate::processing_element::tensors::TensorView;
 
 /// Inputs loaded once and shared by the assignments in this tile.
-pub(super) fn collect_initial_input_reads(config: &ProgramTaskConfig) -> Vec<InputRead<'_>> {
-    config
-        .program
-        .inputs
-        .iter()
-        .zip(&config.inputs)
-        .filter(|(name, _)| !input_requires_assignment_reads(config, name))
+pub(super) fn collect_initial_input_reads(plan: GroupPlan<'_>) -> Vec<InputRead<'_>> {
+    plan.inputs()
+        .filter(|(name, _)| !input_requires_assignment_reads(plan, name))
         .filter_map(|(name, view)| {
-            config
-                .program
-                .assignments
-                .iter()
+            plan.assignments()
                 .find_map(|assignment| find_input_read(name, view, &assignment.expr))
         })
         .collect()
@@ -34,17 +28,14 @@ pub(super) fn collect_initial_input_reads(config: &ProgramTaskConfig) -> Vec<Inp
 
 /// Reduction chunks and differing index mappings need their own input reads.
 pub(super) fn collect_assignment_input_reads(
-    config: &ProgramTaskConfig,
+    plan: GroupPlan<'_>,
     assignment: usize,
 ) -> Vec<InputRead<'_>> {
-    let expr = &config.program.assignments[assignment].expr;
-    let reduction = matches!(expr, ExprSpec::Reduce { .. } | ExprSpec::MatrixMac { .. });
-    let mut reads = config
-        .program
-        .inputs
-        .iter()
-        .zip(&config.inputs)
-        .filter(|(name, _)| reduction || input_requires_assignment_reads(config, name))
+    let expr = &plan.region().program.assignments[assignment].expr;
+    let reduction = matches!(expr, Expr::Reduce { .. } | Expr::MatrixMac { .. });
+    let mut reads = plan
+        .inputs()
+        .filter(|(name, _)| reduction || input_requires_assignment_reads(plan, name))
         .filter_map(|(name, view)| find_input_read(name, view, expr))
         .collect::<Vec<_>>();
     // Preserve the runner's stable issue order within an assignment.
@@ -55,12 +46,12 @@ pub(super) fn collect_assignment_input_reads(
 fn find_input_read<'a>(
     name: &'a str,
     view: &'a TensorView,
-    expr: &'a ExprSpec,
+    expr: &'a Expr,
 ) -> Option<InputRead<'a>> {
     let indices = find_read_indices(expr, name)?;
     let window = matches!(
         expr,
-        ExprSpec::Reduce {
+        Expr::Reduce {
             op: ReductionOp::Min | ReductionOp::Max,
             ..
         }
@@ -86,7 +77,7 @@ impl InputRead<'_> {
     pub fn plan_access(
         &self,
         tile: &RegionTile,
-        region: &ValidatedRegion,
+        region: &ProgramFacts,
         chunk: &BTreeMap<String, Range<usize>>,
     ) -> Result<InputAccess, SimError> {
         if self.window {
@@ -129,48 +120,30 @@ impl InputAccess {
 }
 
 pub(super) fn build_tile_output_views(
-    config: &ProgramTaskConfig,
+    plan: GroupPlan<'_>,
     tile: &RegionTile,
 ) -> Result<Vec<TensorView>, SimError> {
-    config
-        .program
-        .outputs
-        .iter()
-        .zip(&config.outputs)
+    plan.outputs()
         .map(|(name, view)| {
-            let assignment = config
-                .program
-                .assignments
-                .iter()
-                .find(|assignment| {
-                    &assignment.primary_result() == name
-                        || assignment.indices_output.as_ref() == Some(name)
-                })
-                .ok_or_else(|| SimError(format!("missing assignment for {name}")))?;
+            let assignment = &plan.region().program.assignments[plan.region().producers[name]];
             slice_axes(view, &assignment.axes, &tile.output_intervals)
         })
         .collect()
 }
 
-pub(super) fn input_requires_assignment_reads(config: &ProgramTaskConfig, name: &str) -> bool {
-    let mappings = config
-        .program
-        .assignments
-        .iter()
+pub(super) fn input_requires_assignment_reads(plan: GroupPlan<'_>, name: &str) -> bool {
+    let mappings = plan
+        .assignments()
         .filter_map(|assignment| find_read_indices(&assignment.expr, name))
         .collect::<Vec<_>>();
     if mappings.windows(2).any(|pair| pair[0] != pair[1]) {
         return true;
     }
-    config
-        .program
-        .assignments
-        .iter()
-        .any(|assignment| match &assignment.expr {
-            ExprSpec::Reduce { value, .. } => find_read_indices(value, name).is_some(),
-            ExprSpec::MatrixMac { over, .. } => {
-                !over.is_empty() && find_read_indices(&assignment.expr, name).is_some()
-            }
-            _ => false,
-        })
+    plan.assignments().any(|assignment| match &assignment.expr {
+        Expr::Reduce { .. } => find_read_indices(&assignment.expr, name).is_some(),
+        Expr::MatrixMac { over, .. } => {
+            !over.is_empty() && find_read_indices(&assignment.expr, name).is_some()
+        }
+        Expr::Scalar(_) => false,
+    })
 }

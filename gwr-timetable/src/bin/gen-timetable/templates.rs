@@ -5,10 +5,9 @@
 
 use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
+use gwr_models::processing_element::program::PreparedProgram;
 use gwr_models::processing_element::program::syntax::ProgramSpec;
-use gwr_models::processing_element::program::validate::{
-    RegionBindings, TensorSpec, validate_program,
-};
+use gwr_models::processing_element::program::validate::{RegionBindings, TensorSpec};
 use gwr_models::processing_element::tensors::dtype::DataType;
 use gwr_models::processing_element::tensors::{HasShape, Shape, Tensor, TensorView};
 use rand::RngExt;
@@ -48,7 +47,7 @@ impl ProgramTemplate {
                 .collect::<Option<Vec<_>>>()
                 .ok_or_else(|| SimError("generated program has an unbound output".into()))?,
         };
-        validate_program(&program, &bindings).map(drop)
+        PreparedProgram::new(&program, bindings, None).map(drop)
     }
 
     pub fn build_program(

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+use gwr_models::processing_element::program::PreparedProgram;
 use gwr_models::processing_element::program::syntax::ProgramSpec;
-use gwr_models::processing_element::program::validate::{RegionBindings, validate_program};
+use gwr_models::processing_element::program::validate::RegionBindings;
 use gwr_models::processing_element::tensors::dtype::DataType;
 use gwr_models::processing_element::tensors::{Tensor, TensorView};
 use yaml_serde::from_str;
@@ -51,9 +52,9 @@ assignments:
 ",
     )
     .unwrap();
-    let region = validate_program(
+    let region = PreparedProgram::new(
         &p,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![
                 view(&[1, 1024], 0),
                 view(&[1024], 8192),
@@ -62,6 +63,7 @@ assignments:
             ],
             outputs: vec![view(&[1, 1024], 32768)],
         },
+        None,
     )
     .unwrap();
     assert_eq!(region.extent("k"), Some(1024));

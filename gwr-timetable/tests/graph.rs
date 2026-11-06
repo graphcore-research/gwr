@@ -30,7 +30,7 @@ edges:
 
     assert_eq!(graph.nodes()[0].id(), "input");
     assert_eq!(graph.nodes()[1].id(), "compute");
-    assert_eq!(graph.nodes()[1].input_edges(), &[Some(0)]);
+    assert_eq!(graph.nodes()[1].input_edges(), &[0]);
     assert_eq!(graph.nodes()[0].successors(), &[1]);
     assert_eq!(graph.nodes()[1].predecessors(), &[0]);
 
