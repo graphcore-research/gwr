@@ -286,16 +286,6 @@ pub(super) fn prepare_compute(
     Ok(compute)
 }
 
-impl ComputeModel {
-    /// Check actual invocation counts and geometry without binding to a PE.
-    pub fn validate_program(
-        &self,
-        program: &crate::processing_element::program::PreparedProgram,
-    ) -> SimResult {
-        prepare_compute(self, program).map(drop)
-    }
-}
-
 #[cfg(test)]
 mod matrix_test_fixture;
 
