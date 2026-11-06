@@ -6,27 +6,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
 use gwr_engine::sim_error;
-use gwr_engine::types::{SimError, SimResult};
+use gwr_engine::types::SimError;
 
-use super::schedule::plan_schedule;
-use super::syntax::{ExprSpec, TileSpec};
-use super::validate::ValidatedRegion;
-
-/// Validate either the flat tile plan or inferred phased execution.
-pub fn validate_tiling(region: &ValidatedRegion, tiling: Option<&TileSpec>) -> SimResult {
-    if plan_schedule(region, tiling)?.is_none() {
-        plan_tiles(region, tiling)?;
-    }
-    Ok(())
-}
+use super::syntax::TileSpec;
+use super::validate::ProgramFacts;
+use crate::processing_element::program::executable::Expr;
 
 pub(in crate::processing_element) fn plan_tiles(
-    region: &ValidatedRegion,
+    region: &ProgramFacts,
     tiling: Option<&TileSpec>,
 ) -> Result<TileSchedule, SimError> {
-    if plan_schedule(region, tiling)?.is_some() {
-        return sim_error!("inferred phased schedule requires scoped execution, not plan_tiles");
-    }
     let mut parallel = Vec::new();
     let mut seen_parallel = BTreeSet::new();
     let mut reduction = BTreeSet::new();
@@ -84,7 +73,7 @@ impl RegionTile {
     pub(in crate::processing_element) fn new(
         output_intervals: BTreeMap<String, Range<usize>>,
         reductions: BTreeMap<String, usize>,
-        region: &ValidatedRegion,
+        region: &ProgramFacts,
     ) -> Result<Self, SimError> {
         for (axis, interval) in &output_intervals {
             let extent = region
@@ -113,16 +102,14 @@ impl RegionTile {
     }
 
     #[cfg(test)]
-    pub(in crate::processing_element) fn reduction_chunks(
-        &self,
-    ) -> impl Iterator<Item = BTreeMap<String, Range<usize>>> + '_ {
+    pub(in crate::processing_element) fn reduction_chunks(&self) -> IntervalProduct {
         IntervalProduct::new(self.reductions.clone())
     }
 
     pub(in crate::processing_element) fn reduction_chunks_for(
         &self,
         axes: &[String],
-    ) -> impl Iterator<Item = BTreeMap<String, Range<usize>>> + '_ {
+    ) -> IntervalProduct {
         let selected = self
             .reductions
             .iter()
@@ -147,14 +134,14 @@ impl RegionTile {
     }
 }
 
-struct IntervalProduct {
+pub(in crate::processing_element) struct IntervalProduct {
     axes: Vec<AxisStep>,
     starts: Vec<usize>,
     exhausted: bool,
 }
 
 impl IntervalProduct {
-    fn new(axes: Vec<AxisStep>) -> Self {
+    pub(in crate::processing_element) fn new(axes: Vec<AxisStep>) -> Self {
         let starts = vec![0; axes.len()];
         Self {
             axes,
@@ -200,18 +187,14 @@ impl Iterator for IntervalProduct {
 }
 
 #[derive(Clone, Debug)]
-struct AxisStep {
-    name: String,
-    extent: usize,
-    step: usize,
+pub(in crate::processing_element) struct AxisStep {
+    pub name: String,
+    pub extent: usize,
+    pub step: usize,
 }
 
-fn collect_reductions(expr: &ExprSpec, axes: &mut BTreeSet<String>) {
-    for expr in expr.walk() {
-        if let ExprSpec::Reduce { over, .. } | ExprSpec::MatrixMac { over, .. } = expr {
-            axes.extend(over.iter().cloned());
-        }
-    }
+fn collect_reductions(expr: &Expr, axes: &mut BTreeSet<String>) {
+    axes.extend(expr.reduction_axes().iter().cloned());
 }
 
 #[cfg(test)]

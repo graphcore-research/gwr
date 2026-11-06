@@ -10,11 +10,14 @@ use gwr_engine::sim_error;
 use gwr_engine::types::SimResult;
 use gwr_models::processing_element::tensors::TensorView;
 
-use super::{ComputeTensorDirection, TimetableEdge, TimetableGraph};
+use super::{ComputeTensorDirection, NodeDraft, TimetableEdge};
 
-pub(super) fn validate(graph: &TimetableGraph) -> SimResult {
-    let mut accesses = graph
-        .edges()
+pub(super) fn validate(
+    nodes: &[NodeDraft],
+    edges: &[TimetableEdge],
+    topological_positions: &[usize],
+) -> SimResult {
+    let mut accesses = edges
         .iter()
         .filter_map(TimetableEdge::tensor_connection)
         .map(|connection| TensorAccess {
@@ -29,7 +32,7 @@ pub(super) fn validate(graph: &TimetableGraph) -> SimResult {
         .collect::<Vec<_>>();
     accesses.sort_by_key(|access| access.view.address_bounds().start);
 
-    let mut dependencies = DependencyOrder::new(graph);
+    let mut dependencies = DependencyOrder::new(nodes, topological_positions);
     let mut active_reads = BTreeSet::new();
     let mut active_writes = BTreeSet::new();
     let mut ending = BinaryHeap::new();
@@ -60,7 +63,7 @@ pub(super) fn validate(graph: &TimetableGraph) -> SimResult {
                     second: current,
                     ranges,
                 }
-                .into_error(graph);
+                .into_error(nodes);
             }
         }
 
@@ -89,11 +92,11 @@ struct AccessConflict<'a> {
 }
 
 impl AccessConflict<'_> {
-    fn into_error(self, graph: &TimetableGraph) -> SimResult {
-        let first_node = graph.nodes()[self.first.node].id();
-        let second_node = graph.nodes()[self.second.node].id();
-        let first_tensor = graph.nodes()[self.first.tensor].id();
-        let second_tensor = graph.nodes()[self.second.tensor].id();
+    fn into_error(self, nodes: &[NodeDraft]) -> SimResult {
+        let first_node = nodes[self.first.node].id();
+        let second_node = nodes[self.second.node].id();
+        let first_tensor = nodes[self.first.tensor].id();
+        let second_tensor = nodes[self.second.tensor].id();
         let (first_range, second_range) = self.ranges;
 
         match (self.first.kind, self.second.kind) {
@@ -183,16 +186,18 @@ impl Display for AccessKind {
 }
 
 struct DependencyOrder<'a> {
-    graph: &'a TimetableGraph,
+    nodes: &'a [NodeDraft],
+    topological_positions: &'a [usize],
     current: Option<usize>,
     ancestors: ReachabilitySearch,
     descendants: ReachabilitySearch,
 }
 
 impl<'a> DependencyOrder<'a> {
-    fn new(graph: &'a TimetableGraph) -> Self {
+    fn new(nodes: &'a [NodeDraft], topological_positions: &'a [usize]) -> Self {
         Self {
-            graph,
+            nodes,
+            topological_positions,
             current: None,
             ancestors: ReachabilitySearch::default(),
             descendants: ReachabilitySearch::default(),
@@ -209,12 +214,12 @@ impl<'a> DependencyOrder<'a> {
             self.descendants.clear();
         }
 
-        if self.graph.topological_position(other) < self.graph.topological_position(current) {
+        if self.topological_positions[other] < self.topological_positions[current] {
             self.ancestors
-                .contains(self.graph, current, other, SearchDirection::Ancestors)
+                .contains(self.nodes, current, other, SearchDirection::Ancestors)
         } else {
             self.descendants
-                .contains(self.graph, current, other, SearchDirection::Descendants)
+                .contains(self.nodes, current, other, SearchDirection::Descendants)
         }
     }
 }
@@ -233,7 +238,7 @@ impl ReachabilitySearch {
 
     fn contains(
         &mut self,
-        graph: &TimetableGraph,
+        nodes: &[NodeDraft],
         start: usize,
         target: usize,
         direction: SearchDirection,
@@ -248,8 +253,8 @@ impl ReachabilitySearch {
                 return false;
             };
             let adjacent = match direction {
-                SearchDirection::Ancestors => graph.nodes()[node].predecessors(),
-                SearchDirection::Descendants => graph.nodes()[node].successors(),
+                SearchDirection::Ancestors => &nodes[node].predecessors,
+                SearchDirection::Descendants => &nodes[node].successors,
             };
             for adjacent in adjacent {
                 if self.reached.insert(*adjacent) {
@@ -274,7 +279,7 @@ mod tests {
 
     #[test]
     fn searches_dependencies_lazily_in_each_direction() {
-        let graph = TimetableFile::from_string(
+        let file = TimetableFile::from_string(
             r"
 nodes:
   - { id: initial, kind: tensor, config: { addr: 10, dtype: int8, shape: [1] } }
@@ -316,10 +321,23 @@ edges:
   - { from: tensor1, to: compute2, kind: data }
 ",
         )
-        .unwrap()
-        .into_graph()
         .unwrap();
-        let mut dependencies = DependencyOrder::new(&graph);
+        let mut nodes = file
+            .nodes
+            .into_iter()
+            .map(|node| NodeDraft::new(node).unwrap().0)
+            .collect::<Vec<_>>();
+        for edge in file.edges {
+            let from = nodes
+                .iter()
+                .position(|node| node.id() == edge.from)
+                .unwrap();
+            let to = nodes.iter().position(|node| node.id() == edge.to).unwrap();
+            nodes[from].successors.push(to);
+            nodes[to].predecessors.push(from);
+        }
+        let topological_positions = (0..nodes.len()).collect::<Vec<_>>();
+        let mut dependencies = DependencyOrder::new(&nodes, &topological_positions);
 
         assert_eq!(dependencies.current, None);
         assert!(dependencies.ancestors.reached.is_empty());

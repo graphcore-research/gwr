@@ -277,7 +277,7 @@ fn streamed_compute_validation_uses_chunk_service_cost_when_full_reduction_would
     task.tiling = Some(from_str("sizes: {k: 1}").unwrap());
     let region = validate_program(
         &task.program,
-        &RegionBindings {
+        RegionBindings {
             inputs: task.inputs.clone(),
             outputs: task.outputs.clone(),
         },
@@ -287,7 +287,16 @@ fn streamed_compute_validation_uses_chunk_service_cost_when_full_reduction_would
         format!("{{m: {MATRIX_SERVICE_M}, n: {MATRIX_SERVICE_N}, k: {MATRIX_SERVICE_K}}}");
     let model = matrix_service_model(SLOW_MACS_PER_TICK, &service_tile);
     let schedule = plan_tiles(&region, task.tiling.as_ref()).unwrap();
-    validate_program_compute_support(&model, &region, &schedule).unwrap();
+    // Inspect one actual chunk lazily; this intentionally enormous schedule
+    // must not be drained just to establish the chunk/full-duration
+    // distinction.
+    let tile = schedule.tiles().next().unwrap();
+    let invocation = super::invocation::AssignmentInvocations::new(&region, 0, &tile)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap();
+    model.validate_work(&invocation.work).unwrap();
     let full = build_matrix_work(&region.program.assignments[0], &region, &BTreeMap::new())
         .unwrap()
         .unwrap();
@@ -303,7 +312,7 @@ fn matrix_service_shape_uses_operand_indices_when_output_axes_are_reordered() {
     let task = transposed_asymmetric_program();
     let region = validate_program(
         &task.program,
-        &RegionBindings {
+        RegionBindings {
             inputs: task.inputs,
             outputs: task.outputs,
         },
@@ -316,14 +325,19 @@ fn matrix_service_shape_uses_operand_indices_when_output_axes_are_reordered() {
     let work = build_matrix_work(&region.program.assignments[0], &region, &BTreeMap::new())
         .unwrap()
         .unwrap();
+    let crate::processing_element::compute::TypedWork::MatrixMac { shape, .. } =
+        &work.stages[0].operations[0]
+    else {
+        panic!("matrix work")
+    };
     assert_eq!(
-        work.stages[0].operations[0].matrix_shape,
-        Some(MatrixWorkShape {
+        shape.geometry(),
+        MatrixWorkShape {
             batches: 1,
             m: ASYMMETRIC_M,
             n: ASYMMETRIC_N,
             k: ASYMMETRIC_K
-        })
+        }
     );
     let service_macs = ASYMMETRIC_M.next_multiple_of(ASYMMETRIC_SERVICE_M)
         * ASYMMETRIC_N.next_multiple_of(ASYMMETRIC_SERVICE_N)
@@ -333,7 +347,7 @@ fn matrix_service_shape_uses_operand_indices_when_output_axes_are_reordered() {
         service_macs.div_ceil(MACS_PER_TICK) as u64
     );
     assert_eq!(
-        work.stages[0].operations[0].count,
+        work.stages[0].operations[0].count(),
         ASYMMETRIC_M * ASYMMETRIC_N * ASYMMETRIC_K
     );
 }

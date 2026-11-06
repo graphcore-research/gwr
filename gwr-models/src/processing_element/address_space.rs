@@ -5,7 +5,7 @@
 //! Regions map aligned virtual addresses to destination devices and absolute
 //! physical addresses.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::ops::Range;
 use std::option::Option;
 use std::vec::Vec;
@@ -168,6 +168,25 @@ impl AddressSpace {
     pub(crate) fn logical_ranges(&self) -> impl Iterator<Item = Range<u128>> + '_ {
         self.regions
             .values()
+            .map(|region| u128::from(region.start)..u128::from(region.end) + 1)
+    }
+
+    /// Return virtual ranges whose destination devices are all reachable.
+    ///
+    /// A striped region is included only when every bank is reachable. Ends
+    /// are exclusive and use `u128` so a region may include `u64::MAX`.
+    pub fn reachable_ranges<'a>(
+        &'a self,
+        reachable_devices: &'a HashSet<DeviceId>,
+    ) -> impl Iterator<Item = Range<u128>> + 'a {
+        self.regions
+            .values()
+            .filter(move |region| match &region.policy {
+                AddressRegionPolicy::Passthrough { device } => reachable_devices.contains(device),
+                AddressRegionPolicy::Striped { banks, .. } => banks
+                    .iter()
+                    .all(|(device, _)| reachable_devices.contains(device)),
+            })
             .map(|region| u128::from(region.start)..u128::from(region.end) + 1)
     }
 
@@ -547,6 +566,34 @@ mod tests {
                 address_space.resolve(address),
                 Some((device, physical_address)),
                 "{address:#x}"
+            );
+        }
+    }
+
+    #[test]
+    fn reachable_ranges_filter_passthrough_destinations_and_require_every_stripe_bank() {
+        use std::collections::HashSet;
+        use std::iter::once;
+
+        let space = setup_space();
+        for (devices, expected) in [
+            (vec![], vec![]),
+            (vec![DeviceId(1)], once(0..0x1000).collect()),
+            (vec![DeviceId(3)], vec![]),
+            (vec![DeviceId(7)], vec![]),
+            (
+                vec![DeviceId(3), DeviceId(7)],
+                once(0x4000..0x5000).collect(),
+            ),
+            (
+                vec![DeviceId(1), DeviceId(2), DeviceId(3), DeviceId(7)],
+                vec![0..0x1000, 0x2000..0x3000, 0x4000..0x5000],
+            ),
+        ] {
+            let reachable = HashSet::from_iter(devices);
+            assert_eq!(
+                space.reachable_ranges(&reachable).collect::<Vec<_>>(),
+                expected
             );
         }
     }

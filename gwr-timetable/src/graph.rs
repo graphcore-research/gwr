@@ -3,12 +3,13 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::fmt::{Display, Formatter};
+use std::rc::Rc;
 
 use gwr_engine::sim_error;
 use gwr_engine::types::{SimError, SimResult};
+use gwr_models::processing_element::program::PreparedProgram;
 use gwr_models::processing_element::program::syntax::{ProgramSpec, TileSpec};
-use gwr_models::processing_element::program::tile::validate_tiling;
-use gwr_models::processing_element::program::validate::{RegionBindings, validate_program};
+use gwr_models::processing_element::program::validate::RegionBindings;
 use gwr_models::processing_element::tensors::{Tensor, TensorView};
 
 use self::accesses::validate;
@@ -25,7 +26,6 @@ pub struct TimetableGraph {
     nodes: Vec<TimetableNode>,
     edges: Vec<TimetableEdge>,
     topological_order: Vec<usize>,
-    topological_positions: Vec<usize>,
 }
 
 impl TimetableGraph {
@@ -36,7 +36,7 @@ impl TimetableGraph {
         let mut nodes = Vec::with_capacity(file.nodes.len());
         let mut view_sections = Vec::with_capacity(file.nodes.len());
         for section in file.nodes {
-            let (node, views) = TimetableNode::new(section)?;
+            let (node, views) = NodeDraft::new(section)?;
             nodes.push(node);
             view_sections.push(views);
         }
@@ -126,14 +126,16 @@ impl TimetableGraph {
         for (position, node) in topological_order.iter().enumerate() {
             topological_positions[*node] = position;
         }
+        validate(&nodes, &edges, &topological_positions)?;
+        let nodes = nodes
+            .into_iter()
+            .map(|node| node.bind(&edges))
+            .collect::<Result<_, _>>()?;
         let graph = Self {
             nodes,
             edges,
             topological_order,
-            topological_positions,
         };
-        validate(&graph)?;
-        graph.validate_programs()?;
         Ok(graph)
     }
 
@@ -152,74 +154,13 @@ impl TimetableGraph {
         &self.topological_order
     }
 
-    pub(super) fn topological_position(&self, node: usize) -> usize {
-        self.topological_positions[node]
-    }
-
-    fn validate_programs(&self) -> SimResult {
-        for (node_index, node) in self.nodes.iter().enumerate() {
-            if !node.is_compute() {
-                continue;
-            }
-            let Some(views) = self.compute_views(node_index) else {
-                return sim_error!("Node '{}' has no compute views", node.id());
-            };
-            if let Some(program) = node.program() {
-                let bindings = RegionBindings {
-                    inputs: views
-                        .inputs()
-                        .iter()
-                        .cloned()
-                        .collect::<Option<Vec<_>>>()
-                        .ok_or_else(|| {
-                            SimError(format!(
-                                "Compute node '{}' has an unbound program input",
-                                node.id()
-                            ))
-                        })?,
-                    outputs: views
-                        .outputs()
-                        .iter()
-                        .cloned()
-                        .collect::<Option<Vec<_>>>()
-                        .ok_or_else(|| {
-                            SimError(format!(
-                                "Compute node '{}' has an unbound program output",
-                                node.id()
-                            ))
-                        })?,
-                };
-                let region = validate_program(program, &bindings)
-                    .map_err(|error| SimError(format!("Compute node '{}': {error}", node.id())))?;
-                validate_tiling(&region, node.tiling())
-                    .map_err(|error| SimError(format!("Compute node '{}': {error}", node.id())))?;
-            }
-        }
-        Ok(())
-    }
-
+    /// Borrow the dense, resolved input and output views of a compute node.
     #[must_use]
-    pub fn compute_views(&self, node_index: usize) -> Option<ComputeTensorViews> {
-        let node = self.nodes.get(node_index)?;
-        node.is_compute().then_some(())?;
-        Some(ComputeTensorViews {
-            inputs: node
-                .input_edges
-                .iter()
-                .map(|edge| {
-                    edge.and_then(|edge| self.edges[edge].tensor.as_ref())
-                        .map(|connection| connection.view.clone())
-                })
-                .collect(),
-            outputs: node
-                .output_edges
-                .iter()
-                .map(|edge| {
-                    edge.and_then(|edge| self.edges[edge].tensor.as_ref())
-                        .map(|connection| connection.view.clone())
-                })
-                .collect(),
-        })
+    pub fn compute_views(&self, node_index: usize) -> Option<&ComputeTensorViews> {
+        match &self.nodes.get(node_index)?.kind {
+            TimetableNodeKind::Compute { views, .. } => Some(views),
+            TimetableNodeKind::Tensor(_) => None,
+        }
     }
 }
 
@@ -313,24 +254,19 @@ impl TensorConnection {
 
 #[derive(Debug)]
 pub struct ComputeTensorViews {
-    inputs: Vec<Option<TensorView>>,
-    outputs: Vec<Option<TensorView>>,
+    inputs: Vec<TensorView>,
+    outputs: Vec<TensorView>,
 }
 
 impl ComputeTensorViews {
     #[must_use]
-    pub fn inputs(&self) -> &[Option<TensorView>] {
+    pub fn inputs(&self) -> &[TensorView] {
         &self.inputs
     }
 
     #[must_use]
-    pub fn outputs(&self) -> &[Option<TensorView>] {
+    pub fn outputs(&self) -> &[TensorView] {
         &self.outputs
-    }
-
-    #[must_use]
-    pub fn into_parts(self) -> (Vec<Option<TensorView>>, Vec<Option<TensorView>>) {
-        (self.inputs, self.outputs)
     }
 }
 
@@ -349,7 +285,7 @@ fn node_indices(nodes: &[NodeSection]) -> Result<HashMap<String, usize>, SimErro
 }
 
 fn resolve_edge_index(
-    node: &TimetableNode,
+    node: &NodeDraft,
     direction: EdgeDirection,
     requested_index: Option<usize>,
     used: &mut EdgeIndexUsage,
@@ -366,7 +302,7 @@ struct EdgeIndexUsage {
 impl EdgeIndexUsage {
     fn claim(
         &mut self,
-        node: &TimetableNode,
+        node: &NodeDraft,
         direction: EdgeDirection,
         requested_index: Option<usize>,
     ) -> Result<usize, SimError> {
@@ -423,7 +359,7 @@ impl Display for EdgeDirection {
 }
 
 fn validate_disconnected_views(
-    nodes: &[TimetableNode],
+    nodes: &[NodeDraft],
     view_sections: &[Option<ComputeViewSections>],
 ) -> SimResult {
     for (node, sections) in nodes.iter().zip(view_sections) {
@@ -447,7 +383,7 @@ fn validate_disconnected_views(
     Ok(())
 }
 
-fn data_topological_order(nodes: &[TimetableNode]) -> Result<Vec<usize>, SimError> {
+fn data_topological_order(nodes: &[NodeDraft]) -> Result<Vec<usize>, SimError> {
     let mut unresolved_predecessors = nodes
         .iter()
         .map(|node| node.predecessors.len())
@@ -485,8 +421,8 @@ fn data_topological_order(nodes: &[TimetableNode]) -> Result<Vec<usize>, SimErro
 }
 
 fn invalid_data_edge<T>(
-    from: &TimetableNode,
-    to: &TimetableNode,
+    from: &NodeDraft,
+    to: &NodeDraft,
     nodes_are_tensors: bool,
 ) -> Result<T, SimError> {
     if nodes_are_tensors {
@@ -505,7 +441,7 @@ fn invalid_data_edge<T>(
 }
 
 fn make_view(
-    nodes: &[TimetableNode],
+    nodes: &[NodeDraft],
     view_sections: &[Option<ComputeViewSections>],
     tensor_node: usize,
     compute_node: usize,
@@ -537,16 +473,16 @@ fn make_view(
 }
 
 #[derive(Debug)]
-pub struct TimetableNode {
+struct NodeDraft {
     id: String,
-    kind: TimetableNodeKind,
+    kind: DraftKind,
     input_edges: Vec<Option<usize>>,
     output_edges: Vec<Option<usize>>,
     predecessors: Vec<usize>,
     successors: Vec<usize>,
 }
 
-impl TimetableNode {
+impl NodeDraft {
     fn new(section: NodeSection) -> Result<(Self, Option<ComputeViewSections>), SimError> {
         let (id, kind, views, num_inputs, num_outputs) = match section {
             NodeSection::Compute {
@@ -565,7 +501,7 @@ impl TimetableNode {
                 let num_outputs = output_views.len();
                 (
                     id,
-                    TimetableNodeKind::Compute {
+                    DraftKind::Compute {
                         program,
                         tiling,
                         pe,
@@ -582,7 +518,7 @@ impl TimetableNode {
                 let tensor = Tensor::new(&config.shape, &config.dtype, config.addr)
                     .map_err(|error| SimError(format!("Tensor '{id}': {error}")))?
                     .with_id(&id);
-                (id, TimetableNodeKind::Tensor(tensor), None, 0, 0)
+                (id, DraftKind::Tensor(tensor), None, 0, 0)
             }
         };
         Ok((
@@ -598,6 +534,108 @@ impl TimetableNode {
         ))
     }
 
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn is_compute(&self) -> bool {
+        matches!(self.kind, DraftKind::Compute { .. })
+    }
+    fn tensor(&self) -> Option<&Tensor> {
+        match &self.kind {
+            DraftKind::Tensor(tensor) => Some(tensor),
+            DraftKind::Compute { .. } => None,
+        }
+    }
+    fn bind(self, edges: &[TimetableEdge]) -> Result<TimetableNode, SimError> {
+        let dense_edges = |ports: Vec<Option<usize>>, direction: &str| {
+            ports
+                .into_iter()
+                .enumerate()
+                .map(|(port, edge)| {
+                    edge.ok_or_else(|| {
+                        SimError(format!(
+                            "Compute node '{}' has an unbound program {direction} at index {port}",
+                            self.id
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()
+        };
+        let input_edges = dense_edges(self.input_edges, "input")?;
+        let output_edges = dense_edges(self.output_edges, "output")?;
+        let kind = match self.kind {
+            DraftKind::Compute {
+                program,
+                tiling,
+                pe,
+            } => {
+                let views_for = |ports: &[usize]| {
+                    ports
+                        .iter()
+                        .map(|&edge| {
+                            edges[edge]
+                                .tensor
+                                .as_ref()
+                                .expect("resolved data edge")
+                                .view
+                                .clone()
+                        })
+                        .collect::<Vec<_>>()
+                };
+                let views = ComputeTensorViews {
+                    inputs: views_for(&input_edges),
+                    outputs: views_for(&output_edges),
+                };
+                let program = PreparedProgram::new(
+                    &program,
+                    RegionBindings {
+                        inputs: views.inputs.clone(),
+                        outputs: views.outputs.clone(),
+                    },
+                    tiling.as_ref(),
+                )
+                .map_err(|error| SimError(format!("Compute node '{}': {error}", self.id)))?;
+                TimetableNodeKind::Compute {
+                    program: Rc::new(program),
+                    pe,
+                    views,
+                }
+            }
+            DraftKind::Tensor(tensor) => TimetableNodeKind::Tensor(tensor),
+        };
+        Ok(TimetableNode {
+            id: self.id,
+            kind,
+            input_edges,
+            output_edges,
+            predecessors: self.predecessors,
+            successors: self.successors,
+        })
+    }
+}
+
+#[derive(Debug)]
+enum DraftKind {
+    Compute {
+        program: ProgramSpec,
+        tiling: Option<TileSpec>,
+        pe: Option<String>,
+    },
+    Tensor(Tensor),
+}
+
+/// A resolved tensor or compute node with dense data ports.
+#[derive(Debug)]
+pub struct TimetableNode {
+    id: String,
+    kind: TimetableNodeKind,
+    input_edges: Vec<usize>,
+    output_edges: Vec<usize>,
+    predecessors: Vec<usize>,
+    successors: Vec<usize>,
+}
+
+impl TimetableNode {
     #[must_use]
     pub fn id(&self) -> &str {
         &self.id
@@ -611,18 +649,11 @@ impl TimetableNode {
         }
     }
 
+    /// Shared hardware-independent program, present on every compute node.
     #[must_use]
-    pub fn program(&self) -> Option<&ProgramSpec> {
+    pub fn program(&self) -> Option<&Rc<PreparedProgram>> {
         match &self.kind {
             TimetableNodeKind::Compute { program, .. } => Some(program),
-            TimetableNodeKind::Tensor(_) => None,
-        }
-    }
-
-    #[must_use]
-    pub fn tiling(&self) -> Option<&TileSpec> {
-        match &self.kind {
-            TimetableNodeKind::Compute { tiling, .. } => tiling.as_ref(),
             TimetableNodeKind::Tensor(_) => None,
         }
     }
@@ -641,12 +672,12 @@ impl TimetableNode {
     }
 
     #[must_use]
-    pub fn input_edges(&self) -> &[Option<usize>] {
+    pub fn input_edges(&self) -> &[usize] {
         &self.input_edges
     }
 
     #[must_use]
-    pub fn output_edges(&self) -> &[Option<usize>] {
+    pub fn output_edges(&self) -> &[usize] {
         &self.output_edges
     }
 
@@ -664,9 +695,9 @@ impl TimetableNode {
 #[derive(Debug)]
 enum TimetableNodeKind {
     Compute {
-        program: ProgramSpec,
-        tiling: Option<TileSpec>,
+        program: Rc<PreparedProgram>,
         pe: Option<String>,
+        views: ComputeTensorViews,
     },
     Tensor(Tensor),
 }
