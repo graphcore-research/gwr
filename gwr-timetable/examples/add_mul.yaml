@@ -34,9 +34,9 @@ nodes:
     tiling: { sizes: { i: 4 } }
   - { id: Y, kind: tensor, config: { addr: 0x5000, dtype: fp32, shape: [8] } }
 edges:
-  - { from: A, to: add.0, kind: data }
-  - { from: B, to: add.1, kind: data }
-  - { from: add.0, to: T, kind: data }
-  - { from: T, to: multiply.0, kind: data }
-  - { from: C, to: multiply.1, kind: data }
-  - { from: multiply.0, to: Y, kind: data }
+  - { from: A, to: add.A, kind: data }
+  - { from: B, to: add.B, kind: data }
+  - { from: add.T, to: T, kind: data }
+  - { from: T, to: multiply.T, kind: data }
+  - { from: C, to: multiply.C, kind: data }
+  - { from: multiply.Y, to: Y, kind: data }

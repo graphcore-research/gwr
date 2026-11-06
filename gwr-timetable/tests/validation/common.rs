@@ -95,14 +95,14 @@ nodes:
 
 edges:
   - from: tensor0
-    to: add0.0
+    to: add0.A
     kind: data
 
   - from: tensor1
-    to: add0.1
+    to: add0.B
     kind: data
 
-  - from: add0
+  - from: add0.Y
     to: tensor2
     kind: data
 ",
@@ -163,13 +163,27 @@ pub(crate) fn compute_with_program(
     input_views: Vec<Option<TensorViewSection>>,
     output_views: Vec<Option<TensorViewSection>>,
 ) -> NodeSection {
+    let input_views = program
+        .inputs
+        .iter()
+        .cloned()
+        .zip(input_views)
+        .filter_map(|(name, view)| view.map(|view| (name, view)))
+        .collect();
+    let output_views = program
+        .outputs
+        .iter()
+        .cloned()
+        .zip(output_views)
+        .filter_map(|(name, view)| view.map(|view| (name, view)))
+        .collect();
     NodeSection::Compute {
         id: id.to_string(),
         program: program.into(),
         tiling: None,
         pe: None,
-        input_views: Some(input_views),
-        output_views: Some(output_views),
+        input_views,
+        output_views,
     }
 }
 

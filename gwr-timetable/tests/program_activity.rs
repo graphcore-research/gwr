@@ -1,30 +1,23 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
 use std::collections::HashMap;
-use std::rc::Rc;
 
-use gwr_engine::engine::Engine;
-use gwr_models::processing_element::dispatch::Dispatch;
-use gwr_platform::Platform;
-use gwr_timetable::Timetable;
 use gwr_timetable::timetable_file::TimetableFile;
-use gwr_track::test_init;
+
+#[allow(
+    dead_code,
+    reason = "This suite uses only the events from the shared simulation fixture."
+)]
+mod common;
+use common::run_timetable;
 
 fn run_add_and_collect_events() -> Vec<String> {
-    let (test_tracker, tracker) = test_init!(1000);
-    let mut engine = Engine::new(&tracker);
-    let clock = engine.default_clock();
-    let platform = Rc::new(Platform::from_string(&engine, &clock, PLATFORM_YAML).unwrap());
-    let timetable_file = TimetableFile::from_string(TIMETABLE_YAML).unwrap();
-    let graph = timetable_file.into_graph().unwrap();
-    let timetable = Rc::new(Timetable::new(engine.top(), graph, &platform).unwrap());
-    let dispatcher: Rc<dyn Dispatch> = timetable.clone();
-    platform.attach_dispatcher(&dispatcher);
-
-    engine.run().unwrap();
-    timetable.check_tasks_complete().unwrap();
-
-    test_tracker.events()
+    run_timetable(
+        PLATFORM_YAML,
+        TimetableFile::from_string(TIMETABLE_YAML).unwrap(),
+    )
+    .tracker
+    .events()
 }
 
 fn assert_pe_activity_lanes_created(events: &[String]) {
@@ -178,14 +171,14 @@ nodes:
 
 edges:
   - from: input_a
-    to: add.0
+    to: add.A
     kind: data
 
   - from: input_b
-    to: add.1
+    to: add.B
     kind: data
 
-  - from: add
+  - from: add.Y
     to: output
     kind: data
 ";

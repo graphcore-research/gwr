@@ -2,6 +2,8 @@
 
 //! Types that map directly to the YAML file contents
 
+use std::collections::BTreeMap;
+use std::fmt;
 use std::fs::read_to_string;
 use std::path::Path;
 
@@ -9,15 +11,19 @@ use gwr_engine::sim_error;
 use gwr_engine::types::{SimError, SimResult};
 use gwr_models::processing_element::program::syntax::{ProgramSpec, TileSpec};
 use gwr_models::processing_element::tensors::dtype::DataType;
+use serde::de::{Deserializer, Error as DeError, MapAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use yaml_serde::from_str;
 
 use crate::graph::TimetableGraph;
 
+/// Serialized workload nodes and their named data or control edges.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TimetableFile {
+    /// Compute and tensor nodes in file order.
     pub nodes: Vec<NodeSection>,
+    /// Data bindings and control relationships between nodes.
     pub edges: Vec<EdgeSection>,
 }
 
@@ -42,35 +48,61 @@ impl TimetableFile {
         self.clone().into_graph().map(drop)
     }
 
+    /// Resolve named ports and tensor views, then validate data dependencies.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid nodes, bindings, views or conflicting
+    /// accesses.
     pub fn into_graph(self) -> Result<TimetableGraph, SimError> {
         TimetableGraph::build(self)
     }
 }
 
+/// A serialized compute program or a physical tensor.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[serde(tag = "kind")]
 pub enum NodeSection {
+    /// A program with optional tiling, PE placement and named tensor views.
     #[serde(rename = "compute")]
     Compute {
+        /// Unique node identifier, without the port delimiter.
         id: String,
+        /// Program declarations and assignments to prepare for execution.
         program: Box<ProgramSpec>,
+        /// Optional per-axis tile sizes.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tiling: Option<TileSpec>,
+        /// Name of the processing element selected for execution.
         pe: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        input_views: Option<Vec<Option<TensorViewSection>>>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        output_views: Option<Vec<Option<TensorViewSection>>>,
+        /// Sparse input views keyed by declared program input name.
+        #[serde(
+            default,
+            skip_serializing_if = "BTreeMap::is_empty",
+            deserialize_with = "deserialize_views"
+        )]
+        input_views: BTreeMap<String, TensorViewSection>,
+        /// Sparse output views keyed by declared program output name.
+        #[serde(
+            default,
+            skip_serializing_if = "BTreeMap::is_empty",
+            deserialize_with = "deserialize_views"
+        )]
+        output_views: BTreeMap<String, TensorViewSection>,
     },
+    /// A tensor's identity and physical storage descriptor.
     #[serde(rename = "tensor")]
     Tensor {
+        /// Unique node identifier, without the port delimiter.
         id: String,
+        /// Physical storage descriptor for this tensor.
         config: TensorConfigSection,
     },
 }
 
 impl NodeSection {
+    /// Node identifier used by edge endpoints.
     #[must_use]
     pub fn id(&self) -> &str {
         match self {
@@ -79,6 +111,7 @@ impl NodeSection {
         }
     }
 
+    /// Selected PE name for compute nodes, or `None` for tensor nodes.
     #[must_use]
     pub fn pe(&self) -> Option<&str> {
         match self {
@@ -88,19 +121,26 @@ impl NodeSection {
     }
 }
 
+/// Shape and offsets of a view bound to a declared compute port.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TensorViewSection {
+    /// Starting coordinate of the view within its tensor.
     pub offsets: Vec<usize>,
+    /// Number of selected elements along each dimension.
     pub shape: Vec<usize>,
 }
 
+/// Physical address, element type and dimensions of a tensor node.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TensorConfigSection {
+    /// Physical byte address of the tensor storage.
     #[serde(deserialize_with = "gwr_platform::types::parse_u64_byte_str")]
     pub addr: u64,
+    /// Element type stored in the tensor.
     pub dtype: DataType,
+    /// Number of elements along each dimension.
     pub shape: Vec<usize>,
 }
 
@@ -113,31 +153,26 @@ pub struct EdgeSection {
 }
 
 impl EdgeSection {
-    /// Return the node ID in the edge from end
-    ///
-    /// The string are of the form:
-    ///   <node_id>[.<edge_index>?
-    /// So we split on the '.' and return the first part
+    /// Return the source node ID (before the optional port delimiter).
     #[must_use]
     pub fn from_node_id(&self) -> &str {
-        let from: Vec<&str> = self.from.split('.').collect();
-        from[0]
+        self.from.split('.').next().expect("split has a first item")
     }
 
-    /// Return the node ID in the edge to end
-    ///
-    /// See `from_node_id` for more details.
+    /// Return the destination node ID (before the optional port delimiter).
     #[must_use]
     pub fn to_node_id(&self) -> &str {
-        let to: Vec<&str> = self.to.split('.').collect();
-        to[0]
+        self.to.split('.').next().expect("split has a first item")
     }
 
-    pub fn from_node_and_edge(&self) -> Result<(&str, Option<usize>), SimError> {
+    /// Parse the source as a node ID and optional declared output port name.
+    pub fn from_node_and_port(&self) -> Result<(&str, Option<&str>), SimError> {
         parse_edge_end(&self.from)
     }
 
-    pub fn to_node_and_edge(&self) -> Result<(&str, Option<usize>), SimError> {
+    /// Parse the destination as a node ID and optional declared input port
+    /// name.
+    pub fn to_node_and_port(&self) -> Result<(&str, Option<&str>), SimError> {
         parse_edge_end(&self.to)
     }
 }
@@ -151,23 +186,62 @@ pub enum EdgeKind {
     Control,
 }
 
-/// Take the string defining the end of an edge and return the index of
-/// the node it corresponds to and the optional edge index in/out of that node.
-///
-/// For example:
-///   gemm_0.1
-/// will find the node named `gemm_0` defined in `node_idx_by_id` and return
-/// Some(1) as the edge index into that node.
-pub(crate) fn parse_edge_end(id: &str) -> Result<(&str, Option<usize>), SimError> {
-    let parts: Vec<&str> = id.split('.').collect();
-    match parts.as_slice() {
-        [node_id] => Ok((node_id, None)),
-        [node_id, edge_id] => {
-            let index = edge_id
-                .parse::<usize>()
-                .map_err(|error| SimError(format!("Unable to parse edge id '{id}'\n{error}")))?;
-            Ok((node_id, Some(index)))
-        }
-        _ => sim_error!("Unable to parse edge id '{id}'"),
+/// Parse `node` or `node.PORT`, splitting only on the first dot.
+/// The complete suffix is a declared name, never a numeric ordinal.
+pub(crate) fn parse_edge_end(id: &str) -> Result<(&str, Option<&str>), SimError> {
+    let (node, port) = id
+        .split_once('.')
+        .map_or((id, None), |(node, port)| (node, Some(port)));
+    validate_node_id(node)?;
+    if let Some(port) = port {
+        validate_port_name(port)?;
     }
+    Ok((node, port))
+}
+
+/// Node IDs must be nonempty and cannot contain the endpoint delimiter.
+/// Port names are the entire nonempty suffix after the first dot.
+pub(crate) fn validate_node_id(id: &str) -> Result<(), SimError> {
+    if id.is_empty() || id.contains('.') {
+        return sim_error!(
+            "Invalid timetable node identifier '{id}': expected a nonempty name without '.'"
+        );
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_port_name(name: &str) -> Result<(), SimError> {
+    if name.is_empty() {
+        return sim_error!("Invalid timetable port identifier: expected a nonempty name");
+    }
+    Ok(())
+}
+
+fn deserialize_views<'de, D>(
+    deserializer: D,
+) -> Result<BTreeMap<String, TensorViewSection>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct Views;
+
+    impl<'de> Visitor<'de> for Views {
+        type Value = BTreeMap<String, TensorViewSection>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a map of program port names to tensor views")
+        }
+
+        fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<Self::Value, M::Error> {
+            let mut views = BTreeMap::new();
+            while let Some((name, view)) = map.next_entry::<String, TensorViewSection>()? {
+                if views.contains_key(&name) {
+                    return Err(DeError::custom(format!("duplicate view port '{name}'")));
+                }
+                views.insert(name, view);
+            }
+            Ok(views)
+        }
+    }
+    deserializer.deserialize_map(Views)
 }

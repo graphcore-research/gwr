@@ -39,16 +39,16 @@ nodes:
               - read: { tensor: A, indices: [i] }
               - read: { tensor: B, indices: [i] }
 edges:
-  - { from: a4, to: add4.0, kind: data }
-  - { from: b4, to: add4.1, kind: data }
-  - { from: add4, to: y4, kind: data }
-  - { from: a8, to: add8.0, kind: data }
-  - { from: b8, to: add8.1, kind: data }
-  - { from: add8, to: y8, kind: data }
+  - { from: a4, to: add4.A, kind: data }
+  - { from: b4, to: add4.B, kind: data }
+  - { from: add4.Y, to: y4, kind: data }
+  - { from: a8, to: add8.A, kind: data }
+  - { from: b8, to: add8.B, kind: data }
+  - { from: add8.Y, to: y8, kind: data }
 ";
 
 #[test]
-fn omitted_view_lists_cover_every_resolved_program_port() {
+fn omitted_view_maps_cover_every_resolved_program_port() {
     let graph = TimetableFile::from_string(INLINE_ADD)
         .unwrap()
         .into_graph()
@@ -70,15 +70,15 @@ fn omitted_view_lists_cover_every_resolved_program_port() {
 }
 
 #[test]
-fn either_view_list_can_be_omitted_independently() {
+fn either_view_map_can_be_omitted_independently() {
     let source = INLINE_ADD
         .replace(
             "    tiling: { sizes: { i: 2 } }\n",
-            "    tiling: { sizes: { i: 2 } }\n    output_views: [{ offsets: [0], shape: [4] }]\n",
+            "    tiling: { sizes: { i: 2 } }\n    output_views: { Y: { offsets: [0], shape: [4] } }\n",
         )
         .replace(
             "    pe: pe1\n",
-            "    pe: pe1\n    input_views: [{ offsets: [0], shape: [8] }, { offsets: [0], shape: [8] }]\n",
+            "    pe: pe1\n    input_views: { A: { offsets: [0], shape: [8] }, B: { offsets: [0], shape: [8] } }\n",
         );
     let graph = TimetableFile::from_string(&source)
         .unwrap()
@@ -97,19 +97,16 @@ fn either_view_list_can_be_omitted_independently() {
 }
 
 #[test]
-fn explicitly_empty_view_list_does_not_acquire_implicit_ports() {
+fn explicitly_empty_view_map_selects_full_views() {
     let source = INLINE_ADD.replace(
         "    tiling: { sizes: { i: 2 } }\n",
-        "    tiling: { sizes: { i: 2 } }\n    input_views: []\n",
+        "    tiling: { sizes: { i: 2 } }\n    input_views: {}\n",
     );
-    let error = TimetableFile::from_string(&source)
+    let graph = TimetableFile::from_string(&source)
         .unwrap()
         .into_graph()
-        .unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("input tensor index 0 is out of range"),
-        "{error}"
-    );
+        .unwrap();
+    let views = graph.compute_views(3).unwrap();
+    assert_eq!(views.inputs()[0].shape().dims(), &[4]);
+    assert_eq!(views.inputs()[1].shape().dims(), &[4]);
 }

@@ -7,8 +7,8 @@ use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::program::SRAM_SLOT_ALIGNMENT_BYTES;
 use gwr_models::processing_element::task::Task;
 use gwr_platform::Platform;
-use gwr_timetable::Timetable;
 use gwr_timetable::timetable_file::{NodeSection, TimetableFile};
+use gwr_timetable::{Timetable, Workload};
 use gwr_track::log::Level;
 use gwr_track::test_helpers::TestTracker;
 use gwr_track::{Tracker, test_init};
@@ -64,8 +64,8 @@ nodes:
     tiling: { sizes: { o: 1 } }
   - { id: Y, kind: tensor, config: { addr: 0x2000, dtype: fp32, shape: [2] } }
 edges:
-  - { from: A, to: fused.0, kind: data }
-  - { from: fused.0, to: Y, kind: data }
+  - { from: A, to: fused.A, kind: data }
+  - { from: fused.Y, to: Y, kind: data }
 ",
     )
     .unwrap()
@@ -104,9 +104,9 @@ nodes:
     tiling: { sizes: { y: 1 } }
   - { id: Y, kind: tensor, config: { addr: 0x3000, dtype: fp32, shape: [3] } }
 edges:
-  - { from: A, to: window.0, kind: data }
-  - { from: B, to: window.1, kind: data }
-  - { from: window.0, to: Y, kind: data }
+  - { from: A, to: window.A, kind: data }
+  - { from: B, to: window.B, kind: data }
+  - { from: window.Y, to: Y, kind: data }
 ",
     )
     .unwrap()
@@ -131,9 +131,9 @@ nodes:
             read: { tensor: A, indices: [i] }
   - { id: Y, kind: tensor, config: { addr: 0x3000, dtype: fp32, shape: [4] } }
 edges:
-  - { from: A, to: copy.0, kind: data }
-  - { from: dependency, to: copy.1, kind: data }
-  - { from: copy.0, to: Y, kind: data }
+  - { from: A, to: copy.A, kind: data }
+  - { from: dependency, to: copy.dependency, kind: data }
+  - { from: copy.Y, to: Y, kind: data }
 ",
     )
     .unwrap()
@@ -174,12 +174,12 @@ nodes:
   - { id: Y, kind: tensor, config: { addr: 0x3000, dtype: fp32, shape: [4] } }
   - { id: Z, kind: tensor, config: { addr: 0x4000, dtype: fp32, shape: [4] } }
 edges:
-  - { from: A, to: first.0, kind: data }
-  - { from: B, to: first.1, kind: data }
-  - { from: first.0, to: Y, kind: data }
-  - { from: A, to: second.0, kind: data }
-  - { from: B, to: second.1, kind: data }
-  - { from: second.0, to: Z, kind: data }
+  - { from: A, to: first.A, kind: data }
+  - { from: B, to: first.B, kind: data }
+  - { from: first.Y, to: Y, kind: data }
+  - { from: A, to: second.A, kind: data }
+  - { from: B, to: second.B, kind: data }
+  - { from: second.Y, to: Z, kind: data }
 ",
     )
     .unwrap()
@@ -215,10 +215,10 @@ nodes:
     tiling: { sizes: { i: 4 } }
   - { id: Y, kind: tensor, config: { addr: 0x5000, dtype: fp32, shape: [8] } }
 edges:
-  - { from: A, to: fused.0, kind: data }
-  - { from: B, to: fused.1, kind: data }
-  - { from: C, to: fused.2, kind: data }
-  - { from: fused.0, to: Y, kind: data }
+  - { from: A, to: fused.A, kind: data }
+  - { from: B, to: fused.B, kind: data }
+  - { from: C, to: fused.C, kind: data }
+  - { from: fused.Y, to: Y, kind: data }
 ",
     )
     .unwrap()
@@ -253,11 +253,11 @@ nodes:
   - { id: Y, kind: tensor, config: { addr: 0x4000, dtype: fp32, shape: [8] } }
   - { id: Z, kind: tensor, config: { addr: 0x5000, dtype: fp32, shape: [8] } }
 edges:
-  - { from: A, to: branches.0, kind: data }
-  - { from: B, to: branches.1, kind: data }
-  - { from: C, to: branches.2, kind: data }
-  - { from: branches.0, to: Y, kind: data }
-  - { from: branches.1, to: Z, kind: data }
+  - { from: A, to: branches.A, kind: data }
+  - { from: B, to: branches.B, kind: data }
+  - { from: C, to: branches.C, kind: data }
+  - { from: branches.Y, to: Y, kind: data }
+  - { from: branches.Z, to: Z, kind: data }
 ",
     )
     .unwrap()
@@ -298,10 +298,10 @@ nodes:
   - { id: Y, kind: tensor, config: { addr: 0x3000, dtype: fp32, shape: [8] } }
   - { id: Z, kind: tensor, config: { addr: 0x4000, dtype: fp32, shape: [8] } }
 edges:
-  - { from: A, to: fused.0, kind: data }
-  - { from: B, to: fused.1, kind: data }
-  - { from: fused.0, to: Y, kind: data }
-  - { from: fused.1, to: Z, kind: data }
+  - { from: A, to: fused.A, kind: data }
+  - { from: B, to: fused.B, kind: data }
+  - { from: fused.Y, to: Y, kind: data }
+  - { from: fused.Z, to: Z, kind: data }
 ",
     )
     .unwrap()
@@ -339,8 +339,8 @@ nodes:
     tiling: { sizes: { i: 1, j: 2, k: 2 } }
   - { id: Y, kind: tensor, config: { addr: 0x2000, dtype: fp32, shape: [2] } }
 edges:
-  - { from: A, to: nested.0, kind: data }
-  - { from: nested.0, to: Y, kind: data }
+  - { from: A, to: nested.A, kind: data }
+  - { from: nested.Y, to: Y, kind: data }
 ",
     )
     .unwrap()
@@ -371,9 +371,9 @@ nodes:
                   - read: { tensor: B, indices: [k, n] }
   - { id: Y, kind: tensor, config: { addr: 0x3000, dtype: fp32, shape: [2, 2] } }
 edges:
-  - { from: A, to: gemm.0, kind: data }
-  - { from: B, to: gemm.1, kind: data }
-  - { from: gemm.0, to: Y, kind: data }
+  - { from: A, to: gemm.A, kind: data }
+  - { from: B, to: gemm.B, kind: data }
+  - { from: gemm.Y, to: Y, kind: data }
 ",
     )
     .unwrap()
@@ -403,8 +403,8 @@ nodes:
                   - read: { tensor: A, indices: [i] }
   - { id: Y, kind: tensor, config: { addr: 0x2000, dtype: fp32, shape: [] } }
 edges:
-  - { from: A, to: sum_of_squares.0, kind: data }
-  - { from: sum_of_squares.0, to: Y, kind: data }
+  - { from: A, to: sum_of_squares.A, kind: data }
+  - { from: sum_of_squares.Y, to: Y, kind: data }
 ",
     )
     .unwrap()
@@ -435,9 +435,9 @@ nodes:
     tiling: { sizes: { m: 2, n: 3, k: 2 } }
   - { id: Y, kind: tensor, config: { addr: 0x3000, dtype: fp16, shape: [2, 3] } }
 edges:
-  - { from: A, to: gemm.0, kind: data }
-  - { from: B, to: gemm.1, kind: data }
-  - { from: gemm.0, to: Y, kind: data }
+  - { from: A, to: gemm.A, kind: data }
+  - { from: B, to: gemm.B, kind: data }
+  - { from: gemm.Y, to: Y, kind: data }
 ",
     )
     .unwrap()
@@ -475,9 +475,9 @@ nodes:
   - { id: Y, kind: tensor, config: { addr: 0x2000, dtype: fp32, shape: [3] } }
   - { id: I, kind: tensor, config: { addr: 0x3000, dtype: int64, shape: [3] } }
 edges:
-  - { from: A, to: pool.0, kind: data }
-  - { from: pool.0, to: Y, kind: data }
-  - { from: pool.1, to: I, kind: data }
+  - { from: A, to: pool.A, kind: data }
+  - { from: pool.Y, to: Y, kind: data }
+  - { from: pool.I, to: I, kind: data }
 ",
     )
     .unwrap()
@@ -512,8 +512,8 @@ nodes:
                   bounds: exclude
   - { id: Y, kind: tensor, config: { addr: 0x2000, dtype: fp32, shape: [1] } }
 edges:
-  - { from: A, to: pool.0, kind: data }
-  - { from: pool.0, to: Y, kind: data }
+  - { from: A, to: pool.A, kind: data }
+  - { from: pool.Y, to: Y, kind: data }
 ",
     )
     .unwrap()
@@ -542,8 +542,8 @@ nodes:
                 read: { tensor: A, indices: [k], bounds: exclude }
   - { id: Y, kind: tensor, config: { addr: 0x2000, dtype: fp32, shape: [] } }
 edges:
-  - { from: A, to: pool.0, kind: data }
-  - { from: pool.0, to: Y, kind: data }
+  - { from: A, to: pool.A, kind: data }
+  - { from: pool.Y, to: Y, kind: data }
 ",
     )
     .unwrap()
@@ -623,11 +623,11 @@ nodes:
     tiling: { sizes: { m: 16, n: 16, k: 32 } }
   - { id: Y, kind: tensor, config: { addr: 0x13000, dtype: fp32, shape: [64, 64] } }
 edges:
-  - { from: A, to: fused.0, kind: data }
-  - { from: B, to: fused.1, kind: data }
-  - { from: bias, to: fused.2, kind: data }
-  - { from: floor, to: fused.3, kind: data }
-  - { from: fused.0, to: Y, kind: data }
+  - { from: A, to: fused.A, kind: data }
+  - { from: B, to: fused.B, kind: data }
+  - { from: bias, to: fused.bias, kind: data }
+  - { from: floor, to: fused.floor, kind: data }
+  - { from: fused.Y, to: Y, kind: data }
 ",
     )
     .unwrap()
@@ -675,7 +675,7 @@ fn sum_reduction_timetable(reduction_body: &str, uses_local_temporary: bool) -> 
     let uses_b = uses_local_temporary || reduction_body.contains("tensor: B");
     let inputs = if uses_b { "[A, B]" } else { "[A]" };
     let b_edge = if uses_b {
-        "  - { from: B, to: reduce.1, kind: data }"
+        "  - { from: B, to: reduce.B, kind: data }"
     } else {
         ""
     };
@@ -722,9 +722,9 @@ nodes:
     tiling: {{ sizes: {tiling} }}
   - {{ id: Y, kind: tensor, config: {{ addr: 0x3000, dtype: fp32, shape: [4] }} }}
 edges:
-  - {{ from: A, to: reduce.0, kind: data }}
+  - {{ from: A, to: reduce.A, kind: data }}
 {b_edge}
-  - {{ from: reduce.0, to: Y, kind: data }}
+  - {{ from: reduce.Y, to: Y, kind: data }}
 "
     )
 }
@@ -838,15 +838,15 @@ nodes:
               - read: { tensor: T1, indices: [i] }
   - { id: Z, kind: tensor, config: { addr: 0x5000, dtype: fp32, shape: [4] } }
 edges:
-  - { from: A, to: produce.0, kind: data }
-  - { from: B, to: produce.1, kind: data }
-  - { from: produce.0, to: T, kind: data }
-  - { from: T, to: consume1.0, kind: data }
-  - { from: T, to: consume1.1, kind: data }
-  - { from: consume1.0, to: Y, kind: data }
-  - { from: T, to: consume2.0, kind: data }
-  - { from: T, to: consume2.1, kind: data }
-  - { from: consume2.0, to: Z, kind: data }
+  - { from: A, to: produce.A, kind: data }
+  - { from: B, to: produce.B, kind: data }
+  - { from: produce.T, to: T, kind: data }
+  - { from: T, to: consume1.T0, kind: data }
+  - { from: T, to: consume1.T1, kind: data }
+  - { from: consume1.Y, to: Y, kind: data }
+  - { from: T, to: consume2.T0, kind: data }
+  - { from: T, to: consume2.T1, kind: data }
+  - { from: consume2.Z, to: Z, kind: data }
 ";
     if same_pe {
         source
@@ -907,6 +907,90 @@ memories:
 connections:
   - connect: [pe.pe0, mem.mem]
 "
+}
+
+const INTRINSIC_DURATION_PLATFORM: &str = r"
+memory_maps: [{name: mm, devices: [mem]}]
+operation_classes:
+  exp: {operations: [exp], arity: 1}
+processing_elements:
+  - name: pe0
+    memory_map: mm
+    config:
+      sram_bytes: 256
+      compute:
+        execution_units:
+          slow:
+            capabilities: [{class: exp, input_dtypes: [[fp32]], ops_per_tick: 1e-19}]
+memories:
+  - name: mem
+    kind: hbm
+    base_address: 0
+    config: {capacity_bytes: 1MiB}
+connections: [{connect: [pe.pe0, mem.mem]}]
+";
+
+fn nested_exp_timetable() -> TimetableFile {
+    TimetableFile::from_string(
+        r"
+nodes:
+  - {id: A, kind: tensor, config: {addr: 0x1000, dtype: fp32, shape: [1]}}
+  - id: nested
+    kind: compute
+    pe: pe0
+    program:
+      inputs: [A]
+      outputs: [Y]
+      assignments:
+        - output: Y
+          axes: [i]
+          expr: {exp: [{exp: [{read: {tensor: A, indices: [i]}}]}]}
+  - {id: Y, kind: tensor, config: {addr: 0x2000, dtype: fp32, shape: [1]}}
+edges:
+  - {from: A, to: nested.A, kind: data}
+  - {from: nested.Y, to: Y, kind: data}
+",
+    )
+    .unwrap()
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct DispatchSnapshot {
+    completed_nodes: usize,
+    active_nodes: usize,
+    completed_workload: Option<Workload>,
+    ready_tasks: (bool, Vec<usize>),
+    tick: u64,
+    memory_traffic: (usize, usize),
+    peak_sram_bytes: usize,
+    machine_operations: usize,
+}
+
+fn completed_dispatch_simulation() -> Simulation {
+    let simulation = run_timetable(
+        include_str!("../examples/compute_region_platform.yaml"),
+        affine_sum_window_timetable(),
+    );
+    simulation
+        .timetable
+        .enable_completed_workload_tracking()
+        .unwrap();
+    simulation
+}
+
+fn dispatch_snapshot(simulation: &Simulation) -> DispatchSnapshot {
+    let timetable = &simulation.timetable;
+    let pe = simulation.platform.pe("pe0").unwrap();
+    DispatchSnapshot {
+        completed_nodes: timetable.num_graph_nodes_completed(),
+        active_nodes: timetable.num_graph_nodes_active(),
+        completed_workload: timetable.completed_workload(),
+        ready_tasks: timetable.ready_task_indices("pe0").unwrap(),
+        tick: simulation.clock.tick_now().tick(),
+        memory_traffic: pe.memory_traffic_bytes(),
+        peak_sram_bytes: pe.peak_sram_bytes(),
+        machine_operations: pe.machine_ops().checked_operation_total().unwrap(),
+    }
 }
 
 #[test]
@@ -1026,9 +1110,9 @@ nodes:
               - read: { tensor: B, indices: [i] }
     tiling: { sizes: { i: 4 } }
 edges:
-  - { from: A, to: add.0, kind: data }
-  - { from: B, to: add.1, kind: data }
-  - { from: add.0, to: Y, kind: data }
+  - { from: A, to: add.A, kind: data }
+  - { from: B, to: add.B, kind: data }
+  - { from: add.Y, to: Y, kind: data }
 ",
     )
     .unwrap();
@@ -1271,51 +1355,6 @@ fn invalid_downstream_placement_precedes_earlier_preparation_failure() {
     );
 }
 
-const INTRINSIC_DURATION_PLATFORM: &str = r"
-memory_maps: [{name: mm, devices: [mem]}]
-operation_classes:
-  exp: {operations: [exp], arity: 1}
-processing_elements:
-  - name: pe0
-    memory_map: mm
-    config:
-      sram_bytes: 256
-      compute:
-        execution_units:
-          slow:
-            capabilities: [{class: exp, input_dtypes: [[fp32]], ops_per_tick: 1e-19}]
-memories:
-  - name: mem
-    kind: hbm
-    base_address: 0
-    config: {capacity_bytes: 1MiB}
-connections: [{connect: [pe.pe0, mem.mem]}]
-";
-
-fn nested_exp_timetable() -> TimetableFile {
-    TimetableFile::from_string(
-        r"
-nodes:
-  - {id: A, kind: tensor, config: {addr: 0x1000, dtype: fp32, shape: [1]}}
-  - id: nested
-    kind: compute
-    pe: pe0
-    program:
-      inputs: [A]
-      outputs: [Y]
-      assignments:
-        - output: Y
-          axes: [i]
-          expr: {exp: [{exp: [{read: {tensor: A, indices: [i]}}]}]}
-  - {id: Y, kind: tensor, config: {addr: 0x2000, dtype: fp32, shape: [1]}}
-edges:
-  - {from: A, to: nested, kind: data}
-  - {from: nested, to: Y, kind: data}
-",
-    )
-    .unwrap()
-}
-
 #[test]
 fn intrinsic_serial_duration_is_rejected_before_preparation_side_effects() {
     // Each exp fits in 10^19 ticks; the two mandatory stages do not fit u64.
@@ -1492,13 +1531,13 @@ nodes:
         expr:
           {}{second_assignment}
 edges:
- - {{ from: A, to: gather, kind: data }}
- - {{ from: gather.0, to: Y, kind: data }}
+ - {{ from: A, to: gather.A, kind: data }}
+ - {{ from: gather.Y, to: Y, kind: data }}
 {}
 ",
                 expression(sparse).replace('\n', "\n          "),
                 if second_index.is_some() {
-                    " - { from: gather.1, to: Z, kind: data }"
+                    " - { from: gather.Z, to: Z, kind: data }"
                 } else {
                     ""
                 }
@@ -1560,8 +1599,8 @@ nodes:
               sin:
                 - read: {{ tensor: A, indices: [m, k] }}
 edges:
- - {{ from: A, to: argmax, kind: data }}
- - {{ from: argmax, to: I, kind: data }}
+ - {{ from: A, to: argmax.A, kind: data }}
+ - {{ from: argmax.I, to: I, kind: data }}
 "
             );
             let graph = TimetableFile::from_string(&source)
@@ -1610,8 +1649,8 @@ nodes:
     tiling: { sizes: { k: 2 } }
   - { id: I, kind: tensor, config: { addr: 0x2000, dtype: int64, shape: [1] } }
 edges:
-  - { from: A, to: argmax.0, kind: data }
-  - { from: argmax.0, to: I, kind: data }
+  - { from: A, to: argmax.A, kind: data }
+  - { from: argmax.I, to: I, kind: data }
 ";
     let run = |sram_bytes: usize| {
         let (_test_tracker, tracker) = test_init!(1000);
@@ -1765,23 +1804,9 @@ fn dispatch_retains_prepared_handles() {
 
 #[test]
 fn dispatch_rejects_noncompute_and_invalid_indices() {
-    let simulation = run_timetable(
-        include_str!("../examples/compute_region_platform.yaml"),
-        affine_sum_window_timetable(),
-    );
+    let simulation = completed_dispatch_simulation();
     let timetable = &simulation.timetable;
-    let pe = simulation.platform.pe("pe0").unwrap();
-    timetable.enable_completed_workload_tracking().unwrap();
-    let before = (
-        timetable.num_graph_nodes_completed(),
-        timetable.num_graph_nodes_active(),
-        timetable.completed_workload(),
-        timetable.ready_task_indices("pe0").unwrap(),
-        simulation.clock.tick_now().tick(),
-        pe.memory_traffic_bytes(),
-        pe.peak_sram_bytes(),
-        pe.machine_ops().checked_operation_total().unwrap(),
-    );
+    let before = dispatch_snapshot(&simulation);
     for (case, index) in [("tensor", 0), ("outside graph", usize::MAX)] {
         assert!(timetable.task_by_id(index).is_err(), "{case}: lookup");
         assert!(
@@ -1793,20 +1818,15 @@ fn dispatch_rejects_noncompute_and_invalid_indices() {
             "{case}: complete"
         );
     }
-    // A real compute node still accepts repeated completion without accounting
-    // or scheduler changes.
-    timetable.set_task_completed(2).unwrap();
-    let after = (
-        timetable.num_graph_nodes_completed(),
-        timetable.num_graph_nodes_active(),
-        timetable.completed_workload(),
-        timetable.ready_task_indices("pe0").unwrap(),
-        simulation.clock.tick_now().tick(),
-        pe.memory_traffic_bytes(),
-        pe.peak_sram_bytes(),
-        pe.machine_ops().checked_operation_total().unwrap(),
-    );
-    assert_eq!(after, before);
+    assert_eq!(dispatch_snapshot(&simulation), before);
+}
+
+#[test]
+fn repeated_completion_preserves_dispatch_and_accounting_state() {
+    let simulation = completed_dispatch_simulation();
+    let before = dispatch_snapshot(&simulation);
+    simulation.timetable.set_task_completed(2).unwrap();
+    assert_eq!(dispatch_snapshot(&simulation), before);
 }
 
 #[test]
@@ -1851,8 +1871,8 @@ nodes:
          expr:
            read: { tensor: A, indices: [i] }
 edges:
- - { from: A, to: copy, kind: data }
- - { from: copy, to: Y, kind: data }
+ - { from: A, to: copy.A, kind: data }
+ - { from: copy.Y, to: Y, kind: data }
 ",
             &["copy", "unmapped touched bytes"][..],
         ),

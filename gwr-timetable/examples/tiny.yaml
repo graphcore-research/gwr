@@ -75,25 +75,25 @@ nodes:
 
 edges:
   - from: tensor_A
-    to: add
+    to: add.A
     kind: data
 
   - from: tensor_B
-    to: add
+    to: add.B
     kind: data
 
-  - from: add
+  - from: add.Y
     to: tensor_C
     kind: data
 
   - from: tensor_C
-    to: gemm.0
+    to: gemm.A
     kind: data
 
   - from: tensor_D
-    to: gemm.1
+    to: gemm.B
     kind: data
 
-  - from: gemm
+  - from: gemm.Y
     to: tensor_E
     kind: data

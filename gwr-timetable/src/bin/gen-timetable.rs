@@ -680,52 +680,57 @@ impl Generator {
             .inputs
             .iter()
             .enumerate()
-            .map(|(index, maybe_view)| {
-                maybe_view.as_ref().map(|view| {
-                    let tensor = input_tensors[index]
-                        .as_ref()
-                        .expect("boundary input has a tensor");
-                    self.register_edge(
-                        tensor_id(tensor),
-                        &format!("{compute_id}.{index}"),
-                        EdgeKind::Data,
-                    );
+            .filter_map(|(index, view)| view.as_ref().map(|view| (index, view)))
+            .zip(&mapping.program.inputs)
+            .map(|((index, view), name)| {
+                let tensor = input_tensors[index]
+                    .as_ref()
+                    .expect("boundary input has a tensor");
+                self.register_edge(
+                    tensor_id(tensor),
+                    &format!("{compute_id}.{name}"),
+                    EdgeKind::Data,
+                );
+                (
+                    name.clone(),
                     TensorViewSection {
                         offsets: view.offsets().to_vec(),
                         shape: view.shape().dims().to_vec(),
-                    }
-                })
+                    },
+                )
             })
-            .collect::<Vec<_>>();
+            .collect();
         let output_views = boundary
             .outputs
             .iter()
             .enumerate()
-            .map(|(index, maybe_view)| {
-                maybe_view.as_ref().map(|view| {
-                    let tensor = output_tensors[index]
-                        .as_ref()
-                        .expect("boundary output has a tensor");
-                    let from = if boundary.outputs.len() == 1 {
-                        compute_id.to_string()
-                    } else {
-                        format!("{compute_id}.{index}")
-                    };
-                    self.register_edge(&from, tensor_id(tensor), EdgeKind::Data);
+            .filter_map(|(index, view)| view.as_ref().map(|view| (index, view)))
+            .zip(&mapping.program.outputs)
+            .map(|((index, view), name)| {
+                let tensor = output_tensors[index]
+                    .as_ref()
+                    .expect("boundary output has a tensor");
+                self.register_edge(
+                    &format!("{compute_id}.{name}"),
+                    tensor_id(tensor),
+                    EdgeKind::Data,
+                );
+                (
+                    name.clone(),
                     TensorViewSection {
                         offsets: view.offsets().to_vec(),
                         shape: view.shape().dims().to_vec(),
-                    }
-                })
+                    },
+                )
             })
-            .collect::<Vec<_>>();
+            .collect();
         self.nodes.push(NodeSection::Compute {
             id: compute_id.to_string(),
             program: mapping.program.into(),
             tiling: Some(mapping.tiling),
             pe: Some(pe),
-            input_views: Some(input_views),
-            output_views: Some(output_views),
+            input_views,
+            output_views,
         });
     }
 

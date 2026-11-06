@@ -104,14 +104,14 @@ nodes:
 
 edges:
   - from: input
-    to: pool.0
+    to: pool.A
     kind: data
 
-  - from: pool.0
+  - from: pool.Y
     to: pooled
     kind: data
 
-  - from: pool.1
+  - from: pool.I
     to: indices
     kind: data
 ",

@@ -74,9 +74,9 @@ nodes:
               - { read: { tensor: B, indices: [i] } }
     tiling: { sizes: { i: 4 } }
 edges:
-  - { from: lhs, to: add.0, kind: data }
-  - { from: rhs, to: add.1, kind: data }
-  - { from: add.0, to: result, kind: data }
+  - { from: lhs, to: add.A, kind: data }
+  - { from: rhs, to: add.B, kind: data }
+  - { from: add.Y, to: result, kind: data }
 ```
 
 This example uses the same platform as the run command above. The addresses
@@ -142,11 +142,13 @@ A compute node runs one inline tensor program on a Processing Element (PE).
 ### Program ports
 
 Program input and output names are local to the compute node. They need not
-match graph tensor IDs. Their declaration order defines the port numbers.
+match graph tensor IDs. Data edges bind ports by these declared names.
 
-In the complete example, `inputs: [A, B]` creates input ports 0 and 1. The edges
-bind `lhs` to `A` and `rhs` to `B`. `outputs: [Y]` creates output port 0, which
-binds to `result`.
+In the complete example, `inputs: [A, B]` declares inputs `A` and `B`. The edges
+bind `lhs` to `add.A` and `rhs` to `add.B`. `outputs: [Y]` declares output `Y`,
+which binds `add.Y` to `result`. Reordering the declarations preserves these
+binding identities; program input and output iteration follows declaration
+order.
 
 An input can establish a dependency without being read by the program. Such an
 input causes no PE load or SRAM reservation.
@@ -159,22 +161,18 @@ storage strides.
 
 ```yaml
 input_views:
-  - { offsets: [4], shape: [8] }
-  - null
-output_views:
-  - null
+  A: { offsets: [4], shape: [8] }
+output_views: {}
 ```
 
-This selects eight elements of input 0, starting at element four. Input 1 and
-output 0 use their entire connected tensors. Program indices are relative to the
-selected views.
+This selects eight elements of input `A`, starting at element four. Input `B`
+and output `Y` use their entire connected tensors. Program indices are relative
+to the selected views. Scalar views use `offsets: []` and `shape: []`.
 
-Each supplied list must have one entry per program port, in declaration order. A
-`null` entry selects the whole tensor. Omitting either list selects whole
-tensors for that direction. For a program with two inputs, omit `input_views` or
-use `input_views: [null, null]` to select whole tensors. `input_views: []`
-supplies no entries, so it is invalid for that program. The same rule applies to
-`output_views`.
+Views are sparse maps keyed by declared names in the corresponding direction.
+Omitted entries select the full connected tensor. Omitting the map or using `{}`
+selects full views for every port. Unknown, wrong-direction, and duplicate keys
+are rejected. Serialization orders map keys deterministically.
 
 ## Edges
 
@@ -187,19 +185,27 @@ dependency.
 
 ```yaml
 edges:
-  - { from: lhs, to: add.0, kind: data }
-  - { from: rhs, to: add.1, kind: data }
-  - { from: add.0, to: result, kind: data }
+  - { from: lhs, to: add.A, kind: data }
+  - { from: rhs, to: add.B, kind: data }
+  - { from: add.Y, to: result, kind: data }
 ```
 
-Append `.0`, `.1`, and so on to select a compute input or output port. If the
-index is omitted, the edge uses the next free port. Data connections must pass
-through tensor nodes. Compute nodes cannot exchange data directly.
+Compute endpoints must be `node.PORT`, with the actual declared output name at
+`from` or input name at `to`. Tensor endpoints must be plain node IDs. Every
+compute input and output must be bound exactly once. Tensor fanout and multiple
+disjoint or dependency-ordered writes are supported. Data connections must pass
+through tensor nodes; compute nodes cannot exchange data directly.
+
+Node IDs must be nonempty and cannot contain `.`. An endpoint splits on its
+first `.`; the entire remaining nonempty suffix must exactly match a declared
+port name. Port names can therefore contain dots, Unicode, or numeric text.
+Quote YAML strings where necessary. This grammar needs no escaping.
 
 ### Control edges
 
 A `kind: control` edge records a relationship for graph display. It does not
-delay execution.
+delay execution or consume data binding slots. Its endpoints may be plain node
+IDs or declared directional compute ports using the same identifier grammar.
 
 ### Memory conflicts
 

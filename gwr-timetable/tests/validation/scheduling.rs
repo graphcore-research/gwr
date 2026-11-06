@@ -53,11 +53,11 @@ fn control_edges_are_ignored_by_scheduler() {
 }
 
 #[test]
-fn accepts_control_edge_endpoint_indices_without_data_port_validation() {
+fn named_control_edges_do_not_consume_data_binding_slots() {
     let (_, _, mut timetable_file) = create_default_timetable_file();
     timetable_file.edges.push(EdgeSection {
-        from: "tensor2.99".to_string(),
-        to: "add0.99".to_string(),
+        from: "tensor2".to_string(),
+        to: "add0.A".to_string(),
         kind: EdgeKind::Control,
     });
 
@@ -105,10 +105,10 @@ fn rejects_data_dependency_cycles() {
             compute("compute1", vec![None], vec![None]),
         ],
         vec![
-            data_edge("tensor0", "compute0"),
-            data_edge("compute0", "tensor1"),
-            data_edge("tensor1", "compute1"),
-            data_edge("compute1", "tensor0"),
+            data_edge("tensor0", "compute0.input0"),
+            data_edge("compute0.output0", "tensor1"),
+            data_edge("tensor1", "compute1.input0"),
+            data_edge("compute1.output0", "tensor0"),
         ],
     );
 

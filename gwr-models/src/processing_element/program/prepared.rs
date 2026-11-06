@@ -84,6 +84,16 @@ impl PreparedProgram {
             reduction_steps,
         })
     }
+    /// Declared input names in dense binding order.
+    #[must_use]
+    pub fn input_names(&self) -> &[String] {
+        &self.facts.program.inputs
+    }
+    /// Declared output names in dense binding order.
+    #[must_use]
+    pub fn output_names(&self) -> &[String] {
+        &self.facts.program.outputs
+    }
     /// Number of executable assignments in the program.
     #[must_use]
     pub fn assignment_count(&self) -> usize {

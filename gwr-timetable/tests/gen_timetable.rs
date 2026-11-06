@@ -92,20 +92,10 @@ fn assert_add_views_match_output_partitions(file: &TimetableFile) {
         } = node
         {
             assert_eq!(program.inputs, ["A", "B"]);
-            let input_views = input_views.as_ref().unwrap();
-            let output_view = output_views.as_ref().unwrap()[0].as_ref().unwrap();
-            assert_eq!(
-                input_views[0].as_ref().unwrap().offsets[0],
-                output_view.offsets[0]
-            );
-            assert_eq!(
-                input_views[0].as_ref().unwrap().shape[0],
-                output_view.shape[0]
-            );
-            assert_eq!(
-                input_views[1].as_ref().unwrap().offsets[0],
-                output_view.offsets[0]
-            );
+            let output_view = &output_views["Y"];
+            assert_eq!(input_views["A"].offsets[0], output_view.offsets[0]);
+            assert_eq!(input_views["A"].shape[0], output_view.shape[0]);
+            assert_eq!(input_views["B"].offsets[0], output_view.offsets[0]);
             assert!(tiling.is_some());
         }
     }
@@ -119,10 +109,10 @@ fn assert_gemm_partitions_share_rhs(file: &TimetableFile) {
             ..
         } = node
         {
-            let inputs = input_views.as_ref().unwrap();
-            let output = output_views.as_ref().unwrap()[0].as_ref().unwrap();
-            let lhs = inputs[0].as_ref().unwrap();
-            let rhs = inputs[1].as_ref().unwrap();
+            let inputs = input_views;
+            let output = &output_views["Y"];
+            let lhs = &inputs["A"];
+            let rhs = &inputs["B"];
             assert_eq!(
                 (lhs.offsets[0], lhs.shape[0]),
                 (output.offsets[0], output.shape[0])
@@ -138,7 +128,7 @@ fn assert_output_partitions(file: &TimetableFile, expected: &[(usize, usize)]) {
             let NodeSection::Compute { output_views, .. } = node else {
                 unreachable!()
             };
-            let view = output_views.as_ref().unwrap()[0].as_ref().unwrap();
+            let view = &output_views["Y"];
             (view.offsets[0], view.shape[0])
         })
         .collect::<Vec<_>>();
@@ -256,7 +246,6 @@ fn assert_reduction_tensor_shapes(file: &TimetableFile, node: &NodeSection) -> b
     let ExprSpec::Reduce { over, value, .. } = &program.assignments[0].expr else {
         unreachable!()
     };
-    let output_views = output_views.as_ref().unwrap();
     assert_eq!(over, &["k"]);
     assert!(
         matches!(&**value, ExprSpec::Read { indices, .. } if matches!(indices.last(), Some(IndexSpec::Axis(axis)) if axis == "k"))
@@ -264,7 +253,7 @@ fn assert_reduction_tensor_shapes(file: &TimetableFile, node: &NodeSection) -> b
     let input_edge = file
         .edges
         .iter()
-        .find(|edge| edge.to == format!("{id}.0"))
+        .find(|edge| edge.to == format!("{id}.A"))
         .unwrap_or_else(|| panic!("missing input edge for {id}"));
     let input = tensor_config(file, &input_edge.from);
     assert!((1..=2).contains(&output_views.len()));
@@ -273,7 +262,7 @@ fn assert_reduction_tensor_shapes(file: &TimetableFile, node: &NodeSection) -> b
     let values_edge = file
         .edges
         .iter()
-        .find(|edge| edge.from == format!("{id}.0"))
+        .find(|edge| edge.from == format!("{id}.Y"))
         .unwrap_or_else(|| panic!("missing values edge for {id}"));
     let values = tensor_config(file, &values_edge.to);
     assert_eq!(values.shape, input.shape[..input.shape.len() - 1]);
@@ -281,7 +270,7 @@ fn assert_reduction_tensor_shapes(file: &TimetableFile, node: &NodeSection) -> b
         let indices_edge = file
             .edges
             .iter()
-            .find(|edge| edge.from == format!("{id}.1"))
+            .find(|edge| edge.from == format!("{id}.I"))
             .unwrap_or_else(|| panic!("missing indices edge for {id}"));
         let indices = tensor_config(file, &indices_edge.to);
         assert_eq!(indices.dtype, DataType::Int64);
@@ -522,6 +511,53 @@ fn tensor_config<'a>(timetable_file: &'a TimetableFile, id: &str) -> &'a TensorC
             _ => None,
         })
         .unwrap_or_else(|| panic!("tensor {id} not found"))
+}
+
+const BF16_MATRIX_PLATFORM: &str = "
+memory_maps: [{ name: mm, devices: [mem] }]
+operation_classes:
+  matrix: { operations: [matrix_mac], arity: 2, flops_per_op: 2 }
+  conversion: { operations: [convert], arity: 1 }
+  add: { operations: [add], arity: 2 }
+processing_elements:
+  - name: pe0
+    memory_map: mm
+    config:
+      sram_bytes: 1MiB
+      compute:
+        execution_units:
+          matrix:
+            capabilities:
+              - { class: matrix, input_dtypes: [[bf16, bf16]], accumulator: fp32, ops_per_tick: 128 }
+          vector:
+            capabilities:
+              - { class: conversion, input_dtypes: [[fp32]], ops_per_tick: 32 }
+memories:
+  - { name: mem, kind: hbm, base_address: 0, config: { capacity_bytes: 1MiB } }
+connections: [{ connect: [pe.pe0, mem.mem] }]
+";
+
+fn bf16_matrix_args() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("--init-dtype", "bf16"),
+        ("--weight-add", "0"),
+        ("--weight-gemm", "1"),
+        ("--weight-reduce-max", "0"),
+        ("--max-compute-nodes", "1"),
+        ("--init-rank-min", "2"),
+        ("--init-rank-max", "2"),
+        ("--init-dim-min", "2"),
+        ("--init-dim-max", "2"),
+        ("--expand-ratio", "1"),
+    ]
+}
+
+fn assert_matrix_accumulator(file: &TimetableFile, expected: DataType) {
+    let NodeSection::Compute { program, .. } = compute_nodes(file).next().unwrap() else {
+        unreachable!()
+    };
+    assert!(matches!(program.assignments[0].expr,
+        ExprSpec::MatrixMac { accumulator, .. } if accumulator == expected));
 }
 
 #[test]
@@ -946,7 +982,7 @@ fabrics:
             &file
                 .edges
                 .iter()
-                .find(|edge| edge.to == format!("{id}.1"))
+                .find(|edge| edge.to == format!("{id}.B"))
                 .unwrap()
                 .from
         })
@@ -989,53 +1025,6 @@ fn generator_reports_all_resource_infeasible_pe_candidates() {
     }
     assert!(stderr.contains("SRAM bytes, available 1"), "{stderr}");
     assert!(!fixture.timetable_path.exists());
-}
-
-const BF16_MATRIX_PLATFORM: &str = "
-memory_maps: [{ name: mm, devices: [mem] }]
-operation_classes:
-  matrix: { operations: [matrix_mac], arity: 2, flops_per_op: 2 }
-  conversion: { operations: [convert], arity: 1 }
-  add: { operations: [add], arity: 2 }
-processing_elements:
-  - name: pe0
-    memory_map: mm
-    config:
-      sram_bytes: 1MiB
-      compute:
-        execution_units:
-          matrix:
-            capabilities:
-              - { class: matrix, input_dtypes: [[bf16, bf16]], accumulator: fp32, ops_per_tick: 128 }
-          vector:
-            capabilities:
-              - { class: conversion, input_dtypes: [[fp32]], ops_per_tick: 32 }
-memories:
-  - { name: mem, kind: hbm, base_address: 0, config: { capacity_bytes: 1MiB } }
-connections: [{ connect: [pe.pe0, mem.mem] }]
-";
-
-fn bf16_matrix_args() -> Vec<(&'static str, &'static str)> {
-    vec![
-        ("--init-dtype", "bf16"),
-        ("--weight-add", "0"),
-        ("--weight-gemm", "1"),
-        ("--weight-reduce-max", "0"),
-        ("--max-compute-nodes", "1"),
-        ("--init-rank-min", "2"),
-        ("--init-rank-max", "2"),
-        ("--init-dim-min", "2"),
-        ("--init-dim-max", "2"),
-        ("--expand-ratio", "1"),
-    ]
-}
-
-fn assert_matrix_accumulator(file: &TimetableFile, expected: DataType) {
-    let NodeSection::Compute { program, .. } = compute_nodes(file).next().unwrap() else {
-        unreachable!()
-    };
-    assert!(matches!(program.assignments[0].expr,
-        ExprSpec::MatrixMac { accumulator, .. } if accumulator == expected));
 }
 
 #[test]
