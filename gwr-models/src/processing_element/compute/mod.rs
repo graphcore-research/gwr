@@ -9,7 +9,7 @@ use std::fmt::Formatter;
 use std::marker::PhantomData;
 
 use gwr_engine::sim_error;
-use gwr_engine::types::SimError;
+use gwr_engine::types::{SimError, SimResult};
 use serde::de::{Error, MapAccess};
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -59,7 +59,7 @@ impl ComputeModel {
         name: &str,
         unit: &ExecutionUnitConfig,
         classes: &BTreeMap<String, OperationClass>,
-    ) -> Result<(), SimError> {
+    ) -> SimResult {
         if name.trim().is_empty() || unit.capabilities.is_empty() {
             return sim_error!("execution unit '{name}' must have a name and capabilities");
         }
@@ -88,7 +88,7 @@ impl ComputeModel {
         name: &str,
         capability: &CapabilityConfig,
         class: &OperationClass,
-    ) -> Result<(), SimError> {
+    ) -> SimResult {
         for op in &class.operations {
             let matches = self.capabilities.entry(op.clone()).or_default();
             let signatures: Vec<Option<Vec<DataType>>> = match &capability.input_dtypes {
@@ -121,8 +121,34 @@ impl ComputeModel {
 
     /// Validate capability support, service geometry and accumulator capacity
     /// without reserving resources or exposing the execution plan.
-    pub fn validate_work(&self, work: &ComputeWork) -> Result<(), SimError> {
+    pub fn validate_work(&self, work: &ComputeWork) -> SimResult {
         self.lower(work).map(drop)
+    }
+
+    /// Accumulator precisions declared for the ordered matrix operand dtypes,
+    /// in stable datatype order with duplicates removed. Wildcard declarations
+    /// are included. This only queries signature support; validate actual work
+    /// or prepare a program to check service geometry and resource capacity.
+    #[must_use]
+    pub fn matrix_accumulators(&self, inputs: [DataType; 2]) -> Vec<DataType> {
+        self.capabilities
+            .get("matrix_mac")
+            .into_iter()
+            .flatten()
+            .filter(|candidate| {
+                candidate.arity == inputs.len()
+                    && candidate
+                        .inputs
+                        .as_deref()
+                        .is_none_or(|declared| declared == inputs)
+            })
+            .filter_map(|candidate| match candidate.kind {
+                CapabilityKind::Matrix { accumulator, .. } => Some(accumulator),
+                CapabilityKind::Scalar => None,
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
     }
 
     /// Execution unit names in stable execution order.
@@ -160,7 +186,7 @@ impl ComputeModel {
     }
 }
 
-fn validate_operation_classes(classes: &BTreeMap<String, OperationClass>) -> Result<(), SimError> {
+fn validate_operation_classes(classes: &BTreeMap<String, OperationClass>) -> SimResult {
     for (name, class) in classes {
         if name.trim().is_empty()
             || class.arity == 0
@@ -183,7 +209,7 @@ fn validate_operation_classes(classes: &BTreeMap<String, OperationClass>) -> Res
 fn validate_accumulator_capacity(
     unit: &ExecutionUnitConfig,
     classes: &BTreeMap<String, OperationClass>,
-) -> Result<(), SimError> {
+) -> SimResult {
     let Some(capacity) = unit.matrix_accumulator_capacity_bytes else {
         return Ok(());
     };
@@ -283,7 +309,7 @@ impl From<CapabilityConfigRepr> for CapabilityConfig {
 }
 
 impl CapabilityConfig {
-    fn validate(&self, class: &OperationClass) -> Result<(), SimError> {
+    fn validate(&self, class: &OperationClass) -> SimResult {
         if !self.ops_per_tick.is_finite() || self.ops_per_tick <= 0.0 {
             return sim_error!("compute throughput must be finite and greater than zero");
         }
@@ -374,11 +400,15 @@ impl From<CapabilityConfig> for CapabilityConfigRepr {
     }
 }
 
+/// Operation names sharing operand arity and logical accounting cost.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OperationClass {
+    /// Named operations sharing the declared operand arity and accounting cost.
     pub operations: Vec<String>,
+    /// Number of ordered operands in each matching work signature.
     pub arity: usize,
+    /// FLOP-equivalent contribution per logical operation, defaulting to one.
     #[serde(default = "one_flop")]
     pub flops_per_op: usize,
 }
@@ -396,9 +426,13 @@ struct CapabilityMatch {
 /// Matrix-only settings cannot occur without an accumulator datatype.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CapabilityKind {
+    /// Scalar operation signatures without matrix-specific settings.
     Scalar,
+    /// Matrix contraction signatures with a declared accumulator precision.
     Matrix {
+        /// Precision retained across contraction chunks.
         accumulator: DataType,
+        /// Optional service geometry used to round charged matrix work.
         matrix_service_tile: Option<MatrixServiceTile>,
     },
 }
@@ -459,8 +493,11 @@ struct ComputeCandidate {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MatrixServiceTile {
+    /// Number of output rows serviced by one matrix block.
     pub m: usize,
+    /// Number of output columns serviced by one matrix block.
     pub n: usize,
+    /// Number of contraction coordinates serviced by one matrix block.
     pub k: usize,
 }
 
@@ -541,6 +578,8 @@ mod matrix_accumulator_capacity_tests;
 mod matrix_accumulator_tests;
 #[cfg(test)]
 mod matrix_service_shape_tests;
+#[cfg(test)]
+mod matrix_test_fixture;
 #[cfg(test)]
 mod model_tests;
 #[cfg(test)]
