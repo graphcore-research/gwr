@@ -23,10 +23,9 @@ pub(super) fn max_window_chunk_buffer_bytes(
 ) -> Result<usize, SimError> {
     let mut peak = 0usize;
     let unpadded = window_indices_are_in_range(indices, tile, region, view)?;
-    // Full byte-aligned windows differ only by a coordinate translation.
-    // Their physical byte count is constant; trailing partial chunks are
-    // subsets of the first full chunk. Padding and packed byte alignment can
-    // change that count, so retain exhaustive inspection for those cases.
+    // Full unpadded windows differ only by a coordinate translation; trailing
+    // partial chunks are subsets. Retain exhaustive inspection for padding
+    // and packed inputs, whose selected-element storage is checked per chunk.
     let chunks = if unpadded && view.dtype().num_bits().is_multiple_of(8) {
         1
     } else {
@@ -41,8 +40,8 @@ pub(super) fn max_window_chunk_buffer_bytes(
                 );
             }
         }
-        let (_, bytes) = plan_window_chunk_access_ranges(view, indices, tile, region, &chunk)?;
-        peak = peak.max(align_sram_slot_bytes(bytes)?);
+        let access = plan_window_chunk_access(view, indices, tile, region, &chunk)?;
+        peak = peak.max(align_sram_slot_bytes(access.packed_buffer_bytes)?);
     }
     Ok(peak)
 }
@@ -93,47 +92,36 @@ fn max_varying_axis_length(
         .unwrap_or(1)
 }
 
-pub(super) fn plan_window_chunk_access_ranges(
-    view: &TensorView,
-    indices: &[IndexSpec],
-    tile: &RegionTile,
-    region: &ProgramFacts,
-    chunk: &BTreeMap<String, Range<usize>>,
-) -> Result<(Vec<Range<u128>>, usize), SimError> {
-    plan_window_chunk_access(view, indices, tile, region, chunk)
-        .map(|(ranges, bytes, _)| (ranges, bytes))
+pub(super) struct WindowAccessPlan {
+    pub(super) ranges: Vec<Range<u128>>,
+    pub(super) transfer_bytes: usize,
+    /// Logical packed input storage, independent of physical byte alignment.
+    pub(super) packed_buffer_bytes: usize,
 }
 
-/// Logical packed input storage, independent of physical byte alignment.
-pub(super) fn window_chunk_packed_bytes(
+pub(super) fn plan_window_chunk_access(
     view: &TensorView,
     indices: &[IndexSpec],
     tile: &RegionTile,
     region: &ProgramFacts,
     chunk: &BTreeMap<String, Range<usize>>,
-) -> Result<usize, SimError> {
-    plan_window_chunk_access(view, indices, tile, region, chunk).map(|(_, _, bytes)| bytes)
-}
-
-fn plan_window_chunk_access(
-    view: &TensorView,
-    indices: &[IndexSpec],
-    tile: &RegionTile,
-    region: &ProgramFacts,
-    chunk: &BTreeMap<String, Range<usize>>,
-) -> Result<(Vec<Range<u128>>, usize, usize), SimError> {
+) -> Result<WindowAccessPlan, SimError> {
     if !is_dense_window(indices, tile, region, chunk) {
         return enumerate_window_access(view, indices, tile, region, chunk);
     }
     let Some(window_input_view) = build_window_input_view(view, indices, tile, region, chunk)?
     else {
-        return Ok((vec![], 0, 0));
+        return Ok(WindowAccessPlan {
+            ranges: vec![],
+            transfer_bytes: 0,
+            packed_buffer_bytes: 0,
+        });
     };
-    Ok((
-        window_input_view.address_ranges().collect(),
-        window_input_view.layout().num_access_bytes(),
-        window_input_view.num_packed_bytes(),
-    ))
+    Ok(WindowAccessPlan {
+        ranges: window_input_view.address_ranges().collect(),
+        transfer_bytes: window_input_view.layout().num_access_bytes(),
+        packed_buffer_bytes: window_input_view.num_packed_bytes(),
+    })
 }
 
 fn is_dense_window(
@@ -187,7 +175,7 @@ fn enumerate_window_access(
     tile: &RegionTile,
     region: &ProgramFacts,
     chunk: &BTreeMap<String, Range<usize>>,
-) -> Result<(Vec<Range<u128>>, usize, usize), SimError> {
+) -> Result<WindowAccessPlan, SimError> {
     let ranges = collect_window_coordinate_ranges(indices, tile, region, chunk);
     let mut merged = BTreeMap::<u128, u128>::new();
     let mut packed_elements = BTreeSet::new();
@@ -218,7 +206,11 @@ fn enumerate_window_access(
     } else {
         bytes
     };
-    Ok((ranges, bytes, storage_bytes))
+    Ok(WindowAccessPlan {
+        ranges,
+        transfer_bytes: bytes,
+        packed_buffer_bytes: storage_bytes,
+    })
 }
 
 fn collect_window_coordinate_ranges(
@@ -605,6 +597,126 @@ assignments:
         .unwrap()
     }
 
+    // Independently enumerate logical coordinates, resolve each input identity,
+    // and pack the unique selected elements. Repeated overlapping-window reads
+    // share storage; byte addresses and planner helpers are deliberately
+    // unused.
+    fn selected_element_storage_bytes(
+        input: &TensorView,
+        indices: &[IndexSpec],
+        tile: &RegionTile,
+        region: &ProgramFacts,
+        chunk: &BTreeMap<String, Range<usize>>,
+    ) -> usize {
+        let axes = region.extents.keys().collect::<Vec<_>>();
+        let ranges = axes
+            .iter()
+            .map(|axis| {
+                chunk
+                    .get(*axis)
+                    .or_else(|| tile.output_intervals.get(*axis))
+                    .cloned()
+                    .unwrap_or(0..region.extents[*axis])
+            })
+            .collect::<Vec<_>>();
+        let combinations = ranges.iter().map(Range::len).product();
+        let mut selected = BTreeSet::new();
+        for mut ordinal in 0..combinations {
+            let mut coords = BTreeMap::new();
+            for (axis, range) in axes.iter().zip(&ranges) {
+                coords.insert(axis.as_str(), range.start + ordinal % range.len());
+                ordinal /= range.len();
+            }
+            let mut identity = Vec::new();
+            for (dimension, index) in indices.iter().enumerate() {
+                let extent = input.shape().dims()[dimension];
+                let position = if extent == 1 {
+                    0
+                } else {
+                    match index {
+                        IndexSpec::Zero(_) => 0,
+                        IndexSpec::Axis(axis) => coords[axis.as_str()] as i128,
+                        IndexSpec::Affine { affine } => {
+                            i128::from(affine.offset)
+                                + affine
+                                    .terms
+                                    .iter()
+                                    .map(|(axis, stride)| {
+                                        coords[axis.as_str()] as i128 * *stride as i128
+                                    })
+                                    .sum::<i128>()
+                        }
+                    }
+                };
+                if position < 0 || position >= extent as i128 {
+                    break;
+                }
+                identity.push(input.offsets()[dimension] + position as usize);
+            }
+            if identity.len() == indices.len() {
+                selected.insert(identity);
+            }
+        }
+        (selected.len() * input.dtype().num_bits()).div_ceil(8)
+    }
+
+    #[test]
+    fn sparse_packed_reductions_store_selected_elements_without_transfer_gaps() {
+        for (dtype, stride, packed_bytes) in [(DataType::Int4, 2, 8), (DataType::Bool, 8, 2)] {
+            let program: ProgramSpec = from_str(&format!(
+                r"
+inputs: [A]
+outputs: [Y]
+extents: {{ k: 16 }}
+assignments:
+ - output: Y
+   axes: []
+   expr:
+     reduce:
+       op: sum
+       over: [k]
+       value:
+         read:
+           tensor: A
+           indices: [{{ affine: {{ terms: {{ k: {stride} }}, offset: 0 }} }}]
+"
+            ))
+            .unwrap();
+            let input = TensorView::new_full(Tensor::new(&[16 * stride], &dtype, 0).unwrap());
+            let region = validate_program(
+                &program,
+                RegionBindings {
+                    inputs: vec![input.clone()],
+                    outputs: vec![TensorView::new_full(
+                        Tensor::new(&[], &dtype, 4096).unwrap(),
+                    )],
+                },
+            )
+            .unwrap();
+            let ExprSpec::Read { indices, .. } =
+                program.assignments[0].expr.iter_reads().next().unwrap()
+            else {
+                unreachable!()
+            };
+            let tile = plan_tiles(&region, None).unwrap().tiles().next().unwrap();
+            let over = vec!["k".into()];
+            let chunk = tile.reduction_chunks_for(&over).next().unwrap();
+            let access = plan_window_chunk_access(&input, indices, &tile, &region, &chunk).unwrap();
+            assert_eq!(access.ranges, vec![0..16]);
+            assert_eq!(access.transfer_bytes, 16);
+            assert_eq!(access.packed_buffer_bytes, packed_bytes);
+            assert_eq!(
+                selected_element_storage_bytes(&input, indices, &tile, &region, &chunk),
+                packed_bytes
+            );
+            assert_eq!(
+                max_window_chunk_buffer_bytes(&input, indices, &tile, &region, &over, 8).unwrap(),
+                8,
+                "{dtype:?}"
+            );
+        }
+    }
+
     #[test]
     fn window_peak_matches_exhaustive_chunks_for_affine_strides_padding_and_packing() {
         for dtype in [
@@ -612,6 +724,7 @@ assignments:
             DataType::Fp16,
             DataType::Int8,
             DataType::Fp4,
+            DataType::Int4,
             DataType::Bool,
         ] {
             for coefficient in [1, 2, 4] {
@@ -638,14 +751,10 @@ assignments:
                             let exact = tile
                                 .reduction_chunks_for(&over)
                                 .map(|chunk| {
-                                    align_sram_slot_bytes(
-                                        plan_window_chunk_access_ranges(
-                                            &input, indices, &tile, &region, &chunk,
-                                        )
-                                        .unwrap()
-                                        .1,
+                                    selected_element_storage_bytes(
+                                        &input, indices, &tile, &region, &chunk,
                                     )
-                                    .unwrap()
+                                    .next_multiple_of(8)
                                 })
                                 .max()
                                 .unwrap();
