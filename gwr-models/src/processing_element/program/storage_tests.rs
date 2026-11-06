@@ -2,13 +2,14 @@
 
 use yaml_serde::from_str;
 
+use super::prepared::{PreparedProgram, Schedule};
 use crate::processing_element::program::plan::allocate_temporaries;
 use crate::processing_element::program::storage::{
     ReductionStateBinding, select_reduction_state_binding_for_optional_output,
 };
 use crate::processing_element::program::syntax::ProgramSpec;
 use crate::processing_element::program::tile::plan_tiles;
-use crate::processing_element::program::validate::{RegionBindings, validate_program};
+use crate::processing_element::program::validate::{ProgramBindings, validate_program};
 use crate::processing_element::tensors::dtype::DataType;
 use crate::processing_element::tensors::{Tensor, TensorView};
 
@@ -103,15 +104,15 @@ assignments:
     let view = |addr| TensorView::new_full(Tensor::new(&[4], &DataType::Fp32, addr).unwrap());
     let region = validate_program(
         &program,
-        RegionBindings {
+        ProgramBindings {
             inputs: vec![view(0)],
             outputs: vec![view(128)],
         },
     )
     .unwrap();
     let tile = plan_tiles(&region, None).unwrap().tiles().next().unwrap();
-    let program = super::prepared::PreparedProgram::from_facts(region, None).unwrap();
-    let super::prepared::Schedule::Flat { group, .. } = &program.schedule else {
+    let program = PreparedProgram::from_facts(region, None).unwrap();
+    let Schedule::Flat { group, .. } = &program.schedule else {
         unreachable!()
     };
     let allocation = allocate_temporaries(program.group(group), &tile).unwrap();
@@ -157,7 +158,7 @@ assignments:
     };
     let region = validate_program(
         &program,
-        RegionBindings {
+        ProgramBindings {
             inputs: vec![view(&[2, 3], DataType::Fp32, 0)],
             outputs: vec![
                 view(&[2], DataType::Fp32, 128),
@@ -167,8 +168,8 @@ assignments:
     )
     .unwrap();
     let tile = plan_tiles(&region, None).unwrap().tiles().next().unwrap();
-    let program = super::prepared::PreparedProgram::from_facts(region, None).unwrap();
-    let super::prepared::Schedule::Flat { group, .. } = &program.schedule else {
+    let program = PreparedProgram::from_facts(region, None).unwrap();
+    let Schedule::Flat { group, .. } = &program.schedule else {
         unreachable!()
     };
     let allocation = allocate_temporaries(program.group(group), &tile).unwrap();

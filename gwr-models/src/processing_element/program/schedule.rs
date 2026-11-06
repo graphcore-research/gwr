@@ -6,13 +6,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
+use gwr_engine::sim_error;
 use gwr_engine::types::{SimError, SimResult};
 
 use super::group::GroupMetadata;
+use super::prepared::PreparedProgram;
 use super::storage::align_sram_slot_bytes;
 use super::syntax::TileSpec;
-use super::tile::RegionTile;
+use super::tile::{AxisStep, IntervalProduct, RegionTile};
 use super::validate::ProgramFacts;
+use crate::processing_element::tensors::BITS_PER_BYTE;
 
 pub(in crate::processing_element) fn plan_schedule(
     region: &ProgramFacts,
@@ -141,7 +144,7 @@ fn collect_assignment_group_axes(
         .collect::<Vec<_>>()
 }
 
-fn validate_sizes(region: &ProgramFacts, tiling: Option<&TileSpec>) -> Result<(), SimError> {
+fn validate_sizes(region: &ProgramFacts, tiling: Option<&TileSpec>) -> SimResult {
     let Some(tiling) = tiling else {
         return Ok(());
     };
@@ -152,10 +155,10 @@ fn validate_sizes(region: &ProgramFacts, tiling: Option<&TileSpec>) -> Result<()
     }
     for (axis, step) in &tiling.sizes {
         if !known.contains(axis) {
-            return Err(SimError(format!("unknown tile axis {axis}")));
+            return sim_error!("unknown tile axis {axis}");
         }
         if *step == 0 {
-            return Err(SimError(format!("tile size for {axis} must be positive")));
+            return sim_error!("tile size for {axis} must be positive");
         }
     }
     Ok(())
@@ -267,12 +270,12 @@ pub(in crate::processing_element) fn collect_retained_values(
 /// clipped tail and row scope.
 pub(in crate::processing_element) fn visit_groups(
     scope: &ScopedSchedule,
-    program: &super::prepared::PreparedProgram,
+    program: &PreparedProgram,
     visit: &mut impl FnMut(&GroupMetadata, &RegionTile, usize) -> SimResult,
 ) -> SimResult {
     fn walk(
         scope: &ScopedSchedule,
-        program: &super::prepared::PreparedProgram,
+        program: &PreparedProgram,
         outer: &Intervals,
         inherited: usize,
         visit: &mut impl FnMut(&GroupMetadata, &RegionTile, usize) -> SimResult,
@@ -309,13 +312,13 @@ pub(in crate::processing_element) fn scope_intervals<'a>(
     let axes = scope
         .tiles
         .iter()
-        .map(|(axis, step)| super::tile::AxisStep {
+        .map(|(axis, step)| AxisStep {
             name: axis.clone(),
             extent: region.extents[axis],
             step: *step,
         })
         .collect();
-    super::tile::IntervalProduct::new(axes).map(|intervals| {
+    IntervalProduct::new(axes).map(|intervals| {
         let mut result = outer.clone();
         result.extend(intervals);
         result
@@ -325,7 +328,7 @@ pub(in crate::processing_element) fn scope_intervals<'a>(
 pub(in crate::processing_element) fn build_group_tile(
     indices: &[usize],
     intervals: &Intervals,
-    program: &super::prepared::PreparedProgram,
+    program: &PreparedProgram,
 ) -> Result<RegionTile, SimError> {
     let region = &program.facts;
     let mut reductions = BTreeMap::new();
@@ -408,7 +411,7 @@ fn local_value_bytes(
         elements
             .checked_mul(value.dtype.num_bits())
             .ok_or_else(|| SimError("schedule local storage overflows".into()))?
-            .div_ceil(8),
+            .div_ceil(BITS_PER_BYTE),
     )
 }
 
@@ -420,17 +423,19 @@ mod tests {
 
     use yaml_serde::from_str;
 
+    use super::super::group::GroupMetadata;
     use super::super::plan::allocate_temporaries;
+    use super::super::prepared::{PreparedProgram, Schedule};
     use super::super::tile::RegionTile;
     use super::{ScopedStep, plan_schedule};
     use crate::processing_element::program::syntax::{ProgramSpec, TileSpec};
     use crate::processing_element::program::validate::{
-        ProgramFacts, RegionBindings, validate_program,
+        ProgramBindings, ProgramFacts, validate_program,
     };
     use crate::processing_element::tensors::dtype::DataType;
     use crate::processing_element::tensors::{Tensor, TensorView};
 
-    fn row_config() -> (ProgramSpec, RegionBindings) {
+    fn row_config() -> (ProgramSpec, ProgramBindings) {
         let program: ProgramSpec = from_str(
             r"
 inputs: [A]
@@ -464,7 +469,7 @@ assignments:
             |addr| TensorView::new_full(Tensor::new(&[3, 9], &DataType::Fp32, addr).unwrap());
         (
             program,
-            RegionBindings {
+            ProgramBindings {
                 inputs: vec![view(0)],
                 outputs: vec![view(512)],
             },
@@ -481,6 +486,7 @@ assignments:
             sizes: BTreeMap::from([("r".into(), 1), ("k".into(), 4)]),
         }
     }
+
     fn pipeline_with_statistic(statistic: &str) -> ProgramFacts {
         let statistic = statistic.trim().replace('\n', "\n     ");
         let program: ProgramSpec = from_str(&format!(
@@ -509,7 +515,7 @@ assignments:
         };
         validate_program(
             &program,
-            RegionBindings {
+            ProgramBindings {
                 inputs: vec![view(&[9], 0), view(&[4], 128)],
                 outputs: vec![view(&[], 256), view(&[9], 512)],
             },
@@ -633,28 +639,20 @@ assignments:
             let (spec, bindings) = row_config();
             let mut tiling = row_tiling();
             tiling.sizes.insert(axis.into(), size);
-            let error =
-                super::super::prepared::PreparedProgram::new(&spec, bindings, Some(&tiling))
-                    .unwrap_err();
+            let error = PreparedProgram::new(&spec, bindings, Some(&tiling)).unwrap_err();
             assert!(error.0.contains(expected), "{name}: {error}");
         }
     }
 
     #[test]
     fn canonical_schedule_classifies_phased_execution() {
-        let program =
-            super::super::prepared::PreparedProgram::from_facts(row_region(), Some(&row_tiling()))
-                .unwrap();
-        assert!(matches!(
-            program.schedule,
-            super::super::prepared::Schedule::Scoped(_)
-        ));
+        let program = PreparedProgram::from_facts(row_region(), Some(&row_tiling())).unwrap();
+        assert!(matches!(program.schedule, Schedule::Scoped(_)));
     }
 
     #[test]
     fn group_allocator_treats_external_local_producers_as_available() {
-        let program =
-            super::super::prepared::PreparedProgram::from_facts(row_region(), None).unwrap();
+        let program = PreparedProgram::from_facts(row_region(), None).unwrap();
         let region = &program.facts;
         let tile = RegionTile::new(
             BTreeMap::from([("r".into(), 0..1)]),
@@ -662,7 +660,7 @@ assignments:
             region,
         )
         .unwrap();
-        let group = super::GroupMetadata::new(region, vec![1]);
+        let group = GroupMetadata::new(region, vec![1]);
         let allocation = allocate_temporaries(program.group(&group), &tile).unwrap();
         // One FP32 value occupies an eight-byte aligned SRAM slot.
         assert_eq!(allocation.arena_bytes, 8);
