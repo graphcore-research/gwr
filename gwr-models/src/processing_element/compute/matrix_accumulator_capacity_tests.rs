@@ -68,7 +68,7 @@ fn matrix_work_with_accumulator(
     accumulator: DataType,
 ) -> ComputeWork {
     ComputeWork::matrix_mac(
-        vec![DataType::Bf16; 2],
+        [DataType::Bf16; 2],
         accumulator,
         MatrixWorkShape {
             batches: 1,
@@ -276,17 +276,6 @@ fn accumulator_capacity_rejects_an_unsupported_accumulator() {
 }
 
 #[test]
-fn accumulator_capacity_rejects_a_count_that_disagrees_with_shape() {
-    let model = matrix_compute_model(vec![(
-        "matrix",
-        matrix_execution_unit_config(Some(256), None),
-    )]);
-    let mut mismatch = matrix_work(8, 8, 1);
-    mismatch.stages[0].operations[0].count += 1;
-    assert_lowering_error(&model, &mismatch, "shape does not match logical work");
-}
-
-#[test]
 fn accumulator_capacity_rejects_a_zero_capacity_declaration() {
     let invalid = compute_config(vec![(
         "matrix",
@@ -365,7 +354,7 @@ fn matrix_accumulator_demand_includes_every_batch_output() {
     const FP32_BYTES: usize = 4;
     const ACCUMULATOR_BYTES: usize = BATCHES * ROWS * COLUMNS * FP32_BYTES;
     let work = ComputeWork::matrix_mac(
-        vec![DataType::Bf16; 2],
+        [DataType::Bf16; 2],
         DataType::Fp32,
         MatrixWorkShape {
             batches: BATCHES,

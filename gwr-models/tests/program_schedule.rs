@@ -115,52 +115,30 @@ fn reduction_of_a_local_tensor_reserves_the_complete_producer() {
 }
 
 #[test]
-fn matching_free_axes_reserve_chunk_sized_pipeline_temporary_storage() {
-    let task = reduction_pipeline_task(
-        r"
+fn matching_free_axes_keep_one_pass_and_chunk_storage() {
+    for (name, second) in [("temporary_twice", "T"), ("boundary_and_temporary", "A")] {
+        let task = reduction_pipeline_task(
+            &format!(
+                r"
  - output: T
    axes: [i]
    expr:
      exp:
-       - read: { tensor: A, indices: [i] }
+       - read: {{ tensor: A, indices: [i] }}
  - output: Y
    axes: [i]
    expr:
      add:
-       - read: { tensor: T, indices: [i] }
-       - read: { tensor: T, indices: [i] }
-",
-        &[ELEMENTS],
-    );
-    assert_eq!(
-        task.planned_traffic_bytes().unwrap(),
-        (ELEMENTS * FP32_BYTES, ELEMENTS * FP32_BYTES)
-    );
-    assert_eq!(estimated_peak_sram_bytes(&task), CHUNK * FP32_BYTES * 3);
-}
-
-#[test]
-fn matching_free_axes_plan_one_boundary_input_pass() {
-    let task = reduction_pipeline_task(
-        r"
- - output: T
-   axes: [i]
-   expr:
-     exp:
-       - read: { tensor: A, indices: [i] }
- - output: Y
-   axes: [i]
-   expr:
-     add:
-       - read: { tensor: T, indices: [i] }
-       - read: { tensor: A, indices: [i] }
-",
-        &[ELEMENTS],
-    );
-    assert_eq!(
-        task.planned_traffic_bytes().unwrap(),
-        (ELEMENTS * FP32_BYTES, ELEMENTS * FP32_BYTES)
-    );
+       - read: {{ tensor: T, indices: [i] }}
+       - read: {{ tensor: {second}, indices: [i] }}
+"
+            ),
+            &[ELEMENTS],
+        );
+        assert_eq!(task.planned_traffic_bytes().unwrap(), (36, 36), "{name}");
+        // Four FP32 elements in each of three slots.
+        assert_eq!(estimated_peak_sram_bytes(&task), 48, "{name}");
+    }
 }
 
 #[test]

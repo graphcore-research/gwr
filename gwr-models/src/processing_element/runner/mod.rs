@@ -9,35 +9,29 @@ use futures::channel::oneshot::channel;
 use futures::future::{Either, select};
 use futures::stream::FuturesUnordered;
 use gwr_components::capacity_allocator::CapacityAllocator;
-use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::types::{AccessType, SimError, SimResult};
 use gwr_track::entity::{Entity, EntityGroup};
 
 use self::access::InputAccess;
 use self::helpers::{
-    build_assignment_dependencies, build_scalar_expression_work, eval_index, find_first_read_dtype,
-    find_read_indices, slice_axes, slice_view,
+    build_assignment_dependencies, eval_index, find_read_indices, slice_axes, slice_view,
 };
-use self::matrix_shape::build_matrix_work;
-use self::schedule::{estimate_scoped_peak_sram, visit_groups};
-use self::tile::estimate_tile_sram;
 use self::window::{
-    count_window_chunk_operations, max_window_chunk_buffer_bytes, plan_window_chunk_access_ranges,
-    window_chunk_packed_bytes, window_indices_are_in_range,
+    max_window_chunk_buffer_bytes, plan_window_chunk_access_ranges, window_chunk_packed_bytes,
 };
 use crate::processing_element::activity::{ActivityLanes, ProcessingElementActivityLanes};
-use crate::processing_element::compute::{ComputeModel, ComputeScheduler, ComputeWork};
+use crate::processing_element::compute::{ComputeModel, ComputeScheduler};
 use crate::processing_element::flop_monitor::FlopMonitor;
 use crate::processing_element::load_store_unit::LoadStoreUnit;
-use crate::processing_element::program::schedule::plan_schedule;
-use crate::processing_element::program::syntax::{
-    AssignmentSpec, BoundsMode, ExprSpec, IndexSpec, ProgramSpec, ReductionOp, TileSpec,
-};
-use crate::processing_element::program::tile::{RegionTile, TileSchedule, plan_tiles};
-use crate::processing_element::program::validate::{
-    RegionBindings, ValidatedRegion, validate_program,
-};
+use crate::processing_element::program::syntax::{ProgramSpec, TileSpec};
+use crate::processing_element::program::tile::TileSchedule;
+#[cfg(test)]
+use crate::processing_element::program::tile::plan_tiles;
+use crate::processing_element::program::validate::RegionBindings;
+#[cfg(test)]
+use crate::processing_element::program::validate::validate_program;
+#[cfg(test)]
 use crate::processing_element::task::{ProgramTaskConfig, Task};
 use crate::processing_element::tensors::TensorView;
 use crate::processing_element::{Dispatcher, ProcessingElementStats};
@@ -45,6 +39,7 @@ use crate::processing_element::{Dispatcher, ProcessingElementStats};
 mod access;
 mod assignment;
 mod helpers;
+mod invocation;
 
 mod matrix_shape;
 pub(super) mod schedule;
@@ -59,6 +54,7 @@ pub(super) struct TaskRunner {
     pub(super) clock: Clock,
     pub(super) dispatcher: Dispatcher,
     pub(super) lsu: Rc<LoadStoreUnit>,
+    #[cfg(test)]
     pub(super) compute_model: Rc<ComputeModel>,
     pub(super) compute_scheduler: ComputeScheduler,
     pub(super) sram: CapacityAllocator,
@@ -69,38 +65,49 @@ pub(super) struct TaskRunner {
 }
 
 impl TaskRunner {
-    pub(super) async fn run(self, task_idx: usize) -> SimResult {
-        let task = self.dispatcher.task_by_id(task_idx)?;
-        match task {
-            Task::ProgramTask { config } => self.run_program(task_idx, &config).await,
-            Task::SyncTask { .. } => todo!(),
-        }
-    }
-
-    async fn run_program(&self, task_idx: usize, config: &ProgramTaskConfig) -> SimResult {
-        self.lsu.validate_program_views(config)?;
-        let region = validate_program(
-            &config.program,
-            &RegionBindings {
-                inputs: config.inputs.clone(),
-                outputs: config.outputs.clone(),
-            },
-        )?;
-        if let Some(schedule) = plan_schedule(&region, config.tiling.as_ref())? {
-            self.run_scoped_program(config, &region, &schedule).await?;
-        } else {
-            self.run_flat_program(config, &region).await?;
+    pub(super) async fn run(
+        &self,
+        task_idx: usize,
+        task: Rc<crate::processing_element::task::PreparedTask>,
+    ) -> SimResult {
+        match &task.program().schedule {
+            crate::processing_element::program::prepared::Schedule::Scoped(schedule) => {
+                self.run_scoped_program(&task, schedule).await?;
+            }
+            crate::processing_element::program::prepared::Schedule::Flat(schedule) => {
+                self.run_flat_program(&task, schedule).await?;
+            }
         }
         self.dispatcher.set_task_completed(task_idx)
     }
 
+    #[cfg(test)]
+    async fn run_program(&self, task_idx: usize, config: &ProgramTaskConfig) -> SimResult {
+        let program = Rc::new(crate::processing_element::program::PreparedProgram::new(
+            &config.program,
+            RegionBindings {
+                inputs: config.inputs.clone(),
+                outputs: config.outputs.clone(),
+            },
+            config.tiling.as_ref(),
+        )?);
+        let task = crate::processing_element::task::PreparedTask::prepare(
+            config.id.clone(),
+            program,
+            self.entity.clone(),
+            &self.lsu,
+            &self.compute_model,
+            self.sram_bytes,
+        )?;
+        self.run(task_idx, task).await
+    }
+
     async fn run_flat_program(
         &self,
-        config: &ProgramTaskConfig,
-        region: &ValidatedRegion,
+        task: &crate::processing_element::task::PreparedTask,
+        schedule: &TileSchedule,
     ) -> SimResult {
-        let schedule = plan_tiles(region, config.tiling.as_ref())?;
-        validate_program_compute_support(&self.compute_model, region, &schedule)?;
+        let plan = task.program().group(&task.program().facts.assignment_order);
         // At most one tile waits for SRAM admission. Already admitted tiles
         // continue running and may release capacity while that wait is live.
         let mut tiles = schedule.tiles();
@@ -111,7 +118,7 @@ impl TaskRunner {
                 && let Some(tile) = tiles.next()
             {
                 let (sender, receiver) = channel();
-                active.push(self.run_program_tile(config, region, tile, sender));
+                active.push(self.run_program_tile(task, plan, tile, sender));
                 pending = Some(receiver);
             }
             if active.is_empty() {
@@ -194,291 +201,98 @@ impl TaskRunner {
     }
 }
 
-/// Maximum SRAM required by any tile of a program. Direct, byte-aligned
-/// accesses only need the first (largest) tile; other layouts are inspected
-/// tile by tile because their physical access size may vary with offsets.
+/// Bind a raw program and compute the maximum live tile storage.
 pub fn estimate_peak_tile_sram(
     program: &ProgramSpec,
     inputs: &[TensorView],
     outputs: &[TensorView],
     tiling: &TileSpec,
 ) -> Result<usize, SimError> {
-    let config = ProgramTaskConfig {
-        id: "SRAM estimate".into(),
-        program: program.clone(),
-        tiling: Some(tiling.clone()),
-        inputs: inputs.to_vec(),
-        outputs: outputs.to_vec(),
-    };
-    let region = validate_program(
+    crate::processing_element::program::PreparedProgram::new(
         program,
-        &RegionBindings {
+        RegionBindings {
             inputs: inputs.to_vec(),
             outputs: outputs.to_vec(),
         },
-    )?;
-    if let Some(schedule) = plan_schedule(&region, Some(tiling))? {
-        return estimate_scoped_peak_sram(&config, &region, &schedule, None);
-    }
-    let schedule = plan_tiles(&region, Some(tiling))?;
-    estimate_flat_schedule_peak_sram(&config, &region, &schedule)
+        Some(tiling),
+    )?
+    .peak_sram_bytes()
 }
 
-fn estimate_flat_schedule_peak_sram(
-    config: &ProgramTaskConfig,
-    region: &ValidatedRegion,
-    schedule: &TileSchedule,
-) -> Result<usize, SimError> {
-    // Packed elementwise/matrix slices reserve logical packed storage, whose
-    // size is independent of physical bit offsets. Byte-oriented affine
-    // windows with nonnegative offsets can only shrink at the trailing edge;
-    // their first full tile is maximal. Preserve exhaustive checking for
-    // leading padding and packed reduction-window byte alignment.
-    let packed = config.inputs.iter().any(|view| view.dtype().num_bits() < 8);
-    let inspect_all = config.program.assignments.iter().any(|assignment| {
-        uses_leading_padding(&assignment.expr)
-            || (packed && uses_reduction_window(&assignment.expr))
-    });
-    if inspect_all {
-        schedule.tiles().try_fold(0, |peak, tile| {
-            Ok(peak.max(estimate_tile_sram(config, region, &tile)?))
-        })
-    } else {
-        let first = schedule
-            .tiles()
-            .next()
-            .ok_or_else(|| SimError("program has no tiles".into()))?;
-        estimate_tile_sram(config, region, &first)
+impl crate::processing_element::program::PreparedProgram {
+    /// Maximum live storage across the canonical hardware-independent schedule.
+    /// Analysis traverses lazy tiles using bounded memory instead of retaining
+    /// every invocation. Traversal time can still scale with invocation count.
+    pub fn peak_sram_bytes(&self) -> Result<usize, SimError> {
+        use crate::processing_element::program::executable::Expr;
+        use crate::processing_element::program::prepared::Schedule;
+        use crate::processing_element::program::syntax::{BoundsMode, IndexSpec, ReductionOp};
+        // Preserve the bounded maximum-tile proof for direct slices and
+        // nonnegative byte windows. Leading padding and packed reductions
+        // require offset-sensitive inspection.
+        if let Schedule::Flat(schedule) = &self.schedule {
+            let packed = self
+                .facts
+                .bindings
+                .inputs
+                .iter()
+                .any(|view| view.dtype().num_bits() < 8);
+            let inspect_all = self.facts.program.assignments.iter().any(|assignment| {
+                let leading = assignment.expr.iter_reads().any(|read| read.bounds == BoundsMode::Exclude && read.indices.iter().any(|index| matches!(index, IndexSpec::Affine {affine} if affine.offset < 0)));
+                let window = match &assignment.expr {
+                    Expr::Reduce {op: ReductionOp::Min | ReductionOp::Max, ..} => true,
+                    Expr::Reduce {..} => assignment.expr.iter_reads().any(|read| read.indices.iter().any(|index| matches!(index, IndexSpec::Affine {..}))),
+                    _ => false,
+                };
+                leading || (packed && window)
+            });
+            if !inspect_all {
+                let tile = schedule
+                    .tiles()
+                    .next()
+                    .ok_or_else(|| SimError("program has no tiles".into()))?;
+                return tile::estimate_tile_sram(self.group(&self.facts.assignment_order), &tile);
+            }
+        }
+        let mut peak = 0;
+        self.visit_groups(&mut |plan, tile, retained| {
+            peak = peak.max(
+                retained
+                    .checked_add(tile::estimate_tile_sram(plan, tile)?)
+                    .ok_or_else(|| SimError("schedule working set overflows".into()))?,
+            );
+            Ok(())
+        })?;
+        Ok(peak)
     }
+}
+
+pub(super) fn prepare_compute(
+    model: &ComputeModel,
+    program: &crate::processing_element::program::PreparedProgram,
+) -> Result<crate::processing_element::compute::PreparedCompute, SimError> {
+    let mut compute = crate::processing_element::compute::PreparedCompute::default();
+    let mut counts = super::MachineOpCounts::default();
+    program.visit_groups(&mut |plan, tile, _| {
+        for &index in plan.assignments {
+            for invocation in invocation::AssignmentInvocations::new(plan.region(), index, tile)? {
+                counts = counts
+                    .clone()
+                    .checked_add(compute.prepare(model, &invocation?.work)?)?;
+            }
+        }
+        Ok(())
+    })?;
+    Ok(compute)
 }
 
 impl ComputeModel {
-    /// Validate assignment capabilities and logical tile geometry using the
-    /// same compute rules as program execution. SRAM capacity and boundary
-    /// memory mappings are checked separately.
+    /// Check actual invocation counts and geometry without binding to a PE.
     pub fn validate_program(
         &self,
-        region: &ValidatedRegion,
-        tiling: Option<&TileSpec>,
+        program: &crate::processing_element::program::PreparedProgram,
     ) -> SimResult {
-        if let Some(schedule) = plan_schedule(region, tiling)? {
-            visit_groups(&schedule, region, tiling, &mut |indices, tile, _| {
-                for &index in indices {
-                    validate_assignment_compute_support(self, region, index, tile)?;
-                }
-                Ok(())
-            })
-        } else {
-            let schedule = plan_tiles(region, tiling)?;
-            validate_program_compute_support(self, region, &schedule)
-        }
-    }
-}
-
-pub(super) fn validate_program_compute_support(
-    compute_model: &ComputeModel,
-    region: &ValidatedRegion,
-    schedule: &TileSchedule,
-) -> SimResult {
-    let first = schedule
-        .tiles()
-        .next()
-        .ok_or_else(|| SimError("program has no tiles".into()))?;
-    for &index in &region.assignment_order {
-        validate_assignment_compute_support(compute_model, region, index, &first)?;
-    }
-    Ok(())
-}
-
-pub(super) fn validate_assignment_compute_support(
-    compute_model: &ComputeModel,
-    region: &ValidatedRegion,
-    index: usize,
-    first: &RegionTile,
-) -> SimResult {
-    let assignment = &region.program.assignments[index];
-    let work = match &assignment.expr {
-        ExprSpec::Read { .. } => return Ok(()),
-        ExprSpec::Call { .. } => {
-            build_scalar_expression_work(
-                &assignment.expr,
-                region,
-                region.value(&assignment.primary_result()).unwrap().dtype,
-                1,
-            )?
-            .0
-        }
-        ExprSpec::MatrixMac { over, .. } => {
-            build_matrix_validation_work(assignment, over, region, first)?
-        }
-        ExprSpec::Reduce {
-            op: ReductionOp::Min | ReductionOp::Max,
-            over,
-            value,
-        } => {
-            return validate_extremum_compute_support(
-                compute_model,
-                assignment,
-                value,
-                over,
-                region,
-            );
-        }
-        ExprSpec::Reduce {
-            op: ReductionOp::Sum,
-            over,
-            value,
-        } => {
-            return validate_sum_compute_support(compute_model, assignment, value, over, region);
-        }
-    };
-    validate_matrix_output_conversion(compute_model, assignment, region)?;
-    validate_assignment_work(compute_model, assignment, &work)
-}
-
-fn build_matrix_validation_work(
-    assignment: &AssignmentSpec,
-    over: &[String],
-    region: &ValidatedRegion,
-    first: &RegionTile,
-) -> Result<ComputeWork, SimError> {
-    let mut intervals = first.output_intervals.clone();
-    let chunk = first
-        .reduction_chunks_for(over)
-        .next()
-        .ok_or_else(|| SimError("matrix has no reduction chunks".into()))?;
-    intervals.extend(chunk);
-    build_matrix_work(assignment, region, &intervals)?
-        .ok_or_else(|| SimError("matrix assignment has no logical geometry".into()))
-}
-
-fn validate_extremum_compute_support(
-    model: &ComputeModel,
-    assignment: &AssignmentSpec,
-    value: &ExprSpec,
-    over: &[String],
-    region: &ValidatedRegion,
-) -> SimResult {
-    let size = reduction_length(over, region, "min/max reduction size overflows")?;
-    let result_dtype = if matches!(value, ExprSpec::Call { .. }) {
-        assignment.output.as_ref().map_or_else(
-            || find_first_read_dtype(value, region),
-            |name| region.value(name).unwrap().dtype,
-        )
-    } else {
-        let ExprSpec::Read { tensor, .. } = value else {
-            return sim_error!("unsupported expression in compute validation");
-        };
-        region
-            .value(tensor)
-            .ok_or_else(|| SimError(format!("unknown tensor {tensor}")))?
-            .dtype
-    };
-    let body = build_scalar_expression_work(value, region, result_dtype, 1)?.0;
-    model.validate_work(&body)?;
-    if size > 1 {
-        let comparisons = ComputeWork::operation("compare", vec![result_dtype, result_dtype], 1);
-        validate_assignment_work(model, assignment, &comparisons)?;
-    }
-    Ok(())
-}
-
-fn validate_sum_compute_support(
-    model: &ComputeModel,
-    assignment: &AssignmentSpec,
-    value: &ExprSpec,
-    over: &[String],
-    region: &ValidatedRegion,
-) -> SimResult {
-    let size = reduction_length(over, region, "product reduction size overflows")?;
-    let output = region.value(&assignment.primary_result()).unwrap().dtype;
-    let body = build_scalar_expression_work(value, region, output, 1)?.0;
-    model.validate_work(&body)?;
-    if size > 1 {
-        let additions = ComputeWork::operation("add", vec![output, output], 1);
-        validate_assignment_work(model, assignment, &additions)?;
-    }
-    Ok(())
-}
-
-fn validate_assignment_work(
-    model: &ComputeModel,
-    assignment: &AssignmentSpec,
-    work: &ComputeWork,
-) -> SimResult {
-    model.validate_work(work).map_err(|error| {
-        SimError(format!(
-            "assignment {}: {}",
-            assignment.primary_result(),
-            error.0
-        ))
-    })
-}
-
-fn reduction_length(
-    over: &[String],
-    region: &ValidatedRegion,
-    overflow: &str,
-) -> Result<usize, SimError> {
-    over.iter().try_fold(1usize, |count, axis| {
-        count
-            .checked_mul(region.extent(axis).unwrap())
-            .ok_or_else(|| SimError(overflow.into()))
-    })
-}
-
-fn validate_matrix_output_conversion(
-    model: &ComputeModel,
-    assignment: &AssignmentSpec,
-    region: &ValidatedRegion,
-) -> SimResult {
-    if let ExprSpec::MatrixMac { accumulator, .. } = &assignment.expr {
-        let output = region.value(&assignment.primary_result()).unwrap().dtype;
-        if *accumulator != output {
-            model.lower(&ComputeWork::operation("convert", vec![*accumulator], 1))?;
-        }
-    }
-    Ok(())
-}
-
-fn uses_leading_padding(expr: &ExprSpec) -> bool {
-    match expr {
-        ExprSpec::Read {
-            indices,
-            bounds: BoundsMode::Exclude,
-            ..
-        } => indices
-            .iter()
-            .any(|index| matches!(index, IndexSpec::Affine { affine } if affine.offset < 0)),
-        ExprSpec::Call { args, .. } | ExprSpec::MatrixMac { args, .. } => {
-            args.iter().any(uses_leading_padding)
-        }
-        ExprSpec::Reduce { value, .. } => uses_leading_padding(value),
-        ExprSpec::Read { .. } => false,
-    }
-}
-
-fn uses_reduction_window(expr: &ExprSpec) -> bool {
-    match expr {
-        ExprSpec::Reduce {
-            op: ReductionOp::Min | ReductionOp::Max,
-            ..
-        } => true,
-        ExprSpec::Reduce { value, .. } => uses_affine_indices(value),
-        ExprSpec::Call { args, .. } => args.iter().any(uses_reduction_window),
-        _ => false,
-    }
-}
-
-fn uses_affine_indices(expr: &ExprSpec) -> bool {
-    match expr {
-        ExprSpec::Read { indices, .. } => indices
-            .iter()
-            .any(|index| matches!(index, IndexSpec::Affine { .. })),
-        ExprSpec::Call { args, .. } | ExprSpec::MatrixMac { args, .. } => {
-            args.iter().any(uses_affine_indices)
-        }
-        ExprSpec::Reduce { value, .. } => uses_affine_indices(value),
+        prepare_compute(self, program).map(drop)
     }
 }
 

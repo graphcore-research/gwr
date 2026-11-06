@@ -2,7 +2,7 @@
 
 use yaml_serde::from_str;
 
-use crate::processing_element::program::syntax::{ExprSpec, ProgramSpec, ReductionOp};
+use crate::processing_element::program::syntax::{ProgramSpec, ReductionOp};
 use crate::processing_element::program::validate::{RegionBindings, validate_program};
 use crate::processing_element::tensors::dtype::DataType;
 use crate::processing_element::tensors::{Tensor, TensorView};
@@ -26,7 +26,7 @@ assignments:
     let program: ProgramSpec = from_str(&source).unwrap();
     validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![
                 view(&[2, 3], DataType::Fp32, 0),
                 view(&[3, 2], DataType::Fp32, 128),
@@ -102,7 +102,7 @@ assignments:
     .unwrap();
     let error = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![],
             outputs: vec![view(&[], DataType::Fp32, 0)],
         },
@@ -133,7 +133,7 @@ assignments:
     .unwrap();
     let error = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![],
             outputs: vec![view(&[], DataType::Fp32, 0)],
         },
@@ -158,7 +158,7 @@ assignments:
     .unwrap();
     validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![
                 view(&[4], DataType::Fp32, 0),
                 view(&[4], DataType::Fp32, 32),
@@ -196,7 +196,7 @@ assignments:
     .unwrap();
     let region = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![view(&[2, 3], DataType::Fp32, 0)],
             outputs: vec![view(&[2], DataType::Fp32, 64)],
         },
@@ -234,7 +234,7 @@ assignments:
     .unwrap();
     validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![
                 view(&[3], DataType::Fp32, 0),
                 view(&[3], DataType::Fp32, 32),
@@ -243,29 +243,6 @@ assignments:
         },
     )
     .unwrap();
-}
-
-#[test]
-fn parses_value_and_indices_outputs() {
-    let program: ProgramSpec = from_str(
-        r"
-inputs: [A]
-outputs: [Y, I]
-assignments:
-  - output: Y
-    indices_output: I
-    axes: [o]
-    expr:
-      reduce:
-        op: max
-        over: [k]
-        value:
-          read: { tensor: A, indices: [o, k] }
-",
-    )
-    .unwrap();
-    assert_eq!(program.assignments[0].output.as_deref(), Some("Y"));
-    assert_eq!(program.assignments[0].indices_output.as_deref(), Some("I"));
 }
 
 #[test]
@@ -283,7 +260,7 @@ assignments:
     .unwrap();
     let error = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![view(&[4], DataType::Fp32, 0)],
             outputs: vec![view(&[4], DataType::Fp32, 64)],
         },
@@ -314,7 +291,7 @@ assignments:
     .unwrap();
     let error = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![view(&[4], DataType::Fp32, 0)],
             outputs: vec![view(&[4], DataType::Fp32, 64)],
         },
@@ -404,7 +381,7 @@ assignments:
     .unwrap();
     let region = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![view(&[2, 3], DataType::Fp32, 0)],
             outputs: vec![view(&[2], DataType::Int32, 128)],
         },
@@ -414,7 +391,7 @@ assignments:
     assert_eq!(region.value("I").unwrap().dtype, DataType::Int32);
     assert!(matches!(
         &region.program.assignments[0].expr,
-        ExprSpec::Reduce {
+        super::executable::Expr::Reduce {
             op: ReductionOp::Min,
             ..
         }
@@ -441,7 +418,7 @@ assignments:
     .unwrap();
     let region = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![view(&[2, 3, 4], DataType::Fp32, 0)],
             outputs: vec![view(&[2], DataType::Int64, 128)],
         },
@@ -470,7 +447,7 @@ assignments:
     .unwrap();
     let error = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![view(&[2, 3], DataType::Fp32, 0)],
             outputs: vec![view(&[2], DataType::Int64, 128)],
         },
@@ -500,7 +477,7 @@ assignments:
 
     let input_error = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![input],
             outputs: vec![output],
         },
@@ -532,7 +509,7 @@ assignments:
 
     let output_error = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![input.clone(), input],
             outputs: vec![],
         },
@@ -562,7 +539,7 @@ assignments:
     .unwrap();
     let region = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![
                 view(&[7, 1], DataType::Fp32, 0),
                 view(&[1, 5], DataType::Fp32, 64),
@@ -586,7 +563,7 @@ fn broadcast_output_shape_is_independent_of_assignment_order() {
         if reverse_assignments {
             program.assignments.reverse();
         }
-        let region = validate_program(&program, &bindings).unwrap();
+        let region = validate_program(&program, bindings.clone()).unwrap();
         assert_eq!(region.value("Y").unwrap().shape, [SHARED_AXIS_ELEMENTS]);
     }
 }
@@ -601,7 +578,7 @@ fn rejects_singleton_output_when_another_assignment_expands_its_axis() {
         if reverse_assignments {
             program.assignments.reverse();
         }
-        let error = validate_program(&program, &bindings).unwrap_err();
+        let error = validate_program(&program, bindings.clone()).unwrap_err();
         assert!(
             error.0.contains('Y') && error.0.contains("shape"),
             "{error}"
@@ -641,7 +618,7 @@ assignments:
         if reverse_assignments {
             program.assignments.reverse();
         }
-        let region = validate_program(&program, &bindings).unwrap();
+        let region = validate_program(&program, bindings.clone()).unwrap();
         assert_eq!(region.value("T").unwrap().shape, [SHARED_AXIS_ELEMENTS]);
     }
 }
@@ -664,7 +641,7 @@ assignments:
     .unwrap();
     let error = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![view(&[4, 4], DataType::Fp32, 0)],
             outputs: vec![view(&[4, 4], DataType::Fp32, 128)],
         },
@@ -697,7 +674,7 @@ assignments:
     .unwrap();
     let error = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![
                 view(&[4], DataType::Fp32, 0),
                 view(&[4], DataType::Fp32, 64),
@@ -727,7 +704,7 @@ assignments:
     .unwrap();
     let error = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![
                 view(&[7, 3], DataType::Fp32, 0),
                 view(&[7, 5], DataType::Fp32, 128),
@@ -769,7 +746,7 @@ assignments:
     .unwrap();
     let region = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![
                 view(&[2, 4], DataType::Fp16, 0),
                 view(&[4, 3], DataType::Bf16, 128),
@@ -811,7 +788,7 @@ assignments:
     .unwrap();
     let region = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![view(&[4], DataType::Fp32, 0)],
             outputs: vec![
                 view(&[2], DataType::Fp32, 128),
@@ -850,7 +827,7 @@ assignments:
     .unwrap();
     let error = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![view(&[4], DataType::Fp32, 0)],
             outputs: vec![view(&[1], DataType::Fp32, 128)],
         },
@@ -886,7 +863,7 @@ assignments:
     .unwrap();
     let error = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![view(&[2, 3, 4], DataType::Fp32, 0)],
             outputs: vec![view(&[2], DataType::Fp32, 128)],
         },
@@ -913,7 +890,7 @@ assignments:
     .unwrap();
     let error = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![view(&[2, 3], DataType::Fp32, 0)],
             outputs: vec![view(&[2], DataType::Fp32, 128)],
         },
@@ -956,7 +933,7 @@ assignments:
     .unwrap();
     let error = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![view(&[8], DataType::Fp32, 0)],
             outputs: vec![view(&[8], DataType::Fp32, 128)],
         },
@@ -988,7 +965,7 @@ assignments:
     .unwrap();
     let region = validate_program(
         &program,
-        &RegionBindings {
+        RegionBindings {
             inputs: vec![
                 view(&[8], DataType::Fp32, 0),
                 view(&[8], DataType::Fp32, 64),
@@ -1023,7 +1000,7 @@ assignments:
         .unwrap();
         let result = validate_program(
             &program,
-            &RegionBindings {
+            RegionBindings {
                 inputs: vec![view(&[2, 3], DataType::Fp32, 0)],
                 outputs: vec![view(&[3], DataType::Fp32, 64)],
             },
@@ -1034,4 +1011,14 @@ assignments:
             "constant affine offset {offset}: {result:?}"
         );
     }
+}
+
+#[test]
+fn scalar_call_rejects_a_reduction_child_at_raw_validation() {
+    let program: ProgramSpec = from_str("inputs: [A]\noutputs: [Y]\nassignments:\n - output: Y\n   axes: []\n   expr: {exp: [{reduce: {op: sum, over: [k], value: {read: {tensor: A, indices: [k]}}}}]}\n").unwrap();
+    let bindings = RegionBindings {
+        inputs: vec![view(&[2], DataType::Fp32, 0)],
+        outputs: vec![view(&[], DataType::Fp32, 128)],
+    };
+    assert!(validate_program(&program, bindings).is_err());
 }

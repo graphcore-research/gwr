@@ -12,16 +12,17 @@ use std::ops::Range;
 use gwr_engine::types::SimError;
 
 use crate::processing_element::compute::{ComputeWork, MatrixWorkShape};
-use crate::processing_element::program::syntax::{AssignmentSpec, BoundsMode, ExprSpec, IndexSpec};
-use crate::processing_element::program::validate::ValidatedRegion;
+use crate::processing_element::program::executable::{Assignment, Expr, Read};
+use crate::processing_element::program::syntax::IndexSpec;
+use crate::processing_element::program::validate::ProgramFacts;
 use crate::processing_element::tensors::dtype::DataType;
 
 pub(super) fn build_matrix_work(
-    assignment: &AssignmentSpec,
-    region: &ValidatedRegion,
+    assignment: &Assignment,
+    region: &ProgramFacts,
     intervals: &BTreeMap<String, Range<usize>>,
 ) -> Result<Option<ComputeWork>, SimError> {
-    let ExprSpec::MatrixMac {
+    let Expr::MatrixMac {
         args,
         over,
         accumulator,
@@ -30,18 +31,10 @@ pub(super) fn build_matrix_work(
     else {
         return Ok(None);
     };
-    if args.len() != 2 || over.len() != 1 {
-        return Err(SimError(
-            "matrix geometry requires two operands and one contraction axis".into(),
-        ));
-    }
-    let mut inputs = Vec::new();
-    let mut operand_axes = Vec::new();
-    for arg in args {
-        let (dtype, axes) = resolve_matrix_operand(arg, region, &over[0])?;
-        inputs.push(dtype);
-        operand_axes.push(axes);
-    }
+    let (lhs, lhs_axes) = resolve_matrix_operand(&args[0], region, &over[0])?;
+    let (rhs, rhs_axes) = resolve_matrix_operand(&args[1], region, &over[0])?;
+    let inputs = [lhs, rhs];
+    let operand_axes = [lhs_axes, rhs_axes];
     let shape =
         derive_matrix_work_shape(&assignment.axes, &operand_axes, &over[0], region, intervals)?;
     Ok(Some(ComputeWork::matrix_mac(inputs, *accumulator, shape)?))
@@ -51,7 +44,7 @@ fn derive_matrix_work_shape(
     output_axes: &[String],
     operand_axes: &[BTreeSet<&str>],
     contraction_axis: &str,
-    region: &ValidatedRegion,
+    region: &ProgramFacts,
     intervals: &BTreeMap<String, Range<usize>>,
 ) -> Result<MatrixWorkShape, SimError> {
     let mut shape = MatrixWorkShape {
@@ -80,25 +73,12 @@ fn derive_matrix_work_shape(
 }
 
 fn resolve_matrix_operand<'a>(
-    arg: &'a ExprSpec,
-    region: &ValidatedRegion,
-    contraction_axis: &str,
+    arg: &'a Read,
+    region: &ProgramFacts,
+    _contraction_axis: &str,
 ) -> Result<(DataType, BTreeSet<&'a str>), SimError> {
-    let ExprSpec::Read {
-        tensor,
-        indices,
-        bounds,
-    } = arg
-    else {
-        return Err(SimError("matrix operand must be a direct read".into()));
-    };
-    if *bounds != BoundsMode::RequireInRange {
-        return Err(SimError("matrix operands require in-range indexing".into()));
-    }
-    let dtype = region
-        .value(tensor)
-        .ok_or_else(|| SimError(format!("unknown matrix operand {tensor}")))?
-        .dtype;
+    let dtype = region.value(&arg.tensor).unwrap().dtype;
+    let indices = &arg.indices;
     let axes = indices
         .iter()
         .filter_map(|index| match index {
@@ -106,21 +86,12 @@ fn resolve_matrix_operand<'a>(
             _ => None,
         })
         .collect::<BTreeSet<_>>();
-    if indices
-        .iter()
-        .any(|index| matches!(index, IndexSpec::Affine { .. }))
-        || !axes.contains(contraction_axis)
-    {
-        return Err(SimError(
-            "matrix operands must directly index the contraction axis".into(),
-        ));
-    }
     Ok((dtype, axes))
 }
 
 fn resolve_matrix_axis_length(
     axis: &str,
-    region: &ValidatedRegion,
+    region: &ProgramFacts,
     intervals: &BTreeMap<String, Range<usize>>,
 ) -> Result<usize, SimError> {
     let extent = region

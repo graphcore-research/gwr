@@ -6,72 +6,50 @@ use std::ops::Range;
 use gwr_engine::types::SimError;
 
 use crate::processing_element::compute::{ComputeWork, TypedWork, WorkStage};
+use crate::processing_element::program::executable::{Expr, Read, ScalarExpr};
 use crate::processing_element::program::plan::LocalAllocation;
-use crate::processing_element::program::syntax::{ExprSpec, IndexSpec};
-use crate::processing_element::program::validate::ValidatedRegion;
+use crate::processing_element::program::prepared::GroupPlan;
+use crate::processing_element::program::syntax::IndexSpec;
+use crate::processing_element::program::validate::ProgramFacts;
 use crate::processing_element::tensors::dtype::DataType;
 use crate::processing_element::tensors::{HasShape, TensorView};
 
 pub(super) fn build_assignment_dependencies(
-    region: &ValidatedRegion,
+    plan: GroupPlan<'_>,
     allocation: &LocalAllocation,
 ) -> Result<BTreeMap<usize, BTreeSet<usize>>, SimError> {
-    let mut producers = BTreeMap::new();
-    for (index, assignment) in region.program.assignments.iter().enumerate() {
-        if let Some(value_output) = &assignment.output {
-            producers.insert(value_output.as_str(), index);
-        }
-        if let Some(index_output) = &assignment.indices_output {
-            producers.insert(index_output.as_str(), index);
-        }
-    }
-    let mut dependencies = BTreeMap::new();
-    let mut consumers = BTreeMap::<String, BTreeSet<usize>>::new();
-    for (index, assignment) in region.program.assignments.iter().enumerate() {
-        let reads = assignment.expr.collect_read_tensor_names();
-        let mut required = BTreeSet::new();
-        for name in reads {
-            if let Some(producer) = producers.get(name.as_str()) {
-                required.insert(*producer);
-                consumers.entry(name).or_default().insert(index);
+    let region = plan.region();
+    let mut dependencies = plan
+        .assignments
+        .iter()
+        .map(|&index| {
+            (
+                index,
+                region.dependencies[index]
+                    .iter()
+                    .copied()
+                    .filter(|i| plan.assignments.contains(i))
+                    .collect::<BTreeSet<_>>(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    for slot in &allocation.slots {
+        for pair in slot.values.windows(2) {
+            let next = region.producers[&pair[1]];
+            let required = dependencies.get_mut(&next).unwrap();
+            required.insert(region.producers[&pair[0]]);
+            if let Some(consumers) = region.consumers.get(&pair[0]) {
+                required.extend(consumers.iter().filter(|i| plan.assignments.contains(i)));
             }
         }
-        dependencies.insert(index, required);
     }
-    add_slot_reuse_dependencies(allocation, &producers, &consumers, &mut dependencies)?;
     Ok(dependencies)
 }
 
-fn add_slot_reuse_dependencies(
-    allocation: &LocalAllocation,
-    producers: &BTreeMap<&str, usize>,
-    consumers: &BTreeMap<String, BTreeSet<usize>>,
-    dependencies: &mut BTreeMap<usize, BTreeSet<usize>>,
-) -> Result<(), SimError> {
-    for slot in &allocation.slots {
-        for pair in slot.values.windows(2) {
-            let next = *producers
-                .get(pair[1].as_str())
-                .ok_or_else(|| SimError("local slot has no producer".into()))?;
-            let prior = *producers
-                .get(pair[0].as_str())
-                .ok_or_else(|| SimError("local slot has no producer".into()))?;
-            dependencies.get_mut(&next).unwrap().insert(prior);
-            if let Some(uses) = consumers.get(pair[0].as_str()) {
-                dependencies.get_mut(&next).unwrap().extend(uses);
-            }
-        }
-    }
-    Ok(())
-}
-
-pub(super) fn find_read_indices<'a>(expr: &'a ExprSpec, name: &str) -> Option<&'a [IndexSpec]> {
-    expr.iter_reads().find_map(|expr| match expr {
-        ExprSpec::Read {
-            tensor, indices, ..
-        } if tensor == name => Some(indices.as_slice()),
-        _ => None,
-    })
+pub(super) fn find_read_indices<'a>(expr: &'a Expr, name: &str) -> Option<&'a [IndexSpec]> {
+    expr.iter_reads()
+        .find(|read| read.tensor == name)
+        .map(|read| read.indices.as_slice())
 }
 
 pub(super) fn slice_axes(
@@ -149,17 +127,17 @@ pub(super) fn eval_index(
 /// through a typed temporary assignment followed by a separate explicit
 /// conversion assignment.
 pub(super) fn build_scalar_expression_work(
-    expr: &ExprSpec,
-    region: &ValidatedRegion,
+    expr: &ScalarExpr,
+    region: &ProgramFacts,
     result_dtype: DataType,
     count: usize,
 ) -> Result<(ComputeWork, DataType), SimError> {
     match expr {
-        ExprSpec::Read { tensor, .. } => Ok((
+        ScalarExpr::Read(Read { tensor, .. }) => Ok((
             ComputeWork { stages: vec![] },
             region.value(tensor).unwrap().dtype,
         )),
-        ExprSpec::Call { op, args, .. } => {
+        ScalarExpr::Call { op, args, .. } => {
             let mut stages = Vec::new();
             let mut inputs = Vec::new();
             for arg in args {
@@ -172,17 +150,13 @@ pub(super) fn build_scalar_expression_work(
             });
             Ok((ComputeWork { stages }, result_dtype))
         }
-        _ => Err(SimError(
-            "nested reduction or matrix expression is unsupported".into(),
-        )),
     }
 }
 
-pub(super) fn find_first_read_dtype(expr: &ExprSpec, region: &ValidatedRegion) -> DataType {
+pub(super) fn find_first_read_dtype(expr: &ScalarExpr, region: &ProgramFacts) -> DataType {
     match expr {
-        ExprSpec::Read { tensor, .. } => region.value(tensor).unwrap().dtype,
-        ExprSpec::Call { args, .. } => find_first_read_dtype(&args[0], region),
-        _ => unreachable!("validated scalar expression"),
+        ScalarExpr::Read(Read { tensor, .. }) => region.value(tensor).unwrap().dtype,
+        ScalarExpr::Call { args, .. } => find_first_read_dtype(&args[0], region),
     }
 }
 
@@ -210,9 +184,9 @@ mod expression_dtype_contract {
                     .flat_map(|stage| stage.operations)
                     .map(|operation| {
                         (
-                            operation.signature.op().to_owned(),
-                            operation.signature.inputs().to_vec(),
-                            operation.count,
+                            operation.op().to_owned(),
+                            operation.inputs().to_vec(),
+                            operation.count(),
                         )
                     })
                     .collect()
@@ -226,18 +200,25 @@ mod expression_dtype_contract {
             |dtype, address| TensorView::new_full(Tensor::new(&[4], &dtype, address).unwrap());
         let region = validate_program(
             &spec,
-            &RegionBindings {
+            RegionBindings {
                 inputs: vec![view(input, 0)],
                 outputs: vec![view(output, 128)],
             },
         )
         .unwrap();
-        spec.assignments
+        region
+            .program
+            .assignments
             .iter()
             .map(|assignment| {
-                let dtype = region.value(&assignment.primary_result()).unwrap().dtype;
-                let (work, result) =
-                    build_scalar_expression_work(&assignment.expr, &region, dtype, 4).unwrap();
+                let dtype = region.value(assignment.primary_result()).unwrap().dtype;
+                let (work, result) = build_scalar_expression_work(
+                    assignment.expr.scalar().unwrap(),
+                    &region,
+                    dtype,
+                    4,
+                )
+                .unwrap();
                 assert_eq!(result, dtype);
                 work
             })
