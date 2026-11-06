@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 use yaml_serde::{from_str, from_value, to_value};
 
+use super::matrix_test_fixture;
 use crate::processing_element::MachineOpCounts;
 use crate::processing_element::compute::{
     CapabilityConfig, CapabilityKind, ComputeConfig, ComputeModel, ComputeWork, ExecutionPlan,
@@ -32,15 +33,7 @@ fn matrix_service_tile(m: usize, n: usize, k: usize) -> MatrixServiceTile {
 }
 
 fn matrix_capability(policy: Option<MatrixServiceTile>) -> CapabilityConfig {
-    CapabilityConfig {
-        class: "matrix".into(),
-        input_dtypes: Some(vec![vec![DataType::Bf16; 2]]),
-        ops_per_tick: MATRIX_MACS_PER_TICK as f64,
-        kind: CapabilityKind::Matrix {
-            accumulator: DataType::Fp32,
-            matrix_service_tile: policy,
-        },
-    }
+    matrix_test_fixture::matrix_capability(MATRIX_MACS_PER_TICK as f64, DataType::Fp32, policy)
 }
 
 fn matrix_compute_model(entries: Vec<(&str, CapabilityConfig)>) -> ComputeModel {
@@ -48,14 +41,7 @@ fn matrix_compute_model(entries: Vec<(&str, CapabilityConfig)>) -> ComputeModel 
 }
 
 fn matrix_operation_classes() -> BTreeMap<String, OperationClass> {
-    BTreeMap::from([(
-        "matrix".into(),
-        OperationClass {
-            operations: vec!["matrix_mac".into()],
-            arity: 2,
-            flops_per_op: FLOPS_PER_MAC,
-        },
-    )])
+    matrix_test_fixture::matrix_operation_classes(FLOPS_PER_MAC)
 }
 
 fn compute_config(entries: Vec<(&str, CapabilityConfig)>) -> ComputeConfig {
@@ -76,12 +62,7 @@ fn compute_config(entries: Vec<(&str, CapabilityConfig)>) -> ComputeConfig {
 }
 
 fn matrix_work(m: usize, n: usize, k: usize) -> ComputeWork {
-    ComputeWork::matrix_mac(
-        [DataType::Bf16; 2],
-        DataType::Fp32,
-        matrix_work_shape(m, n, k),
-    )
-    .unwrap()
+    matrix_test_fixture::matrix_work(DataType::Fp32, matrix_work_shape(m, n, k))
 }
 
 fn matrix_work_shape(m: usize, n: usize, k: usize) -> MatrixWorkShape {

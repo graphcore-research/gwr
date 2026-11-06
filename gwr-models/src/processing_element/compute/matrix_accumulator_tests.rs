@@ -193,3 +193,54 @@ assignments:
         88
     );
 }
+
+#[test]
+fn matrix_accumulator_query_preserves_ordered_signatures_and_deduplicates_precisions() {
+    let config: ComputeConfig = from_str(
+        "execution_units:
+  matrix:
+    capabilities:
+      - { class: matrix, input_dtypes: [[fp16, bf16], [bf16, bf16]], accumulator: fp32, ops_per_tick: 4 }
+      - { class: matrix, input_dtypes: [[bf16, bf16]], accumulator: bf16, ops_per_tick: 8 }
+  other:
+    capabilities:
+      - { class: matrix, input_dtypes: [[bf16, bf16]], accumulator: fp32, ops_per_tick: 4 }",
+    ).unwrap();
+    let model = ComputeModel::new(&config, &matrix_operation_classes()).unwrap();
+    assert_eq!(
+        model.matrix_accumulators([DataType::Fp16, DataType::Bf16]),
+        [DataType::Fp32]
+    );
+    assert_eq!(
+        model.matrix_accumulators([DataType::Bf16, DataType::Fp16]),
+        []
+    );
+    assert_eq!(
+        model.matrix_accumulators([DataType::Bf16; 2]),
+        [DataType::Fp32, DataType::Bf16]
+    );
+}
+
+#[test]
+fn matrix_accumulator_query_includes_wildcard_and_native_service_tile_declarations() {
+    let config: ComputeConfig = from_str(
+        "execution_units:
+  wildcard:
+    capabilities:
+      - { class: matrix, accumulator: fp16, ops_per_tick: 4 }
+  native:
+    matrix_accumulator_capacity_bytes: 1
+    capabilities:
+      - { class: matrix, input_dtypes: [[bf16, bf16]], accumulator: fp32, ops_per_tick: 8, matrix_service_tile: {m: 2, n: 2, k: 2} }",
+    ).unwrap();
+    let model = ComputeModel::new(&config, &matrix_operation_classes()).unwrap();
+    // This query reports signatures, not whether a particular tile will fit.
+    assert_eq!(
+        model.matrix_accumulators([DataType::Bf16; 2]),
+        [DataType::Fp32, DataType::Fp16]
+    );
+    assert_eq!(
+        model.matrix_accumulators([DataType::Int8; 2]),
+        [DataType::Fp16]
+    );
+}

@@ -12,6 +12,7 @@ use gwr_models::processing_element::program::syntax::{
     AssignmentSpec, BoundsMode, ExprSpec, IndexSpec, ProgramSpec, ReductionOp, TemporarySpec,
 };
 use gwr_models::processing_element::program::validate::TensorSpec;
+use gwr_models::processing_element::tensors::dtype::DataType;
 
 pub(super) fn build_reduce_max_program(
     input: &TensorSpec,
@@ -105,12 +106,13 @@ pub(super) fn build_add_program(
 pub(super) fn build_gemm_program(
     inputs: &[TensorSpec],
     output: &TensorSpec,
+    accumulator: DataType,
 ) -> Result<ProgramSpec, SimError> {
     let batch_rank = validate_gemm_shapes(inputs, output)?;
     let batch_axes = (0..batch_rank)
         .map(|index| format!("b{index}"))
         .collect::<Vec<_>>();
-    let product = build_matrix_product_expression(inputs, output, &batch_axes);
+    let product = build_matrix_product_expression(inputs, accumulator, &batch_axes);
     let axes = batch_axes
         .into_iter()
         .chain(["m".into(), "n".into()])
@@ -180,7 +182,7 @@ fn validate_gemm_shapes(inputs: &[TensorSpec], output: &TensorSpec) -> Result<us
 
 fn build_matrix_product_expression(
     inputs: &[TensorSpec],
-    output: &TensorSpec,
+    accumulator: DataType,
     batch_axes: &[String],
 ) -> ExprSpec {
     let m_axis = IndexSpec::Axis("m".into());
@@ -199,7 +201,7 @@ fn build_matrix_product_expression(
     let mut rhs_indices = batch_indices(inputs[1].shape.len());
     rhs_indices.extend([k_axis, n_axis]);
     ExprSpec::MatrixMac {
-        accumulator: output.dtype,
+        accumulator,
         args: vec![
             build_tensor_read_expression("A", lhs_indices),
             build_tensor_read_expression("B", rhs_indices),
@@ -343,6 +345,7 @@ mod tests {
                 shape: vec![2, 3],
                 dtype: DataType::Fp32,
             },
+            DataType::Fp32,
         )
         .unwrap();
         let region = PreparedProgram::new(
@@ -381,7 +384,7 @@ mod tests {
             shape: vec![2, 4, 3, 7],
             dtype: DataType::Fp32,
         };
-        let program = build_gemm_program(&inputs, &output).unwrap();
+        let program = build_gemm_program(&inputs, &output, DataType::Fp32).unwrap();
         let region = PreparedProgram::new(
             &program,
             RegionBindings {

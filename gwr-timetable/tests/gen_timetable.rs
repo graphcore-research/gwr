@@ -61,7 +61,7 @@ impl GeneratorFixture {
             .unwrap()
     }
 
-    fn run_to_completion(&self, file: TimetableFile) {
+    fn run_to_completion(&self, file: TimetableFile) -> Rc<Platform> {
         let mut engine = start_test(file!());
         let clock = engine.default_clock();
         let platform = Rc::new(Platform::from_file(&engine, &clock, &self.platform_path).unwrap());
@@ -71,6 +71,7 @@ impl GeneratorFixture {
         platform.attach_dispatcher(&dispatcher);
         engine.run().unwrap();
         timetable.check_tasks_complete().unwrap();
+        platform
     }
 }
 
@@ -292,7 +293,8 @@ fn assert_reduction_tensor_shapes(file: &TimetableFile, node: &NodeSection) -> b
 fn three_pe_platform() -> String {
     PLATFORM_YAML
         .replace(
-            "memories:\n",
+            "memories:
+",
             "  - name: pe1
     memory_map: default
     config:
@@ -331,8 +333,13 @@ memories:
 
 fn platform_with_sram(bytes: usize) -> String {
     PLATFORM_YAML.replace(
-        "    config:\n      compute:",
-        &format!("    config:\n      sram_bytes: {bytes}\n      compute:"),
+        "    config:
+      compute:",
+        &format!(
+            "    config:
+      sram_bytes: {bytes}
+      compute:"
+        ),
     )
 }
 
@@ -777,8 +784,11 @@ const SMALL_ADD_ARGS: &[(&str, &str)] = &[
 #[test]
 fn generator_tries_later_pe_when_first_pe_cannot_fit() {
     let yaml = three_pe_platform().replacen(
-        "    config:\n      compute:",
-        "    config:\n      sram_bytes: 1\n      compute:",
+        "    config:
+      compute:",
+        "    config:
+      sram_bytes: 1
+      compute:",
         1,
     );
     let fixture = GeneratorFixture::new(&yaml);
@@ -789,8 +799,39 @@ fn generator_tries_later_pe_when_first_pe_cannot_fit() {
 
 #[test]
 fn generator_allocates_in_selected_pe_map() {
-    let yaml = PLATFORM_YAML.replace("memories:\n", "memories:\n  - name: unused\n    kind: hbm\n    base_address: 0\n    config: { capacity_bytes: 4096 }\n").replace("    base_address: 0\n    config:\n", "    base_address: 4096\n    config:\n");
-    let yaml = yaml.replace("connections:\n  - connect: [pe.pe0, mem.hbm0]", "fabrics:\n  - name: fabric0\n    kind: functional\n    columns: 3\n    rows: 1\n    config: {}\nconnections:\n  - connect: [pe.pe0, 'fabric.fabric0@(0,0)']\n  - connect: [mem.hbm0, 'fabric.fabric0@(1,0)']\n  - connect: [mem.unused, 'fabric.fabric0@(2,0)']");
+    let yaml = PLATFORM_YAML
+        .replace(
+            "memories:
+",
+            "memories:
+  - name: unused
+    kind: hbm
+    base_address: 0
+    config: { capacity_bytes: 4096 }
+",
+        )
+        .replace(
+            "    base_address: 0
+    config:
+",
+            "    base_address: 4096
+    config:
+",
+        );
+    let yaml = yaml.replace(
+        "connections:
+  - connect: [pe.pe0, mem.hbm0]",
+        "fabrics:
+  - name: fabric0
+    kind: functional
+    columns: 3
+    rows: 1
+    config: {}
+connections:
+  - connect: [pe.pe0, 'fabric.fabric0@(0,0)']
+  - connect: [mem.hbm0, 'fabric.fabric0@(1,0)']
+  - connect: [mem.unused, 'fabric.fabric0@(2,0)']",
+    );
     let fixture = GeneratorFixture::new(&yaml);
     let file = fixture.generate(SMALL_ADD_ARGS);
     let mut addresses = file
@@ -815,8 +856,11 @@ fn generator_checks_physical_capacity_and_exact_fit() {
                 &format!("capacity_bytes: {capacity}"),
             )
             .replace(
-                "    config:\n      compute:",
-                "    config:\n      lsu_access_bytes: 1\n      compute:",
+                "    config:
+      compute:",
+                "    config:
+      lsu_access_bytes: 1
+      compute:",
             );
         let fixture = GeneratorFixture::new(&yaml);
         if succeeds {
@@ -842,14 +886,54 @@ fn generator_checks_physical_capacity_and_exact_fit() {
 #[test]
 fn generator_preserves_shared_rhs_across_selected_memory_maps() {
     let yaml = matrix_capacity_platform(64, 64)
-        .replace("  - name: default\n    devices: [hbm0]", "  - { name: first, devices: [a, c] }\n  - { name: second, devices: [b, c] }\n  - { name: unused, devices: [d] }")
+        .replace(
+            "  - name: default
+    devices: [hbm0]",
+            "  - { name: first, devices: [a, c] }
+  - { name: second, devices: [b, c] }
+  - { name: unused, devices: [d] }",
+        )
         .replacen("memory_map: default", "memory_map: first", 1)
         .replacen("memory_map: default", "memory_map: second", 1)
-        .replace("fabrics:\n", "  - name: unused\n    memory_map: unused\n    config:\n      compute:\n        execution_units:\n          vector:\n            capabilities: [{ class: add, ops_per_tick: 1 }]\nfabrics:\n")
-        .replace("operation_classes:\n", "operation_classes:\n  add: { operations: [add], arity: 2 }\n")
+        .replace(
+            "fabrics:
+",
+            "  - name: unused
+    memory_map: unused
+    config:
+      compute:
+        execution_units:
+          vector:
+            capabilities: [{ class: add, ops_per_tick: 1 }]
+fabrics:
+",
+        )
+        .replace(
+            "operation_classes:
+",
+            "operation_classes:
+  add: { operations: [add], arity: 2 }
+",
+        )
         .replace("columns: 3", "columns: 7")
-        .replace("  - name: hbm0\n    kind: hbm\n    base_address: 0\n    config: { capacity_bytes: 1GiB }", "  - { name: a, kind: hbm, base_address: 0, config: { capacity_bytes: 4096 } }\n  - { name: b, kind: hbm, base_address: 4096, config: { capacity_bytes: 4096 } }\n  - { name: c, kind: hbm, base_address: 8192, config: { capacity_bytes: 4096 } }\n  - { name: d, kind: hbm, base_address: 12288, config: { capacity_bytes: 4096 } }")
-        .replace("  - connect: [mem.hbm0, 'fabric.fabric0@(2,0)']", "  - connect: [pe.unused, 'fabric.fabric0@(2,0)']\n  - connect: [mem.a, 'fabric.fabric0@(3,0)']\n  - connect: [mem.b, 'fabric.fabric0@(4,0)']\n  - connect: [mem.c, 'fabric.fabric0@(5,0)']\n  - connect: [mem.d, 'fabric.fabric0@(6,0)']");
+        .replace(
+            "  - name: hbm0
+    kind: hbm
+    base_address: 0
+    config: { capacity_bytes: 1GiB }",
+            "  - { name: a, kind: hbm, base_address: 0, config: { capacity_bytes: 4096 } }
+  - { name: b, kind: hbm, base_address: 4096, config: { capacity_bytes: 4096 } }
+  - { name: c, kind: hbm, base_address: 8192, config: { capacity_bytes: 4096 } }
+  - { name: d, kind: hbm, base_address: 12288, config: { capacity_bytes: 4096 } }",
+        )
+        .replace(
+            "  - connect: [mem.hbm0, 'fabric.fabric0@(2,0)']",
+            "  - connect: [pe.unused, 'fabric.fabric0@(2,0)']
+  - connect: [mem.a, 'fabric.fabric0@(3,0)']
+  - connect: [mem.b, 'fabric.fabric0@(4,0)']
+  - connect: [mem.c, 'fabric.fabric0@(5,0)']
+  - connect: [mem.d, 'fabric.fabric0@(6,0)']",
+        );
     let fixture = GeneratorFixture::new(&yaml);
     let file = generate_square_gemm(&fixture, 2);
     assert_pe_assignments(&file, &["pe0", "pe1"]);
@@ -887,8 +971,11 @@ fn generator_preserves_shared_rhs_across_selected_memory_maps() {
 #[test]
 fn generator_reports_all_resource_infeasible_pe_candidates() {
     let yaml = three_pe_platform().replace(
-        "    config:\n      compute:",
-        "    config:\n      sram_bytes: 1\n      compute:",
+        "    config:
+      compute:",
+        "    config:
+      sram_bytes: 1
+      compute:",
     );
     let fixture = GeneratorFixture::new(&yaml);
     let output = fixture.run_generator(SMALL_ADD_ARGS);
@@ -902,4 +989,205 @@ fn generator_reports_all_resource_infeasible_pe_candidates() {
     }
     assert!(stderr.contains("SRAM bytes, available 1"), "{stderr}");
     assert!(!fixture.timetable_path.exists());
+}
+
+const BF16_MATRIX_PLATFORM: &str = "
+memory_maps: [{ name: mm, devices: [mem] }]
+operation_classes:
+  matrix: { operations: [matrix_mac], arity: 2, flops_per_op: 2 }
+  conversion: { operations: [convert], arity: 1 }
+  add: { operations: [add], arity: 2 }
+processing_elements:
+  - name: pe0
+    memory_map: mm
+    config:
+      sram_bytes: 1MiB
+      compute:
+        execution_units:
+          matrix:
+            capabilities:
+              - { class: matrix, input_dtypes: [[bf16, bf16]], accumulator: fp32, ops_per_tick: 128 }
+          vector:
+            capabilities:
+              - { class: conversion, input_dtypes: [[fp32]], ops_per_tick: 32 }
+memories:
+  - { name: mem, kind: hbm, base_address: 0, config: { capacity_bytes: 1MiB } }
+connections: [{ connect: [pe.pe0, mem.mem] }]
+";
+
+fn bf16_matrix_args() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("--init-dtype", "bf16"),
+        ("--weight-add", "0"),
+        ("--weight-gemm", "1"),
+        ("--weight-reduce-max", "0"),
+        ("--max-compute-nodes", "1"),
+        ("--init-rank-min", "2"),
+        ("--init-rank-max", "2"),
+        ("--init-dim-min", "2"),
+        ("--init-dim-max", "2"),
+        ("--expand-ratio", "1"),
+    ]
+}
+
+fn assert_matrix_accumulator(file: &TimetableFile, expected: DataType) {
+    let NodeSection::Compute { program, .. } = compute_nodes(file).next().unwrap() else {
+        unreachable!()
+    };
+    assert!(matches!(program.assignments[0].expr,
+        ExprSpec::MatrixMac { accumulator, .. } if accumulator == expected));
+}
+
+#[test]
+fn generator_selects_bf16_matrix_fp32_accumulation_and_executes_output_conversion() {
+    let fixture = GeneratorFixture::new(BF16_MATRIX_PLATFORM);
+    let file = fixture.generate(&bf16_matrix_args());
+    assert_matrix_accumulator(&file, DataType::Fp32);
+    let platform = fixture.run_to_completion(file);
+    let ops = platform.pe("pe0").unwrap().machine_ops();
+    assert_eq!(ops.by_operation.get("matrix_mac"), Some(&8));
+    assert_eq!(ops.by_operation.get("convert"), Some(&4));
+}
+
+#[test]
+fn generator_rejects_matrix_accumulator_without_output_conversion() {
+    let yaml = BF16_MATRIX_PLATFORM.replace("input_dtypes: [[fp32]]", "input_dtypes: [[fp16]]");
+    let fixture = GeneratorFixture::new(&yaml);
+    assert_generation_failed(
+        &fixture.run_generator(&bf16_matrix_args()),
+        "no supported compute templates",
+    );
+    assert!(!fixture.timetable_path.exists());
+}
+
+#[test]
+fn generator_preserves_bf16_bias_temporary_with_fp32_accumulation() {
+    let yaml = BF16_MATRIX_PLATFORM.replace(
+        "              - { class: conversion,",
+        "              - { class: add, input_dtypes: [[bf16, bf16]], ops_per_tick: 32 }
+              - { class: conversion,",
+    );
+    let fixture = GeneratorFixture::new(&yaml);
+    let file = fixture.generate(&bf16_matrix_args());
+    let NodeSection::Compute { program, .. } = compute_nodes(&file).next().unwrap() else {
+        unreachable!()
+    };
+    assert_eq!(program.inputs, ["A", "B", "bias"]);
+    assert_eq!(program.temporaries["product"].dtype, DataType::Bf16);
+    let platform = fixture.run_to_completion(file);
+    let ops = platform.pe("pe0").unwrap().machine_ops();
+    assert_eq!(ops.by_operation.get("matrix_mac"), Some(&8));
+    assert_eq!(ops.by_operation.get("convert"), Some(&4));
+    assert_eq!(ops.by_operation.get("add"), Some(&4));
+}
+
+#[test]
+fn generator_omits_bias_when_only_promoted_bias_arithmetic_is_supported() {
+    let yaml = BF16_MATRIX_PLATFORM.replace(
+        "              - { class: conversion,",
+        "              - { class: add, input_dtypes: [[fp32, bf16]], ops_per_tick: 32 }
+              - { class: conversion,",
+    );
+    let fixture = GeneratorFixture::new(&yaml);
+    let file = fixture.generate(&bf16_matrix_args());
+    let NodeSection::Compute { program, .. } = compute_nodes(&file).next().unwrap() else {
+        unreachable!()
+    };
+    assert_eq!(program.inputs, ["A", "B"]);
+    fixture.run_to_completion(file);
+}
+
+#[test]
+fn generator_tries_other_accumulators_when_preferred_accumulator_cannot_fit() {
+    // The preferred BF16 accumulator cannot hold even one BF16 value.
+    // FP32 on the other unit remains feasible for the actual tile.
+    let yaml = BF16_MATRIX_PLATFORM.replace(
+        "          matrix:
+            capabilities:",
+        "          matrix_bf16:
+            matrix_accumulator_capacity_bytes: 1
+            capabilities:
+              - { class: matrix, input_dtypes: [[bf16, bf16]], accumulator: bf16, ops_per_tick: 128 }
+          matrix:
+            capabilities:",
+    );
+    let fixture = GeneratorFixture::new(&yaml);
+    let file = fixture.generate(&bf16_matrix_args());
+    assert_matrix_accumulator(&file, DataType::Fp32);
+    fixture.run_to_completion(file);
+}
+
+#[test]
+fn generator_prefers_destination_accumulator_when_feasible() {
+    let yaml = BF16_MATRIX_PLATFORM.replace(
+        "          matrix:
+            capabilities:",
+        "          matrix:
+            capabilities:
+              - { class: matrix, input_dtypes: [[bf16, bf16]], accumulator: bf16, ops_per_tick: 128 }",
+    );
+    let fixture = GeneratorFixture::new(&yaml);
+    let file = fixture.generate(&bf16_matrix_args());
+    assert_matrix_accumulator(&file, DataType::Bf16);
+    let platform = fixture.run_to_completion(file);
+    assert!(
+        !platform
+            .pe("pe0")
+            .unwrap()
+            .machine_ops()
+            .by_operation
+            .contains_key("convert")
+    );
+}
+
+#[test]
+fn generator_accepts_native_full_matrix_service_tile() {
+    let yaml = BF16_MATRIX_PLATFORM.replace(
+        "accumulator: fp32, ops_per_tick: 128",
+        "accumulator: fp32, ops_per_tick: 128, matrix_service_tile: { m: 2, n: 2, k: 2 }",
+    );
+    let fixture = GeneratorFixture::new(&yaml);
+    let file = fixture.generate(&bf16_matrix_args());
+    let platform = fixture.run_to_completion(file);
+    assert_eq!(
+        platform
+            .pe("pe0")
+            .unwrap()
+            .machine_ops()
+            .by_operation
+            .get("matrix_mac"),
+        Some(&8)
+    );
+}
+
+#[test]
+fn generator_builds_each_heterogeneous_candidates_actual_accumulator_program() {
+    // The first PE supports FP16 accumulation and conversion, but its SRAM
+    // cannot hold a tile. The next PE needs a different, FP32 program.
+    let yaml = BF16_MATRIX_PLATFORM.replace(
+        "  - name: pe0",
+        "  - name: pe_bad
+    memory_map: mm
+    config:
+      sram_bytes: 1
+      compute:
+        execution_units:
+          matrix:
+            capabilities: [{ class: matrix, input_dtypes: [[bf16, bf16]], accumulator: fp16, ops_per_tick: 128 }]
+          vector:
+            capabilities: [{ class: conversion, input_dtypes: [[fp16]], ops_per_tick: 32 }]
+  - name: pe0",
+    ).replace(
+        "connections: [{ connect: [pe.pe0, mem.mem] }]",
+        "fabrics: [{ name: fabric0, kind: functional, columns: 3, rows: 1, config: {} }]
+connections:
+  - { connect: [pe.pe_bad, 'fabric.fabric0@(0,0)'] }
+  - { connect: [pe.pe0, 'fabric.fabric0@(1,0)'] }
+  - { connect: [mem.mem, 'fabric.fabric0@(2,0)'] }",
+    );
+    let fixture = GeneratorFixture::new(&yaml);
+    let file = fixture.generate(&bf16_matrix_args());
+    assert_pe_assignments(&file, &["pe0"]);
+    assert_matrix_accumulator(&file, DataType::Fp32);
+    fixture.run_to_completion(file);
 }

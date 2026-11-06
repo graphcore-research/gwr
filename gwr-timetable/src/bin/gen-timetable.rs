@@ -34,7 +34,7 @@ use clap::Parser;
 use gwr_engine::engine::Engine;
 use gwr_engine::types::SimError;
 use gwr_models::processing_element::ProcessingElement;
-use gwr_models::processing_element::compute::{ComputeWork, MatrixWorkShape};
+use gwr_models::processing_element::compute::ComputeWork;
 use gwr_models::processing_element::program::PreparedProgram;
 use gwr_models::processing_element::program::syntax::{ProgramSpec, TileSpec};
 use gwr_models::processing_element::program::validate::RegionBindings;
@@ -465,7 +465,6 @@ impl Generator {
             )));
         }
         let count = self.partition_count(extent, eligible.len());
-        let program = build_program_for_boundary(template, boundary)?;
         let base = extent / count;
         let extra = extent % count;
         let mut offset = 0;
@@ -477,13 +476,14 @@ impl Generator {
             } else {
                 format!("{compute_id}_part{part}")
             };
-            let mut candidates = eligible.clone();
-            candidates
-                .sort_by_key(|index| (index + self.pes.len() - self.last_pe_idx) % self.pes.len());
             let mut failures = Vec::new();
             let mut accepted = None;
-            for pe_idx in candidates {
+            for (pe_idx, accumulator) in
+                self.compute_candidates(template, &part_boundary, &eligible)
+            {
                 let attempt = (|| {
+                    let program =
+                        build_program_for_boundary(template, &part_boundary, accumulator)?;
                     let tensors = self.allocate_tensors(pe_idx, &part_boundary)?;
                     let relocated = relocate_boundary(&part_boundary, &tensors)?;
                     let (tiling, prepared) = find_tiling_for_pe(
@@ -494,7 +494,7 @@ impl Generator {
                         &self.pes[pe_idx].model,
                     )?;
                     let previous = self.prepare_selected(&tensors)?;
-                    Ok::<_, Box<dyn Error>>((tensors, tiling, prepared, previous))
+                    Ok::<_, Box<dyn Error>>((tensors, program, tiling, prepared, previous))
                 })();
                 match attempt {
                     Ok(value) => {
@@ -504,7 +504,7 @@ impl Generator {
                     Err(error) => failures.push(format!("{}: {error}", self.pes[pe_idx].name)),
                 }
             }
-            let Some((pe_idx, (tensors, tiling, prepared, previous))) = accepted else {
+            let Some((pe_idx, (tensors, program, tiling, prepared, previous))) = accepted else {
                 return Err(error_from_str(format!(
                     "no feasible placement found for this generated mapping ({part_id}): {}",
                     failures.join("; ")
@@ -523,7 +523,7 @@ impl Generator {
                 output_tensors,
                 ComputeMapping {
                     pe_idx,
-                    program: program.clone(),
+                    program,
                     tiling,
                 },
             )?;
@@ -537,6 +537,40 @@ impl Generator {
             offset += length;
         }
         Ok(count)
+    }
+
+    fn compute_candidates(
+        &self,
+        template: &ProgramTemplate,
+        boundary: &GenerationBoundary,
+        eligible: &[usize],
+    ) -> Vec<(usize, DataType)> {
+        let output_dtype = *boundary.outputs[0]
+            .as_ref()
+            .expect("generated output")
+            .dtype();
+        let mut candidates = eligible.to_vec();
+        candidates
+            .sort_by_key(|index| (index + self.pes.len() - self.last_pe_idx) % self.pes.len());
+        candidates
+            .into_iter()
+            .flat_map(|pe_idx| {
+                let mut accumulators = if matches!(template, ProgramTemplate::Gemm) {
+                    let inputs = [&boundary.inputs[0], &boundary.inputs[1]]
+                        .map(|view| *view.as_ref().expect("generated matrix operand").dtype());
+                    self.pes[pe_idx]
+                        .model
+                        .compute_model()
+                        .matrix_accumulators(inputs)
+                } else {
+                    vec![output_dtype]
+                };
+                // Prefer destination precision when feasible, then try other
+                // declared precisions deterministically.
+                accumulators.sort_by_key(|dtype| (*dtype != output_dtype, *dtype));
+                accumulators.into_iter().map(move |dtype| (pe_idx, dtype))
+            })
+            .collect()
     }
 
     fn partition_count(&self, extent: usize, eligible_count: usize) -> usize {
@@ -794,39 +828,29 @@ impl Generator {
         dtype: DataType,
         with_bias: bool,
     ) -> Vec<usize> {
-        let operations: &[&str] = match template {
-            ProgramTemplate::Add => &["add"],
-            ProgramTemplate::Gemm if with_bias => &["matrix_mac", "add"],
-            ProgramTemplate::Gemm => &["matrix_mac"],
-            ProgramTemplate::ReduceMax => &["compare"],
-        };
         self.pes
             .iter()
             .enumerate()
             .filter_map(|(index, pe)| {
-                operations
-                    .iter()
-                    .all(|op| {
-                        // Probe a unit matrix with explicit geometry. Actual
-                        // generated tile sizes are checked during tiling.
-                        let work = if *op == "matrix_mac" {
-                            ComputeWork::matrix_mac(
-                                [dtype, dtype],
-                                dtype,
-                                MatrixWorkShape {
-                                    batches: 1,
-                                    m: 1,
-                                    n: 1,
-                                    k: 1,
+                let model = pe.model.compute_model();
+                let supports = |op, inputs| {
+                    model
+                        .validate_work(&ComputeWork::operation(op, inputs, 1))
+                        .is_ok()
+                };
+                let supported =
+                    match template {
+                        ProgramTemplate::Add => supports("add", vec![dtype, dtype]),
+                        ProgramTemplate::Gemm => {
+                            model.matrix_accumulators([dtype, dtype]).into_iter().any(
+                                |accumulator| {
+                                    accumulator == dtype || supports("convert", vec![accumulator])
                                 },
-                            )
-                        } else {
-                            Ok(ComputeWork::operation(*op, vec![dtype, dtype], 1))
-                        };
-                        work.and_then(|work| pe.model.compute_model().validate_work(&work))
-                            .is_ok()
-                    })
-                    .then_some(index)
+                            ) && (!with_bias || supports("add", vec![dtype, dtype]))
+                        }
+                        ProgramTemplate::ReduceMax => supports("compare", vec![dtype, dtype]),
+                    };
+                supported.then_some(index)
             })
             .collect()
     }
@@ -903,8 +927,9 @@ fn template_name(template: &ProgramTemplate) -> &'static str {
 fn build_program_for_boundary(
     op: &ProgramTemplate,
     boundary: &GenerationBoundary,
+    matrix_accumulator: DataType,
 ) -> Result<ProgramSpec> {
-    op.build_program(&boundary.inputs, &boundary.outputs)
+    op.build_program(&boundary.inputs, &boundary.outputs, matrix_accumulator)
         .map_err(boxed_error)
 }
 
