@@ -60,8 +60,8 @@ mod flop_monitor;
 mod load_store_unit;
 pub mod program;
 mod runner;
+pub use program::analysis::estimate_peak_tile_sram;
 use runner::TaskRunner;
-pub use runner::estimate_peak_tile_sram;
 
 pub mod task;
 pub mod tensors;

@@ -33,6 +33,7 @@
 //! Insufficient SRAM is an error: execution does not recompute earlier phases
 //! or spill local values to external memory.
 
+pub(in crate::processing_element) mod analysis;
 pub(in crate::processing_element) mod executable;
 pub(super) mod plan;
 pub(in crate::processing_element) mod prepared;

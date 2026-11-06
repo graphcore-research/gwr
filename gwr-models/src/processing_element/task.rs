@@ -1,6 +1,10 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+use gwr_engine::types::SimError;
+
+use crate::processing_element::program::PreparedProgram;
 use crate::processing_element::program::syntax::{ProgramSpec, TileSpec};
+use crate::processing_element::program::validate::RegionBindings;
 use crate::processing_element::tensors::TensorView;
 
 #[derive(Debug, Clone)]
@@ -66,14 +70,16 @@ impl PreparedTask {
         {
             lsu.validate_mapped_view(view)?;
         }
-        let compute = super::runner::prepare_compute(model, &program)?;
-        let peak_sram_bytes = program.peak_sram_bytes()?;
+        let super::program::analysis::TaskAnalysis {
+            compute,
+            peak_sram_bytes,
+            traffic_bytes,
+        } = program.analyze(model)?;
         if peak_sram_bytes > capacity {
             return Err(gwr_engine::types::SimError(format!(
                 "{id} tile requires {peak_sram_bytes} SRAM bytes, available {capacity}"
             )));
         }
-        let traffic_bytes = program.planned_traffic_bytes()?;
         Ok(std::rc::Rc::new(Self {
             id,
             program,
@@ -112,5 +118,20 @@ impl PreparedTask {
     #[must_use]
     pub fn planned_traffic_bytes(&self) -> (usize, usize) {
         self.traffic_bytes
+    }
+}
+
+impl ProgramTaskConfig {
+    /// Bind and estimate boundary traffic without issuing requests.
+    pub fn planned_traffic_bytes(&self) -> Result<(usize, usize), SimError> {
+        PreparedProgram::new(
+            &self.program,
+            RegionBindings {
+                inputs: self.inputs.clone(),
+                outputs: self.outputs.clone(),
+            },
+            self.tiling.as_ref(),
+        )?
+        .planned_traffic_bytes()
     }
 }

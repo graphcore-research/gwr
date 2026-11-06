@@ -6,7 +6,7 @@ use std::ops::Range;
 use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
 
-use super::eval_index;
+use super::helpers::eval_index;
 use crate::processing_element::program::storage::align_sram_slot_bytes;
 use crate::processing_element::program::syntax::IndexSpec;
 use crate::processing_element::program::tile::RegionTile;

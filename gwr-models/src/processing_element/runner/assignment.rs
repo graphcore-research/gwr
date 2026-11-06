@@ -11,9 +11,12 @@ use gwr_track::debug;
 use gwr_track::entity::EntityGroup;
 
 use super::TaskRunner;
-use super::access::{InputRead, collect_assignment_input_reads};
 use crate::processing_element::activity::ActivityLanes;
 use crate::processing_element::compute::{ComputeBatch, ComputeReservation, ExecutionPlan};
+use crate::processing_element::program::analysis::access::{
+    InputRead, collect_assignment_input_reads,
+};
+use crate::processing_element::program::analysis::invocation::AssignmentInvocations;
 use crate::processing_element::program::executable::Assignment;
 use crate::processing_element::program::prepared::GroupPlan;
 use crate::processing_element::program::tile::RegionTile;
@@ -57,11 +60,8 @@ struct AssignmentExecution<'a> {
 
 impl AssignmentExecution<'_> {
     async fn run(&self) -> SimResult {
-        for invocation in super::invocation::AssignmentInvocations::new(
-            self.region,
-            self.assignment_index,
-            self.tile,
-        )? {
+        for invocation in AssignmentInvocations::new(self.region, self.assignment_index, self.tile)?
+        {
             let invocation = invocation?;
             if let Some(label) = invocation.read_label {
                 self.load_inputs(&invocation.chunk, &label).await?;

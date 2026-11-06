@@ -6,12 +6,13 @@ use std::collections::BTreeMap;
 use gwr_engine::engine::Engine;
 use yaml_serde::{from_str, from_value, to_value};
 
-use super::matrix_shape::build_matrix_work;
 use super::matrix_test_fixture::*;
 use super::*;
 use crate::memory::Memory;
 use crate::memory::memory_access::MemoryAccess;
 use crate::processing_element::compute::MatrixWorkShape;
+use crate::processing_element::program::analysis::invocation::AssignmentInvocations;
+use crate::processing_element::program::analysis::matrix_shape::build_matrix_work;
 use crate::processing_element::program::storage::SRAM_SLOT_ALIGNMENT_BYTES;
 use crate::processing_element::tensors::Tensor;
 use crate::processing_element::tensors::dtype::DataType;
@@ -291,7 +292,7 @@ fn streamed_compute_validation_uses_chunk_service_cost_when_full_reduction_would
     // must not be drained just to establish the chunk/full-duration
     // distinction.
     let tile = schedule.tiles().next().unwrap();
-    let invocation = super::invocation::AssignmentInvocations::new(&region, 0, &tile)
+    let invocation = AssignmentInvocations::new(&region, 0, &tile)
         .unwrap()
         .next()
         .unwrap()
