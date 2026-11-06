@@ -16,6 +16,13 @@ exclude = ["gwr-developer-guide/Cargo.toml"]
 path = "https://www.schemastore.org/cargo.json"
 
 [[rule]]
+include = ["gwr-developer-guide/book.toml"]
+# Keep mermaid.min.js before mermaid-init.js, which depends on it.
+keys = ["output.html"]
+[rule.formatting]
+reorder_arrays = false
+
+[[rule]]
 include = ["prek.toml"]
 [rule.schema]
 path = "https://www.schemastore.org/prek.json"

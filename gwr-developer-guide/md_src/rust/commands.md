@@ -55,8 +55,8 @@ cargo bench
 
 ## Formatting the Code
 
-There is no need to manually format your code as the Rust tools provide a tool
-for this that keeps all of the codebase in a consistent format.
+The Rust toolchain provides a formatting tool that helps to keep all of the
+codebase in a consistent format.
 
 This is usually be done using the stable toolchain:
 

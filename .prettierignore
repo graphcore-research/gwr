@@ -16,5 +16,7 @@ CHANGELOG.md
 !*.js
 
 # Keep checked-in third-party distributions byte-for-byte unchanged
+gwr-developer-guide/mermaid-init.js
+gwr-developer-guide/mermaid.min.js
 gwr-spotter/frontend/lib/d3.v7.min.js
 gwr-spotter/frontend/lib/jquery-3.4.1.js

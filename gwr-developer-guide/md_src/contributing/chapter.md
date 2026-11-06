@@ -3,4 +3,8 @@
 # Contributing
 
 In order to contribute to GWR you will need to install some tooling and set up a
-workspace.
+workspace. The following chapters cover these processes.
+
+{{#include ../../../CONTRIBUTING.md:intro}}
+
+[contribution checklist]: ./checklists.md

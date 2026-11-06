@@ -44,6 +44,7 @@
   - [Setup](contributing/setup.md)
   - [Advanced Setup](contributing/advanced_setup.md)
   - [Workspace](contributing/workspace.md)
+  - [Checklists](contributing/checklists.md)
 
 - [Rust](rust/chapter.md)
   - [Learning Rust](rust/learning.md)

@@ -238,20 +238,29 @@ prek install
 
 ### Branching the Repo
 
+The process for branching the repo is codified by the [Branching] item of the
+[Feature/fix development checklist].
+
 Changes to GWR packages are developed on branches separate to `main` (the
 default) branch of the repo, and then incorporated when complete via a pull
 request.
 
-Push-specific CI runs only on `main` and branches whose names begin with
-`feature-`, for example, `feature-new-example-app`. Long running or
-collaborative development should use this prefix when a branch needs to be
-pushed to `origin` and validated before a pull request is opened.
+Push-specific CI runs only on `main`, `experimental` and branches whose names
+begin with `feature-`, for example, `feature-new-example-app`.
 
-Before opening a pull request, a feature branch must be renamed to use the `pr-`
-prefix, for example, `pr-new-example-app`. Short lived branches may use this
-prefix from the outset. Branches named with this prefix do not cause the
-push-specific CI workflow to run, avoiding a duplicate run alongside the pull
-request-specific workflow.
+<!-- prettier-ignore-start -->
+
+> [!NOTE]
+> The `experimental` branch will never be merged into the `main` branch. However
+> updates from `main` may be merged into `experimental` via a pull request.
+
+<!-- prettier-ignore-end -->
+
+Before opening a pull request, a feature branch must be renamed to remove the
+`feature-` prefix. Use of the `pr-` prefix, for example, `pr-new-example-app` is
+the usual convention. Branches named without the push-specific prefixes are
+preferred as they do not cause the push-specific CI workflow to run, avoiding a
+duplicate run alongside the pull request-specific workflow.
 
 Draft pull requests create only skipped CI job entries, so no runner work is
 performed. CI runs when a pull request is opened as ready for review, when a
@@ -259,39 +268,67 @@ draft is marked ready, when a ready pull request is reopened, and after each
 subsequent push or rebase. Moving a pull request back to draft cancels any
 in-progress CI run.
 
+```mermaid
+---
+title: GWR git branching scheme
+config:
+  theme: 'base'
+  gitGraph:
+    parallelCommits: false
+---
+gitGraph:
+  checkout main
+  commit id: "initial commit"
+
+  branch experimental
+
+  branch pr-publish-docs
+  commit id: "infra: publish built documentation"
+
+  checkout main
+  merge pr-publish-docs
+
+  checkout experimental
+  branch feature-visualiser-experiment
+  commit id: "feat: add visualiser package"
+  commit id: "feat: component hierarchy viz"
+
+  branch pr-visualiser-experiment
+  commit id: "feat: component hierarchy visualisation"
+
+  checkout experimental
+  merge pr-visualiser-experiment
+
+  checkout main
+  branch feature-visualiser
+  commit id: "feat: component visualisation"
+  commit id: "feat: model visualisation"
+
+  branch pr-visualiser
+  commit id: "feat(gwr-visualiser): component visualisation"
+  commit id: "feat(gwr-visualiser): model visualisation"
+
+  checkout main
+  merge pr-visualiser
+
+  checkout experimental
+  branch pr-updates-from-main
+  commit id: "chore: remove experimental visualiser"
+  merge main
+
+  checkout experimental
+  merge pr-updates-from-main
+```
+
+This diagram is read left to right and top to bottom (like the [Network graph]
+view of GitHub). Pull requests are shown as if they land using merge commits,
+single points (the circles with white centres) on the graph, though in reality
+they will be rebased without squashing their individual commits.
+
 ### Committing a Change
 
-All commits made to the GWR repo must follow the [Conventional Commits] 1.0.0
-specification. This allows the automatic generation of both a top-level
-changelog covering the whole workspace as well as an individual changelog for
-each package within the workspace.
-
-When writing a commmit message in this form:
-
-- The set of `type`s that should generally be used can be found in the
-  `commit_parsers` array within the `release-plz.toml` configuration file. This
-  array also details the sections each type will be included in within the
-  changelog.
-- The `optional scope` should be used to detail the name of the updated package.
-  For example:
-
-  ```text
-  fix(gwr-developer-guide): check for panic when running mdBook tests
-  ```
-
-  - If the change applied to multiple, but not all packages, the names should be
-    comma seperated. For example:
-    ```text
-    feat(gwr-track,gwr-spotter): capnp binary file support
-    ```
-  - If the change applies to all Rust packages, infrastructure, CI, or general
-    configuration the scope can be omitted. For example:
-    ```text
-    docs: add example use for all public APIs
-    ```
-    ```text
-    infra: set default pre-commit hooks to install
-    ```
+The process for creating commits is codified by the [Commits] item of the
+[Feature/fix development checklist].
 
 During the commit process a number of different hooks will be invoked by [prek]:
 
@@ -344,23 +381,28 @@ which will tag the repo marking the correct commit with the versions for each
 updated package, and automatically publishes the updated packages using
 `cargo publish` and as Github releases.
 
+[builtin hooks]: https://prek.j178.dev/built-in-hooks/
 [Cap'n Proto]: https://capnproto.org
 [cargo-about]: https://github.com/EmbarkStudios/cargo-about
 [cargo-deny]: https://github.com/EmbarkStudios/cargo-deny
 [cargo-semver-checks]: https://github.com/obi1kenobi/cargo-semver-checks
 [CI system]: https://github.com/graphcore-research/gwr/actions/workflows/ci.yaml
 [clippy]: https://doc.rust-lang.org/clippy
-[ESLint]: https://eslint.org
 [Cocogitto]: https://docs.cocogitto.io
 [Conventional Commits]: https://www.conventionalcommits.org/en/v1.0.0
+[ESLint]: https://eslint.org
 [lychee]: https://lychee.cli.rs
+[Network graph]: https://github.com/graphcore-research/gwr/network
 [prek]: https://prek.j178.dev/
-[builtin hooks]: https://prek.j178.dev/built-in-hooks/
 [Prettier]: https://prettier.io
 [Release-plz]: https://release-plz.dev
 
 <!-- ANCHOR_END: package_developers -->
 
+[Branching]: ./CONTRIBUTING.md#branching
+[Commits]: ./CONTRIBUTING.md#commits
+[Feature/fix development checklist]:
+  ./CONTRIBUTING.md#featurefix-development-checklist
 [licenses.html]: https://graphcore-research.github.io/gwr/html/licenses.html
 
 <!-- ANCHOR: dev_docs -->

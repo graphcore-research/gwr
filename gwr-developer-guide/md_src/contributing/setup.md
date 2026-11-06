@@ -12,4 +12,8 @@
 
 <!-- cmdrun cp ../../../licenses.html ../../md_src/licenses.html -->
 
+[Branching]: ./checklists.md#branching
+[Commits]: ./checklists.md#commits
+[Feature/fix development checklist]:
+  ./checklists.md#featurefix-development-checklist
 [licenses.html]: ../licenses.html

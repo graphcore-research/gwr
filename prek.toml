@@ -6,6 +6,14 @@
 default_stages = ["pre-commit", "pre-merge-commit"]
 default_install_hook_types = ["commit-msg", "pre-commit", "pre-merge-commit"]
 
+exclude = '''
+(?x)^(
+  .*d3.*.js|
+  .*jquery.*.js|
+  .*mermaid.*.js
+)
+'''
+
 [[repos]]
 repo = "builtin"
 
@@ -62,8 +70,6 @@ exclude = '''
   ^.git/.*|
   ^Cargo.lock|
   .*\.stderr$|
-  d3.*.js|
-  jquery.*.js|
   .*\.png|
   .*\.json
 )
