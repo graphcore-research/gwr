@@ -6,7 +6,7 @@ use futures::future::LocalBoxFuture;
 use gwr_engine::types::SimResult;
 
 use super::TaskRunner;
-use super::tile::build_tile_storage;
+use crate::processing_element::program::analysis::tile_storage::build_tile_storage;
 use crate::processing_element::program::schedule::{
     Intervals, ScopedSchedule, ScopedStep, build_group_tile, scope_intervals,
 };
