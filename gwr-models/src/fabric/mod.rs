@@ -135,24 +135,20 @@ pub struct FabricPortConfig {
     pub port_bits_per_tick: usize,
 }
 
-fn validate_destination_port_map(
-    destination_port_map: &HashMap<u64, Vec<usize>>,
-    fabric_port_indices: &[usize],
-) -> Result<(), SimError> {
-    let fabric_port_indices: HashSet<usize> = fabric_port_indices.iter().copied().collect();
-    for (destination, ports) in destination_port_map {
-        for port in ports {
-            if !fabric_port_indices.contains(port) {
-                return sim_error!(
-                    "Destination port map references unpopulated fabric port {port} for destination {destination}"
-                );
-            }
-        }
-    }
-    Ok(())
-}
-
 impl FabricConfig {
+    /// Install routing destinations while retaining checked geometry and
+    /// service.
+    pub fn set_destination_port_map(&mut self, map: HashMap<u64, Vec<usize>>) -> SimResult {
+        validate_destination_port_map(&map, |index| {
+            let (column, row, port) = self.fabric_port_index_to_col_row_port(index);
+            column < self.num_columns
+                && row < self.num_rows
+                && port < self.node_num_ingress_egress_ports(column, row)
+        })?;
+        self.destination_port_map = map;
+        Ok(())
+    }
+
     pub fn new(
         geometry: FabricGeometry,
         ports: FabricPortConfig,
@@ -199,13 +195,17 @@ impl FabricConfig {
             return sim_error!("link rate must be greater than zero");
         }
         if !destination_port_map.is_empty() {
-            let fabric_port_indices = create_populated_indices(
+            let fabric_port_indices: HashSet<_> = create_populated_indices(
                 num_columns,
                 num_rows,
                 num_ports_per_node,
                 ports_per_node_limit,
-            );
-            validate_destination_port_map(&destination_port_map, &fabric_port_indices)?;
+            )
+            .into_iter()
+            .collect();
+            validate_destination_port_map(&destination_port_map, |port| {
+                fabric_port_indices.contains(&port)
+            })?;
         }
 
         Ok(Self {
@@ -387,6 +387,22 @@ impl FabricConfig {
             }
         }
     }
+}
+
+fn validate_destination_port_map(
+    destination_port_map: &HashMap<u64, Vec<usize>>,
+    populated: impl Fn(usize) -> bool,
+) -> Result<(), SimError> {
+    for (destination, ports) in destination_port_map {
+        for port in ports {
+            if !populated(*port) {
+                return sim_error!(
+                    "Destination port map references unpopulated fabric port {port} for destination {destination}"
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 #[must_use]
@@ -812,6 +828,47 @@ mod tests {
         assert!(error.to_string().contains(
             "Destination port map references unpopulated fabric port 2 for destination 7"
         ));
+    }
+
+    #[test]
+    fn destination_map_update_checks_population_and_preserves_geometry() {
+        let mut config = FabricConfig::new(
+            FabricGeometry {
+                num_columns: 2,
+                num_rows: 2,
+                num_ports_per_node: 2,
+                ports_per_node_limit: Some(3),
+            },
+            FabricPortConfig {
+                ticks_per_hop: 1,
+                ticks_overhead: 1,
+                rx_buffer_bytes: 1,
+                tx_buffer_bytes: 1,
+                port_bits_per_tick: 1,
+            },
+            HashMap::new(),
+        )
+        .unwrap();
+        config
+            .set_destination_port_map(HashMap::from([(7, vec![0, 2])]))
+            .unwrap();
+        assert_eq!(config.destination_port_map()[&7], [0, 2]);
+        assert_eq!(
+            (
+                config.num_columns(),
+                config.num_rows(),
+                config.num_ports_per_node()
+            ),
+            (2, 2, 2)
+        );
+        for invalid in [3, 8, usize::MAX] {
+            assert!(
+                config
+                    .set_destination_port_map(HashMap::from([(7, vec![invalid])]))
+                    .is_err()
+            );
+            assert_eq!(config.destination_port_map()[&7], [0, 2]);
+        }
     }
 
     #[test]

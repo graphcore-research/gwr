@@ -19,7 +19,7 @@ use gwr_engine::types::SimError;
 use regex::Regex;
 
 /// Identifies one of the cache's external connection ports.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Copy, Hash)]
 pub enum CachePortId {
     /// Device-facing cache port.
     Dev,

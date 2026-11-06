@@ -158,9 +158,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-The `gwr_platform::builder` module supplies component builders. The
-`gwr_platform::connect` module contains the connection logic.
-
 <!-- ANCHOR_END: overview -->
 
 ## Processing elements

@@ -30,10 +30,7 @@ const FABRIC_PORT_BITS_PER_TICK: usize = 1024;
 
 // Storage and cache geometry. One Int8 occupies a byte; two FP4 values share
 // one.
-const BITS_PER_BYTE: usize = 8;
 const INT8_BYTES: usize = 1;
-const FP4_BITS: usize = 4;
-const FP4_ELEMENTS_PER_BYTE: usize = BITS_PER_BYTE / FP4_BITS;
 const CACHE_LINE_BYTES: usize = 4;
 const CACHE_SET_COUNT: usize = 16;
 const CACHE_WAY_COUNT: usize = 1;
@@ -51,25 +48,8 @@ const SPARSE_SEQUENCE_TASKS: usize = 2;
 // Leave one tensor-sized unmapped gap before the remote device.
 const SPARSE_REMOTE_BASE: u64 = INPUT_BASE_ADDRESS + (SPARSE_TENSOR_BYTES * 2) as u64;
 
-// Strided views select one element per row. Both offset cases below touch the
-// same physical bytes, with the FP4 case starting in a byte's second nibble.
+// Strided views select one element per row.
 const STRIDED_ROWS: usize = 2;
-const STRIDED_ROW_BYTES: usize = 4;
-const FIRST_TOUCHED_BYTE_OFFSET: usize = 1;
-const FIRST_TOUCHED_ADDRESS: u64 = INPUT_BASE_ADDRESS + FIRST_TOUCHED_BYTE_OFFSET as u64;
-const SECOND_TOUCHED_ADDRESS: u64 = FIRST_TOUCHED_ADDRESS + STRIDED_ROW_BYTES as u64;
-const OFFSET_CASES: [(DataType, usize, usize); 2] = [
-    (
-        DataType::Int8,
-        STRIDED_ROW_BYTES / INT8_BYTES,
-        FIRST_TOUCHED_BYTE_OFFSET / INT8_BYTES,
-    ),
-    (
-        DataType::Fp4,
-        STRIDED_ROW_BYTES * FP4_ELEMENTS_PER_BYTE,
-        FIRST_TOUCHED_BYTE_OFFSET * FP4_ELEMENTS_PER_BYTE + 1,
-    ),
-];
 
 // The contiguous fixture splits equal halves across adjacent input devices.
 const ELEMENTS_PER_DEVICE: usize = 2;
@@ -166,6 +146,7 @@ fn run_sparse_read_then_unfetched_cache_line() -> Platform {
         &clock,
         &platform_yaml_with_cache(
             &multi_device_platform_yaml(
+                0,
                 SPARSE_TENSOR_BYTES as u64,
                 SPARSE_REMOTE_BASE,
                 CACHE_LINE_BYTES as u64,
@@ -296,6 +277,7 @@ caches:
 
 fn single_input_device_platform_yaml() -> String {
     multi_device_platform_yaml(
+        0,
         CONTIGUOUS_DEVICE_BYTES as u64,
         CONTIGUOUS_SECOND_BASE,
         CONTIGUOUS_DEVICE_BYTES as u64,
@@ -303,7 +285,12 @@ fn single_input_device_platform_yaml() -> String {
     .replacen("[m0, m1, out]", "[m0, out]", 1)
 }
 
-fn multi_device_platform_yaml(first_bytes: u64, second_base: u64, second_bytes: u64) -> String {
+fn multi_device_platform_yaml(
+    first_base: u64,
+    first_bytes: u64,
+    second_base: u64,
+    second_bytes: u64,
+) -> String {
     format!(
         r"
 memory_maps:
@@ -326,7 +313,7 @@ processing_elements:
 memories:
  - name: m0
    kind: hbm
-   base_address: {INPUT_BASE_ADDRESS}
+   base_address: {first_base}
    config:
      capacity_bytes: {first_bytes}
      delay_ticks: {MEMORY_DELAY_TICKS}
@@ -361,7 +348,7 @@ connections:
     )
 }
 
-fn nonzero_offset_views(dtype: DataType, width: usize, offset: usize) -> (TensorView, TensorView) {
+fn strided_views(dtype: DataType, width: usize, offset: usize) -> (TensorView, TensorView) {
     let input = TensorView::new(
         Tensor::new(&[STRIDED_ROWS, width], &dtype, INPUT_BASE_ADDRESS).unwrap(),
         &[STRIDED_ROWS, 1],
@@ -390,6 +377,7 @@ fn repeated_reads_across_devices_fetch_each_cache_line_once() {
     let platform = run_tasks_and_check_traffic(
         &platform_yaml_with_cache(
             &multi_device_platform_yaml(
+                0,
                 CACHE_LINE_BYTES as u64,
                 second_base,
                 CACHE_LINE_BYTES as u64,
@@ -439,6 +427,7 @@ fn sparse_cache_reads_round_only_touched_lines() {
     let platform = run_copy_and_check_traffic(
         &platform_yaml_with_cache(
             &multi_device_platform_yaml(
+                0,
                 SPARSE_TENSOR_BYTES as u64,
                 SPARSE_REMOTE_BASE,
                 CACHE_LINE_BYTES as u64,
@@ -465,6 +454,7 @@ fn unmapped_cached_input_is_rejected_before_execution() {
     const REMOTE_ELEMENTS: usize = 2;
     let config = platform_yaml_with_cache(
         &multi_device_platform_yaml(
+            0,
             SPARSE_TENSOR_BYTES as u64,
             SPARSE_REMOTE_BASE,
             CACHE_LINE_BYTES as u64,
@@ -492,6 +482,7 @@ fn cache_rejects_physical_boundaries_not_aligned_to_whole_lines() {
         &clock,
         &platform_yaml_with_cache(
             &multi_device_platform_yaml(
+                0,
                 HALF_LINE_BYTES as u64,
                 second_base,
                 HALF_LINE_BYTES as u64,
@@ -537,59 +528,6 @@ fn reading_a_cache_line_skipped_by_a_sparse_read_causes_a_miss() {
 }
 
 #[test]
-fn strided_reads_allow_unmapped_gaps_between_selected_bytes() {
-    let input = TensorView::new(
-        Tensor::new(
-            &[STRIDED_ROWS, STRIDED_ROW_BYTES / INT8_BYTES],
-            &DataType::Int8,
-            INPUT_BASE_ADDRESS,
-        )
-        .unwrap(),
-        &[STRIDED_ROWS, 1],
-        &[0, 0],
-    )
-    .unwrap();
-    let output = TensorView::new_full(
-        Tensor::new(&[STRIDED_ROWS], &DataType::Int8, OUTPUT_BASE_ADDRESS).unwrap(),
-    );
-    let selected_bytes = STRIDED_ROWS * INT8_BYTES;
-    run_copy_and_check_traffic(
-        &multi_device_platform_yaml(
-            INT8_BYTES as u64,
-            INPUT_BASE_ADDRESS + STRIDED_ROW_BYTES as u64,
-            INT8_BYTES as u64,
-        ),
-        copy_program_task(input, output, "[i, 0]"),
-        Some((selected_bytes, selected_bytes)),
-    );
-}
-
-#[test]
-fn strided_reads_reject_unmapped_selected_bytes_before_task_activation() {
-    let input = TensorView::new(
-        Tensor::new(
-            &[STRIDED_ROWS, STRIDED_ROW_BYTES / INT8_BYTES],
-            &DataType::Int8,
-            INPUT_BASE_ADDRESS,
-        )
-        .unwrap(),
-        &[STRIDED_ROWS, 1],
-        &[0, 0],
-    )
-    .unwrap();
-    let output = TensorView::new_full(
-        Tensor::new(&[STRIDED_ROWS], &DataType::Int8, OUTPUT_BASE_ADDRESS).unwrap(),
-    );
-    // Move the second device one byte beyond the second selected element.
-    let missing_second_base = INPUT_BASE_ADDRESS + (STRIDED_ROW_BYTES + INT8_BYTES) as u64;
-    run_copy_and_check_traffic(
-        &multi_device_platform_yaml(INT8_BYTES as u64, missing_second_base, INT8_BYTES as u64),
-        copy_program_task(input, output, "[i, 0]"),
-        None,
-    );
-}
-
-#[test]
 fn contiguous_reads_across_devices_charge_each_device_for_its_bytes() {
     let input = TensorView::new_full(
         Tensor::new(&[CONTIGUOUS_ELEMENTS], &DataType::Int8, INPUT_BASE_ADDRESS).unwrap(),
@@ -600,6 +538,7 @@ fn contiguous_reads_across_devices_charge_each_device_for_its_bytes() {
     let copy_bytes = CONTIGUOUS_ELEMENTS * INT8_BYTES;
     let platform = run_copy_and_check_traffic(
         &multi_device_platform_yaml(
+            0,
             CONTIGUOUS_DEVICE_BYTES as u64,
             CONTIGUOUS_SECOND_BASE,
             CONTIGUOUS_DEVICE_BYTES as u64,
@@ -618,118 +557,89 @@ fn contiguous_reads_across_devices_charge_each_device_for_its_bytes() {
 }
 
 #[test]
-fn unmapped_compute_inputs_are_rejected_before_task_activation() {
-    let source = single_input_device_platform_yaml();
-    let view = |addr| {
-        TensorView::new_full(Tensor::new(&[ELEMENTS_PER_DEVICE], &DataType::Int8, addr).unwrap())
-    };
-    run_copy_and_check_traffic(
-        &source,
-        copy_program_task(
-            view(CONTIGUOUS_SECOND_BASE),
-            view(OUTPUT_BASE_ADDRESS),
-            "[i]",
-        ),
-        None,
-    );
-}
-
-#[test]
-fn unmapped_compute_outputs_are_rejected_before_task_activation() {
-    let source = single_input_device_platform_yaml();
-    let view = |addr| {
-        TensorView::new_full(Tensor::new(&[ELEMENTS_PER_DEVICE], &DataType::Int8, addr).unwrap())
-    };
-    run_copy_and_check_traffic(
-        &source,
-        copy_program_task(
-            view(INPUT_BASE_ADDRESS),
-            view(CONTIGUOUS_SECOND_BASE),
-            "[i]",
-        ),
-        None,
-    );
-}
-
-#[test]
-fn nonzero_strided_and_packed_offsets_allow_untouched_unmapped_bytes() {
-    for (dtype, width, offset) in OFFSET_CASES {
-        let (input, output) = nonzero_offset_views(dtype, width, offset);
-        let mapped = multi_device_platform_yaml(
-            INT8_BYTES as u64,
-            SECOND_TOUCHED_ADDRESS,
-            INT8_BYTES as u64,
-        )
-        .replacen(
-            &format!("base_address: {INPUT_BASE_ADDRESS}\n"),
-            &format!("base_address: {FIRST_TOUCHED_ADDRESS}\n"),
-            1,
-        );
-        // One physical input byte per row, even when only a nibble is selected.
-        let input_bytes = STRIDED_ROWS;
-        let output_bytes = (STRIDED_ROWS * dtype.num_bits()).div_ceil(BITS_PER_BYTE);
-        run_copy_and_check_traffic(
-            &mapped,
-            copy_program_task(input, output, "[i, 0]"),
-            Some((input_bytes, output_bytes)),
-        );
-    }
-}
-
-#[test]
-fn nonzero_strided_and_packed_offsets_reject_missing_touched_bytes() {
-    for (dtype, width, offset) in OFFSET_CASES {
-        let (input, output) = nonzero_offset_views(dtype, width, offset);
-        let missing_second_base = SECOND_TOUCHED_ADDRESS + INT8_BYTES as u64;
-        let missing =
-            multi_device_platform_yaml(INT8_BYTES as u64, missing_second_base, INT8_BYTES as u64)
-                .replacen(
-                    &format!("base_address: {INPUT_BASE_ADDRESS}\n"),
-                    &format!("base_address: {FIRST_TOUCHED_ADDRESS}\n"),
-                    1,
-                );
-        run_copy_and_check_traffic(&missing, copy_program_task(input, output, "[i, 0]"), None);
-    }
-}
-
-#[test]
-fn packed_views_count_unique_physical_bytes() {
-    let view = TensorView::new(
-        Tensor::new(
-            &[STRIDED_ROWS, STRIDED_ROW_BYTES * FP4_ELEMENTS_PER_BYTE],
-            &DataType::Fp4,
-            INPUT_BASE_ADDRESS,
-        )
-        .unwrap(),
-        &[STRIDED_ROWS, 1],
-        &[0, 0],
-    )
-    .unwrap();
-    let output = TensorView::new_full(
-        Tensor::new(&[STRIDED_ROWS], &DataType::Fp4, OUTPUT_BASE_ADDRESS).unwrap(),
-    );
-    let input_bytes = STRIDED_ROWS;
-    let output_bytes = (STRIDED_ROWS * FP4_BITS).div_ceil(BITS_PER_BYTE);
-    run_copy_and_check_traffic(
-        &multi_device_platform_yaml(
-            INT8_BYTES as u64,
-            INPUT_BASE_ADDRESS + STRIDED_ROW_BYTES as u64,
-            INT8_BYTES as u64,
-        ),
-        copy_program_task(view, output, "[i, 0]"),
-        Some((input_bytes, output_bytes)),
-    );
-}
-
-#[test]
 fn compute_can_read_the_final_physical_byte() {
     let input = TensorView::new_full(Tensor::new(&[1], &DataType::Int8, u64::MAX).unwrap());
     let output =
         TensorView::new_full(Tensor::new(&[1], &DataType::Int8, OUTPUT_BASE_ADDRESS).unwrap());
     let platform = run_copy_and_check_traffic(
-        &multi_device_platform_yaml(INT8_BYTES as u64, u64::MAX, INT8_BYTES as u64),
+        &multi_device_platform_yaml(0, INT8_BYTES as u64, u64::MAX, INT8_BYTES as u64),
         copy_program_task(input, output, "[i]"),
         Some((INT8_BYTES, INT8_BYTES)),
     );
     assert_eq!(platform.memory("m1").unwrap().bytes_read(), INT8_BYTES);
+}
+
+#[test]
+fn strided_mapping_cases() {
+    for (name, dtype, width, offset, first, second, expected) in [
+        (
+            "int8_zero_present",
+            DataType::Int8,
+            4,
+            0,
+            0,
+            4,
+            Some((2, 2)),
+        ),
+        ("int8_zero_missing_second", DataType::Int8, 4, 0, 0, 5, None),
+        (
+            "int8_offset_present",
+            DataType::Int8,
+            4,
+            1,
+            1,
+            5,
+            Some((2, 2)),
+        ),
+        (
+            "int8_offset_missing_second",
+            DataType::Int8,
+            4,
+            1,
+            1,
+            6,
+            None,
+        ),
+        (
+            "fp4_nibble_offset_present",
+            DataType::Fp4,
+            8,
+            3,
+            1,
+            5,
+            Some((2, 1)),
+        ),
+        (
+            "fp4_nibble_offset_missing_second",
+            DataType::Fp4,
+            8,
+            3,
+            1,
+            6,
+            None,
+        ),
+        ("fp4_zero_present", DataType::Fp4, 8, 0, 0, 4, Some((2, 1))),
+    ] {
+        println!("case: {name}");
+        let (input, output) = strided_views(dtype, width, offset);
+        run_copy_and_check_traffic(
+            &multi_device_platform_yaml(first, 1, second, 1),
+            copy_program_task(input, output, "[i, 0]"),
+            expected,
+        );
+    }
+}
+
+#[test]
+fn unmapped_boundary_cases() {
+    let source = single_input_device_platform_yaml();
+    let view = |addr| TensorView::new_full(Tensor::new(&[2], &DataType::Int8, addr).unwrap());
+    for (name, input, output) in [("read", 2, 64), ("write", 0, 2)] {
+        println!("case: {name}");
+        run_copy_and_check_traffic(
+            &source,
+            copy_program_task(view(input), view(output), "[i]"),
+            None,
+        );
+    }
 }

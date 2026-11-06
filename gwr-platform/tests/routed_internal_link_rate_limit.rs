@@ -77,7 +77,7 @@ fn zero_hop_delay_is_rejected_for_all_fabric_kinds() {
 
 #[test]
 fn invalid_opt_in_rejects_with_intended_categories() {
-    // Valid legacy baseline first, including the one-node geometry.
+    // Validate the baseline, including one-node geometry.
     for (kind, columns) in [("functional", 2), ("routed", 1)] {
         let mut e = Engine::default();
         let c = e.default_clock();

@@ -5,8 +5,8 @@ use std::collections::{HashMap, HashSet};
 use gwr_engine::sim_error;
 use gwr_engine::types::{SimError, SimResult};
 
-use crate::builder::EffectiveConfigs;
 use crate::connection_id::{CachePortId, ConnectionEndpointId, parse_connection_endpoint_id};
+use crate::resolved::{ModelConfigs, ResolvedPlatform};
 use crate::types::{CacheSection, FabricSection, MemoryMapSection, MemorySection, PlatformConfig};
 
 impl PlatformConfig {
@@ -19,18 +19,18 @@ impl PlatformConfig {
     /// a physical memory is not aligned to a processing element's LSU access
     /// size or a cache's line size.
     pub fn validate(&self) -> SimResult {
-        self.validated().map(drop)
+        self.resolve().map(drop)
     }
 
-    pub(crate) fn validated(&self) -> Result<EffectiveConfigs, SimError> {
+    pub(crate) fn resolve(&self) -> Result<ResolvedPlatform, SimError> {
         let lookup = self.validation_lookup()?;
-        let effective = EffectiveConfigs::new(self)?;
-        self.validate_memory_ranges(&effective)?;
+        let effective = ModelConfigs::new(self)?;
+        Self::validate_memory_ranges(&effective)?;
         self.validate_references(&lookup)?;
         self.validate_memory_fetch_alignment(&effective)?;
-        self.validate_coherence(&effective)?;
-        self.validate_connections(&lookup, &effective)?;
-        Ok(effective)
+        let connections = self.validate_connections(&lookup, &effective)?;
+        self.validate_coherence(&effective, &connections)?;
+        ResolvedPlatform::new(self, effective, connections)
     }
 
     fn validation_lookup(&self) -> Result<PlatformValidationLookup<'_>, SimError> {
@@ -127,8 +127,9 @@ impl PlatformConfig {
     fn validate_connections(
         &self,
         lookup: &PlatformValidationLookup<'_>,
-        effective: &EffectiveConfigs,
-    ) -> SimResult {
+        effective: &ModelConfigs,
+    ) -> Result<Vec<[ConnectionEndpointId; 2]>, SimError> {
+        let mut connections = Vec::new();
         let mut connected_ports = HashSet::new();
         for connection in self.connections.iter().flatten() {
             let [from_source, to_source] = connection.connect.as_slice() else {
@@ -139,42 +140,45 @@ impl PlatformConfig {
                 );
             };
 
-            validate_connection(
-                lookup,
-                effective,
-                from_source,
-                to_source,
-                &mut connected_ports,
-            )
-            .map_err(|error| {
-                SimError(format!(
-                    "Connection '{from_source}' -> '{to_source}': {error}"
-                ))
-            })?;
+            connections.push(
+                validate_connection(
+                    lookup,
+                    effective,
+                    from_source,
+                    to_source,
+                    &mut connected_ports,
+                )
+                .map_err(|error| {
+                    SimError(format!(
+                        "Connection '{from_source}' -> '{to_source}': {error}"
+                    ))
+                })?,
+            );
         }
-        Ok(())
+        Ok(connections)
     }
 
     /// Validate every fetch size, including non-power-of-two sizes, without
     /// computing an LCM that could overflow. Applies to all physical memories.
-    fn validate_memory_fetch_alignment(&self, effective: &EffectiveConfigs) -> SimResult {
-        let fetches =
-            self.processing_elements
-                .iter()
-                .flatten()
-                .zip(&effective.processing_elements)
-                .map(|(pe, config)| {
-                    (
-                        format!(
-                            "Processing element '{}', memory map '{}', LSU access size {}",
-                            pe.name, pe.memory_map, config.lsu_access_bytes,
-                        ),
-                        config.lsu_access_bytes,
-                    )
-                })
-                .chain(self.caches.iter().flatten().zip(&effective.caches).map(
-                    |(cache, config)| (format!("cache '{}'", cache.name), config.line_size_bytes()),
-                ));
+    fn validate_memory_fetch_alignment(&self, effective: &ModelConfigs) -> SimResult {
+        let fetches = effective
+            .processing_elements
+            .iter()
+            .map(|pe| {
+                (
+                    format!(
+                        "Processing element '{}', memory map '{}', LSU access size {}",
+                        pe.section.name, pe.section.memory_map, pe.config.lsu_access_bytes
+                    ),
+                    pe.config.lsu_access_bytes,
+                )
+            })
+            .chain(effective.caches.iter().map(|cache| {
+                (
+                    format!("cache '{}'", cache.section.name),
+                    cache.config.line_size_bytes(),
+                )
+            }));
         for (source, bytes) in fetches {
             let bytes = u64::try_from(bytes)
                 .map_err(|error| SimError(format!("{source} fetch size: {error}")))?;
@@ -200,19 +204,17 @@ impl PlatformConfig {
         Ok(())
     }
 
-    fn validate_memory_ranges(&self, effective: &EffectiveConfigs) -> SimResult {
-        let mut ranges = self
+    fn validate_memory_ranges(effective: &ModelConfigs) -> SimResult {
+        let mut ranges = effective
             .memories
             .iter()
-            .flatten()
-            .zip(&effective.memories)
-            .map(|(memory, config)| {
-                let range = config
-                    .address_range()
-                    .map_err(|error| SimError(format!("Memory '{}': {error}", memory.name)))?;
-                Ok((memory, *range.end()))
+            .map(|memory| {
+                let range = memory.config.address_range().map_err(|error| {
+                    SimError(format!("Memory '{}': {error}", memory.section.name))
+                })?;
+                Ok((memory.section, *range.end()))
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, SimError>>()?;
         ranges.sort_by_key(|(memory, _)| memory.base_address);
 
         for pair in ranges.windows(2) {
@@ -258,7 +260,7 @@ impl PlatformValidationLookup<'_> {
         &self,
         endpoint: &ConnectionEndpointId,
         source: &str,
-        effective: &EffectiveConfigs,
+        effective: &ModelConfigs,
     ) -> SimResult {
         match endpoint {
             ConnectionEndpointId::Null => Ok(()),
@@ -320,17 +322,27 @@ impl PlatformValidationLookup<'_> {
 
 fn validate_connection(
     lookup: &PlatformValidationLookup<'_>,
-    effective: &EffectiveConfigs,
+    effective: &ModelConfigs,
     from_source: &str,
     to_source: &str,
     connected_ports: &mut HashSet<String>,
-) -> SimResult {
-    let from = parse_connection_endpoint_id(from_source)?;
-    let to = parse_connection_endpoint_id(to_source)?;
+) -> Result<[ConnectionEndpointId; 2], SimError> {
+    let mut from = parse_connection_endpoint_id(from_source)?;
+    let mut to = parse_connection_endpoint_id(to_source)?;
     lookup.validate_port_endpoint(&from, from_source, effective)?;
     lookup.validate_port_endpoint(&to, to_source, effective)?;
     validate_port_endpoint_pair(&from, &to)?;
-    validate_ports_available(&from, &to, connected_ports)
+    let normalize = |endpoint: &mut ConnectionEndpointId, other: &ConnectionEndpointId, is_from| {
+        if let ConnectionEndpointId::Cache { port, .. } = endpoint
+            && port.is_none()
+        {
+            *port = Some(cache_connection_port(other, is_from));
+        }
+    };
+    normalize(&mut from, &to, true);
+    normalize(&mut to, &from, false);
+    validate_ports_available(&from, &to, connected_ports)?;
+    Ok([from, to])
 }
 
 fn insert_device<'a>(
@@ -364,7 +376,11 @@ fn validate_ports_available(
     to: &ConnectionEndpointId,
     connected_ports: &mut HashSet<String>,
 ) -> SimResult {
-    for port in connection_ports(from, to) {
+    for endpoint in [from, to] {
+        if matches!(endpoint, ConnectionEndpointId::Null) {
+            continue;
+        }
+        let port = endpoint_port(endpoint);
         if !connected_ports.insert(port.clone()) {
             return sim_error!("Port '{port}' is connected more than once");
         }
@@ -372,21 +388,7 @@ fn validate_ports_available(
     Ok(())
 }
 
-fn connection_ports(from: &ConnectionEndpointId, to: &ConnectionEndpointId) -> Vec<String> {
-    [
-        (!matches!(from, ConnectionEndpointId::Null)).then(|| endpoint_port(from, to, true)),
-        (!matches!(to, ConnectionEndpointId::Null)).then(|| endpoint_port(to, from, false)),
-    ]
-    .into_iter()
-    .flatten()
-    .collect()
-}
-
-fn endpoint_port(
-    endpoint: &ConnectionEndpointId,
-    other: &ConnectionEndpointId,
-    is_from: bool,
-) -> String {
+fn endpoint_port(endpoint: &ConnectionEndpointId) -> String {
     match endpoint {
         ConnectionEndpointId::Null => unreachable!("null has no port to reserve"),
         ConnectionEndpointId::Pe { name } => format!("pe.{name}"),
@@ -399,28 +401,17 @@ fn endpoint_port(
             port,
         } => format!("fabric.{fabric}@({column},{row}).{port}"),
         ConnectionEndpointId::Cache { name, port } => {
-            let port = cache_connection_port(port.as_ref(), other, is_from);
+            let port = port.expect("cache port was resolved before reservation");
             format!("cache.{name}.{port}")
         }
     }
 }
 
-fn cache_connection_port(
-    port: Option<&CachePortId>,
-    other: &ConnectionEndpointId,
-    is_from: bool,
-) -> &'static str {
-    if let Some(port) = port {
-        return port.as_str();
-    }
+fn cache_connection_port(other: &ConnectionEndpointId, is_from: bool) -> CachePortId {
     match other {
-        ConnectionEndpointId::Null => "mem",
-        ConnectionEndpointId::Pe { .. } => "dev",
-        ConnectionEndpointId::Cache { .. } if is_from => "mem",
-        ConnectionEndpointId::Cache { .. } => "dev",
-        ConnectionEndpointId::Mem { .. }
-        | ConnectionEndpointId::CoherencyManager { .. }
-        | ConnectionEndpointId::FabricPort { .. } => "mem",
+        ConnectionEndpointId::Pe { .. } => CachePortId::Dev,
+        ConnectionEndpointId::Cache { .. } if !is_from => CachePortId::Dev,
+        _ => CachePortId::Mem,
     }
 }
 
@@ -512,13 +503,13 @@ fn validate_cache_mem_port(port: Option<&CachePortId>, message: &str) -> SimResu
 fn validate_fabric_port(
     source: &str,
     fabric: &FabricReference<'_>,
-    effective: &EffectiveConfigs,
+    effective: &ModelConfigs,
     col: usize,
     row: usize,
     port: usize,
 ) -> SimResult {
     let section = fabric.section;
-    let config = &effective.fabrics[fabric.config_index].0;
+    let config = &effective.fabrics[fabric.config_index].config.0;
     let ports_per_node = config.num_ports_per_node();
     if col >= config.num_columns() || row >= config.num_rows() || port >= ports_per_node {
         return sim_error!(
@@ -533,7 +524,11 @@ fn validate_fabric_port(
 }
 
 impl PlatformConfig {
-    fn validate_coherence(&self, effective: &EffectiveConfigs) -> SimResult {
+    fn validate_coherence(
+        &self,
+        effective: &ModelConfigs,
+        connections: &[[ConnectionEndpointId; 2]],
+    ) -> SimResult {
         let managers = self
             .coherency_managers
             .iter()
@@ -546,7 +541,7 @@ impl PlatformConfig {
             .map(|m| (m.name.as_str(), m))
             .collect::<HashMap<_, _>>();
         self.validate_manager_domains(&managers, &maps)?;
-        self.validate_cache_coherence(effective, &managers, &maps)
+        self.validate_cache_coherence(effective, &managers, &maps, connections)
     }
 
     fn validate_manager_domains(
@@ -617,11 +612,14 @@ impl PlatformConfig {
 
     fn validate_cache_coherence(
         &self,
-        effective: &EffectiveConfigs,
+        effective: &ModelConfigs,
         managers: &HashMap<&str, &crate::types::CoherencyManagerSection>,
         maps: &HashMap<&str, &MemoryMapSection>,
+        connections: &[[ConnectionEndpointId; 2]],
     ) -> SimResult {
-        for (cache, config) in self.caches.iter().flatten().zip(&effective.caches) {
+        for configured in &effective.caches {
+            let cache = configured.section;
+            let config = &configured.config;
             if let Some(names) = &cache.coherency_managers {
                 if names.is_empty() {
                     return sim_error!(
@@ -660,13 +658,8 @@ impl PlatformConfig {
                         }
                     }
                 }
-                for connection in self.connections.iter().flatten() {
-                    let [left, right] = connection.connect.as_slice() else {
-                        continue;
-                    };
-                    let left = parse_connection_endpoint_id(left)?;
-                    let right = parse_connection_endpoint_id(right)?;
-                    let peer = match (&left, &right) {
+                for [left, right] in connections {
+                    let peer = match (left, right) {
                         (ConnectionEndpointId::Cache { name, .. }, peer) if name == &cache.name => {
                             peer
                         }
