@@ -65,8 +65,8 @@ impl TaskRunner {
             crate::processing_element::program::prepared::Schedule::Scoped(schedule) => {
                 self.run_scoped_program(&task, schedule).await?;
             }
-            crate::processing_element::program::prepared::Schedule::Flat(schedule) => {
-                self.run_flat_program(&task, schedule).await?;
+            crate::processing_element::program::prepared::Schedule::Flat { tiles, group } => {
+                self.run_flat_program(&task, tiles, group).await?;
             }
         }
         self.dispatcher.set_task_completed(task_idx)
@@ -97,8 +97,9 @@ impl TaskRunner {
         &self,
         task: &crate::processing_element::task::PreparedTask,
         schedule: &TileSchedule,
+        group: &crate::processing_element::program::group::GroupMetadata,
     ) -> SimResult {
-        let plan = task.program().group(&task.program().facts.assignment_order);
+        let plan = task.program().group(group);
         // At most one tile waits for SRAM admission. Already admitted tiles
         // continue running and may release capacity while that wait is live.
         let mut tiles = schedule.tiles();

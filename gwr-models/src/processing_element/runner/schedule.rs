@@ -25,6 +25,7 @@ impl TaskRunner {
         }
         self.run_scope(task, schedule, &BTreeMap::new()).await
     }
+
     fn run_scope<'a>(
         &'a self,
         task: &'a PreparedTask,
@@ -37,9 +38,10 @@ impl TaskRunner {
                 for step in &scope.steps {
                     match step {
                         ScopedStep::Tiles(child) => self.run_scope(task, child, &intervals).await?,
-                        ScopedStep::Group(indices) => {
-                            let tile = build_group_tile(indices, &intervals, program)?;
-                            let plan = program.group(indices);
+                        ScopedStep::Group(metadata) => {
+                            let tile =
+                                build_group_tile(&metadata.assignments, &intervals, program)?;
+                            let plan = program.group(metadata);
                             let storage = build_tile_storage(plan, &tile, usize::MAX)?;
                             let group = self.activity_lanes.create_group(&format!(
                                 "{} tile {:?}",

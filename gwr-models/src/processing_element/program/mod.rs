@@ -35,6 +35,7 @@
 
 pub(in crate::processing_element) mod analysis;
 pub(in crate::processing_element) mod executable;
+pub(in crate::processing_element) mod group;
 pub(super) mod plan;
 pub(in crate::processing_element) mod prepared;
 pub use prepared::PreparedProgram;

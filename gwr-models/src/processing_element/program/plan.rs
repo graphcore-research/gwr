@@ -2,25 +2,24 @@
 
 //! Stable SRAM slot allocation for values local to one output tile.
 
-use std::collections::BTreeMap;
-
 use gwr_engine::types::SimError;
 
 use super::prepared::GroupPlan;
 use super::storage::align_sram_slot_bytes;
 use super::tile::RegionTile;
 use super::validate::ProgramFacts;
+use crate::processing_element::tensors::BITS_PER_BYTE;
 
 pub(in crate::processing_element) fn allocate_temporaries(
     plan: GroupPlan<'_>,
     tile: &RegionTile,
 ) -> Result<LocalAllocation, SimError> {
     let region = plan.region();
-    let layers = calculate_assignment_layers(plan)?;
-    let last_use = last_consumer_layer_by_value(plan, &layers);
+    let layers = &plan.group.layers;
+    let last_use = &plan.group.last_consumer_layers;
     let mut slots = Vec::<LocalSlot>::new();
     let mut occupied_until = Vec::<usize>::new();
-    for index in plan.assignments {
+    for index in &plan.group.assignments {
         let assignment = &region.program.assignments[*index];
         let elements = count_assignment_tile_elements(&assignment.axes, region, tile)?;
         for name in [assignment.output(), assignment.indices_output()]
@@ -37,7 +36,7 @@ pub(in crate::processing_element) fn allocate_temporaries(
                 elements
                     .checked_mul(temp.dtype.num_bits())
                     .ok_or_else(|| SimError("local value size overflows".into()))?
-                    .div_ceil(8),
+                    .div_ceil(BITS_PER_BYTE),
             )?;
             let produced = layers[index];
             let last = last_use.get(name).copied().unwrap_or(produced);
@@ -49,23 +48,6 @@ pub(in crate::processing_element) fn allocate_temporaries(
             .ok_or_else(|| SimError("local arena size overflows".into()))
     })?;
     Ok(LocalAllocation { slots, arena_bytes })
-}
-
-fn last_consumer_layer_by_value(
-    plan: GroupPlan<'_>,
-    layers: &BTreeMap<usize, usize>,
-) -> BTreeMap<String, usize> {
-    plan.region()
-        .consumers
-        .iter()
-        .filter_map(|(name, consumers)| {
-            consumers
-                .iter()
-                .filter_map(|i| layers.get(i))
-                .max()
-                .map(|last| (name.clone(), *last))
-        })
-        .collect()
 }
 
 fn count_assignment_tile_elements(
@@ -108,20 +90,6 @@ fn assign_local_slot(
         });
         occupied_until.push(last);
     }
-}
-
-/// Dependencies without a producer in this group belong to an enclosing scope.
-fn calculate_assignment_layers(plan: GroupPlan<'_>) -> Result<BTreeMap<usize, usize>, SimError> {
-    let mut layers = BTreeMap::new();
-    for &index in plan.assignments {
-        let layer = plan.region().dependencies[index]
-            .iter()
-            .filter_map(|dependency| layers.get(dependency).copied())
-            .max()
-            .map_or(0, |layer: usize| layer + 1);
-        layers.insert(index, layer);
-    }
-    Ok(layers)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
