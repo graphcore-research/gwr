@@ -10,17 +10,20 @@ use super::{
     MatrixServiceTile, MatrixWorkShape, TypedWork, WorkStage,
 };
 use crate::processing_element::MachineOpCounts;
+use crate::processing_element::tensors::BITS_PER_BYTE;
 use crate::processing_element::tensors::dtype::DataType;
 
 #[derive(Debug, Default)]
 pub(in crate::processing_element) struct PreparedCompute {
     candidates: BTreeMap<WorkSignature, Vec<ComputeCandidate>>,
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum WorkSignature {
     Scalar(String, Vec<DataType>),
     Matrix([DataType; 2], DataType),
 }
+
 impl From<&TypedWork> for WorkSignature {
     fn from(work: &TypedWork) -> Self {
         match work {
@@ -33,6 +36,7 @@ impl From<&TypedWork> for WorkSignature {
         }
     }
 }
+
 impl PreparedCompute {
     pub(in crate::processing_element) fn prepare(
         &mut self,
@@ -49,6 +53,7 @@ impl PreparedCompute {
         })
         .map(|(_, counts)| counts)
     }
+
     pub(in crate::processing_element) fn lower(
         &self,
         work: &ComputeWork,
@@ -62,6 +67,7 @@ impl PreparedCompute {
         .map(|(plan, _)| plan)
     }
 }
+
 impl ComputeModel {
     pub(in crate::processing_element) fn lower(
         &self,
@@ -70,11 +76,12 @@ impl ComputeModel {
         lower_work(work, |operation| self.resolve_candidates(operation)).map(|(plan, _)| plan)
     }
 }
+
 impl ComputeModel {
     fn resolve_candidates(&self, work: &TypedWork) -> Result<Vec<ComputeCandidate>, SimError> {
         let candidates = self.select(work);
         if candidates.is_empty() {
-            return Err(SimError(format!("unsupported capability {work:?}")));
+            return sim_error!("unsupported capability {work:?}");
         }
         if candidates
             .iter()
@@ -100,6 +107,7 @@ fn lower_work(
             .map(|stage| lower_stage(stage, &mut candidates))
             .collect::<Result<_, _>>()?,
     };
+    plan.duration_lower_bound_ticks()?;
     // Validate total accounting across independent execution units and
     // stage barriers.
     let counts = plan
@@ -134,16 +142,24 @@ fn lower_stage(
             continue;
         }
         let candidate = &candidates[0];
-        let (time, counts, bytes) = batches.entry(candidate.execution_unit).or_default();
-        *bytes = (*bytes).max(accumulator_bytes);
-        *time += candidate.time;
-        *counts = counts.clone().checked_add(machine_ops)?;
+        let (service_time, operation_counts, required_bytes) =
+            batches.entry(candidate.execution_unit).or_default();
+        *required_bytes = (*required_bytes).max(accumulator_bytes);
+        *service_time += candidate.time;
+        *operation_counts = operation_counts.clone().checked_add(machine_ops)?;
     }
     let mut fixed = batches
         .into_iter()
-        .map(|(execution_unit, (time, counts, bytes))| {
-            build_fixed_batch(execution_unit, time, counts, bytes)
-        })
+        .map(
+            |(execution_unit, (service_time, operation_counts, required_bytes))| {
+                build_fixed_batch(
+                    execution_unit,
+                    service_time,
+                    operation_counts,
+                    required_bytes,
+                )
+            },
+        )
         .collect::<Result<Vec<_>, _>>()?;
     fixed.extend(flexible);
     Ok(fixed)
@@ -194,6 +210,7 @@ fn select_work_candidates(
     }
     Ok((services, bytes))
 }
+
 fn required_accumulator_bytes(
     work: &TypedWork,
     candidates: &[ComputeCandidate],
@@ -267,6 +284,6 @@ fn accumulator_bytes(shape: MatrixWorkShape, accumulator: DataType) -> Result<u6
         .and_then(|bm| bm.checked_mul(shape.n))
         .and_then(|elements| elements.checked_mul(accumulator.num_bits()))
         .ok_or_else(|| SimError("matrix accumulator byte demand overflows".into()))?
-        .div_ceil(8);
+        .div_ceil(BITS_PER_BYTE);
     u64::try_from(bytes).map_err(|_| SimError("matrix accumulator byte demand exceeds u64".into()))
 }

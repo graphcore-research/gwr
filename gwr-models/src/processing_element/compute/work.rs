@@ -3,6 +3,7 @@
 #[cfg(test)]
 use std::collections::BTreeMap;
 
+use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
 use serde::{Deserialize, Serialize};
 
@@ -101,6 +102,10 @@ impl TypedWork {
         }
     }
 
+    pub(crate) fn machine_ops(&self, flops_per_op: usize) -> Result<MachineOpCounts, SimError> {
+        MachineOpCounts::single(self.op(), self.count(), flops_per_op)
+    }
+
     pub(in crate::processing_element) fn count(&self) -> usize {
         match self {
             Self::Operation { count, .. } => *count,
@@ -120,10 +125,6 @@ impl TypedWork {
             Self::Operation { inputs, .. } => inputs,
             Self::MatrixMac { inputs, .. } => inputs,
         }
-    }
-
-    pub(crate) fn machine_ops(&self, flops_per_op: usize) -> Result<MachineOpCounts, SimError> {
-        MachineOpCounts::single(self.op(), self.count(), flops_per_op)
     }
 }
 
@@ -153,8 +154,12 @@ impl CheckedMatrixShape {
 pub struct MatrixWorkShape {
     /// Independent contractions; shared or repeated output axes form batches.
     pub batches: usize,
+    /// Logical output rows contributed by axes exclusive to the left operand.
     pub m: usize,
+    /// Logical output columns contributed by axes exclusive to the right
+    /// operand.
     pub n: usize,
+    /// Length of the shared contraction axis in this work chunk.
     pub k: usize,
 }
 
@@ -162,7 +167,7 @@ impl MatrixWorkShape {
     /// Checked logical MACs; zero dimensions are malformed, not empty work.
     pub(in crate::processing_element) fn logical_macs(self) -> Result<usize, SimError> {
         if self.batches == 0 || self.m == 0 || self.n == 0 || self.k == 0 {
-            return Err(SimError("matrix shape dimensions must be positive".into()));
+            return sim_error!("matrix shape dimensions must be positive");
         }
         self.batches
             .checked_mul(self.m)
@@ -177,6 +182,26 @@ impl MatrixWorkShape {
 pub(in crate::processing_element) struct ExecutionPlan {
     /// Batches in stable execution unit order, grouped into sequential stages.
     pub(in crate::processing_element) stages: Vec<Vec<ComputeBatch>>,
+}
+
+impl ExecutionPlan {
+    /// A duration lower bound in ticks for one invocation. Batches may run in
+    /// parallel, so each stage needs at least its longest minimum eligible
+    /// service. Mandatory stage barriers add those bounds. Shared-unit
+    /// contention and elapsed start times still require runtime checks.
+    pub(in crate::processing_element) fn duration_lower_bound_ticks(
+        &self,
+    ) -> Result<u64, SimError> {
+        self.stages.iter().try_fold(0_u64, |sum, stage| {
+            let ticks = stage
+                .iter()
+                .filter_map(|batch| batch.alternatives.iter().map(|(_, ticks)| *ticks).min())
+                .max()
+                .unwrap_or(0);
+            sum.checked_add(ticks)
+                .ok_or_else(|| SimError("intrinsic compute duration lower bound overflows".into()))
+        })
+    }
 }
 
 #[cfg(test)]

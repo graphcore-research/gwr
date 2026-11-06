@@ -381,3 +381,63 @@ fn unrepresentable_candidate_duration_does_not_poison_serviceable_units() {
         }
     }
 }
+
+#[test]
+fn intrinsic_serial_duration_uses_the_fastest_eligible_alternative() {
+    let classes = BTreeMap::from([("exp".into(), operation_class(&["exp"], 1, 1))]);
+    let model = compute_model(
+        &classes,
+        &[
+            ("slow", vec![operation_class_capability("exp", None, 1e-19)]),
+            ("fast", vec![operation_class_capability("exp", None, 1.0)]),
+        ],
+    );
+    let mut work = ComputeWork::operation("exp", vec![DataType::Fp32], 1);
+    work.stages.extend(work.stages.clone());
+    let plan = model.lower(&work).unwrap();
+    assert_eq!(plan.service_ticks().unwrap(), 2);
+}
+
+#[test]
+fn intrinsic_serial_duration_preserves_independent_execution_units() {
+    let classes = BTreeMap::from([
+        ("exp".into(), operation_class(&["exp"], 1, 1)),
+        ("sin".into(), operation_class(&["sin"], 1, 1)),
+    ]);
+    let model = compute_model(
+        &classes,
+        &[
+            ("exp", vec![operation_class_capability("exp", None, 1e-19)]),
+            ("sin", vec![operation_class_capability("sin", None, 1e-19)]),
+        ],
+    );
+    let plan = model
+        .lower(&ComputeWork::parallel(vec![
+            ComputeWork::operation("exp", vec![DataType::Fp32], 1),
+            ComputeWork::operation("sin", vec![DataType::Fp32], 1),
+        ]))
+        .unwrap();
+    // Each unit takes 10^19 ticks, which fits; their sum does not.
+    assert_eq!(plan.service_ticks().unwrap(), 10_000_000_000_000_000_000);
+}
+
+#[test]
+fn intrinsic_serial_duration_does_not_use_greedy_service_as_rejection_proof() {
+    let classes = BTreeMap::from([("math".into(), operation_class(&["exp", "sin"], 1, 1))]);
+    let model = compute_model(
+        &classes,
+        &[
+            ("a", vec![operation_class_capability("math", None, 1e-19)]),
+            ("b", vec![operation_class_capability("math", None, 1e-19)]),
+        ],
+    );
+    // A feasible schedule puts exp on a and sin on b. The greedy test helper
+    // checks overflowing a+a before considering the available second unit.
+    let plan = model
+        .lower(&ComputeWork::parallel(vec![
+            ComputeWork::operation("exp", vec![DataType::Fp32], 1),
+            ComputeWork::operation("sin", vec![DataType::Fp32], 1),
+        ]))
+        .unwrap();
+    assert!(plan.service_ticks().is_err());
+}

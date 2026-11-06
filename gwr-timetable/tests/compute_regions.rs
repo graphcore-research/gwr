@@ -1271,6 +1271,81 @@ fn invalid_downstream_placement_precedes_earlier_preparation_failure() {
     );
 }
 
+const INTRINSIC_DURATION_PLATFORM: &str = r"
+memory_maps: [{name: mm, devices: [mem]}]
+operation_classes:
+  exp: {operations: [exp], arity: 1}
+processing_elements:
+  - name: pe0
+    memory_map: mm
+    config:
+      sram_bytes: 256
+      compute:
+        execution_units:
+          slow:
+            capabilities: [{class: exp, input_dtypes: [[fp32]], ops_per_tick: 1e-19}]
+memories:
+  - name: mem
+    kind: hbm
+    base_address: 0
+    config: {capacity_bytes: 1MiB}
+connections: [{connect: [pe.pe0, mem.mem]}]
+";
+
+fn nested_exp_timetable() -> TimetableFile {
+    TimetableFile::from_string(
+        r"
+nodes:
+  - {id: A, kind: tensor, config: {addr: 0x1000, dtype: fp32, shape: [1]}}
+  - id: nested
+    kind: compute
+    pe: pe0
+    program:
+      inputs: [A]
+      outputs: [Y]
+      assignments:
+        - output: Y
+          axes: [i]
+          expr: {exp: [{exp: [{read: {tensor: A, indices: [i]}}]}]}
+  - {id: Y, kind: tensor, config: {addr: 0x2000, dtype: fp32, shape: [1]}}
+edges:
+  - {from: A, to: nested, kind: data}
+  - {from: nested, to: Y, kind: data}
+",
+    )
+    .unwrap()
+}
+
+#[test]
+fn intrinsic_serial_duration_is_rejected_before_preparation_side_effects() {
+    // Each exp fits in 10^19 ticks; the two mandatory stages do not fit u64.
+    assert_rejected_before_loading(
+        INTRINSIC_DURATION_PLATFORM,
+        nested_exp_timetable(),
+        &["duration"],
+    );
+}
+
+#[test]
+fn intrinsic_serial_duration_accepts_a_faster_eligible_alternative() {
+    let platform_source = INTRINSIC_DURATION_PLATFORM.replace(
+        "          slow:",
+        "          fast:\n            capabilities: [{class: exp, input_dtypes: [[fp32]], ops_per_tick: 1}]\n          slow:",
+    );
+    let mut engine = Engine::default();
+    let clock = engine.default_clock();
+    let platform = Rc::new(Platform::from_string(&engine, &clock, &platform_source).unwrap());
+    let timetable = Timetable::new(
+        engine.top(),
+        nested_exp_timetable().into_graph().unwrap(),
+        &platform,
+    )
+    .unwrap();
+    let totals = timetable.workload_totals().unwrap();
+    assert_eq!((totals.read_bytes, totals.written_bytes), (4, 4));
+    assert_eq!(clock.tick_now().tick(), 0);
+}
+
 #[test]
 fn compute_completion_tick_overflow_is_an_error() {
     let tracker = Rc::new(TestTracker::new(1000, Level::Trace));
