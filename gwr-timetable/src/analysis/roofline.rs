@@ -396,7 +396,7 @@ impl RooflineAnalyzer {
         platform: &PlatformConfig,
         timetable: &Timetable,
     ) -> Result<RooflineReport, SimError> {
-        Self::analyze_activities(platform, &timetable.analysis_activities()?)
+        Self::analyze_activities(platform, &timetable.analysis_activities()?, false)
     }
 
     /// Analyze a validated workload graph without constructing an engine or
@@ -406,7 +406,18 @@ impl RooflineAnalyzer {
         platform: &PlatformConfig,
         graph: &TimetableGraph,
     ) -> Result<RooflineReport, SimError> {
-        Self::analyze_activities(platform, &graph.analysis_activities()?)
+        Self::analyze_activities(platform, &graph.analysis_activities()?, false)
+    }
+
+    /// Analyze full task views using ordinary aligned LSU packet traffic.
+    /// This calibrated traffic policy retains aggregate overlap, ideal SRAM,
+    /// and cold-cache assumptions. It does not predict tiled execution time.
+    /// Fragmented views are bounded; striped maps are explicitly unsupported.
+    pub fn analyze_graph_lsu_aligned(
+        platform: &PlatformConfig,
+        graph: &TimetableGraph,
+    ) -> Result<RooflineReport, SimError> {
+        Self::analyze_activities(platform, &graph.analysis_activities()?, true)
     }
 
     #[expect(
@@ -416,6 +427,7 @@ impl RooflineAnalyzer {
     fn analyze_activities(
         platform: &PlatformConfig,
         snapshots: &[AnalysisActivity],
+        aligned_lsu: bool,
     ) -> Result<RooflineReport, SimError> {
         let started = Instant::now();
         let prepared = PreparedPlatform::new(platform)?;
@@ -535,9 +547,15 @@ impl RooflineAnalyzer {
                     (destination, Operation::WriteNonPosted),
                 ]
             };
+            let mut activity_memory_bytes = BTreeMap::<String, u128>::new();
             for (view, operation) in views {
                 let traffic_started = Instant::now();
-                let traffic = ViewTraffic::new_analytical(
+                let plan_traffic = if aligned_lsu {
+                    ViewTraffic::new_lsu_aligned
+                } else {
+                    ViewTraffic::new_analytical
+                };
+                let traffic = plan_traffic(
                     view,
                     operation,
                     memory_map,
@@ -548,6 +566,11 @@ impl RooflineAnalyzer {
                     let memory = memory_names.get(&destination.device()).ok_or_else(|| {
                         SimError(format!("Unknown memory device {:?}", destination.device()))
                     })?;
+                    add_byte_count(
+                        &mut activity_memory_bytes,
+                        (*memory).to_owned(),
+                        destination.traffic().payload,
+                    )?;
                     add_byte_count(
                         &mut memory_bytes,
                         (*memory).to_owned(),
@@ -594,6 +617,20 @@ impl RooflineAnalyzer {
                 }
                 traffic_planning_elapsed += traffic_started.elapsed();
             }
+            // Dependency paths must include each task's own memory service,
+            // even when successive tasks use independent memory resources.
+            // Global aggregate demand alone loses this serialization floor.
+            let memory_floor =
+                activity_memory_bytes
+                    .iter()
+                    .try_fold(0.0f64, |floor, (memory, bytes)| {
+                        let resource = resources
+                            .index(memory, ResourceKind::MemoryPayload)
+                            .ok_or_else(|| {
+                                SimError(format!("Missing memory resource '{memory}'"))
+                            })?;
+                        Ok::<_, SimError>(floor.max(*bytes as f64 / capacities[resource]))
+                    })?;
             *pe_local_work.entry(activity.pe_name.clone()).or_default() += compute_ticks as f64;
             *compute_work.entry(activity.pe_name.clone()).or_default() += compute_ticks as f64;
             let pe_engine_work = compute_by_engine
@@ -608,7 +645,7 @@ impl RooflineAnalyzer {
                 .collect();
             activities.push(ActivityEstimate {
                 pe: activity.pe_name.clone(),
-                local_ticks: compute_ticks as f64,
+                local_ticks: (compute_ticks as f64).max(memory_floor),
                 engine_demands,
                 predecessors: activity
                     .predecessors
@@ -724,8 +761,12 @@ impl RooflineAnalyzer {
             written_bytes_by_pe,
             approximations: vec![
                 "Compute work is estimated from full-region typed operation counts; explicit tiling and pipeline effects are omitted.".into(),
-                "Memory traffic uses whole logical task views, so tile-induced rereads and SRAM effects are omitted.".into(),
-                "Global resource demand is combined as an aggregate bandwidth floor using averaged route selection; all cache reads are modeled as misses.".into(),
+                if aligned_lsu {
+                    "Memory traffic uses aligned full LSU packets over whole task views; tile-induced rereads and SRAM effects are omitted.".into()
+                } else {
+                    "Memory traffic uses whole logical task views, so tile-induced rereads and SRAM effects are omitted.".into()
+                },
+                "Dependency paths retain per-task memory service floors. Global resource demand is combined as an aggregate bandwidth floor using averaged route selection; all cache reads are modeled as misses.".into(),
                 "The analyzer uses physical platform configuration directly; no event simulation or model selection is involved.".into(),
             ],
         })

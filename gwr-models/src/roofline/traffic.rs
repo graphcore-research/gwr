@@ -70,6 +70,94 @@ pub struct MappedRange {
 }
 
 impl ViewTraffic {
+    /// Account the ordinary LSU's aligned, full-size packets for each physical
+    /// view range. Repeated ranges remain repeated issues, as in event
+    /// execution. Dense ranges are counted arithmetically; fragmented inputs
+    /// are bounded to 100,000 ranges. Striped maps require a separate packet
+    /// policy and are explicitly rejected. This does not model task tiling or
+    /// cache state.
+    pub fn new_lsu_aligned(
+        view: &TensorView,
+        operation: Operation,
+        map: &MemoryMap,
+        maximum: u128,
+        header: u128,
+    ) -> Result<Self, SimError> {
+        let fetch = usize::try_from(maximum)
+            .ok()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| SimError("LSU packet size must be positive and fit usize".into()))?;
+        if map.has_striping() {
+            return Err(SimError(
+                "Aligned LSU roofline traffic does not support striped maps".into(),
+            ));
+        }
+        let mut result = Self::mapped(view, operation, map, maximum, header)?;
+        let mut counts = BTreeMap::<u64, BTreeMap<u128, u128>>::new();
+        let bounds = view.address_bounds();
+        let dense = bounds.end - bounds.start == view.layout().num_access_bytes() as u128;
+        let fragments = view
+            .layout()
+            .strides()
+            .iter()
+            .try_fold(1usize, |count, stride| count.checked_mul(stride.count()))
+            .ok_or_else(|| SimError("Aligned LSU range count overflow".into()))?;
+        if !dense && fragments > 100_000 {
+            return Err(SimError(
+                "Aligned LSU traffic exceeds 100000 physical ranges".into(),
+            ));
+        }
+        // Packed byte ranges may coalesce a huge number of element ranges
+        // before their first yield. Dense coverage must bypass that iterator.
+        let ranges: Box<dyn Iterator<Item = std::ops::Range<u128>> + '_> = if dense {
+            Box::new(std::iter::once(bounds))
+        } else {
+            Box::new(view.address_ranges())
+        };
+        for (index, range) in ranges.enumerate() {
+            if index >= 100_000 {
+                return Err(SimError(
+                    "Aligned LSU traffic exceeds 100000 physical ranges".into(),
+                ));
+            }
+            let mut cursor = range.start;
+            while cursor < range.end {
+                let address = u64::try_from(cursor)
+                    .map_err(|_| SimError("Aligned LSU address overflow".into()))?;
+                let resolved = map
+                    .resolve(address)
+                    .ok_or_else(|| SimError("Unmapped aligned LSU address".into()))?;
+                let end = range.end.min(cursor + resolved.contiguous_bytes);
+                let first_packet = cursor / maximum * maximum;
+                let last_packet = (end - 1) / maximum * maximum;
+                // Validate the full first and last packets, including padding.
+                // Every intervening packet lies in this same contiguous region.
+                for packet in [first_packet, last_packet] {
+                    let packet = u64::try_from(packet)
+                        .map_err(|_| SimError("Aligned LSU packet address overflow".into()))?;
+                    let target = map.resolve_access(packet, fetch)?;
+                    if target.device != resolved.device {
+                        return Err(SimError(
+                            "Aligned LSU packet crosses device boundary".into(),
+                        ));
+                    }
+                }
+                let packets = (last_packet - first_packet) / maximum + 1;
+                let count = counts
+                    .entry(resolved.device.0)
+                    .or_default()
+                    .entry(maximum)
+                    .or_default();
+                *count = count
+                    .checked_add(packets)
+                    .ok_or_else(|| SimError("Aligned LSU packet count overflow".into()))?;
+                cursor = end;
+            }
+        }
+        result.set_counts(counts)?;
+        Ok(result)
+    }
+
     /// Count byte-aligned strided ranges without visiting each fragment. Also
     /// supports physically contiguous packed coverage. Fragmented packed views
     /// are explicitly rejected, never silently sent to the slower exact path.
