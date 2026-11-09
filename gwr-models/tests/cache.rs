@@ -7,7 +7,7 @@ use gwr_engine::engine::Engine;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::SimObject;
 use gwr_models::build_model_harness;
-use gwr_models::memory::cache::{Cache, CacheConfig};
+use gwr_models::cache::{Cache, CacheConfig};
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::traits::{AccessMemory, CacheAccess, ReadMemory};
 use gwr_models::memory::{Memory, MemoryConfig};
@@ -37,6 +37,11 @@ impl ReadMemory for TestMemory {
     }
 }
 
+fn create_cache(engine: &mut Engine) -> Rc<Cache<MemoryAccess>> {
+    let clock = engine.default_clock();
+    Cache::new_and_register(engine, &clock, engine.top(), "cache", cache_config()).unwrap()
+}
+
 fn cache_config() -> CacheConfig {
     CacheConfig::new(
         LINE_SIZE_BYTES,
@@ -45,11 +50,6 @@ fn cache_config() -> CacheConfig {
         NUM_WAYS,
         DELAY_TICKS,
     )
-}
-
-fn create_cache(engine: &mut Engine) -> Rc<Cache<MemoryAccess>> {
-    let clock = engine.default_clock();
-    Cache::new_and_register(engine, &clock, engine.top(), "cache", cache_config()).unwrap()
 }
 
 /// Create a memory which is big enough to ensure the cache can't hold it all

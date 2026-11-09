@@ -50,6 +50,8 @@ impl fmt::Display for CachePortId {
 /// The display form round-trips through [`parse_connection_endpoint_id`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConnectionEndpointId {
+    /// Directory endpoint, formatted as `coherency_manager.<name>`.
+    CoherencyManager { name: String },
     /// Processing element endpoint, formatted as `pe.<name>`.
     Pe {
         /// Processing element name.
@@ -97,6 +99,7 @@ impl fmt::Display for ConnectionEndpointId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Null => f.write_str("null"),
+            Self::CoherencyManager { name } => write!(f, "coherency_manager.{name}"),
             Self::Pe { name } => write!(f, "pe.{name}"),
             Self::Cache { name, port } => {
                 write!(f, "cache.{name}")?;
@@ -148,6 +151,16 @@ pub fn parse_connection_endpoint_id(s: &str) -> Result<ConnectionEndpointId, Sim
     }
 
     match kind {
+        "coherency_manager" => {
+            if port.is_some() {
+                return Err(SimError(
+                    "Cannot specify a port for Coherency Manager".into(),
+                ));
+            }
+            Ok(ConnectionEndpointId::CoherencyManager {
+                name: name.to_owned(),
+            })
+        }
         "pe" => {
             if port.is_some() {
                 return Err(SimError("Cannot specify a port for PE".to_string()));

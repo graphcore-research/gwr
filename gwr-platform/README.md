@@ -21,6 +21,43 @@ The `gwr_platform` library provides:
 - connection functions that wire a platform together via the
   `gwr_platform::connect` module.
 
+## Coherent Caches
+
+A cache can select directory endpoints with `coherency_managers: [cm0, cm1]`.
+Each entry in the top-level `coherency_managers` section names a backing
+`memory_map` and a `config.line_size_bytes`. Set the optional positive
+`config.operations_per_tick` to limit directory processing; omitting it leaves
+processing unlimited. Incoming packets, queued request starts, and barrier
+completions share that budget. For example:
+
+```yaml
+coherency_managers:
+  - name: cm0
+    memory_map: backing_memory
+    config:
+      line_size_bytes: 32
+      operations_per_tick: 1
+```
+
+Connect the directory endpoint `coherency_manager.cm0` to a fabric port, and
+connect the cache's memory side to the fabric. Device routes are derived from
+these connections.
+
+Every selected manager must have the same positive line size as its cache.
+Memory ranges must align to that size, and each physical memory can belong to
+only one manager. Matching sizes need not be powers of two. The selected
+managers must cover the connected processing element's memory map.
+
+Coherent caches retain `max_inflight_parents` and `max_inflight_fills` (both
+default to 64). The child bound includes read fills and exclusive acquisitions;
+large requests stream through it. Dirty writebacks and invalidation acks share
+one ordered control path. Barriers drain prior work without flushing resident
+dirty lines. Hierarchical coherence is unsupported and rejected in platform
+configuration.
+
+The coherent examples demonstrate one and two managers. `gen-fabric` accepts
+`--use-coherency-managers` with L1 caches and no L2 cache.
+
 ## A Simple Platform
 
 An example of a simple platform could include:

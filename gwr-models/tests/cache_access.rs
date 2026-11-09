@@ -92,4 +92,8 @@ impl AccessMemory for MemoryOnly {
     ) -> Result<Self, gwr_engine::types::SimError> {
         AccessMemory::to_response(&self.0, m).map(Self)
     }
+
+    fn to_ack(&self) -> Result<Self, gwr_engine::types::SimError> {
+        self.0.to_ack().map(Self)
+    }
 }

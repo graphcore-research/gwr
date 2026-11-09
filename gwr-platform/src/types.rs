@@ -7,6 +7,25 @@ use gwr_models::fabric::node::FabricRoutingAlgorithm;
 use serde::{Deserialize, Serialize, de};
 use yaml_serde::Value;
 
+/// Same as `parse_u64_byte_str` but returns a `usize`.
+pub fn parse_usize_byte_str<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let value = parse_u64_byte_str(deserializer)?;
+    usize::try_from(value).map_err(|error| {
+        de::Error::custom(format!("{value} cannot be represented as usize: {error}"))
+    })
+}
+
+/// Same as `parse_u64_byte_str` but returns a `Option<u64>`.
+pub fn parse_optional_u64_byte_str<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    Ok(Some(parse_u64_byte_str(deserializer)?))
+}
+
 /// Parse a value which could be an integer or a string and return u64 value
 ///
 /// The string can be a hex string with underscores or a Byte string that
@@ -58,25 +77,6 @@ where
     }
 }
 
-/// Same as `parse_u64_byte_str` but returns a `usize`.
-pub fn parse_usize_byte_str<'de, D>(deserializer: D) -> Result<usize, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    let value = parse_u64_byte_str(deserializer)?;
-    usize::try_from(value).map_err(|error| {
-        de::Error::custom(format!("{value} cannot be represented as usize: {error}"))
-    })
-}
-
-/// Same as `parse_u64_byte_str` but returns a `Option<u64>`.
-pub fn parse_optional_u64_byte_str<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    Ok(Some(parse_u64_byte_str(deserializer)?))
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlatformConfig {
@@ -84,6 +84,7 @@ pub struct PlatformConfig {
     pub defaults: Option<DefaultsSection>,
     pub processing_elements: Option<Vec<ProcessingElementSection>>,
     pub caches: Option<Vec<CacheSection>>,
+    pub coherency_managers: Option<Vec<CoherencyManagerSection>>,
     pub fabrics: Option<Vec<FabricSection>>,
     pub memories: Option<Vec<MemorySection>>,
     pub connections: Option<Vec<ConnectSection>>,
@@ -128,6 +129,7 @@ pub struct ProcessingElementConfigSection {
 #[serde(deny_unknown_fields)]
 pub struct CacheSection {
     pub name: String,
+    pub coherency_managers: Option<Vec<String>>,
     pub config: CacheConfigSection,
 }
 
@@ -208,4 +210,20 @@ pub enum MemoryKind {
 #[serde(deny_unknown_fields)]
 pub struct ConnectSection {
     pub connect: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct CoherencyManagerSection {
+    pub name: String,
+    pub memory_map: String,
+    pub config: CoherencyManagerConfigSection,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct CoherencyManagerConfigSection {
+    pub line_size_bytes: Option<usize>,
+    /// Positive directory work budget per tick; omitted means unlimited.
+    pub operations_per_tick: Option<usize>,
 }

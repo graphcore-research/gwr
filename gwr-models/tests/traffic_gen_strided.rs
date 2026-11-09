@@ -7,7 +7,7 @@ use gwr_components::connect_port;
 use gwr_engine::engine::Engine;
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
-use gwr_models::memory::cache::{Cache, CacheConfig};
+use gwr_models::cache::{Cache, CacheConfig};
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::memory_access_gen::MemoryAccessGen;
 use gwr_models::memory::memory_access_gen::strided::Strided;
@@ -25,66 +25,6 @@ const CACHE_CAPACITY_BYTES: usize = NUM_SETS * NUM_WAYS * LINE_SIZE_BYTES;
 const DELAY_TICKS: usize = 20;
 
 const OVERHEAD_SIZE_BYTES: usize = 16;
-
-/// Helper to build a cache and the device-side ports to drive it.
-#[expect(clippy::type_complexity)]
-fn build_system(
-    base_addr: u64,
-    stride_bytes: u64,
-    end_addr: u64,
-    num_to_send: usize,
-) -> (
-    Engine,
-    Rc<Cache<MemoryAccess>>,
-    Rc<Memory<MemoryAccess>>,
-    Rc<MemoryAccessGen<MemoryAccess>>,
-) {
-    let mut engine = start_test(file!());
-    let clock = engine.default_clock();
-    let memory_map = Rc::new(create_default_memory_map());
-
-    let top = engine.top();
-    let data_generator = Box::new(Strided::new(
-        top,
-        "strided",
-        &memory_map,
-        SRC_ADDR,
-        base_addr,
-        end_addr,
-        stride_bytes,
-        OVERHEAD_SIZE_BYTES,
-        LINE_SIZE_BYTES,
-        num_to_send,
-    ));
-
-    let traffic_gen =
-        MemoryAccessGen::new_and_register(&engine, &clock, top, "gen", data_generator).unwrap();
-
-    let config = CacheConfig::new(
-        LINE_SIZE_BYTES,
-        BW_BYTES_PER_TICK,
-        NUM_SETS,
-        NUM_WAYS,
-        DELAY_TICKS,
-    );
-    let cache = Cache::new_and_register(&engine, &clock, top, "cache", config).unwrap();
-
-    connect_port!(traffic_gen, tx => cache, dev_rx).unwrap();
-    connect_port!(cache, dev_tx => traffic_gen, rx).unwrap();
-
-    let config = MemoryConfig::new(
-        BASE_ADDRESS,
-        CACHE_CAPACITY_BYTES * 2,
-        BW_BYTES_PER_TICK,
-        DELAY_TICKS,
-    );
-    let memory = Memory::new_and_register(&engine, &clock, top, "memory", config).unwrap();
-
-    connect_port!(cache, mem_tx => memory, rx).unwrap();
-    connect_port!(memory, tx => cache, mem_rx).unwrap();
-
-    (engine, cache, memory, traffic_gen)
-}
 
 #[test]
 fn full_sweep_lines() {
@@ -181,4 +121,64 @@ fn all_misses() {
         traffic_gen.payload_bytes_received(),
         num_reads * LINE_SIZE_BYTES
     );
+}
+
+/// Helper to build a cache and the device-side ports to drive it.
+#[expect(clippy::type_complexity)]
+fn build_system(
+    base_addr: u64,
+    stride_bytes: u64,
+    end_addr: u64,
+    num_to_send: usize,
+) -> (
+    Engine,
+    Rc<Cache<MemoryAccess>>,
+    Rc<Memory<MemoryAccess>>,
+    Rc<MemoryAccessGen<MemoryAccess>>,
+) {
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
+    let memory_map = Rc::new(create_default_memory_map());
+
+    let top = engine.top();
+    let data_generator = Box::new(Strided::new(
+        top,
+        "strided",
+        &memory_map,
+        SRC_ADDR,
+        base_addr,
+        end_addr,
+        stride_bytes,
+        OVERHEAD_SIZE_BYTES,
+        LINE_SIZE_BYTES,
+        num_to_send,
+    ));
+
+    let traffic_gen =
+        MemoryAccessGen::new_and_register(&engine, &clock, top, "gen", data_generator).unwrap();
+
+    let config = CacheConfig::new(
+        LINE_SIZE_BYTES,
+        BW_BYTES_PER_TICK,
+        NUM_SETS,
+        NUM_WAYS,
+        DELAY_TICKS,
+    );
+    let cache = Cache::new_and_register(&engine, &clock, top, "cache", config).unwrap();
+
+    connect_port!(traffic_gen, tx => cache, dev_rx).unwrap();
+    connect_port!(cache, dev_tx => traffic_gen, rx).unwrap();
+
+    let config = MemoryConfig::new(
+        BASE_ADDRESS,
+        CACHE_CAPACITY_BYTES * 2,
+        BW_BYTES_PER_TICK,
+        DELAY_TICKS,
+    );
+    let memory = Memory::new_and_register(&engine, &clock, top, "memory", config).unwrap();
+
+    connect_port!(cache, mem_tx => memory, rx).unwrap();
+    connect_port!(memory, tx => cache, mem_rx).unwrap();
+
+    (engine, cache, memory, traffic_gen)
 }

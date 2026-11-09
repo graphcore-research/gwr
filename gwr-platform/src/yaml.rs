@@ -11,71 +11,20 @@ use yaml_serde::Value;
 
 use crate::types::{CacheConfigSection, PlatformConfig, ProcessingElementConfigSection};
 
-/// Format a `u64` as lowercase hexadecimal with a `0x` prefix and underscores
-/// inserted every 4 hex digits (grouped from the right).
-///
-/// Examples:
-/// - `0x1000000` -> `0x100_0000`
-/// - `0x100000000` -> `0x1_0000_0000`
-fn u64_hex_str(v: u64) -> String {
-    let hex = format!("{v:x}");
-    let mut out = String::with_capacity(2 + hex.len() + ((hex.len().saturating_sub(1)) / 4));
-    out.push_str("0x");
-
-    let first_group_len = match hex.len() % 4 {
-        0 => 4,
-        n => n,
-    };
-    out.push_str(&hex[..first_group_len]);
-    for chunk in hex.as_bytes()[first_group_len..].chunks(4) {
-        out.push('_');
-        // `hex` is a String, so each byte chunk should be UTF-8.
-        out.push_str(std::str::from_utf8(chunk).expect("hex chunk should be utf-8"));
-    }
-
-    out
-}
-
-fn emit_line(
-    out: &mut String,
-    line: impl std::fmt::Display,
-    indent_level: usize,
-) -> Result<(), std::fmt::Error> {
-    writeln!(out, "{}{line}", "  ".repeat(indent_level))
-}
-
-fn start_section(section: &str) -> Result<String, std::fmt::Error> {
+pub fn platform_to_yaml_str(
+    platform: &PlatformConfig,
+) -> Result<String, Box<dyn std::error::Error>> {
     let mut out = String::new();
-    emit_line(&mut out, format_args!("{section}:"), 0)?;
+
+    emit_optional_section(&mut out, emit_memory_maps(platform)?);
+    emit_optional_section(&mut out, emit_processing_elements(platform)?);
+    emit_optional_section(&mut out, emit_fabrics(platform)?);
+    emit_optional_section(&mut out, emit_caches(platform)?);
+    emit_optional_section(&mut out, emit_memories(platform)?);
+    emit_optional_section(&mut out, emit_connections(platform)?);
+    emit_optional_section(&mut out, emit_coherency_managers(platform)?);
+
     Ok(out)
-}
-
-fn emit_kv<T: std::fmt::Display>(
-    out: &mut String,
-    key: &str,
-    value: T,
-    indent_level: usize,
-) -> Result<(), std::fmt::Error> {
-    emit_line(out, format_args!("{key}: {value}"), indent_level)
-}
-
-fn emit_optional_kv<T: std::fmt::Display>(
-    out: &mut String,
-    key: &str,
-    value: Option<T>,
-    indent_level: usize,
-) -> Result<(), std::fmt::Error> {
-    if let Some(v) = value {
-        emit_kv(out, key, v, indent_level)?;
-    }
-    Ok(())
-}
-
-fn serializable_to_str<T: Serialize>(value: &T) -> Result<String, Box<dyn std::error::Error>> {
-    match yaml_serde::to_value(value)? {
-        Value::String(s) => Ok(s),
-        other => Err(format!("expected type to serialize a string, got: {other:?}").into()),
-    }
 }
 
 fn emit_memory_maps(
@@ -257,6 +206,12 @@ fn emit_caches(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std:
         let config = &cache.config;
 
         emit_line(&mut out, format_args!("- name: {}", cache.name), 1)?;
+        if let Some(names) = &cache.coherency_managers {
+            emit_line(&mut out, "coherency_managers:", 2)?;
+            for name in names {
+                emit_line(&mut out, format_args!("- {name}"), 3)?;
+            }
+        }
         if emitted_anchors[config_idx] {
             emit_line(&mut out, format_args!("config: *{anchor}"), 2)?;
         } else {
@@ -328,6 +283,50 @@ fn emit_memories(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn st
     Ok(Some(out))
 }
 
+/// Format a `u64` as lowercase hexadecimal with a `0x` prefix and underscores
+/// inserted every 4 hex digits (grouped from the right).
+///
+/// Examples:
+/// - `0x1000000` -> `0x100_0000`
+/// - `0x100000000` -> `0x1_0000_0000`
+fn u64_hex_str(v: u64) -> String {
+    let hex = format!("{v:x}");
+    let mut out = String::with_capacity(2 + hex.len() + ((hex.len().saturating_sub(1)) / 4));
+    out.push_str("0x");
+
+    let first_group_len = match hex.len() % 4 {
+        0 => 4,
+        n => n,
+    };
+    out.push_str(&hex[..first_group_len]);
+    for chunk in hex.as_bytes()[first_group_len..].chunks(4) {
+        out.push('_');
+        // `hex` is a String, so each byte chunk should be UTF-8.
+        out.push_str(std::str::from_utf8(chunk).expect("hex chunk should be utf-8"));
+    }
+
+    out
+}
+
+fn emit_optional_kv<T: std::fmt::Display>(
+    out: &mut String,
+    key: &str,
+    value: Option<T>,
+    indent_level: usize,
+) -> Result<(), std::fmt::Error> {
+    if let Some(v) = value {
+        emit_kv(out, key, v, indent_level)?;
+    }
+    Ok(())
+}
+
+fn serializable_to_str<T: Serialize>(value: &T) -> Result<String, Box<dyn std::error::Error>> {
+    match yaml_serde::to_value(value)? {
+        Value::String(s) => Ok(s),
+        other => Err(format!("expected type to serialize a string, got: {other:?}").into()),
+    }
+}
+
 fn emit_connections(
     platform: &PlatformConfig,
 ) -> Result<Option<String>, Box<dyn std::error::Error>> {
@@ -359,19 +358,59 @@ fn emit_optional_section(out: &mut String, section: Option<String>) {
     }
 }
 
-pub fn platform_to_yaml_str(
+fn emit_coherency_managers(
     platform: &PlatformConfig,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    let Some(managers) = &platform.coherency_managers else {
+        return Ok(None);
+    };
+    let mut out = start_section("coherency_managers")?;
+    for manager in managers {
+        emit_line(&mut out, format_args!("- name: {}", manager.name), 1)?;
+        emit_kv(&mut out, "memory_map", &manager.memory_map, 2)?;
+        if manager.config.line_size_bytes.is_some() || manager.config.operations_per_tick.is_some()
+        {
+            emit_line(&mut out, "config:", 2)?;
+            emit_optional_kv(
+                &mut out,
+                "line_size_bytes",
+                manager.config.line_size_bytes,
+                3,
+            )?;
+            emit_optional_kv(
+                &mut out,
+                "operations_per_tick",
+                manager.config.operations_per_tick,
+                3,
+            )?;
+        } else {
+            emit_line(&mut out, "config: {}", 2)?;
+        }
+    }
+    Ok(Some(out))
+}
+
+fn start_section(section: &str) -> Result<String, std::fmt::Error> {
     let mut out = String::new();
-
-    emit_optional_section(&mut out, emit_memory_maps(platform)?);
-    emit_optional_section(&mut out, emit_processing_elements(platform)?);
-    emit_optional_section(&mut out, emit_fabrics(platform)?);
-    emit_optional_section(&mut out, emit_caches(platform)?);
-    emit_optional_section(&mut out, emit_memories(platform)?);
-    emit_optional_section(&mut out, emit_connections(platform)?);
-
+    emit_line(&mut out, format_args!("{section}:"), 0)?;
     Ok(out)
+}
+
+fn emit_kv<T: std::fmt::Display>(
+    out: &mut String,
+    key: &str,
+    value: T,
+    indent_level: usize,
+) -> Result<(), std::fmt::Error> {
+    emit_line(out, format_args!("{key}: {value}"), indent_level)
+}
+
+fn emit_line(
+    out: &mut String,
+    line: impl std::fmt::Display,
+    indent_level: usize,
+) -> Result<(), std::fmt::Error> {
+    writeln!(out, "{}{line}", "  ".repeat(indent_level))
 }
 
 #[cfg(test)]
@@ -385,16 +424,10 @@ mod tests {
         PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
     };
 
-    fn test_memory_map() -> MemoryMapSection {
-        MemoryMapSection {
-            name: "memory_map".to_string(),
-            devices: vec!["hbm0".to_string()],
-        }
-    }
-
     #[test]
     fn emitted_null_endpoint_is_a_yaml_string_and_round_trips() {
         let platform = PlatformConfig {
+            coherency_managers: None,
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: None,
@@ -438,6 +471,7 @@ mod tests {
             compares_per_tick: Some(16.0),
         };
         let platform = PlatformConfig {
+            coherency_managers: None,
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: Some(vec![
@@ -508,6 +542,7 @@ mod tests {
             delay_ticks: None,
         };
         let platform = PlatformConfig {
+            coherency_managers: None,
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: Some(vec![ProcessingElementSection {
@@ -517,10 +552,12 @@ mod tests {
             }]),
             caches: Some(vec![
                 CacheSection {
+                    coherency_managers: None,
                     name: "l1a".to_string(),
                     config: empty_cache_config.clone(),
                 },
                 CacheSection {
+                    coherency_managers: None,
                     name: "l1b".to_string(),
                     config: empty_cache_config.clone(),
                 },
@@ -570,6 +607,7 @@ mod tests {
             delay_ticks: Some(9),
         };
         let platform = PlatformConfig {
+            coherency_managers: None,
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: None,
@@ -621,6 +659,7 @@ mod tests {
             ..only_port_selection.clone()
         };
         let platform = PlatformConfig {
+            coherency_managers: None,
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: None,
@@ -659,5 +698,12 @@ mod tests {
         let fabrics = round_trip.fabrics.expect("fabrics should be present");
         assert_eq!(fabrics[0].config, only_port_selection);
         assert_eq!(fabrics[1].config, mixed_config);
+    }
+
+    fn test_memory_map() -> MemoryMapSection {
+        MemoryMapSection {
+            name: "memory_map".to_string(),
+            devices: vec!["hbm0".to_string()],
+        }
     }
 }

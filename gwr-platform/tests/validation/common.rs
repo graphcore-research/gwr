@@ -10,6 +10,7 @@ pub(crate) use gwr_platform::types::{
 
 pub(crate) fn platform() -> PlatformConfig {
     PlatformConfig {
+        coherency_managers: None,
         memory_maps: Vec::new(),
         defaults: None,
         processing_elements: None,
@@ -58,6 +59,7 @@ pub(crate) fn processing_element(name: &str, memory_map: &str) -> ProcessingElem
 
 pub(crate) fn cache(name: &str) -> CacheSection {
     CacheSection {
+        coherency_managers: None,
         name: name.to_string(),
         config: CacheConfigSection {
             bw_bytes_per_tick: None,

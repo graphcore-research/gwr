@@ -99,26 +99,13 @@ impl Dispatch for TestDispatcher {
     }
 }
 
-fn build_dispatcher() -> Rc<dyn Dispatch> {
-    let input_a = Tensor::new(&[8], &DataType::Fp32, 0x1_0000_0000).unwrap();
-    let input_b = Tensor::new(&[8], &DataType::Fp32, 0x1_0000_0100).unwrap();
-    let output = Tensor::new(&[8], &DataType::Fp32, 0x1_0000_0200).unwrap();
-    let task = |id: &str| Task::ComputeTask {
-        config: ComputeTaskConfig {
-            id: id.to_string(),
-            op: ComputeOp::Add,
-            inputs: vec![
-                Some(TensorView::new_full(input_a.clone())),
-                Some(TensorView::new_full(input_b.clone())),
-            ],
-            outputs: vec![Some(TensorView::new_full(output.clone()))],
-        },
-    };
+#[test]
+fn simple_pe_mem_one_request() {
+    let (_, clock) = run_pe_mem(1);
 
-    Rc::new(TestDispatcher::new(
-        HashMap::from([(0, task("task0")), (1, task("task1"))]),
-        HashMap::from([("pe0".to_string(), VecDeque::from([0, 1]))]),
-    ))
+    // There are two compute tasks, each issuing two 32-byte reads and one
+    // 32-byte write. Each memory access has a 10ns delay.
+    assert_eq!(clock.time_now_ns(), 60.0);
 }
 
 macro_rules! pe_mem_config {
@@ -156,101 +143,6 @@ connections:
     };
 }
 
-fn run_pe_mem(num_active_requests: usize) -> (Engine, Clock) {
-    let mut engine = start_test(file!());
-    let clock = engine.default_clock();
-    let platform =
-        Platform::from_string(&engine, &clock, pe_mem_config!(num_active_requests)).unwrap();
-
-    assert_eq!(platform.num_pes(), 1);
-    assert_eq!(platform.num_memories(), 1);
-    assert_eq!(platform.num_fabrics(), 0);
-    assert_eq!(platform.num_caches(), 0);
-
-    let dispatcher = build_dispatcher();
-    platform.attach_dispatcher(&dispatcher);
-
-    run_simulation!(engine);
-    (engine, clock)
-}
-
-fn run_pe_fabric_mem(num_active_requests: usize) -> (Engine, Clock) {
-    let mut engine = start_test(file!());
-    let clock = engine.default_clock();
-    let platform = Platform::from_string(
-        &engine,
-        &clock,
-        format!(
-            "
-memory_maps:
-  - name: mm0
-    devices:
-      - hbm0
-
-processing_elements:
-  - name: pe0
-    memory_map: mm0
-    config:
-      num_active_requests: {num_active_requests}
-      lsu_access_bytes: 32
-
-fabrics:
-  - name: fabric0
-    kind: functional
-    columns: 2
-    rows: 1
-    config:
-      fabric_ports_per_node: 1
-      ticks_per_hop: 1
-      ticks_overhead: 1
-      port_bits_per_tick: 4096
-
-memories:
-  - name: hbm0
-    kind: hbm
-    base_address: 0x1_0000_0000
-    config:
-      capacity_bytes: 16GiB
-      delay_ticks: 10
-
-connections:
-  - connect:
-    - pe.pe0
-    - fabric.fabric0@(0,0)
-  - connect:
-    - mem.hbm0
-    - fabric.fabric0@(1,0)
-"
-        )
-        .as_str(),
-    )
-    .unwrap();
-
-    assert_eq!(platform.num_pes(), 1);
-    assert_eq!(platform.num_memories(), 1);
-    assert_eq!(platform.num_fabrics(), 1);
-    assert_eq!(platform.num_caches(), 0);
-    let port_map_dump = platform.fabric_port_map_description();
-    assert!(port_map_dump.contains("Fabric fabric0 port_selection: destination-address-hash"));
-    assert!(port_map_dump.contains("device 0 (pe0) -> 0=fabric.fabric0@(0,0) (0,0).0"));
-    assert!(port_map_dump.contains("device 1 (hbm0) -> 1=fabric.fabric0@(1,0) (1,0).0"));
-
-    let dispatcher = build_dispatcher();
-    platform.attach_dispatcher(&dispatcher);
-
-    run_simulation!(engine);
-    (engine, clock)
-}
-
-#[test]
-fn simple_pe_mem_one_request() {
-    let (_, clock) = run_pe_mem(1);
-
-    // There are two compute tasks, each issuing two 32-byte reads and one
-    // 32-byte write. Each memory access has a 10ns delay.
-    assert_eq!(clock.time_now_ns(), 60.0);
-}
-
 #[test]
 fn simple_pe_mem_two_requests() {
     let (_, clock) = run_pe_mem(2);
@@ -258,73 +150,6 @@ fn simple_pe_mem_two_requests() {
     // Two compute tasks can overlap their LSU requests when the LSU has two
     // outstanding request slots.
     assert_eq!(clock.time_now_ns(), 32.0);
-}
-
-fn access_dispatcher(strided: bool) -> Rc<dyn Dispatch> {
-    let view = if strided {
-        let tensor = Tensor::new(&[8, 2], &DataType::Int8, 0x1_0000_0000).unwrap();
-        TensorView::new(tensor, &[8, 1], &[0, 0]).unwrap()
-    } else {
-        TensorView::new_full(Tensor::new(&[8], &DataType::Int8, 0x1_0000_0000).unwrap())
-    };
-    let task = Task::ComputeTask {
-        config: ComputeTaskConfig {
-            id: "read".to_string(),
-            op: ComputeOp::Custom(OperatorCustom {
-                name: None,
-                machine_ops: MachineOpCounts::default(),
-            }),
-            inputs: vec![Some(view)],
-            outputs: Vec::new(),
-        },
-    };
-
-    Rc::new(TestDispatcher::new(
-        HashMap::from([(0, task)]),
-        HashMap::from([("pe0".to_string(), VecDeque::from([0]))]),
-    ))
-}
-
-fn strided_platform(
-    engine: &Engine,
-    clock: &Clock,
-    sram_bytes: usize,
-    lsu_access_bytes: usize,
-) -> Platform {
-    Platform::from_string(
-        engine,
-        clock,
-        &format!(
-            "
-memory_maps:
-  - name: mm0
-    devices:
-      - hbm0
-
-processing_elements:
-  - name: pe0
-    memory_map: mm0
-    config:
-      num_active_requests: 8
-      lsu_access_bytes: {lsu_access_bytes}
-      sram_bytes: {sram_bytes}
-
-memories:
-  - name: hbm0
-    kind: hbm
-    base_address: 0x1_0000_0000
-    config:
-      capacity_bytes: 16GiB
-      delay_ticks: 10
-
-connections:
-  - connect:
-    - pe.pe0
-    - mem.hbm0
-"
-        ),
-    )
-    .unwrap()
 }
 
 #[test]
@@ -482,4 +307,224 @@ connections:
     assert_eq!(traffic.downstream_read_bytes, 64);
     assert_eq!(traffic.downstream_write_bytes, 64);
     assert_eq!(clock.time_now_ns(), 154.0);
+}
+
+#[test]
+fn coherent_examples_run_with_one_parent_and_one_child_slot() {
+    for source in [
+        include_str!("../examples/simple_pe_cache_coherent_mem.yaml"),
+        include_str!("../examples/coherent_2mem_1manager.yaml"),
+        include_str!("../examples/coherent_2mem_2managers.yaml"),
+    ] {
+        for routed in [false, true] {
+            // Restrict each example to one tracked parent and one active fill.
+            let mut engine = start_test(file!());
+            let clock = engine.default_clock();
+            let source = source.replace("      bw_bytes_per_tick: 32", "      bw_bytes_per_tick: 32\n      max_inflight_parents: 1\n      max_inflight_fills: 1");
+
+            // Exercise the same workload with both fabric implementations.
+            let source = if routed {
+                source.replace("kind: functional", "kind: routed")
+            } else {
+                source
+            };
+
+            // Build the platform, attach work, and run it to completion.
+            let platform = Platform::from_string(&engine, &clock, &source).unwrap();
+            platform.attach_dispatcher(&build_dispatcher());
+            run_simulation!(engine);
+
+            // Check that coherence ran without exceeding the fill limit.
+            assert!(
+                platform
+                    .coherency_manager("cm0")
+                    .unwrap()
+                    .received_coherence_message_count()
+                    > 0
+            );
+            assert!(
+                platform
+                    .cache("l1_0")
+                    .unwrap()
+                    .inflight_fills_snapshot()
+                    .peak
+                    <= 1
+            );
+        }
+    }
+}
+
+fn run_pe_mem(num_active_requests: usize) -> (Engine, Clock) {
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
+    let platform =
+        Platform::from_string(&engine, &clock, pe_mem_config!(num_active_requests)).unwrap();
+
+    assert_eq!(platform.num_pes(), 1);
+    assert_eq!(platform.num_memories(), 1);
+    assert_eq!(platform.num_fabrics(), 0);
+    assert_eq!(platform.num_caches(), 0);
+
+    let dispatcher = build_dispatcher();
+    platform.attach_dispatcher(&dispatcher);
+
+    run_simulation!(engine);
+    (engine, clock)
+}
+
+fn run_pe_fabric_mem(num_active_requests: usize) -> (Engine, Clock) {
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
+    let platform = Platform::from_string(
+        &engine,
+        &clock,
+        format!(
+            "
+memory_maps:
+  - name: mm0
+    devices:
+      - hbm0
+
+processing_elements:
+  - name: pe0
+    memory_map: mm0
+    config:
+      num_active_requests: {num_active_requests}
+      lsu_access_bytes: 32
+
+fabrics:
+  - name: fabric0
+    kind: functional
+    columns: 2
+    rows: 1
+    config:
+      fabric_ports_per_node: 1
+      ticks_per_hop: 1
+      ticks_overhead: 1
+      port_bits_per_tick: 4096
+
+memories:
+  - name: hbm0
+    kind: hbm
+    base_address: 0x1_0000_0000
+    config:
+      capacity_bytes: 16GiB
+      delay_ticks: 10
+
+connections:
+  - connect:
+    - pe.pe0
+    - fabric.fabric0@(0,0)
+  - connect:
+    - mem.hbm0
+    - fabric.fabric0@(1,0)
+"
+        )
+        .as_str(),
+    )
+    .unwrap();
+
+    assert_eq!(platform.num_pes(), 1);
+    assert_eq!(platform.num_memories(), 1);
+    assert_eq!(platform.num_fabrics(), 1);
+    assert_eq!(platform.num_caches(), 0);
+    let port_map_dump = platform.fabric_port_map_description();
+    assert!(port_map_dump.contains("Fabric fabric0 port_selection: destination-address-hash"));
+    assert!(port_map_dump.contains("device 0 (pe0) -> 0=fabric.fabric0@(0,0) (0,0).0"));
+    assert!(port_map_dump.contains("device 1 (hbm0) -> 1=fabric.fabric0@(1,0) (1,0).0"));
+
+    let dispatcher = build_dispatcher();
+    platform.attach_dispatcher(&dispatcher);
+
+    run_simulation!(engine);
+    (engine, clock)
+}
+
+fn build_dispatcher() -> Rc<dyn Dispatch> {
+    let input_a = Tensor::new(&[8], &DataType::Fp32, 0x1_0000_0000).unwrap();
+    let input_b = Tensor::new(&[8], &DataType::Fp32, 0x1_0000_0100).unwrap();
+    let output = Tensor::new(&[8], &DataType::Fp32, 0x1_0000_0200).unwrap();
+    let task = |id: &str| Task::ComputeTask {
+        config: ComputeTaskConfig {
+            id: id.to_string(),
+            op: ComputeOp::Add,
+            inputs: vec![
+                Some(TensorView::new_full(input_a.clone())),
+                Some(TensorView::new_full(input_b.clone())),
+            ],
+            outputs: vec![Some(TensorView::new_full(output.clone()))],
+        },
+    };
+
+    Rc::new(TestDispatcher::new(
+        HashMap::from([(0, task("task0")), (1, task("task1"))]),
+        HashMap::from([("pe0".to_string(), VecDeque::from([0, 1]))]),
+    ))
+}
+
+fn access_dispatcher(strided: bool) -> Rc<dyn Dispatch> {
+    let view = if strided {
+        let tensor = Tensor::new(&[8, 2], &DataType::Int8, 0x1_0000_0000).unwrap();
+        TensorView::new(tensor, &[8, 1], &[0, 0]).unwrap()
+    } else {
+        TensorView::new_full(Tensor::new(&[8], &DataType::Int8, 0x1_0000_0000).unwrap())
+    };
+    let task = Task::ComputeTask {
+        config: ComputeTaskConfig {
+            id: "read".to_string(),
+            op: ComputeOp::Custom(OperatorCustom {
+                name: None,
+                machine_ops: MachineOpCounts::default(),
+            }),
+            inputs: vec![Some(view)],
+            outputs: Vec::new(),
+        },
+    };
+
+    Rc::new(TestDispatcher::new(
+        HashMap::from([(0, task)]),
+        HashMap::from([("pe0".to_string(), VecDeque::from([0]))]),
+    ))
+}
+
+fn strided_platform(
+    engine: &Engine,
+    clock: &Clock,
+    sram_bytes: usize,
+    lsu_access_bytes: usize,
+) -> Platform {
+    Platform::from_string(
+        engine,
+        clock,
+        &format!(
+            "
+memory_maps:
+  - name: mm0
+    devices:
+      - hbm0
+
+processing_elements:
+  - name: pe0
+    memory_map: mm0
+    config:
+      num_active_requests: 8
+      lsu_access_bytes: {lsu_access_bytes}
+      sram_bytes: {sram_bytes}
+
+memories:
+  - name: hbm0
+    kind: hbm
+    base_address: 0x1_0000_0000
+    config:
+      capacity_bytes: 16GiB
+      delay_ticks: 10
+
+connections:
+  - connect:
+    - pe.pe0
+    - mem.hbm0
+"
+        ),
+    )
+    .unwrap()
 }
