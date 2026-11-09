@@ -2,7 +2,7 @@
 
 [package]
 name = "gwr-models"
-version = "0.27.0"
+version = "0.28.0"
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -40,6 +40,7 @@ paste.workspace = true
 rand.workspace = true
 rand_xoshiro = "0.8.1"
 serde.workspace = true
+yaml_serde.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true

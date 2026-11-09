@@ -1,6 +1,13 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use super::common::*;
+use gwr_models::processing_element::dispatch::Dispatch;
+use gwr_models::processing_element::tensors::dtype::DataType;
+use gwr_timetable::timetable_file::{EdgeKind, EdgeSection, NodeSection, TensorConfigSection};
+
+use super::common::{
+    build_timetable, compute, control_edge, create_default_timetable_file, data_edge, tensor,
+    timetable,
+};
 
 #[test]
 fn builds_a_valid_timetable() {
@@ -46,11 +53,11 @@ fn control_edges_are_ignored_by_scheduler() {
 }
 
 #[test]
-fn control_edges_ignore_data_tensor_indices() {
+fn named_control_edges_do_not_consume_data_binding_slots() {
     let (_, _, mut timetable_file) = create_default_timetable_file();
     timetable_file.edges.push(EdgeSection {
-        from: "tensor2.99".to_string(),
-        to: "add0.99".to_string(),
+        from: "tensor2".to_string(),
+        to: "add0.A".to_string(),
         kind: EdgeKind::Control,
     });
 
@@ -98,10 +105,10 @@ fn rejects_data_dependency_cycles() {
             compute("compute1", vec![None], vec![None]),
         ],
         vec![
-            data_edge("tensor0", "compute0"),
-            data_edge("compute0", "tensor1"),
-            data_edge("tensor1", "compute1"),
-            data_edge("compute1", "tensor0"),
+            data_edge("tensor0", "compute0.input0"),
+            data_edge("compute0.output0", "tensor1"),
+            data_edge("tensor1", "compute1.input0"),
+            data_edge("compute1.output0", "tensor0"),
         ],
     );
 

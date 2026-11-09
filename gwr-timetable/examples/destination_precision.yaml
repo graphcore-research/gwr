@@ -1,0 +1,35 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+nodes:
+  - { id: lhs, kind: tensor, config: { addr: 0x1000, dtype: fp32, shape: [8] } }
+  - { id: rhs, kind: tensor, config: { addr: 0x2000, dtype: fp32, shape: [8] } }
+  - {
+      id: result,
+      kind: tensor,
+      config: { addr: 0x3000, dtype: bf16, shape: [8] },
+    }
+  - id: compute
+    kind: compute
+    pe: pe0
+    program:
+      inputs: [A, B]
+      outputs: [Y]
+      temporaries: { T: { dtype: fp32 } }
+      assignments:
+        - output: T
+          axes: [i]
+          expr:
+            exp:
+              - add:
+                  - { read: { tensor: A, indices: [i] } }
+                  - { read: { tensor: B, indices: [i] } }
+        - output: Y
+          axes: [i]
+          expr:
+            convert:
+              - { read: { tensor: T, indices: [i] } }
+    tiling: { sizes: { i: 4 } }
+edges:
+  - { from: lhs, to: compute.A, kind: data }
+  - { from: rhs, to: compute.B, kind: data }
+  - { from: compute.Y, to: result, kind: data }

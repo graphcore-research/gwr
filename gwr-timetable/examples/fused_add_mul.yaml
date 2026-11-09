@@ -1,0 +1,32 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+nodes:
+  - { id: A, kind: tensor, config: { addr: 0x1000, dtype: fp32, shape: [8] } }
+  - { id: B, kind: tensor, config: { addr: 0x2000, dtype: fp32, shape: [8] } }
+  - { id: C, kind: tensor, config: { addr: 0x3000, dtype: fp32, shape: [8] } }
+  - id: fused
+    kind: compute
+    pe: pe0
+    program:
+      inputs: [A, B, C]
+      outputs: [Y]
+      temporaries: { T: { dtype: fp32 } }
+      assignments:
+        - output: T
+          axes: [i]
+          expr:
+            add:
+              - read: { tensor: A, indices: [i] }
+              - read: { tensor: B, indices: [i] }
+        - output: Y
+          axes: [i]
+          expr:
+            mul:
+              - read: { tensor: T, indices: [i] }
+              - read: { tensor: C, indices: [i] }
+    tiling: { sizes: { i: 4 } }
+  - { id: Y, kind: tensor, config: { addr: 0x5000, dtype: fp32, shape: [8] } }
+edges:
+  - { from: A, to: fused.A, kind: data }
+  - { from: B, to: fused.B, kind: data }
+  - { from: C, to: fused.C, kind: data }
+  - { from: fused.Y, to: Y, kind: data }

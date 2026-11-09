@@ -3,7 +3,7 @@
 #![doc(test(attr(deny(unused_must_use))))]
 #![doc = std::include_str!(concat!(env!("OUT_DIR"), "/crate-docs.md"))]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Display};
 use std::path::Path;
 use std::rc::Rc;
@@ -16,6 +16,8 @@ use gwr_model_builder::EntityGet;
 use gwr_models::cache::coherency_manager::CoherencyManager;
 use gwr_models::cache::{Cache, CacheStatsDisplay};
 use gwr_models::fabric::Fabric;
+use gwr_models::fabric::functional::FunctionalFabric;
+use gwr_models::fabric::routed::RoutedFabric;
 use gwr_models::log_stats;
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::{Memory, MemoryStatsDisplay};
@@ -25,17 +27,15 @@ use gwr_models::processing_element::{
 };
 use gwr_track::entity::{Entity, GetEntity};
 
-use crate::builder::{
-    build_caches_from_configs, build_fabric_destination_port_maps, build_memories_from_configs,
-    build_memory_maps, build_pes_from_configs,
-};
 use crate::connect::connect_ports;
 use crate::connection_id::fabric_port_endpoint_id;
-use crate::types::PlatformConfig;
+use crate::resolved::ResolvedFabric;
+use crate::types::{FabricKind, PlatformConfig};
 
 pub mod builder;
 mod connect;
 pub mod connection_id;
+mod resolved;
 pub mod types;
 mod validation;
 pub mod yaml;
@@ -66,6 +66,7 @@ pub struct Platform {
     memories: Memories,
     memories_idx_by_id: NameToIdxMap,
     device_names_by_id: HashMap<u64, String>,
+    reachable_memories: Vec<HashSet<DeviceId>>,
 }
 
 impl fmt::Debug for Platform {
@@ -94,43 +95,95 @@ impl Platform {
     ) -> Result<Self, SimError> {
         let cfg: PlatformConfig = yaml_serde::from_str(platform_config)
             .map_err(|e| SimError(format!("yaml_serde::from_str failed: {e}")))?;
-        Platform::build(engine, clock, &cfg)
+        Platform::from_config(engine, clock, &cfg)
     }
 
-    fn build(engine: &Engine, clock: &Clock, cfg: &PlatformConfig) -> Result<Self, SimError> {
-        let effective = cfg.validated()?;
-        let device_ids = assign_device_ids(cfg)?;
-
+    /// Build a platform from an already parsed configuration.
+    ///
+    /// Validates effective settings, references and routing before registering
+    /// runtime models and connecting their ports.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if configuration validation or model construction
+    /// fails.
+    pub fn from_config(
+        engine: &Engine,
+        clock: &Clock,
+        cfg: &PlatformConfig,
+    ) -> Result<Self, SimError> {
+        let resolved = cfg.resolve()?;
         let top = engine.top();
-        let (memories, memories_idx_by_id) =
-            build_memories_from_configs(engine, clock, top, cfg, &effective.memories)?;
-        let memory_maps = build_memory_maps(cfg, &memories, &memories_idx_by_id, &device_ids)?;
-        let (processing_elements, pes_idx_by_id) = build_pes_from_configs(
-            engine,
-            clock,
-            top,
-            cfg,
-            &effective.processing_elements,
-            &memory_maps,
-            &device_ids,
-        )?;
-        let (caches, caches_idx_by_id) = build_caches_from_configs(
-            engine,
-            clock,
-            top,
-            cfg,
-            &effective.caches,
-            &memory_maps,
-            &device_ids,
-        )?;
-        let coherency_managers =
-            builder::build_coherency_managers(engine, clock, top, cfg, &memory_maps, &device_ids)?;
-        let fabric_destination_port_maps = build_fabric_destination_port_maps(cfg, &device_ids)?;
-        let (fabrics, fabrics_idx_by_id) =
-            crate::builder::build_fabrics(engine, clock, top, cfg, &fabric_destination_port_maps)?;
-        let device_names_by_id = device_ids
+        let memories = resolved
+            .memories
+            .into_iter()
+            .map(|memory| Memory::new_and_register(engine, clock, top, &memory.name, memory.config))
+            .collect::<Result<Vec<_>, _>>()?;
+        let processing_elements = resolved
+            .pes
+            .into_iter()
+            .map(|pe| {
+                ProcessingElement::new_and_register(
+                    engine,
+                    clock,
+                    top,
+                    &pe.name,
+                    &pe.memory_map,
+                    &pe.config,
+                    pe.device_id,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let caches = resolved
+            .caches
+            .into_iter()
+            .map(|cache| match cache.coherence {
+                Some(coherence) => Cache::new_coherent_and_register(
+                    engine,
+                    clock,
+                    top,
+                    &cache.name,
+                    cache.config,
+                    coherence,
+                ),
+                None => Cache::new_and_register(engine, clock, top, &cache.name, cache.config),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let managers = resolved
+            .managers
+            .into_iter()
+            .map(|(name, config)| {
+                CoherencyManager::new_and_register(engine, clock, top, &name, config)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let coherency_managers = managers
             .iter()
-            .map(|(name, device_id)| (device_id.0, name.clone()))
+            .map(|manager| (manager.entity().name.clone(), manager.clone()))
+            .collect();
+        let fabrics = resolved
+            .fabrics
+            .into_iter()
+            .map(|fabric| register_fabric(engine, clock, fabric))
+            .collect::<Result<Vec<_>, _>>()?;
+        let pes_idx_by_id = processing_elements
+            .iter()
+            .enumerate()
+            .map(|(index, pe)| (pe.entity().name.clone(), index))
+            .collect();
+        let memories_idx_by_id = memories
+            .iter()
+            .enumerate()
+            .map(|(index, memory)| (memory.entity().name.clone(), index))
+            .collect();
+        let caches_idx_by_id = caches
+            .iter()
+            .enumerate()
+            .map(|(index, cache)| (cache.entity().name.clone(), index))
+            .collect();
+        let fabrics_idx_by_id = fabrics
+            .iter()
+            .enumerate()
+            .map(|(index, fabric)| (fabric.entity().name.clone(), index))
             .collect();
 
         let parent = engine.top();
@@ -146,10 +199,21 @@ impl Platform {
             fabrics_idx_by_id,
             memories,
             memories_idx_by_id,
-            device_names_by_id,
+            device_names_by_id: resolved.device_names_by_id,
+            reachable_memories: resolved.reachable_memories,
         };
-        connect_ports(engine, clock, &platform, cfg)?;
+        connect_ports(engine, clock, &platform, &managers, &resolved.connections)?;
         Ok(platform)
+    }
+
+    /// Mapped physical devices reachable from a PE through platform
+    /// connections.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `pe_name` does not identify a processing element.
+    pub fn reachable_memories(&self, pe_name: &str) -> Result<&HashSet<DeviceId>, SimError> {
+        Ok(&self.reachable_memories[self.pe_idx_from_name(pe_name)?])
     }
 
     pub fn coherency_manager(&self, name: &str) -> Result<&Rc<CoherencyManager>, SimError> {
@@ -408,6 +472,28 @@ impl Display for Platform {
 
         Ok(())
     }
+}
+
+fn register_fabric(
+    engine: &Engine,
+    clock: &Clock,
+    fabric: ResolvedFabric,
+) -> Result<Rc<dyn Fabric<MemoryAccess>>, SimError> {
+    let top = engine.top();
+    let model: Rc<dyn Fabric<MemoryAccess>> = match fabric.kind {
+        FabricKind::Functional => {
+            FunctionalFabric::new_and_register(engine, clock, top, &fabric.name, fabric.config)?
+        }
+        FabricKind::Routed => RoutedFabric::new_and_register(
+            engine,
+            clock,
+            top,
+            &fabric.name,
+            fabric.config,
+            fabric.routing,
+        )?,
+    };
+    Ok(model)
 }
 
 fn assign_device_ids(cfg: &PlatformConfig) -> Result<DeviceIds, SimError> {
