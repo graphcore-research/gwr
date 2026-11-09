@@ -178,6 +178,8 @@ fn fixture_with_request_gate(
         stats: pe.stats.clone(),
         activity_lanes: pe.activity_lanes.clone(),
         flop_monitor: None,
+        #[cfg(feature = "functional")]
+        functional: None,
     };
     (runner, memory, completed, cache)
 }

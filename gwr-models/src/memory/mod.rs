@@ -25,11 +25,21 @@ use crate::log_stats;
 use crate::memory::traits::{AccessMemory, ReadMemory};
 
 pub mod atomic;
+#[cfg(feature = "functional")]
+mod functional;
+#[cfg(feature = "functional")]
+pub(crate) mod functional_value;
 pub mod memory_access;
 pub mod memory_access_gen;
 pub mod memory_map;
 mod service;
 pub mod traits;
+#[cfg(feature = "functional")]
+pub use functional::{FunctionalCheck, FunctionalMemory};
+#[cfg(feature = "functional")]
+pub(crate) use functional::{FunctionalContext, FunctionalPacket};
+#[cfg(feature = "functional")]
+pub use functional_value::FunctionalValue;
 pub use service::{
     MAX_MEMORY_SERVICE_REQUESTS, MemoryServiceLaneSnapshot, MemoryServiceSnapshot, payload_by_lane,
 };
@@ -586,7 +596,7 @@ where
                 }
                 AccessType::WriteNonPostedRequest => {
                     self.stats.borrow_mut().bytes_written += payload_bytes;
-                    let response = access.to_ack()?;
+                    let response = access.to_response(self)?;
                     response_tx.put(response)?.await;
                 }
                 AccessType::ReadResponse
@@ -612,5 +622,9 @@ where
 {
     fn read(&self) -> Vec<u8> {
         Vec::new()
+    }
+    #[cfg(feature = "functional")]
+    fn supports_functional(&self) -> bool {
+        self.atomic.is_none()
     }
 }

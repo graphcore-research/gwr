@@ -66,6 +66,17 @@ impl TaskRunner {
             Assignment(usize),
             Store,
         }
+        #[cfg(feature = "functional")]
+        let tile_runner = self.functional.as_ref().map(|context| {
+            let mut runner = self.clone();
+            runner.functional = Some(context.fresh());
+            runner
+        });
+        #[cfg(feature = "functional")]
+        let runner = tile_runner.as_ref().unwrap_or(self);
+        #[cfg(not(feature = "functional"))]
+        let runner = self;
+
         let indexed_ranges = config
             .program
             .indexed_metadata_inputs
@@ -75,7 +86,7 @@ impl TaskRunner {
                     .map(|ranges| (name.clone(), ranges))
             })
             .collect::<Result<std::collections::BTreeMap<_, _>, SimError>>()?;
-        let group = self
+        let group = runner
             .activity_lanes
             .create_group(&format!("{} tile {:?}", config.id, tile.output_intervals));
         let TileStorage {
@@ -84,7 +95,7 @@ impl TaskRunner {
             local_allocation,
             arena,
             ..
-        } = tile_storage(config, region, &tile, self.sram_bytes)?;
+        } = tile_storage(config, region, &tile, runner.sram_bytes)?;
         let local_footprints = if config.program.local_round_policy.is_some() {
             let prefix = super::super::local_payload::boundary_arena_bytes(config)?;
             if prefix.checked_add(local_allocation.arena_bytes) != Some(arena) {
@@ -101,10 +112,10 @@ impl TaskRunner {
         } else {
             None
         };
-        let _reservation = self.sram.reserve(arena).await?;
+        let _reservation = runner.sram.reserve(arena).await?;
         {
-            let mut stats = self.stats.borrow_mut();
-            stats.peak_sram_bytes = stats.peak_sram_bytes.max(self.sram.used());
+            let mut stats = runner.stats.borrow_mut();
+            stats.peak_sram_bytes = stats.peak_sram_bytes.max(runner.sram.used());
         }
         let _ = admitted.send(());
         let mut active =
@@ -124,25 +135,27 @@ impl TaskRunner {
             let indexed = indexed_ranges.get(name).cloned();
             active.push(Box::pin(async move {
                 if let Some((ranges, bytes)) = indexed {
-                    self.staged_access_ranges(
-                        AccessType::ReadRequest,
-                        ranges,
-                        bytes,
-                        &self.activity_lanes.lsu_read,
-                        &format!("{} {name} read", config.id),
-                        group_ref,
-                    )
-                    .await?;
+                    runner
+                        .staged_access_ranges(
+                            AccessType::ReadRequest,
+                            ranges,
+                            bytes,
+                            &runner.activity_lanes.lsu_read,
+                            &format!("{} {name} read", config.id),
+                            group_ref,
+                        )
+                        .await?;
                 } else {
-                    self.staged_access_ranges(
-                        AccessType::ReadRequest,
-                        view.address_ranges(),
-                        view.layout().num_access_bytes(),
-                        &self.activity_lanes.lsu_read,
-                        &format!("{} {name} read", config.id),
-                        group_ref,
-                    )
-                    .await?;
+                    runner
+                        .staged_access_ranges(
+                            AccessType::ReadRequest,
+                            view.address_ranges(),
+                            view.layout().num_access_bytes(),
+                            &runner.activity_lanes.lsu_read,
+                            &format!("{} {name} read", config.id),
+                            group_ref,
+                        )
+                        .await?;
                 }
                 Ok(TileActionDone::Load(name.clone()))
             }));
@@ -201,24 +214,33 @@ impl TaskRunner {
                 pending.remove(&index);
                 active.push(Box::pin(async move {
                     if let Some(footprints) = local_footprints_ref {
-                        self.local_payload_phase(
-                            super::super::local_payload::LocalPayloadDirection::Read,
-                            footprints[index].read_bytes,
-                            &format!("{} assignment{index} local read", config.id),
-                            group_ref,
-                        )
-                        .await?;
+                        runner
+                            .local_payload_phase(
+                                super::super::local_payload::LocalPayloadDirection::Read,
+                                footprints[index].read_bytes,
+                                &format!("{} assignment{index} local read", config.id),
+                                group_ref,
+                            )
+                            .await?;
                     }
-                    self.run_program_assignment(config, region, tile_ref, group_ref, index)
+                    runner
+                        .run_program_assignment(config, region, tile_ref, group_ref, index)
                         .await?;
+                    #[cfg(feature = "functional")]
+                    if let Some(context) = &runner.functional {
+                        super::super::functional::evaluate_assignment(
+                            context, config, region, tile_ref, index,
+                        )?;
+                    }
                     if let Some(footprints) = local_footprints_ref {
-                        self.local_payload_phase(
-                            super::super::local_payload::LocalPayloadDirection::Write,
-                            footprints[index].write_bytes,
-                            &format!("{} assignment{index} local write", config.id),
-                            group_ref,
-                        )
-                        .await?;
+                        runner
+                            .local_payload_phase(
+                                super::super::local_payload::LocalPayloadDirection::Write,
+                                footprints[index].write_bytes,
+                                &format!("{} assignment{index} local write", config.id),
+                                group_ref,
+                            )
+                            .await?;
                     }
                     Ok(TileActionDone::Assignment(index))
                 }));
@@ -233,16 +255,17 @@ impl TaskRunner {
                 let name = &config.program.outputs[index];
                 let view = &outputs[index];
                 active.push(Box::pin(async move {
-                    self.staged_access_ranges(
-                        AccessType::WriteNonPostedRequest,
-                        view.address_ranges(),
-                        view.layout().num_access_bytes(),
-                        &self.activity_lanes.lsu_write,
-                        &format!("{} {name} write", config.id),
-                        group_ref,
-                    )
-                    .await?;
-                    self.record_write(view)?;
+                    runner
+                        .staged_access_ranges(
+                            AccessType::WriteNonPostedRequest,
+                            view.address_ranges(),
+                            view.layout().num_access_bytes(),
+                            &runner.activity_lanes.lsu_write,
+                            &format!("{} {name} write", config.id),
+                            group_ref,
+                        )
+                        .await?;
+                    runner.record_write(view)?;
                     Ok(TileActionDone::Store)
                 }));
             }

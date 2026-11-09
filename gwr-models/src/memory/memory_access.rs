@@ -29,6 +29,8 @@ pub struct MemoryAccess {
     cache_fill_token: Option<CacheFillToken>,
     coherence_op: Option<CoherenceOp>,
     coherence_token: Option<CoherenceToken>,
+    #[cfg(feature = "functional")]
+    pub(crate) functional: Option<crate::memory::FunctionalPacket>,
 
     /// Non-data overhead. Control/Read accesses don't contain any data.
     overhead_size_bytes: usize,
@@ -74,7 +76,35 @@ impl AccessMemory for MemoryAccess {
         self.access_size_bytes
     }
 
-    fn to_response(&self, _mem: &impl ReadMemory) -> Result<Self, SimError> {
+    fn to_response(&self, mem: &impl ReadMemory) -> Result<Self, SimError> {
+        #[cfg(not(feature = "functional"))]
+        let _ = mem;
+        #[cfg(feature = "functional")]
+        if let Some(packet) = &self.functional {
+            if !mem.supports_functional()
+                || self.coherence_op.is_some()
+                || self.coherence_token.is_some()
+            {
+                return sim_error!(
+                    "functional mode does not support caches, atomic memory or coherence"
+                );
+            }
+            let response_type = match self.access_type {
+                AccessType::ReadRequest => {
+                    self.access_size_bytes
+                        .checked_add(self.overhead_size_bytes)
+                        .ok_or_else(|| {
+                            SimError("read response byte size overflows usize".into())
+                        })?;
+                    AccessType::ReadResponse
+                }
+                AccessType::WriteNonPostedRequest => AccessType::WriteNonPostedResponse,
+                _ => return sim_error!("unsupported functional packet response"),
+            };
+            let mut response = self.build_response(response_type);
+            response.functional = Some(packet.respond(self.access_type)?);
+            return Ok(response);
+        }
         if self.access_type != AccessType::ReadRequest {
             return self.to_ack();
         }
@@ -85,6 +115,10 @@ impl AccessMemory for MemoryAccess {
     }
 
     fn to_ack(&self) -> Result<Self, SimError> {
+        #[cfg(feature = "functional")]
+        if self.functional.is_some() {
+            return sim_error!("functional packets require a memory-backed response");
+        }
         let response_type = match self.access_type {
             AccessType::Control => AccessType::Control,
             AccessType::WriteNonPostedRequest => AccessType::WriteNonPostedResponse,
@@ -119,6 +153,10 @@ impl CacheAccess for MemoryAccess {
                 .is_none()
         {
             return Err(SimError("invalid cache fill range/type".into()));
+        }
+        #[cfg(feature = "functional")]
+        if self.functional.is_some() {
+            return sim_error!("functional mode does not support cache fragments");
         }
         let mut fragment = Self::new(
             &self.created_by,
@@ -187,6 +225,10 @@ impl CoherentAccess for MemoryAccess {
         {
             return sim_error!("invalid coherence fragment range");
         }
+        #[cfg(feature = "functional")]
+        if self.functional.is_some() {
+            return sim_error!("functional mode does not support coherence fragments");
+        }
         let mut child_request = Self::new(
             &self.created_by,
             access_type,
@@ -253,6 +295,8 @@ impl MemoryAccess {
             cache_fill_token: None,
             coherence_op: None,
             coherence_token: None,
+            #[cfg(feature = "functional")]
+            functional: None,
             overhead_size_bytes,
         };
         track_create_object!(
@@ -471,5 +515,132 @@ mod coherence_tests {
         fn read(&self) -> Vec<u8> {
             vec![0; LINE_SIZE_BYTES]
         }
+    }
+}
+
+#[cfg(all(test, feature = "functional"))]
+mod functional_tests {
+    use gwr_engine::engine::Engine;
+    use gwr_engine::port::{InPort, OutPort};
+
+    use super::*;
+    use crate::memory::{FunctionalContext, FunctionalMemory, Memory, MemoryConfig};
+
+    #[test]
+    fn nonposted_value_writes_commit_before_legacy_and_service_acknowledgements() {
+        for arrival_aware in [false, true] {
+            let mut engine = Engine::new(&gwr_track::tracker::dev_null_tracker());
+            let clock = engine.default_clock();
+            let config = MemoryConfig::new(0, 64, 16, 1);
+            let config = if arrival_aware {
+                config.with_arrival_aware_service(2)
+            } else {
+                config
+            };
+            let memory =
+                Memory::new_and_register(&engine, &clock, engine.top(), "memory", config).unwrap();
+            let backing = Rc::new(FunctionalMemory::default());
+            backing.write_f32(0, &[1.0]).unwrap();
+            let context = FunctionalContext::new(backing.clone());
+            context.local.write_f32(0, &[7.5]).unwrap();
+            let mut request = MemoryAccess::new(
+                engine.top(),
+                AccessType::WriteNonPostedRequest,
+                4,
+                0,
+                32,
+                DeviceId(1),
+                DeviceId(2),
+                16,
+            );
+            request.functional = Some(
+                context
+                    .packet(AccessType::WriteNonPostedRequest, 0, 4)
+                    .unwrap(),
+            );
+            assert!(request.to_ack().is_err());
+            assert_eq!(backing.read_f32(0, 1).unwrap(), [1.0]);
+            let id = request.id();
+            let mut tx = OutPort::new(engine.top(), "requests");
+            tx.connect(memory.port_rx()).unwrap();
+            let mut rx: InPort<MemoryAccess> =
+                InPort::new(&engine, &clock, engine.top(), "responses");
+            memory.connect_port_tx(rx.state()).unwrap();
+            engine.spawner().spawn(async move {
+                tx.put(request)?.await;
+                Ok(())
+            });
+            let received = Rc::new(std::cell::Cell::new(false));
+            let received_by_task = received.clone();
+            engine.spawner().spawn(async move {
+                let response = rx.get()?.await;
+                assert_eq!(response.access_type(), AccessType::WriteNonPostedResponse);
+                assert_eq!(response.id(), id);
+                assert_eq!(response.dst_device(), DeviceId(2));
+                assert_eq!(response.total_bytes(), 16);
+                assert!(response.functional.is_some());
+                assert_eq!(backing.read_f32(0, 1).unwrap(), [7.5]);
+                received_by_task.set(true);
+                Ok(())
+            });
+            engine.run().unwrap();
+            assert!(received.get());
+            assert_eq!(memory.bytes_written(), 4);
+        }
+    }
+
+    #[test]
+    fn value_packets_reject_coherence_children_and_unsupported_endpoints() {
+        struct UnsupportedMemory;
+        impl ReadMemory for UnsupportedMemory {
+            fn read(&self) -> Vec<u8> {
+                Vec::new()
+            }
+        }
+        struct ValueMemory;
+        impl ReadMemory for ValueMemory {
+            fn read(&self) -> Vec<u8> {
+                Vec::new()
+            }
+            fn supports_functional(&self) -> bool {
+                true
+            }
+        }
+        let engine = Engine::new(&gwr_track::tracker::dev_null_tracker());
+        let backing = Rc::new(FunctionalMemory::default());
+        backing.write_f32(0, &[1.0]).unwrap();
+        let context = FunctionalContext::new(backing);
+        let mut request = MemoryAccess::new(
+            engine.top(),
+            AccessType::ReadRequest,
+            4,
+            0,
+            32,
+            DeviceId(1),
+            DeviceId(2),
+            16,
+        );
+        request.functional = Some(context.packet(AccessType::ReadRequest, 0, 4).unwrap());
+        assert!(request.to_response(&UnsupportedMemory).is_err());
+        let token = CacheFillToken {
+            owner: Rc::new(()),
+            ordinal: 0,
+        };
+        assert!(request.cache_read_fragment(0, 4, token.clone()).is_err());
+        assert!(
+            request
+                .build_coherence_child_request(AccessType::ReadRequest, 0, 4, token)
+                .is_err()
+        );
+        let response = request.to_response(&ValueMemory).unwrap();
+        response
+            .functional
+            .unwrap()
+            .receive(AccessType::ReadResponse)
+            .unwrap();
+        assert_eq!(context.local.read_f32(0, 1).unwrap(), [1.0]);
+        let coherent = request.with_coherence_op(Some(CoherenceOp::SharedRead));
+        assert!(coherent.to_response(&ValueMemory).is_err());
+        assert_eq!(coherent.coherence_op(), Some(CoherenceOp::SharedRead));
     }
 }

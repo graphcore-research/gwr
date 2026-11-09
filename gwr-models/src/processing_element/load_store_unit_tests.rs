@@ -522,3 +522,37 @@ fn striped_source_vectors_validate_boundaries_and_actual_target_before_issue() {
             .all(|slot| !slot.in_use)
     );
 }
+
+#[cfg(feature = "functional")]
+#[test]
+fn functional_issuer_rejects_its_own_striped_map() {
+    use crate::memory::memory_map::MemoryRegion;
+    let mut engine = Engine::default();
+    let mut map = MemoryMap::new();
+    map.insert_striped(
+        vec![
+            MemoryRegion {
+                start: 0,
+                end: 127,
+                device: DeviceId(0),
+            },
+            MemoryRegion {
+                start: 128,
+                end: 255,
+                device: DeviceId(1),
+            },
+        ],
+        64,
+    )
+    .unwrap();
+    let striped = fixture_with_map(&mut engine, map);
+    assert!(
+        striped
+            .validate_functional_mapping()
+            .unwrap_err()
+            .to_string()
+            .contains("striped")
+    );
+    let ordinary = fixture(&mut engine);
+    ordinary.validate_functional_mapping().unwrap();
+}

@@ -1,0 +1,29 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+memory_maps:
+  - name: mm
+    devices: [mem]
+operation_classes:
+  matrix: { operations: [matrix_mac], arity: 2, flops_per_op: 2 }
+processing_elements:
+  - name: pe0
+    memory_map: mm
+    config:
+      sram_bytes: 256
+      compute:
+        engines:
+          matrix:
+            capabilities:
+              [
+                {
+                  class: matrix,
+                  input_dtypes: [[fp32, fp32]],
+                  ops_per_tick: 10,
+                },
+              ]
+memories:
+  - name: mem
+    kind: hbm
+    base_address: 0
+    config: { capacity_bytes: 1MiB }
+connections:
+  - connect: [pe.pe0, mem.mem]
