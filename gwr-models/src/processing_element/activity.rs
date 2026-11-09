@@ -13,6 +13,7 @@ pub(super) struct ProcessingElementActivityLanes {
     pub(super) compute_wait: Rc<RefCell<ActivityLanes>>,
     pub(super) lsu_read: Rc<RefCell<ActivityLanes>>,
     pub(super) lsu_write: Rc<RefCell<ActivityLanes>>,
+    pub(super) local_payload: Rc<RefCell<ActivityLanes>>,
 }
 
 impl ProcessingElementActivityLanes {
@@ -20,7 +21,7 @@ impl ProcessingElementActivityLanes {
         Self {
             entity: entity.clone(),
             compute: model
-                .execution_unit_names()
+                .engine_names()
                 .iter()
                 .map(|name| {
                     Rc::new(RefCell::new(ActivityLanes::new(
@@ -37,6 +38,10 @@ impl ProcessingElementActivityLanes {
                 entity.clone(),
                 "lane::lsu_read",
             ))),
+            local_payload: Rc::new(RefCell::new(ActivityLanes::new(
+                entity.clone(),
+                "lane::local_payload",
+            ))),
             lsu_write: Rc::new(RefCell::new(ActivityLanes::new(entity, "lane::lsu_write"))),
         }
     }
@@ -50,15 +55,6 @@ pub(crate) struct ActivityLanes {
     entity: Rc<Entity>,
     track_name: String,
     lanes: Vec<Lane>,
-}
-
-impl Drop for ActivityLaneGuard {
-    fn drop(&mut self) {
-        if self.active {
-            self.lanes.borrow_mut().end(self.lane_idx);
-            self.active = false;
-        }
-    }
 }
 
 impl ActivityLanes {
@@ -93,6 +89,11 @@ impl ActivityLanes {
     }
 
     #[cfg(test)]
+    pub(crate) fn allocated_count_for_test(&self) -> usize {
+        self.lanes.len()
+    }
+
+    #[cfg(test)]
     pub(crate) fn active_count_for_test(&self) -> usize {
         self.lanes.iter().filter(|lane| lane.active).count()
     }
@@ -118,6 +119,15 @@ pub(super) struct ActivityLaneGuard {
     lanes: Rc<RefCell<ActivityLanes>>,
     lane_idx: usize,
     active: bool,
+}
+
+impl Drop for ActivityLaneGuard {
+    fn drop(&mut self) {
+        if self.active {
+            self.lanes.borrow_mut().end(self.lane_idx);
+            self.active = false;
+        }
+    }
 }
 
 struct Lane {

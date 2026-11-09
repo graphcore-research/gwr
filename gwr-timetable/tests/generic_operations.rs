@@ -1,30 +1,27 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+use std::rc::Rc;
+
+use gwr_engine::engine::Engine;
+use gwr_models::processing_element::dispatch::Dispatch;
+use gwr_platform::Platform;
+use gwr_timetable::Timetable;
 use gwr_timetable::timetable_file::TimetableFile;
 
-#[allow(
-    dead_code,
-    reason = "This suite uses only the platform from the shared simulation fixture."
-)]
-mod common;
-use common::run_timetable;
-
 #[test]
-fn declared_unary_operation_reports_operation_counts_and_memory_traffic() {
-    let platform_yaml = r"
+fn named_unary_operation_uses_declared_class_rate() {
+    let platform_yaml = r#"
 operation_classes:
   trig: { operations: [sin, cos, tan], arity: 1 }
 memory_maps:
   - { name: mm, devices: [mem] }
-address_spaces:
-  - { name: mm, memory_map: mm, access_bytes: 32 }
 processing_elements:
   - name: pe0
-    address_space: mm
+    memory_map: mm
     config:
       sram_bytes: 1KiB
       compute:
-        execution_units:
+        engines:
           trig_engine:
             capabilities:
               - { class: trig, input_dtypes: [[fp32]], ops_per_tick: 2 }
@@ -32,8 +29,8 @@ memories:
   - { name: mem, kind: hbm, base_address: 0, config: { capacity_bytes: 1MiB, delay_ticks: 2 } }
 connections:
   - { connect: [pe.pe0, mem.mem] }
-";
-    let timetable_yaml = r"
+"#;
+    let timetable_yaml = r#"
 nodes:
   - { id: A, kind: tensor, config: { addr: 0x1000, dtype: fp32, shape: [4] } }
   - id: sin_node
@@ -45,19 +42,25 @@ nodes:
       assignments:
         - output: Y
           axes: [i]
-          expr:
-            sin:
-              - read: { tensor: A, indices: [i] }
+          expr: { sin: { args: [{ read: { tensor: A, indices: [i] } }] } }
   - { id: Y, kind: tensor, config: { addr: 0x2000, dtype: fp32, shape: [4] } }
 edges:
-  - { from: A, to: sin_node.A, kind: data }
-  - { from: sin_node.Y, to: Y, kind: data }
-";
-    let simulation = run_timetable(
-        platform_yaml,
-        TimetableFile::from_string(timetable_yaml).unwrap(),
-    );
-    let platform = simulation.platform;
+  - { from: A, to: sin_node.0, kind: data }
+  - { from: sin_node.0, to: Y, kind: data }
+"#;
+    let graph = TimetableFile::from_string(timetable_yaml)
+        .unwrap()
+        .into_graph()
+        .unwrap();
+    let (_test_tracker, tracker) = gwr_track::test_init!(1000);
+    let mut engine = Engine::new(&tracker);
+    let clock = engine.default_clock();
+    let platform = Rc::new(Platform::from_string(&engine, &clock, platform_yaml).unwrap());
+    let timetable = Rc::new(Timetable::new(engine.top(), graph, &platform).unwrap());
+    let dispatcher: Rc<dyn Dispatch> = timetable.clone();
+    platform.attach_dispatcher(&dispatcher);
+    engine.run().unwrap();
+    timetable.check_tasks_complete().unwrap();
     let counts = platform.pe("pe0").unwrap().machine_ops();
     assert_eq!(counts.by_operation["sin"], 4);
     assert_eq!(counts.flop_equivalents, 4);

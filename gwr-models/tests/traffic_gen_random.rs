@@ -78,19 +78,22 @@ fn build_system(
     let memory_map = Rc::new(create_default_memory_map());
 
     let top = engine.top();
-    let data_generator = Box::new(Random::new(
-        top,
-        "random",
-        seed,
-        &memory_map,
-        SRC_ADDR,
-        base_addr,
-        end_addr,
-        alignment_mask,
-        OVERHEAD_SIZE_BYTES,
-        LINE_SIZE_BYTES,
-        num_to_send,
-    ));
+    let data_generator = Box::new(
+        Random::new(
+            top,
+            "random",
+            seed,
+            &memory_map,
+            SRC_ADDR,
+            base_addr,
+            end_addr,
+            alignment_mask,
+            OVERHEAD_SIZE_BYTES,
+            LINE_SIZE_BYTES,
+            num_to_send,
+        )
+        .unwrap(),
+    );
 
     let traffic_gen =
         MemoryAccessGen::new_and_register(&engine, &clock, top, "gen", data_generator).unwrap();

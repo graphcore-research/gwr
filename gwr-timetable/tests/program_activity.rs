@@ -1,26 +1,30 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
+use gwr_engine::engine::Engine;
+use gwr_models::processing_element::dispatch::Dispatch;
+use gwr_platform::Platform;
+use gwr_timetable::Timetable;
 use gwr_timetable::timetable_file::TimetableFile;
 
-#[allow(
-    dead_code,
-    reason = "This suite uses only the events from the shared simulation fixture."
-)]
-mod common;
-use common::run_timetable;
+#[test]
+fn compute_region_emits_tile_activity_on_pe() {
+    let (test_tracker, tracker) = gwr_track::test_init!(1000);
+    let mut engine = Engine::new(&tracker);
+    let clock = engine.default_clock();
+    let platform = Rc::new(Platform::from_string(&engine, &clock, PLATFORM_YAML).unwrap());
+    let timetable_file = TimetableFile::from_string(TIMETABLE_YAML).unwrap();
+    let graph = timetable_file.into_graph().unwrap();
+    let timetable = Rc::new(Timetable::new(engine.top(), graph, &platform).unwrap());
+    let dispatcher: Rc<dyn Dispatch> = timetable.clone();
+    platform.attach_dispatcher(&dispatcher);
 
-fn run_add_and_collect_events() -> Vec<String> {
-    run_timetable(
-        PLATFORM_YAML,
-        TimetableFile::from_string(TIMETABLE_YAML).unwrap(),
-    )
-    .tracker
-    .events()
-}
+    engine.run().unwrap();
+    timetable.check_tasks_complete().unwrap();
 
-fn assert_pe_activity_lanes_created(events: &[String]) {
+    let events = test_tracker.events();
     assert!(
         events
             .iter()
@@ -38,9 +42,6 @@ fn assert_pe_activity_lanes_created(events: &[String]) {
         ),
         "missing PE LSU write lane create event in {events:#?}"
     );
-}
-
-fn assert_add_tile_activities_emitted(events: &[String]) {
     assert!(
         events
             .iter()
@@ -71,15 +72,12 @@ fn assert_add_tile_activities_emitted(events: &[String]) {
             .any(|event| event.contains("activity begin add Y write")),
         "missing Y write activity begin event in {events:#?}"
     );
-}
-
-fn assert_tile_activities_share_a_group(events: &[String]) {
     let read_group =
-        activity_group(events, "activity begin add A read").expect("missing read group");
+        activity_group(&events, "activity begin add A read").expect("missing read group");
     let compute_group =
-        activity_group(events, "activity begin add Y compute").expect("missing compute group");
+        activity_group(&events, "activity begin add Y compute").expect("missing compute group");
     let write_group =
-        activity_group(events, "activity begin add Y write").expect("missing write group");
+        activity_group(&events, "activity begin add Y write").expect("missing write group");
     assert_eq!(read_group, compute_group);
     assert_eq!(compute_group, write_group);
     assert!(
@@ -94,20 +92,17 @@ memory_maps:
     devices:
       - mem0
 
-address_spaces:
-  - name: pe_address_space
-    memory_map: pe_memory_map
-    access_bytes: 32
 operation_classes:
   add: { operations: [add], arity: 2 }
 
 processing_elements:
   - name: pe0
-    address_space: pe_address_space
+    memory_map: pe_memory_map
     config:
+      lsu_access_bytes: 32
       sram_bytes: 64KiB
       compute:
-        execution_units:
+        engines:
           vector:
             capabilities: [{ class: add, ops_per_tick: 256 }]
 
@@ -135,7 +130,7 @@ connections:
       - mem.mem0
 ";
 
-const TIMETABLE_YAML: &str = r"
+const TIMETABLE_YAML: &str = "
 nodes:
   - id: input_a
     kind: tensor
@@ -159,10 +154,7 @@ nodes:
       assignments:
         - output: Y
           axes: [i]
-          expr:
-            add:
-              - read: { tensor: A, indices: [i] }
-              - read: { tensor: B, indices: [i] }
+          expr: { add: [{ read: { tensor: A, indices: [i] } }, { read: { tensor: B, indices: [i] } }] }
     pe: pe0
 
   - id: output
@@ -174,14 +166,14 @@ nodes:
 
 edges:
   - from: input_a
-    to: add.A
+    to: add.0
     kind: data
 
   - from: input_b
-    to: add.B
+    to: add.1
     kind: data
 
-  - from: add.Y
+  - from: add
     to: output
     kind: data
 ";
@@ -206,13 +198,4 @@ fn activity_group(events: &[String], activity_name: &str) -> Option<String> {
         }
     }
     None
-}
-
-#[test]
-fn compute_region_emits_tile_activity_on_pe() {
-    let events = run_add_and_collect_events();
-
-    assert_pe_activity_lanes_created(&events);
-    assert_add_tile_activities_emitted(&events);
-    assert_tile_activities_share_a_group(&events);
 }

@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use gwr_engine::types::AccessType;
+use gwr_engine::types::{AccessType, SimError};
 use gwr_track::entity::Entity;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -35,7 +35,7 @@ pub struct Random {
 
 impl Random {
     #[expect(clippy::too_many_arguments)]
-    #[must_use]
+    /// Construct a checked seeded stream without resampling invalid addresses.
     pub fn new(
         parent: &Rc<Entity>,
         name: &str,
@@ -48,9 +48,25 @@ impl Random {
         overhead_size_bytes: usize,
         access_size_bytes: usize,
         num_to_send: usize,
-    ) -> Self {
+    ) -> Result<Self, SimError> {
+        let alignment = (!alignment_mask)
+            .checked_add(1)
+            .filter(|a| a.is_power_of_two())
+            .ok_or_else(|| SimError("Unsupported random alignment mask".into()))?;
+        if end_addr <= base_addr {
+            return Err(SimError(
+                "Random generator requires a nonempty range".into(),
+            ));
+        }
+        let first = base_addr & alignment_mask;
+        let last = (end_addr - 1) & alignment_mask;
+        let count = u128::from(last - first) / u128::from(alignment) + 1;
+        super::validation::progression(memory_map, first, alignment, count, access_size_bytes)?;
+        memory_map
+            .resolve(src_addr)
+            .ok_or_else(|| SimError("Unmapped generator reply address".into()))?;
         let rng = StdRng::seed_from_u64(seed);
-        Self {
+        Ok(Self {
             entity: Rc::new(Entity::new(parent, name)),
             memory_map: memory_map.clone(),
             src_addr,
@@ -62,7 +78,7 @@ impl Random {
             num_to_send,
             num_sent: 0,
             rng,
-        }
+        })
     }
 }
 
@@ -75,14 +91,18 @@ impl Iterator for Random {
 
             let dst_addr =
                 ((self.rng.next_u64() % self.addr_range) + self.base_addr) & self.alignment_mask;
-            let (dst_device, _) = self.memory_map.lookup(dst_addr)?;
+            let resolved = self
+                .memory_map
+                .resolve_access(dst_addr, self.access_size_bytes)
+                .expect("validated generator geometry");
+            let dst_device = resolved.device;
             let (src_device, _) = self.memory_map.lookup(self.src_addr)?;
 
             let access = MemoryAccess::new(
                 &self.entity,
                 AccessType::ReadRequest,
                 self.access_size_bytes,
-                dst_addr,
+                resolved.physical_address,
                 self.src_addr,
                 dst_device,
                 src_device,

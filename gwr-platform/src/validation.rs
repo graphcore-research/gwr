@@ -5,13 +5,9 @@ use std::collections::{HashMap, HashSet};
 use gwr_engine::sim_error;
 use gwr_engine::types::{SimError, SimResult};
 
-use crate::builder::DEFAULT_ADDRESS_SPACE_ACCESS_BYTES;
+use crate::builder::EffectiveConfigs;
 use crate::connection_id::{CachePortId, ConnectionEndpointId, parse_connection_endpoint_id};
-use crate::resolved::{ModelConfigs, ResolvedPlatform};
-use crate::types::{
-    AddressRegionSection, AddressSpaceSection, CacheSection, FabricSection, MemoryMapSection,
-    MemorySection, PlatformConfig,
-};
+use crate::types::{CacheSection, FabricSection, MemoryMapSection, MemorySection, PlatformConfig};
 
 impl PlatformConfig {
     /// Validate platform properties that do not require building the simulator.
@@ -23,18 +19,19 @@ impl PlatformConfig {
     /// a physical memory is not aligned to a processing element's LSU access
     /// size or a cache's line size.
     pub fn validate(&self) -> SimResult {
-        self.resolve().map(drop)
+        self.validated().map(drop)
     }
 
-    pub(crate) fn resolve(&self) -> Result<ResolvedPlatform, SimError> {
+    pub(crate) fn validated(&self) -> Result<EffectiveConfigs, SimError> {
         let lookup = self.validation_lookup()?;
-        let effective = ModelConfigs::new(self)?;
-        Self::validate_memory_ranges(&effective)?;
+        let effective = EffectiveConfigs::new(self)?;
+        self.validate_memory_ranges(&effective)?;
         self.validate_references(&lookup)?;
-        self.validate_memory_fetch_alignment(&lookup, &effective)?;
-        let connections = self.validate_connections(&lookup, &effective)?;
-        self.validate_coherence(&effective, &connections)?;
-        ResolvedPlatform::new(self, effective, connections)
+        self.validate_memory_fetch_alignment(&effective)?;
+        self.validate_coherence(&effective)?;
+        self.validate_connections(&lookup, &effective)?;
+        crate::memory_mapping::validate(self, &effective)?;
+        Ok(effective)
     }
 
     fn validation_lookup(&self) -> Result<PlatformValidationLookup<'_>, SimError> {
@@ -65,11 +62,6 @@ impl PlatformConfig {
             collect_unique_sections("memory map", self.memory_maps.iter(), |memory_map| {
                 memory_map.name.as_str()
             })?;
-        let address_spaces = collect_unique_sections(
-            "address space",
-            self.address_spaces.iter(),
-            |address_space| address_space.name.as_str(),
-        )?;
         let caches = collect_unique_sections("cache", self.caches.iter().flatten(), |cache| {
             cache.name.as_str()
         })?;
@@ -95,7 +87,6 @@ impl PlatformConfig {
         Ok(PlatformValidationLookup {
             devices,
             memory_maps,
-            address_spaces,
             caches,
             fabrics,
         })
@@ -122,43 +113,29 @@ impl PlatformConfig {
             }
         }
 
-        for address_space in &self.address_spaces {
-            let Some(memory_map) = lookup.memory_maps.get(address_space.memory_map.as_str()) else {
-                return sim_error!(
-                    "Unknown memory map '{}' for address space '{}'",
-                    address_space.memory_map,
-                    address_space.name
-                );
-            };
-            let mut seen_devices = HashSet::new();
-            for region in address_space.address_regions.iter().flatten() {
-                let AddressRegionSection::Striped { devices } = region;
-                for name in devices {
-                    if !memory_map.devices.contains(name) {
-                        return sim_error!(
-                            "Address space '{}': Memory '{name}' in striped region is not in memory map '{}'",
-                            address_space.name,
-                            memory_map.name
-                        );
-                    }
-                    if !seen_devices.insert(name.as_str()) {
-                        return sim_error!(
-                            "Duplicate memory '{name}' in address space '{}'",
-                            address_space.name
-                        );
-                    }
+        for pe in self.processing_elements.iter().flatten() {
+            if let Some(map) = &pe.dma_memory_map {
+                if !lookup.memory_maps.contains_key(map.as_str()) {
+                    return sim_error!(
+                        "Unknown DMA memory map '{map}' for processing element '{}'",
+                        pe.name
+                    );
+                }
+                let endpoint = format!("{}.dma", pe.name);
+                let connected = self.connections.iter().flatten().flat_map(|c| &c.connect).any(|source| {
+                    matches!(parse_connection_endpoint_id(source), Ok(ConnectionEndpointId::Pe { name }) if name == endpoint)
+                });
+                if !connected {
+                    return sim_error!(
+                        "DMA memory map for '{}' requires a connected independent DMA issuer",
+                        pe.name
+                    );
                 }
             }
-        }
-
-        for pe in self.processing_elements.iter().flatten() {
-            if !lookup
-                .address_spaces
-                .contains_key(pe.address_space.as_str())
-            {
+            if !lookup.memory_maps.contains_key(pe.memory_map.as_str()) {
                 return sim_error!(
-                    "Unknown address space '{}' for processing element '{}'",
-                    pe.address_space,
+                    "Unknown memory map '{}' for processing element '{}'",
+                    pe.memory_map,
                     pe.name
                 );
             }
@@ -169,9 +146,8 @@ impl PlatformConfig {
     fn validate_connections(
         &self,
         lookup: &PlatformValidationLookup<'_>,
-        effective: &ModelConfigs,
-    ) -> Result<Vec<[ConnectionEndpointId; 2]>, SimError> {
-        let mut connections = Vec::new();
+        effective: &EffectiveConfigs,
+    ) -> SimResult {
         let mut connected_ports = HashSet::new();
         for connection in self.connections.iter().flatten() {
             let [from_source, to_source] = connection.connect.as_slice() else {
@@ -182,97 +158,42 @@ impl PlatformConfig {
                 );
             };
 
-            connections.push(
-                validate_connection(
-                    lookup,
-                    effective,
-                    from_source,
-                    to_source,
-                    &mut connected_ports,
-                )
-                .map_err(|error| {
-                    SimError(format!(
-                        "Connection '{from_source}' -> '{to_source}': {error}"
-                    ))
-                })?,
-            );
-        }
-        Ok(connections)
-    }
-
-    fn validate_memory_fetch_alignment(
-        &self,
-        lookup: &PlatformValidationLookup<'_>,
-        effective: &ModelConfigs,
-    ) -> SimResult {
-        self.validate_address_space_memory_alignment(lookup)?;
-        self.validate_physical_memory_fetch_alignment(lookup, effective)
-    }
-
-    /// Check the backing memories of every address space, including unused
-    /// ones.
-    fn validate_address_space_memory_alignment(
-        &self,
-        lookup: &PlatformValidationLookup<'_>,
-    ) -> SimResult {
-        for section in &self.address_spaces {
-            let bytes = section
-                .access_size_bytes()
-                .map_err(|error| SimError(format!("Address space '{}': {error}", section.name)))?;
-            let memory_map = lookup.memory_maps[section.memory_map.as_str()];
-            for name in &memory_map.devices {
-                let memory = lookup
-                    .memory(name)
-                    .expect("memory map references validated");
-                let start = memory.base_address;
-                let size = memory.config.capacity_bytes;
-                if !start.is_multiple_of(bytes) {
-                    return sim_error!(
-                        "Address space '{}': Memory '{name}': Region start {start} not aligned to access size {bytes}",
-                        section.name
-                    );
-                }
-                if !size.is_multiple_of(bytes) {
-                    return sim_error!(
-                        "Address space '{}': Memory '{name}': Region size {size} not a multiple of access size {bytes}",
-                        section.name
-                    );
-                }
-            }
+            validate_connection(
+                lookup,
+                effective,
+                from_source,
+                to_source,
+                &mut connected_ports,
+            )
+            .map_err(|error| {
+                SimError(format!(
+                    "Connection '{from_source}' -> '{to_source}': {error}"
+                ))
+            })?;
         }
         Ok(())
     }
 
-    /// Check all physical memories against each PE and cache fetch size.
-    /// Checking each size individually avoids computing an LCM that could
-    /// overflow.
-    fn validate_physical_memory_fetch_alignment(
-        &self,
-        lookup: &PlatformValidationLookup<'_>,
-        effective: &ModelConfigs,
-    ) -> SimResult {
-        let fetches = self
-            .processing_elements
-            .iter()
-            .flatten()
-            .map(|pe| {
-                let bytes = lookup.address_spaces[pe.address_space.as_str()]
-                    .access_bytes
-                    .unwrap_or(DEFAULT_ADDRESS_SPACE_ACCESS_BYTES);
-                (
-                    format!(
-                        "Processing element '{}', address space '{}', LSU access size {}",
-                        pe.name, pe.address_space, bytes,
-                    ),
-                    bytes,
-                )
-            })
-            .chain(effective.caches.iter().map(|cache| {
-                (
-                    format!("cache '{}'", cache.section.name),
-                    cache.config.line_size_bytes(),
-                )
-            }));
+    /// Validate every fetch size, including non-power-of-two sizes, without
+    /// computing an LCM that could overflow. Applies to all physical memories.
+    fn validate_memory_fetch_alignment(&self, effective: &EffectiveConfigs) -> SimResult {
+        let fetches =
+            self.processing_elements
+                .iter()
+                .flatten()
+                .zip(&effective.processing_elements)
+                .map(|(pe, config)| {
+                    (
+                        format!(
+                            "Processing element '{}', memory map '{}', LSU access size {}",
+                            pe.name, pe.memory_map, config.lsu_access_bytes,
+                        ),
+                        config.lsu_access_bytes,
+                    )
+                })
+                .chain(self.caches.iter().flatten().zip(&effective.caches).map(
+                    |(cache, config)| (format!("cache '{}'", cache.name), config.line_size_bytes()),
+                ));
         for (source, bytes) in fetches {
             let bytes = u64::try_from(bytes)
                 .map_err(|error| SimError(format!("{source} fetch size: {error}")))?;
@@ -298,17 +219,19 @@ impl PlatformConfig {
         Ok(())
     }
 
-    fn validate_memory_ranges(effective: &ModelConfigs) -> SimResult {
-        let mut ranges = effective
+    fn validate_memory_ranges(&self, effective: &EffectiveConfigs) -> SimResult {
+        let mut ranges = self
             .memories
             .iter()
-            .map(|memory| {
-                let range = memory.config.address_range().map_err(|error| {
-                    SimError(format!("Memory '{}': {error}", memory.section.name))
-                })?;
-                Ok((memory.section, *range.end()))
+            .flatten()
+            .zip(&effective.memories)
+            .map(|(memory, config)| {
+                let range = config
+                    .address_range()
+                    .map_err(|error| SimError(format!("Memory '{}': {error}", memory.name)))?;
+                Ok((memory, *range.end()))
             })
-            .collect::<Result<Vec<_>, SimError>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
         ranges.sort_by_key(|(memory, _)| memory.base_address);
 
         for pair in ranges.windows(2) {
@@ -345,7 +268,6 @@ enum PlatformDevice<'a> {
 struct PlatformValidationLookup<'a> {
     devices: HashMap<&'a str, PlatformDevice<'a>>,
     memory_maps: HashMap<&'a str, &'a MemoryMapSection>,
-    address_spaces: HashMap<&'a str, &'a AddressSpaceSection>,
     caches: HashMap<&'a str, &'a CacheSection>,
     fabrics: HashMap<&'a str, FabricReference<'a>>,
 }
@@ -355,7 +277,7 @@ impl PlatformValidationLookup<'_> {
         &self,
         endpoint: &ConnectionEndpointId,
         source: &str,
-        effective: &ModelConfigs,
+        effective: &EffectiveConfigs,
     ) -> SimResult {
         match endpoint {
             ConnectionEndpointId::Null => Ok(()),
@@ -401,6 +323,7 @@ impl PlatformValidationLookup<'_> {
     }
 
     fn processing_element_exists(&self, name: &str) -> bool {
+        let name = name.strip_suffix(".dma").unwrap_or(name);
         matches!(
             self.devices.get(name),
             Some(PlatformDevice::ProcessingElement)
@@ -417,27 +340,17 @@ impl PlatformValidationLookup<'_> {
 
 fn validate_connection(
     lookup: &PlatformValidationLookup<'_>,
-    effective: &ModelConfigs,
+    effective: &EffectiveConfigs,
     from_source: &str,
     to_source: &str,
     connected_ports: &mut HashSet<String>,
-) -> Result<[ConnectionEndpointId; 2], SimError> {
-    let mut from = parse_connection_endpoint_id(from_source)?;
-    let mut to = parse_connection_endpoint_id(to_source)?;
+) -> SimResult {
+    let from = parse_connection_endpoint_id(from_source)?;
+    let to = parse_connection_endpoint_id(to_source)?;
     lookup.validate_port_endpoint(&from, from_source, effective)?;
     lookup.validate_port_endpoint(&to, to_source, effective)?;
     validate_port_endpoint_pair(&from, &to)?;
-    let normalize = |endpoint: &mut ConnectionEndpointId, other: &ConnectionEndpointId, is_from| {
-        if let ConnectionEndpointId::Cache { port, .. } = endpoint
-            && port.is_none()
-        {
-            *port = Some(cache_connection_port(other, is_from));
-        }
-    };
-    normalize(&mut from, &to, true);
-    normalize(&mut to, &from, false);
-    validate_ports_available(&from, &to, connected_ports)?;
-    Ok([from, to])
+    validate_ports_available(&from, &to, connected_ports)
 }
 
 fn insert_device<'a>(
@@ -471,11 +384,7 @@ fn validate_ports_available(
     to: &ConnectionEndpointId,
     connected_ports: &mut HashSet<String>,
 ) -> SimResult {
-    for endpoint in [from, to] {
-        if matches!(endpoint, ConnectionEndpointId::Null) {
-            continue;
-        }
-        let port = endpoint_port(endpoint);
+    for port in connection_ports(from, to) {
         if !connected_ports.insert(port.clone()) {
             return sim_error!("Port '{port}' is connected more than once");
         }
@@ -483,7 +392,21 @@ fn validate_ports_available(
     Ok(())
 }
 
-fn endpoint_port(endpoint: &ConnectionEndpointId) -> String {
+fn connection_ports(from: &ConnectionEndpointId, to: &ConnectionEndpointId) -> Vec<String> {
+    [
+        (!matches!(from, ConnectionEndpointId::Null)).then(|| endpoint_port(from, to, true)),
+        (!matches!(to, ConnectionEndpointId::Null)).then(|| endpoint_port(to, from, false)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+fn endpoint_port(
+    endpoint: &ConnectionEndpointId,
+    other: &ConnectionEndpointId,
+    is_from: bool,
+) -> String {
     match endpoint {
         ConnectionEndpointId::Null => unreachable!("null has no port to reserve"),
         ConnectionEndpointId::Pe { name } => format!("pe.{name}"),
@@ -496,17 +419,28 @@ fn endpoint_port(endpoint: &ConnectionEndpointId) -> String {
             port,
         } => format!("fabric.{fabric}@({column},{row}).{port}"),
         ConnectionEndpointId::Cache { name, port } => {
-            let port = port.expect("cache port was resolved before reservation");
+            let port = cache_connection_port(port.as_ref(), other, is_from);
             format!("cache.{name}.{port}")
         }
     }
 }
 
-fn cache_connection_port(other: &ConnectionEndpointId, is_from: bool) -> CachePortId {
+fn cache_connection_port(
+    port: Option<&CachePortId>,
+    other: &ConnectionEndpointId,
+    is_from: bool,
+) -> &'static str {
+    if let Some(port) = port {
+        return port.as_str();
+    }
     match other {
-        ConnectionEndpointId::Pe { .. } => CachePortId::Dev,
-        ConnectionEndpointId::Cache { .. } if !is_from => CachePortId::Dev,
-        _ => CachePortId::Mem,
+        ConnectionEndpointId::Null => "mem",
+        ConnectionEndpointId::Pe { .. } => "dev",
+        ConnectionEndpointId::Cache { .. } if is_from => "mem",
+        ConnectionEndpointId::Cache { .. } => "dev",
+        ConnectionEndpointId::Mem { .. }
+        | ConnectionEndpointId::CoherencyManager { .. }
+        | ConnectionEndpointId::FabricPort { .. } => "mem",
     }
 }
 
@@ -546,10 +480,9 @@ fn validate_port_endpoint_pair(
         }
         (ConnectionEndpointId::Cache { port, .. }, ConnectionEndpointId::FabricPort { .. })
         | (ConnectionEndpointId::FabricPort { .. }, ConnectionEndpointId::Cache { port, .. }) => {
-            validate_cache_mem_port(
-                port.as_ref(),
-                "Cache should connect the 'mem' port to a Fabric",
-            )
+            // Explicit dev supports shared upstream fabrics; omitted stays mem.
+            let _ = port;
+            Ok(())
         }
         (ConnectionEndpointId::Cache { port, .. }, ConnectionEndpointId::Mem { .. })
         | (ConnectionEndpointId::Mem { .. }, ConnectionEndpointId::Cache { port, .. }) => {
@@ -598,13 +531,13 @@ fn validate_cache_mem_port(port: Option<&CachePortId>, message: &str) -> SimResu
 fn validate_fabric_port(
     source: &str,
     fabric: &FabricReference<'_>,
-    effective: &ModelConfigs,
+    effective: &EffectiveConfigs,
     col: usize,
     row: usize,
     port: usize,
 ) -> SimResult {
     let section = fabric.section;
-    let config = &effective.fabrics[fabric.config_index].config.0;
+    let config = &effective.fabrics[fabric.config_index].0;
     let ports_per_node = config.num_ports_per_node();
     if col >= config.num_columns() || row >= config.num_rows() || port >= ports_per_node {
         return sim_error!(
@@ -619,11 +552,7 @@ fn validate_fabric_port(
 }
 
 impl PlatformConfig {
-    fn validate_coherence(
-        &self,
-        effective: &ModelConfigs,
-        connections: &[[ConnectionEndpointId; 2]],
-    ) -> SimResult {
+    fn validate_coherence(&self, effective: &EffectiveConfigs) -> SimResult {
         let managers = self
             .coherency_managers
             .iter()
@@ -636,7 +565,7 @@ impl PlatformConfig {
             .map(|m| (m.name.as_str(), m))
             .collect::<HashMap<_, _>>();
         self.validate_manager_domains(&managers, &maps)?;
-        self.validate_cache_coherence(effective, &managers, &maps, connections)
+        self.validate_cache_coherence(effective, &managers, &maps)
     }
 
     fn validate_manager_domains(
@@ -674,6 +603,17 @@ impl PlatformConfig {
                     manager.memory_map, manager.name
                 ))
             })?;
+            if map
+                .address_mapping
+                .as_ref()
+                .is_some_and(|mapping| mapping.mode == crate::types::AddressMappingMode::Striped)
+            {
+                return sim_error!(
+                    "Coherency Manager '{}': striped backing memory map '{}' is unsupported",
+                    manager.name,
+                    map.name
+                );
+            }
             if map.devices.is_empty() {
                 return sim_error!(
                     "Coherency Manager '{}' has an empty memory map",
@@ -707,19 +647,11 @@ impl PlatformConfig {
 
     fn validate_cache_coherence(
         &self,
-        effective: &ModelConfigs,
+        effective: &EffectiveConfigs,
         managers: &HashMap<&str, &crate::types::CoherencyManagerSection>,
         maps: &HashMap<&str, &MemoryMapSection>,
-        connections: &[[ConnectionEndpointId; 2]],
     ) -> SimResult {
-        let address_spaces = self
-            .address_spaces
-            .iter()
-            .map(|address_space| (address_space.name.as_str(), address_space))
-            .collect::<HashMap<_, _>>();
-        for configured in &effective.caches {
-            let cache = configured.section;
-            let config = &configured.config;
+        for (cache, config) in self.caches.iter().flatten().zip(&effective.caches) {
             if let Some(names) = &cache.coherency_managers {
                 if names.is_empty() {
                     return sim_error!(
@@ -758,8 +690,13 @@ impl PlatformConfig {
                         }
                     }
                 }
-                for [left, right] in connections {
-                    let peer = match (left, right) {
+                for connection in self.connections.iter().flatten() {
+                    let [left, right] = connection.connect.as_slice() else {
+                        continue;
+                    };
+                    let left = parse_connection_endpoint_id(left)?;
+                    let right = parse_connection_endpoint_id(right)?;
+                    let peer = match (&left, &right) {
                         (ConnectionEndpointId::Cache { name, .. }, peer) if name == &cache.name => {
                             peer
                         }
@@ -782,14 +719,19 @@ impl PlatformConfig {
                             );
                         }
                         ConnectionEndpointId::Pe { name } => {
+                            let pe_name = name.strip_suffix(".dma").unwrap_or(name);
                             let pe = self
                                 .processing_elements
                                 .iter()
                                 .flatten()
-                                .find(|pe| &pe.name == name)
+                                .find(|pe| pe.name == pe_name)
                                 .ok_or_else(|| SimError(format!("No PE '{name}'")))?;
-                            let address_space = address_spaces[pe.address_space.as_str()];
-                            for memory in &maps[address_space.memory_map.as_str()].devices {
+                            let map = if name.ends_with(".dma") {
+                                pe.dma_memory_map.as_deref().unwrap_or(&pe.memory_map)
+                            } else {
+                                &pe.memory_map
+                            };
+                            for memory in &maps[map].devices {
                                 if !covered.contains(memory.as_str()) {
                                     return sim_error!(
                                         "Cache '{}' has no coherency manager for Memory '{}' used by PE '{}'",
@@ -806,5 +748,48 @@ impl PlatformConfig {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::types::PlatformConfig;
+
+    #[test]
+    fn coherency_managers_require_contiguous_backing_maps() {
+        let source = "
+memory_maps:
+  - name: backing
+    devices: [memory0, memory1]
+    address_mapping:
+      mode: striped
+      stripe_bytes: 32
+      groups:
+        - name: pair
+          devices: [memory0, memory1]
+memories:
+  - name: memory0
+    kind: hbm
+    base_address: 0
+    config: {capacity_bytes: 128}
+  - name: memory1
+    kind: hbm
+    base_address: 128
+    config: {capacity_bytes: 128}
+coherency_managers:
+  - name: directory
+    memory_map: backing
+    config: {line_size_bytes: 32}
+";
+        let mut striped: PlatformConfig = yaml_serde::from_str(source).unwrap();
+        let error = striped.validate().unwrap_err().to_string();
+        assert!(error.contains("Coherency Manager 'directory'"));
+        assert!(error.contains("striped backing memory map 'backing' is unsupported"));
+
+        striped.coherency_managers = None;
+        striped.validate().unwrap();
+        let contiguous: PlatformConfig =
+            yaml_serde::from_str(&source.replace("mode: striped", "mode: contiguous")).unwrap();
+        contiguous.validate().unwrap();
     }
 }

@@ -1,28 +1,17 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use std::fs::write;
-use std::path::Path;
-use std::process::{Command, Output};
+use std::fs;
+use std::process::Command;
 
 use tempfile::tempdir;
 
-fn compute_region_stats_stdout(name: &str) -> String {
-    let output = run_timetable_with_dump_stats(
-        "examples/compute_region_platform.yaml",
-        format!("examples/{name}.yaml"),
-    );
-    String::from_utf8(output.stdout).unwrap()
-}
-
-fn run_timetable_with_dump_stats(
-    platform: impl AsRef<Path>,
-    timetable: impl AsRef<Path>,
-) -> Output {
+#[test]
+fn dump_stats_includes_cache_stats() {
     let output = Command::new(env!("CARGO_BIN_EXE_gwr-timetable"))
         .arg("--platform")
-        .arg(platform.as_ref())
+        .arg("../gwr-platform/examples/simple_pe_cache_mem.yaml")
         .arg("--timetable")
-        .arg(timetable.as_ref())
+        .arg("examples/cache.yaml")
         .arg("--stdout")
         .arg("--dump-stats")
         .output()
@@ -33,51 +22,6 @@ fn run_timetable_with_dump_stats(
         "gwr-timetable failed\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
-    );
-
-    output
-}
-
-const PACKED_VIEW_TIMETABLE: &str = r"
-nodes:
-  - id: input0
-    kind: tensor
-    config: { addr: 0x100000000, dtype: int4, shape: [4] }
-  - id: input1
-    kind: tensor
-    config: { addr: 0x100000010, dtype: int4, shape: [4] }
-  - id: add
-    kind: compute
-    program:
-      inputs: [A, B]
-      outputs: [Y]
-      assignments:
-        - output: Y
-          axes: [i]
-          expr:
-            add:
-              - read: { tensor: A, indices: [i] }
-              - read: { tensor: B, indices: [i] }
-    pe: pe0
-    input_views:
-      A: { offsets: [1], shape: [2] }
-      B: { offsets: [1], shape: [2] }
-    output_views:
-      Y: { offsets: [1], shape: [2] }
-  - id: output
-    kind: tensor
-    config: { addr: 0x100000020, dtype: int4, shape: [4] }
-edges:
-  - { from: input0, to: add.A, kind: data }
-  - { from: input1, to: add.B, kind: data }
-  - { from: add.Y, to: output, kind: data }
-";
-
-#[test]
-fn dump_stats_includes_cache_stats() {
-    let output = run_timetable_with_dump_stats(
-        "../gwr-platform/examples/simple_pe_cache_mem.yaml",
-        "examples/cache.yaml",
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -102,10 +46,7 @@ fn dump_stats_includes_cache_stats() {
     );
     assert!(
         stdout.contains("Read: 32 bytes"),
-        r"
-coalesced cold reads should issue one backing read:
-{stdout}
-"
+        "coalesced cold reads should issue one backing read:\n{stdout}"
     );
 }
 
@@ -113,11 +54,57 @@ coalesced cold reads should issue one backing read:
 fn dump_stats_counts_physical_tensor_view_bytes() {
     let temp = tempdir().unwrap();
     let timetable = temp.path().join("timetable.yaml");
-    write(&timetable, PACKED_VIEW_TIMETABLE).unwrap();
-
-    let output = run_timetable_with_dump_stats(
-        "../gwr-platform/examples/simple_pe_cache_mem.yaml",
+    fs::write(
         &timetable,
+        r"
+nodes:
+  - id: input0
+    kind: tensor
+    config: { addr: 0x100000000, dtype: int4, shape: [4] }
+  - id: input1
+    kind: tensor
+    config: { addr: 0x100000010, dtype: int4, shape: [4] }
+  - id: add
+    kind: compute
+    program:
+      inputs: [A, B]
+      outputs: [Y]
+      assignments:
+        - output: Y
+          axes: [i]
+          expr: { add: [{ read: { tensor: A, indices: [i] } }, { read: { tensor: B, indices: [i] } }] }
+    pe: pe0
+    input_views:
+      - { offsets: [1], shape: [2] }
+      - { offsets: [1], shape: [2] }
+    output_views:
+      - { offsets: [1], shape: [2] }
+  - id: output
+    kind: tensor
+    config: { addr: 0x100000020, dtype: int4, shape: [4] }
+edges:
+  - { from: input0, to: add.0, kind: data }
+  - { from: input1, to: add.1, kind: data }
+  - { from: add, to: output, kind: data }
+",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_gwr-timetable"))
+        .arg("--platform")
+        .arg("../gwr-platform/examples/simple_pe_cache_mem.yaml")
+        .arg("--timetable")
+        .arg(&timetable)
+        .arg("--stdout")
+        .arg("--dump-stats")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "gwr-timetable failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -132,8 +119,25 @@ fn dump_stats_counts_physical_tensor_view_bytes() {
 
 #[test]
 fn paired_regions_report_actual_intermediate_traffic_and_timing() {
-    let fused = compute_region_stats_stdout("fused_add_mul");
-    let materialized = compute_region_stats_stdout("add_mul");
+    let run = |name: &str| {
+        let output = Command::new(env!("CARGO_BIN_EXE_gwr-timetable"))
+            .arg("--platform")
+            .arg("examples/compute_region_platform.yaml")
+            .arg("--timetable")
+            .arg(format!("examples/{name}_region.yaml"))
+            .arg("--stdout")
+            .arg("--dump-stats")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let fused = run("fused");
+    let materialized = run("materialized");
     assert!(fused.contains("Time now 33ns"), "{fused}");
     assert!(materialized.contains("Time now 58ns"), "{materialized}");
     assert!(

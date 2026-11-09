@@ -2,45 +2,111 @@
 
 //! Stable SRAM slot allocation for values local to one output tile.
 
+use std::collections::{BTreeMap, BTreeSet};
+
+use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
 
-use super::prepared::GroupPlan;
-use super::storage::align_sram_slot_bytes;
+use super::syntax::ExprSpec;
 use super::tile::RegionTile;
-use super::validate::ProgramFacts;
-use crate::processing_element::tensors::BITS_PER_BYTE;
+use super::validate::ValidatedRegion;
 
-pub(in crate::processing_element) fn allocate_temporaries(
-    plan: GroupPlan<'_>,
+pub fn allocate_temporaries(
+    region: &ValidatedRegion,
     tile: &RegionTile,
 ) -> Result<LocalAllocation, SimError> {
-    let region = plan.region();
-    let layers = &plan.group.layers;
-    let last_use = &plan.group.last_consumer_layers;
+    let mut layers = BTreeMap::new();
+    let mut done = BTreeSet::new();
+    let mut remaining = region.assignment_order.clone();
+    let mut layer = 0usize;
+    while !remaining.is_empty() {
+        let ready = remaining
+            .iter()
+            .copied()
+            .filter(|index| {
+                let mut dependencies = BTreeSet::new();
+                reads(&region.program.assignments[*index].expr, &mut dependencies);
+                dependencies
+                    .iter()
+                    .all(|name| region.program.inputs.contains(name) || done.contains(name))
+            })
+            .collect::<Vec<_>>();
+        if ready.is_empty() {
+            return sim_error!("local assignments cannot be scheduled");
+        }
+        for index in &ready {
+            let assignment = &region.program.assignments[*index];
+            layers.insert(*index, layer);
+            done.insert(assignment.primary_result().clone());
+            if let Some(index_output) = &assignment.indices_output {
+                done.insert(index_output.clone());
+            }
+        }
+        remaining.retain(|index| !ready.contains(index));
+        layer = layer
+            .checked_add(1)
+            .ok_or_else(|| SimError("assignment layer overflows".into()))?;
+    }
+    let mut last_use = BTreeMap::new();
+    for (index, assignment) in region.program.assignments.iter().enumerate() {
+        let mut dependencies = BTreeSet::new();
+        reads(&assignment.expr, &mut dependencies);
+        for name in dependencies {
+            last_use
+                .entry(name)
+                .and_modify(|last: &mut usize| *last = (*last).max(layers[&index]))
+                .or_insert(layers[&index]);
+        }
+    }
     let mut slots = Vec::<LocalSlot>::new();
     let mut occupied_until = Vec::<usize>::new();
-    for index in &plan.group.assignments {
+    for index in &region.assignment_order {
         let assignment = &region.program.assignments[*index];
-        let elements = count_assignment_tile_elements(&assignment.axes, region, tile)?;
-        for name in [assignment.output(), assignment.indices_output()]
-            .into_iter()
-            .flatten()
+        let elements = assignment.axes.iter().try_fold(1usize, |count, axis| {
+            let len = tile
+                .output_intervals
+                .get(axis)
+                .map_or(region.extent(axis).unwrap(), |range| range.len());
+            count
+                .checked_mul(len)
+                .ok_or_else(|| SimError("local value element count overflows".into()))
+        })?;
+        for name in [
+            assignment.output.as_ref(),
+            assignment.indices_output.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
         {
-            if plan.program.retained.contains(name) {
-                continue;
-            }
             let Some(temp) = region.program.temporaries.get(name) else {
                 continue;
             };
-            let bytes = align_sram_slot_bytes(
+            let bytes = align8(
                 elements
                     .checked_mul(temp.dtype.num_bits())
                     .ok_or_else(|| SimError("local value size overflows".into()))?
-                    .div_ceil(BITS_PER_BYTE),
+                    .div_ceil(8),
             )?;
             let produced = layers[index];
             let last = last_use.get(name).copied().unwrap_or(produced);
-            assign_local_slot(&mut slots, &mut occupied_until, name, bytes, produced, last);
+            let available = slots
+                .iter()
+                .enumerate()
+                .filter(|(slot, entry)| {
+                    occupied_until[*slot] < produced && entry.capacity_bytes >= bytes
+                })
+                .min_by_key(|(_, entry)| entry.capacity_bytes)
+                .map(|(slot, _)| slot);
+            if let Some(slot) = available {
+                slots[slot].values.push(name.clone());
+                occupied_until[slot] = last;
+            } else {
+                slots.push(LocalSlot {
+                    capacity_bytes: bytes,
+                    values: vec![name.clone()],
+                });
+                occupied_until.push(last);
+            }
         }
     }
     let arena_bytes = slots.iter().try_fold(0usize, |sum, slot| {
@@ -50,56 +116,35 @@ pub(in crate::processing_element) fn allocate_temporaries(
     Ok(LocalAllocation { slots, arena_bytes })
 }
 
-fn count_assignment_tile_elements(
-    axes: &[String],
-    region: &ProgramFacts,
-    tile: &RegionTile,
-) -> Result<usize, SimError> {
-    axes.iter().try_fold(1usize, |count, axis| {
-        let len = tile
-            .output_intervals
-            .get(axis)
-            .map_or(region.extent(axis).unwrap(), |range| range.len());
-        count
-            .checked_mul(len)
-            .ok_or_else(|| SimError("local value element count overflows".into()))
-    })
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LocalAllocation {
+    pub slots: Vec<LocalSlot>,
+    pub arena_bytes: usize,
 }
 
-fn assign_local_slot(
-    slots: &mut Vec<LocalSlot>,
-    occupied_until: &mut Vec<usize>,
-    name: &str,
-    bytes: usize,
-    produced: usize,
-    last: usize,
-) {
-    let available = slots
-        .iter()
-        .enumerate()
-        .filter(|(slot, entry)| occupied_until[*slot] < produced && entry.capacity_bytes >= bytes)
-        .min_by_key(|(_, entry)| entry.capacity_bytes)
-        .map(|(slot, _)| slot);
-    if let Some(slot) = available {
-        slots[slot].values.push(name.to_owned());
-        occupied_until[slot] = last;
-    } else {
-        slots.push(LocalSlot {
-            capacity_bytes: bytes,
-            values: vec![name.to_owned()],
-        });
-        occupied_until.push(last);
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LocalSlot {
+    pub capacity_bytes: usize,
+    pub values: Vec<String>,
+}
+
+fn align8(bytes: usize) -> Result<usize, SimError> {
+    bytes
+        .checked_add(7)
+        .map(|value| value & !7)
+        .ok_or_else(|| SimError("local slot alignment overflows".into()))
+}
+
+fn reads(expr: &ExprSpec, names: &mut BTreeSet<String>) {
+    match expr {
+        ExprSpec::Read { tensor, .. } => {
+            names.insert(tensor.clone());
+        }
+        ExprSpec::Call { args, .. } | ExprSpec::MatrixMac { args, .. } => {
+            for arg in args {
+                reads(arg, names);
+            }
+        }
+        ExprSpec::Reduce { value, .. } => reads(value, names),
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(in crate::processing_element) struct LocalAllocation {
-    pub(in crate::processing_element) slots: Vec<LocalSlot>,
-    pub(in crate::processing_element) arena_bytes: usize,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(in crate::processing_element) struct LocalSlot {
-    pub(in crate::processing_element) capacity_bytes: usize,
-    pub(in crate::processing_element) values: Vec<String>,
 }

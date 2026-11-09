@@ -1,0 +1,19 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+# Caller-declared service fixture; no physical HBM mapping/peak certificate.
+memory_maps:
+  - name: map
+    devices:
+      - hbm
+memories:
+  - name: hbm
+    kind: hbm
+    base_address: 0
+    config:
+      capacity_bytes: 4096
+      bw_bytes_per_tick: 8
+      delay_ticks: 3
+      arrival_aware_service:
+        max_pending_requests: 16
+        lanes:
+          interleave_bytes: 4
+          bytes_per_tick: [4, 4]

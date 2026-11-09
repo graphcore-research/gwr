@@ -29,19 +29,15 @@ memory_maps:
     devices:
       - hbm0
 
-address_spaces:
-  - name: default
-    memory_map: default
-    access_bytes: 32
 operation_classes:
   add: { operations: [add], arity: 2 }
 
 processing_elements:
   - name: pe0
-    address_space: default
+    memory_map: default
     config:
       compute:
-        execution_units:
+        engines:
           vector:
             capabilities: [{ class: add, ops_per_tick: 256 }]
 
@@ -56,7 +52,7 @@ memories:
             .unwrap(),
         ),
         TimetableFile::from_string(
-            r"
+            "
 nodes:
   - id: tensor0
     kind: tensor
@@ -99,14 +95,14 @@ nodes:
 
 edges:
   - from: tensor0
-    to: add0.A
+    to: add0.0
     kind: data
 
   - from: tensor1
-    to: add0.B
+    to: add0.1
     kind: data
 
-  - from: add0.Y
+  - from: add0
     to: tensor2
     kind: data
 ",
@@ -124,7 +120,12 @@ pub(crate) fn build_timetable(
 }
 
 pub(crate) fn timetable(nodes: Vec<NodeSection>, edges: Vec<EdgeSection>) -> TimetableFile {
-    TimetableFile { nodes, edges }
+    TimetableFile {
+        atomic_effects: None,
+        programs: BTreeMap::default(),
+        nodes,
+        edges,
+    }
 }
 
 pub(crate) fn tensor(id: &str, addr: u64, dtype: DataType, shape: &[usize]) -> NodeSection {
@@ -146,15 +147,18 @@ pub(crate) fn compute(
     compute_with_program(
         id,
         ProgramSpec {
+            metadata_inputs: vec![],
+            indexed_metadata_inputs: vec![],
+            local_round_policy: None,
             inputs: (0..input_views.len())
                 .map(|index| format!("input{index}"))
                 .collect(),
             outputs: (0..output_views.len())
                 .map(|index| format!("output{index}"))
                 .collect(),
-            temporaries: BTreeMap::default(),
+            temporaries: std::collections::BTreeMap::default(),
             assignments: vec![],
-            extents: BTreeMap::default(),
+            extents: std::collections::BTreeMap::default(),
         },
         input_views,
         output_views,
@@ -167,27 +171,14 @@ pub(crate) fn compute_with_program(
     input_views: Vec<Option<TensorViewSection>>,
     output_views: Vec<Option<TensorViewSection>>,
 ) -> NodeSection {
-    let input_views = program
-        .inputs
-        .iter()
-        .cloned()
-        .zip(input_views)
-        .filter_map(|(name, view)| view.map(|view| (name, view)))
-        .collect();
-    let output_views = program
-        .outputs
-        .iter()
-        .cloned()
-        .zip(output_views)
-        .filter_map(|(name, view)| view.map(|view| (name, view)))
-        .collect();
     NodeSection::Compute {
+        pipeline: None,
         id: id.to_string(),
         program: program.into(),
         tiling: None,
         pe: None,
-        input_views,
-        output_views,
+        input_views: Some(input_views),
+        output_views: Some(output_views),
     }
 }
 

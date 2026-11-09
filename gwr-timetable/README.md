@@ -2,339 +2,246 @@
 
 # gwr-timetable
 
-`gwr-timetable` describes a workload as a graph of tensors and computations. A
-timetable file defines the workload. A separate platform file defines the
-machine. See `gwr-platform/README.md` for its format.
+`gwr-timetable` describes a workload as a graph of tensors and computations.
+The timetable file supplies the workload; a separate `gwr-platform` file
+supplies the PEs, memory, and compute engines that run it.
 
-The simulator models compute time, storage, and memory traffic. It does not
-calculate tensor values.
+## Timetable files
 
-## Run an example
+A timetable is a YAML file with these top-level fields:
 
-### Add then multiply
+| Field | Purpose |
+| --- | --- |
+| `nodes` | Tensor storage and computations, each with a unique `id`. |
+| `edges` | Connections between nodes. |
+| `programs` | Optional named programs shared by compute nodes. |
+| `includes` | Optional paths to shared catalogs of named programs. |
 
-`gwr-timetable/examples/add_mul.yaml` describes a simple graph with two compute
-nodes. The first compute node reads tensors `A` and `B` from memory and adds
-them. It writes the intermediate tensor `T` to memory. The second compute node
-reads `T` and a third input, `C`. It multiplies them and writes the result, `Y`,
-to memory.
+An include path is relative to the file containing it, and catalogs may
+include other catalogs. The same catalog file may be imported through more
+than one path; duplicate program names from different files or the timetable
+itself are errors. `TimetableFile::from_file` resolves includes, while
+`from_string` accepts only self-contained YAML. A shared catalog can contain
+`operation_classes`, `compute_profiles`, and `programs` together: a platform
+imports the compute definitions and a timetable imports the programs. The
+[ONNX catalog](examples/onnx/catalog.yaml) is one example; its runnable
+programs are referenced by files under `examples/onnx/implemented/`.
 
-Run this command from the repository root:
+Regenerate the pinned ONNX inventory, shared catalog, platform fixture, and
+fixed-shape cases natively from the repository root:
+
+```sh
+cargo run --release --bin gen-onnx-examples -- --out-dir gwr-timetable
+```
+
+The generator embeds the pinned 200-operator inventory and declarative
+program/gap catalog, then builds and validates 78 runnable graphs in Rust.
+It records the remaining 122 operators as gaps. This is coverage of selected
+fixed-shape cases at the pinned schema revisions, not a numerical ONNX runtime
+or complete support for every attribute and shape. Use another `--out-dir` to
+export a standalone directory containing `examples/onnx` and `tests/fixtures`.
+
+Tensor nodes declare an external memory `addr`, storage `dtype`, and `shape`.
+They can be inputs, outputs, or intermediates. Compute nodes name a `pe` in the
+platform and supply a `program`, either inline or by name. They also have
+optional `input_views` and `output_views` lists, with one entry for each
+program input and output in declaration order when supplied. Omitting either
+list gives every port in that direction a `null` view. A `null` entry selects
+the whole connected tensor; an entry with `offsets` and `shape` selects a view
+of it. For example,
+`{ offsets: [4], shape: [8] }` selects eight elements starting at index four
+from a one-dimensional tensor.
+
+Each edge has `from`, `to`, and `kind` fields. A `data` edge connects a tensor
+node to a compute input or a compute output to a tensor node. Append `.0`,
+`.1`, and so on to a compute node ID to identify its input or output position:
+
+```yaml
+edges:
+  - { from: A, to: add.0, kind: data }
+  - { from: B, to: add.1, kind: data }
+  - { from: add.0, to: Y, kind: data }
+```
+
+Edge indices are optional. If they are omitted, then the next free input or
+output on the node will be connected.
+Node IDs may contain dots, but a final decimal suffix always denotes a port:
+`layer.0.add.1` selects port 1 of `layer.0.add`. Avoid node IDs ending in a
+decimal dot suffix because an edge cannot refer to that ID without interpreting
+its suffix as a port.
+
+Data edges
+also establish dependencies: a compute node becomes ready once its input
+tensors are ready. A tensor produced by a compute node becomes complete
+after that node finishes. If multiple compute nodes write to a tensor then
+all nodes need to finish in order for the tensor to be complete.
+An input may be bound solely to establish a dependency; if the program never
+reads it, the PE does not load it or reserve SRAM for it.
+Data connections must pass through tensor nodes; compute nodes cannot send data directly to one another.
+
+Use `kind: dependency` to require completion without binding a tensor port,
+for example `{ from: selection, to: gather, kind: dependency }`. Dependency
+edges can connect tasks or tensors and participate in readiness and cycle
+validation. `kind: control` records a relationship for graph display only;
+it does not delay execution. Overlapping memory writes, or overlapping reads
+and writes, require an ordering path between their tasks. A task cannot read
+and write overlapping external storage itself.
+
+Building a timetable graph validates node IDs, edge positions, tensor views,
+program bindings, memory access conflicts, and the absence of cycles across
+data and dependency edges.
+Creating a runnable timetable with a platform also checks that named PEs exist.
+Library callers can then call `Timetable::preflight()` to check platform
+capabilities, tile SRAM admission, and transfer memory mapping before issuing
+requests. The ordinary runner validates task execution as it proceeds.
+
+The [tiny timetable](examples/tiny.yaml) shows tensor nodes, compute nodes,
+views, and data edges together. The [fused region](examples/fused_region.yaml)
+shows a smaller single-compute node workload. The following command runs it with a
+matching platform:
 
 ```sh
 cargo run --release --bin gwr-timetable -- \
   --platform gwr-timetable/examples/compute_region_platform.yaml \
-  --timetable gwr-timetable/examples/add_mul.yaml \
+  --timetable gwr-timetable/examples/fused_region.yaml \
   --stdout --stdout-level info
 ```
 
-### Fused computation
-
-The example in `gwr-timetable/examples/fused_add_mul.yaml` combines both steps
-in one compute node. Its intermediate stays in PE SRAM. This removes the
-intermediate store, reload, and dependency between compute nodes.
-
-To run this optimization, use
-`--timetable gwr-timetable/examples/fused_add_mul.yaml` in the command above.
-
-### Destination precision
-
-The matched pair `examples/destination_precision_platform.yaml` and
-`examples/destination_precision.yaml` models nested FP32 arithmetic followed by
-an explicit BF16 output conversion:
-
-```sh
-cargo run --bin gwr-timetable -- \
-  --platform gwr-timetable/examples/destination_precision_platform.yaml \
-  --timetable gwr-timetable/examples/destination_precision.yaml --dump-stats
-```
-
-It counts eight `add`, eight `exp`, and eight `convert` operations. The planned
-boundary payload is 64 read bytes and 16 written bytes. The FP32 temporary stays
-in SRAM. See [Destination precision](#destination-precision-and-nested-calls)
-for the precision rules.
-
-## Load, prepare, and run in Rust
-
-The normal path loads the platform and timetable, validates graph bindings, then
-prepares every compute node against its PE in `Timetable::new`. Attach the
-retained dispatcher and run the engine. Keep the dispatcher alive through the
-run. This executable uses the matched add/multiply files above and resolves
-paths from the crate directory, so it can run from any working directory:
+The `gen-timetable` tool generates synthetic add, matrix product, and
+max-reduction graphs for a platform. It divides each operation along an outer
+output dimension into contiguous compute nodes with matching tensor views,
+then assigns consecutive partitions to PEs with matching typed compute
+capabilities in round-robin order. Unsupported templates are skipped; the
+tool reports an error if no enabled template can run on the platform. By
+default the outer extent is divided into roughly one partition per eligible PE. Use
+`--partition-size N` to request partitions of about `N` output elements along
+that axis; the number of partitions need not be a multiple of the PE count.
+`--max-compute-nodes` caps the total number of generated partitions and may
+make them larger than the requested size. Partitioned nodes share one named
+program in the timetable YAML. The generator also chooses smaller internal
+tile sizes when needed to fit each assigned PE's SRAM, and reports an error
+if even a one-element tile cannot fit. A platform file may import compute
+catalogs.
 
 ```sh
-cargo run -p gwr-timetable --example load_prepare_run
+cargo run --release --bin gen-timetable -- \
+  --platform gwr-platform/examples/platform.yaml \
+  --out /tmp/generated-timetable.yaml \
+  --partition-size 16
 ```
 
-The source is [load_prepare_run.rs](examples/load_prepare_run.rs). The same code
-is compiled and run as a documentation example:
-
-```rust
-{{#include examples/load_prepare_run.rs:example}}
-```
-
-### Custom dispatch
-
-For custom task selection, first bind syntax and owned views into
-`gwr_models::processing_element::program::PreparedProgram`. `ProgramBindings`
-and `TensorSpec` are public at the same module root. Binding order follows the
-program's declared input/output lists; a timetable resolves its named graph
-edges into that order. `PreparedProgram` exposes resolved value metadata and
-hardware-independent SRAM and logical boundary-traffic estimates.
-
-Then call `ProcessingElement::prepare_program` to obtain an immutable
-`PreparedTask` for that exact PE instance. Return the retained handle as
-`Task::PreparedProgram` from your dispatcher. This checks compute capabilities,
-durations, touched addresses, and SRAM capacity before activation or memory
-requests. A handle cannot execute on another PE, even one with the same name.
-
-This single-task dispatcher demonstrates both stages and completion
-notification:
+To inspect the names available to a trace filter, run the entity helper with
+the same platform, timetable, and regex. It runs the workload, prints every
+matched entity name and the match count. Add `--show-all` to include unmatched
+names, explicitly labelled `NO MATCH`. If an alternative name caused a match,
+the helper prints that alias too. Activity lane names appear when the workload
+uses them:
 
 ```sh
-cargo run -p gwr-timetable --example custom_dispatch
-```
-
-The source is [custom_dispatch.rs](examples/custom_dispatch.rs):
-
-```rust
-{{#include examples/custom_dispatch.rs:example}}
-```
-
-For a raw task, `ProgramTaskConfig` owns syntax, optional tiling, and input and
-output views in declaration order. `pe.prepare_program_task(config)` is the
-one-call preparation convenience. A custom dispatcher may instead return
-`Task::ProgramTask { config: Box::new(config) }`; the PE performs the same
-preparation before marking that task active. Use `Timetable` for ordinary graph
-scheduling and dependencies.
-
-## Check preparation without simulation
-
-Add `--check` to the run command to construct and validate the same platform and
-timetable, then exit before simulation starts. Preparation errors use the same
-diagnostics and failure status as a normal run. Runtime progress and statistics
-are not emitted.
-
-Use `--explain` to check and print retained preparation facts: named tensor
-bindings and views, PE placement, inferred axis extents, declared and effective
-tile sizes, peak live SRAM, and planned logical boundary traffic per compute
-node. It also reports effective PE SRAM and LSU settings, including defaults,
-and execution unit names. The summary follows graph order, sorts hardware and
-axis names, and grows with graph metadata rather than tile count. Effective tile
-sizes are maxima; the final tile can be smaller.
-
-These modes run no simulated operations, memory requests, SRAM allocations, or
-simulated time. Planned logical boundary bytes precede LSU packetization;
-physical traffic is only observed during a simulation. Trace setup metadata may
-still be emitted when trackers are enabled.
-
-```sh
-cargo run --bin gwr-timetable -- \
+cargo run --release --bin gwr-timetable-entities -- \
   --platform gwr-timetable/examples/compute_region_platform.yaml \
-  --timetable gwr-timetable/examples/add_mul.yaml --explain
+  --timetable gwr-timetable/examples/fused_region.yaml \
+  --perfetto-filter-regex '^top::pe0($|::lane::)'
 ```
 
-## File structure
+The helper accepts exactly one of `--regex`, `--filter-regex`,
+`--perfetto-filter-regex`, `--binary-filter-regex`, or
+`--stdout-filter-regex`, so a filter can be copied from another command.
+Omit the regex to list all names; a regex with no matches exits with an error
+and suggests `--show-all`.
 
-A timetable is a YAML file with two top-level fields:
+To record only the PE activity lanes in a Perfetto trace, run:
 
-| Field   | Purpose                                                 |
-| ------- | ------------------------------------------------------- |
-| `nodes` | Tensor nodes and compute nodes. Each has a unique `id`. |
-| `edges` | Data connections and control relationships.             |
+```sh
+cargo run --release --bin gwr-timetable -- \
+  --platform gwr-timetable/examples/compute_region_platform.yaml \
+  --timetable gwr-timetable/examples/fused_region.yaml \
+  --perfetto \
+  --perfetto-filter-regex '^top::pe0($|::lane::)' \
+  --perfetto-file pe-activity.pftrace
+```
 
-The following timetable adds two vectors on `pe0`:
+The filter includes the `pe0` entity and its compute, compute-wait, and LSU
+activity lanes. Change `pe0` to the PE name in your platform, or omit the filter
+to include all tracked entities. `--perfetto` does not enable console or binary
+trace logging; the runner still prints a short run summary.
+
+## Compute
+
+Each compute node selects a tensor `program`. The program names its external
+input and outputs, optional SRAM-local temporaries, and assignments. Input
+datatypes come from the connected tensors; a temporary declares its datatype.
+The result and optional index output use the datatypes of their connected
+tensors. MAC accumulator width is handled by the hardware model and is not a
+program operand. An explicit `matrix_mac.execution` can select the instruction
+family, accumulator dtype, and sparsity; the platform must advertise the same
+mode. If its accumulator dtype differs from the output dtype, the simulator
+counts a final `convert` operation for each result. Engine selection uses the
+operation, ordered input datatypes, and execution mode, not the result datatype.
+Validation of whether an operation's
+result datatype is appropriate for its inputs is deferred.
+
+Programs shared by compute nodes can be defined once at the top level and
+referenced by name. The node keeps its own PE, tensor views, and tiling, so the
+same program can run on different PEs and tensor regions:
 
 ```yaml
+programs:
+  vector_add:
+    inputs: [A, B]
+    outputs: [Y]
+    assignments:
+      - output: Y
+        axes: [i]
+        expr: { add: [{ read: { tensor: A, indices: [i] } }, { read: { tensor: B, indices: [i] } }] }
 nodes:
-  - id: lhs
-    kind: tensor
-    config: { addr: 0x1000, dtype: fp32, shape: [8] }
-  - id: rhs
-    kind: tensor
-    config: { addr: 0x2000, dtype: fp32, shape: [8] }
-  - id: result
-    kind: tensor
-    config: { addr: 0x3000, dtype: fp32, shape: [8] }
-  - id: add
+  - id: add_0
     kind: compute
     pe: pe0
-    program:
-      inputs: [A, B]
-      outputs: [Y]
-      assignments:
-        - output: Y
-          axes: [i]
-          expr:
-            add:
-              - { read: { tensor: A, indices: [i] } }
-              - { read: { tensor: B, indices: [i] } }
-    tiling: { sizes: { i: 4 } }
-edges:
-  - { from: lhs, to: add.A, kind: data }
-  - { from: rhs, to: add.B, kind: data }
-  - { from: add.Y, to: result, kind: data }
+    program: vector_add
+    tiling: { sizes: { i: 128 } }
+  # Other tensor and compute nodes may refer to vector_add as well.
+edges: []
 ```
 
-This example uses the same platform as the run command above. The addresses
-select storage in that platform's memory map.
-
-## Tensor nodes
-
-A tensor node describes storage in external memory. It can be a workload input,
-an output, or an intermediate between compute nodes.
+A named program can call other named programs. Each call binds every callee
+input and output to a value in the caller. Values between calls are declared
+as caller temporaries and stay in PE SRAM for the tile:
 
 ```yaml
-- id: weights
-  kind: tensor
-  config:
-    addr: 0x4000
-    dtype: bf16
-    shape: [16, 32]
+programs:
+  add:
+    inputs: [A, B]
+    outputs: [Y]
+    assignments:
+      - output: Y
+        axes: [i]
+        expr: { add: [{ read: { tensor: A, indices: [i] } }, { read: { tensor: B, indices: [i] } }] }
+  mul:
+    inputs: [A, B]
+    outputs: [Y]
+    assignments:
+      - output: Y
+        axes: [i]
+        expr: { mul: [{ read: { tensor: A, indices: [i] } }, { read: { tensor: B, indices: [i] } }] }
+  add_then_mul:
+    inputs: [A, B, C]
+    outputs: [Y]
+    temporaries: { T: { dtype: fp32 } }
+    calls:
+      - { program: add, inputs: { A: A, B: B }, outputs: { Y: T } }
+      - { program: mul, inputs: { A: T, B: C }, outputs: { Y: Y } }
 ```
 
-| Field          | Meaning                                                       |
-| -------------- | ------------------------------------------------------------- |
-| `id`           | Unique graph node name.                                       |
-| `kind`         | Must be `tensor`.                                             |
-| `config.addr`  | Address of the tensor's first byte.                           |
-| `config.dtype` | Storage datatype of each element.                             |
-| `config.shape` | Dimensions in storage order. Each dimension must be positive. |
+Calls can be nested; their own
+temporaries are kept separate. An optional `axes` map on a call renames callee
+axes in the caller, for example `axes: { i: channel }`. Unmapped axes keep
+their names. Composition is expanded when the timetable loads, then the same
+program validation, tile scheduling, and engine selection apply as for a
+program written with assignments directly.
 
-### Shapes and storage
-
-Tensors use a contiguous row-major layout. The last dimension varies fastest.
-The `weights` example contains 512 BF16 elements and occupies 1,024 bytes.
-
-Use `shape: []` for a scalar. Use `shape: [8]` for a vector and `shape: [4, 8]`
-for a matrix. A scalar contains one element.
-
-The datatype determines each element's storage size. Sub-byte elements are
-packed into bytes. The total storage size rounds up to a whole byte.
-
-### Tensor readiness
-
-A tensor with no producer is ready at the start of the simulation. A produced
-tensor becomes ready after every compute node writing it finishes. Consumers
-then become eligible to run.
-
-This is a whole-tensor dependency. A consumer cannot start after only part of
-its input tensor has been produced. This also applies when producer and consumer
-use the same PE.
-
-## Compute nodes
-
-A compute node runs one inline tensor program on a Processing Element (PE).
-
-| Field          | Meaning                                                   |
-| -------------- | --------------------------------------------------------- |
-| `id`           | Unique graph node name.                                   |
-| `kind`         | Must be `compute`.                                        |
-| `pe`           | Platform PE name. Required to execute the node.           |
-| `program`      | Inputs, outputs, temporaries, and assignments.            |
-| `tiling`       | Optional axis sizes for splitting the program into tiles. |
-| `input_views`  | Optional views of connected input tensors.                |
-| `output_views` | Optional views of connected output tensors.               |
-
-### Program ports
-
-Program input and output names are local to the compute node. They need not
-match graph tensor IDs. Data edges bind ports by these declared names.
-
-In the complete example, `inputs: [A, B]` declares inputs `A` and `B`. The edges
-bind `lhs` to `add.A` and `rhs` to `add.B`. `outputs: [Y]` declares output `Y`,
-which binds `add.Y` to `result`. Reordering the declarations preserves these
-binding identities; program input and output iteration follows declaration
-order.
-
-An input can establish a dependency without being read by the program. Such an
-input causes no PE load or SRAM reservation.
-
-### Tensor views
-
-A view selects a rectangular region of a connected tensor. Its offsets and
-dimensions are measured in elements. The view retains the parent tensor's
-storage strides.
-
-```yaml
-input_views:
-  A: { offsets: [4], shape: [8] }
-output_views: {}
-```
-
-This selects eight elements of input `A`, starting at element four. Input `B`
-and output `Y` use their entire connected tensors. Program indices are relative
-to the selected views. Scalar views use `offsets: []` and `shape: []`.
-
-Views are sparse maps keyed by declared names in the corresponding direction.
-Omitted entries select the full connected tensor. Omitting the map or using `{}`
-selects full views for every port. Unknown, wrong-direction, and duplicate keys
-are rejected. Serialization orders map keys deterministically.
-
-## Edges
-
-Each edge has `from`, `to`, and `kind` fields.
-
-### Data edges
-
-A data edge binds a tensor to a compute port. It also establishes a scheduling
-dependency.
-
-```yaml
-edges:
-  - { from: lhs, to: add.A, kind: data }
-  - { from: rhs, to: add.B, kind: data }
-  - { from: add.Y, to: result, kind: data }
-```
-
-Compute endpoints must be `node.PORT`, with the actual declared output name at
-`from` or input name at `to`. Tensor endpoints must be plain node IDs. Every
-compute input and output must be bound exactly once. Tensor fanout and multiple
-disjoint or dependency-ordered writes are supported. Data connections must pass
-through tensor nodes; compute nodes cannot exchange data directly.
-
-Node IDs must be nonempty and cannot contain `.`. An endpoint splits on its
-first `.`; the entire remaining nonempty suffix must exactly match a declared
-port name. Port names can therefore contain dots, Unicode, or numeric text.
-Quote YAML strings where necessary. This grammar needs no escaping.
-
-### Control edges
-
-A `kind: control` edge records a relationship for graph display. It does not
-delay execution or consume data binding slots. Its endpoints may be plain node
-IDs or declared directional compute ports using the same identifier grammar.
-
-### Memory conflicts
-
-Two compute nodes may access the same memory bytes. If either writes, the graph
-must order their execution through data edges. For example,
-`writer -> tensor -> reader` makes the reader wait for the writer to finish. The
-dependency can also pass through other nodes. Two nodes that only read the
-shared bytes need no ordering. A compute node cannot read and write overlapping
-external storage itself. Validation also checks aliases between different tensor
-nodes.
-
-## Tensor programs
-
-A program names its values and describes the assignments that produce them.
-`read`, `reduce`, and `matrix_mac` have dedicated expression syntax. Other
-expression keys name platform operations.
-
-| Field         | Meaning                                          |
-| ------------- | ------------------------------------------------ |
-| `inputs`      | Names bound to external input ports.             |
-| `outputs`     | Names bound to external output ports.            |
-| `temporaries` | Optional local values, each with a `dtype`.      |
-| `assignments` | Expressions that produce outputs or temporaries. |
-| `extents`     | Optional explicit axis sizes.                    |
-
-### Assignments and temporaries
-
-Each assignment gives its output axes in dimension order. `output` names the
-value it produces. A read can use a program input or a value from another
-assignment.
-
-This program computes `(A + B) * C`:
+For a program used by only one node, its definition may be placed directly
+under that node's `program` field:
 
 ```yaml
 program:
@@ -345,414 +252,252 @@ program:
     - output: T
       axes: [i]
       expr:
-        add:
-          - { read: { tensor: A, indices: [i] } }
-          - { read: { tensor: B, indices: [i] } }
+        {
+          add:
+            [
+              { read: { tensor: A, indices: [i] } },
+              { read: { tensor: B, indices: [i] } },
+            ],
+        }
     - output: Y
       axes: [i]
       expr:
-        mul:
-          - { read: { tensor: T, indices: [i] } }
-          - { read: { tensor: C, indices: [i] } }
+        {
+          mul:
+            [
+              { read: { tensor: T, indices: [i] } },
+              { read: { tensor: C, indices: [i] } },
+            ],
+        }
+tiling: { sizes: { i: 4 } }
 ```
-
-`T` stays in PE SRAM. It needs no graph tensor node or external memory address.
-Input and output datatypes come from connected tensors. Temporary datatypes come
-from their declarations.
-
-### Reads and axes
-
-A read has one index per tensor dimension:
-
-```yaml
-read: { tensor: A, indices: [m, k] }
-```
-
-An index can be an axis name or an affine expression. The literal `0` selects a
-singleton dimension. Use `indices: []` to read a scalar. A size-one dimension
-can broadcast across a larger axis.
-
-Local reads must use the producing assignment's axes in the same order. Within
-one assignment, each external input must use one consistent index mapping.
-Different assignments can use different mappings.
 
 ### Axis extents
 
-An extent is the number of positions an axis covers in the full program
-invocation. A direct read usually establishes it. For example, shape `[8]` with
-`indices: [i]` gives `i` an extent of 8. Non-singleton reads of the same axis
-must agree on its size.
+An axis extent is the number of positions an axis covers in one invocation of
+a program. The optional `extents` map belongs inside the program, whether the
+program is inline or named. For example, `extents: { o: 3, k: 2 }` gives the
+output axis `o` three positions and the reduction axis `k` two positions.
+Extents must be positive.
 
-Use `extents` when direct reads do not establish the required sizes:
+The simulator infers an axis extent when a read uses that axis directly as a
+tensor index: a read of a view with shape `[8]` and `indices: [i]` gives `i`
+an extent of 8. Reads of size-one dimensions can broadcast across a larger
+extent. Other non-singleton reads using the same axis must agree on its size.
+Assignment output axes determine the result shape from these extents;
+reduction axes cover their extents but do not appear in the result shape.
 
-```yaml
-extents: { o: 3, k: 2 }
-```
+An affine index does not establish the extents of its axes. Declare any axes
+used only in affine indices explicitly. For example, a stride-two window can
+use `extents: { o: 3, k: 2 }` with the affine index `2*o + k - 1`: `o` selects
+three output positions and `k` selects two samples per window. With
+`bounds: exclude` in a `min` or `max` reduction, samples outside the input are skipped.
 
-Here, `o` covers three positions and `k` covers two. Extents must be positive.
-An affine index does not establish axis extents. Its axes need explicit extents
-or sizes inferred from other direct reads.
+Extents describe the full program invocation. The compute node's `tiling.sizes`
+map specifies how many positions of each axis a tile covers; omitting an axis
+size makes one tile cover its full extent.
 
-### Named operations
+Every tile keeps its local temporaries in PE SRAM, so an intermediate
+assignment produces no external memory access. A tile can start when enough
+PE SRAM is available for it. Tiles from the same or
+different compute nodes may overlap while their combined reservations fit;
+all compute nodes on one PE share that SRAM capacity.
 
-Use a lowercase operation name as an expression key:
+Within a tile, an assignment starts when the values it reads are ready. The
+simulator groups its compute operations into batches by engine. A batch holds
+its engine until it finishes, so another batch needing that engine waits.
+Independent batches on different engines can run at the same time; dependent
+batches run in order. A downstream compute node becomes ready only after the
+producer has finished every tile and written its output tensor to external
+memory, even when both nodes use the same PE.
 
-```yaml
-sin:
-  - { read: { tensor: A, indices: [i] } }
-```
+### Expressions and assignments
 
-The platform must declare the operation and a matching capability. Ordered
-operand datatypes select the capability. Matrix operations also match the
-accumulator datatype. See "Input datatype matching" in `gwr-platform/README.md`.
+Each assignment lists its output `axes` in dimension order and supplies an
+`expr`. `output: NAME` binds the computed value. A `min` or `max` reduction
+may also bind `indices_output: NAME`, or bind only `indices_output` when its
+value is not needed. At least one output must be named. A read refers to a program input or a value produced by
+another assignment. The following expression forms are executable; `read`
+stands for `{ read: { tensor: NAME, indices: [INDEX, ...] } }`:
 
-Calls can nest, including inside reduction bodies. Use a named temporary when
-several assignments need the same intermediate. The simulator counts operations
-but does not evaluate their numerical results. It does not validate every
-operation's output datatype against its inputs.
+| Expression | Shape | Meaning |
+| --- | --- | --- |
+| `read` | One indexed read | Read a tensor or local temporary. |
+| Operation name | `{ add: [read, read] }` or `{ sin: [read] }` | Execute a lowercase operation declared in the platform's operation classes. Arguments may contain further operation calls; their operand datatypes select the engine rate. Use `{ op_name: { args: [read], attrs: { ... } } }` for operator attributes. |
+| `matrix_mac` | `{ matrix_mac: { over: [k], args: [read, read] } }` | Execute a matrix MAC across one reduction axis. |
+| `reduce` | `{ reduce: { op: sum, over: [AXIS, ...], value: read } }` | Combine a read or scalar operation expression over the named axes with `sum`, `min`, or `max`. Body arithmetic is counted separately from reduction work. |
 
-### Destination precision and nested calls
+`read`, `reduce`, and `matrix_mac` have dedicated syntax. Every other
+expression key is interpreted as a lowercase operation name and must be
+declared by the platform. A program cannot declare operations with those three
+reserved names.
 
-A scalar read keeps its tensor's declared datatype. Every scalar call result,
-including a nested call, uses the enclosing assignment's destination datatype.
-FP32 inputs do not promote intermediate call results. For example, if `Y` is
-BF16, `Y = exp(add(A, B))` with FP32 inputs matches `add` with ordered inputs
-`[fp32, fp32]`, then `exp` with `[bf16]`. Neither implicit result transition
-adds `convert` work. This describes modeled work and storage; the simulator does
-not calculate numerical tensor values.
-
-Wrapping the expression in `convert` does not give its child a separate FP32
-scope. To model FP32 intermediate arithmetic followed by a BF16 store, give the
-arithmetic a named FP32 temporary and explicitly convert that temporary in the
-BF16 assignment:
-
-```yaml
-program:
-  inputs: [A, B]
-  outputs: [Y]
-  temporaries: { T: { dtype: fp32 } }
-  assignments:
-    - output: T
-      axes: [i]
-      expr:
-        exp:
-          - add:
-              - { read: { tensor: A, indices: [i] } }
-              - { read: { tensor: B, indices: [i] } }
-    - output: Y
-      axes: [i]
-      expr:
-        convert:
-          - { read: { tensor: T, indices: [i] } }
-```
-
-Connect FP32 inputs and a BF16 output, and supply `add` on `[fp32, fp32]`, `exp`
-on `[fp32]`, and `convert` on `[fp32]`. Output precision does not select an
-execution unit. The matched destination-precision recipe above supplies all
-three capabilities.
-
-### Modeled operation costs
-
-For each output, let `N` be its number of included reduction samples. Chunking
-preserves the total `N - 1` combines for a nonempty reduction; the first sample
-initializes the partial result. Excluded samples add no body or combine work.
-
-| Expression                                  | Named work                                                                     | Datatype signature and result                                                                                                                                     |
-| ------------------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Scalar call `op(args...)`                   | One `op` per evaluated element, plus nested calls.                             | Ordered operand dtypes; result uses assignment destination dtype.                                                                                                 |
-| `reduce: { op: sum, ... }`                  | `N - 1` `add` operations per output, plus body calls for each included sample. | `add` uses two destination-dtype operands; scalar reads retain their dtype. No implicit `convert` work.                                                           |
-| `min` or `max` of a direct read             | `N - 1` `compare` operations per output.                                       | Two operands of the read tensor's dtype. A differing value output dtype adds no conversion. Optional indices add storage/traffic, not comparisons or conversions. |
-| `matrix_mac`                                | One `matrix_mac` per logical contraction product.                              | Ordered read dtypes and explicit accumulator dtype. Service-tile padding affects time only.                                                                       |
-| Matrix result with a different output dtype | One final `convert` per output after all contraction chunks.                   | Input is the accumulator dtype. Matching accumulator/output dtypes add no conversion.                                                                             |
-| Explicit `convert` call                     | One `convert` per evaluated element, plus child calls.                         | Input is the child result dtype; result uses assignment destination dtype.                                                                                        |
-
-A min/max reduction can also contain scalar body calls. Body-call results use
-the value destination dtype; an indices-only assignment uses its first read's
-dtype for that body and its comparisons. The index destination dtype controls
-index storage. Reads alone add no named compute work. The platform must declare
-all named operations and matching capabilities, including `add`, `compare`, or
-`convert` when the program requires them.
-
-### Matrix products and accumulators
-
-Use `matrix_mac` for a matrix product:
+For example, this assignment computes a matrix product. The `m` and `n` axes
+form the output shape; `k` is reduced away:
 
 ```yaml
 - output: Y
   axes: [m, n]
   expr:
     matrix_mac:
-      accumulator: fp32
       over: [k]
       args:
         - { read: { tensor: A, indices: [m, k] } }
         - { read: { tensor: B, indices: [k, n] } }
 ```
 
-The output has axes `m` and `n`. The expression sums products over `k`. Both
-operands must be direct reads of the single contraction axis. Affine indices and
-excluded bounds are not supported here.
+Each read has one index per tensor dimension. An index can be an axis name
+such as `m`, the literal `0` for a singleton dimension, or an affine index.
+For example, `{ affine: { terms: { o: 2, k: 1 }, offset: -1 } }` means
+`2*o + k - 1`. Affine axes need known extents, supplied by other direct reads
+or by the program's `extents` map. Reads default to
+`bounds: require_in_range`; `bounds: exclude` skips out-of-range positions
+inside a reduction. Sum reductions can use affine indices to model windowed
+convolutions, including padding where the excluded samples contribute zero.
+Reduction axes may be tiled
+separately from output axes.
 
-Either operand may use transposed matrix indices: `A[k,m]` with stored shape
-`[K,M]`, `B[n,k]` with stored shape `[N,K]`, or both together. For every
-orientation, the model assumes the selected matrix execution unit consumes that
-layout directly, with no implicit transpose, repacking work or temporary
-conversion buffer. Memory requests still follow the declared views, so their
-costs can depend on layout. See
-[Matrix operand layouts](../gwr-platform/README.md#matrix-operand-layouts) for
-the supported combinations and the execution unit assumption.
-
-`accumulator` is required. It specifies the datatype retained across contraction
-chunks. The platform must advertise the same accumulator and input datatype
-combination. If the output datatype differs, each result incurs one final
-`convert` operation. That conversion occurs after all contraction chunks finish.
-The platform must provide its capability too.
-
-A sum of scalar products uses scalar multiply and add capabilities. Its index
-shape does not turn it into a matrix execution unit operation.
-
-### Reductions and index outputs
-
-A reduction combines values across the axes in `over`. Those axes do not appear
-in the result shape. Supported operations are `sum`, `min`, and `max`.
+A `min` or `max` reduction can bind an `indices_output` to an external output
+or local temporary. It has the same shape as the optional value result and
+uses the output or temporary's declared dtype. The simulator accounts for
+this result's storage and traffic but does not calculate tensor values or
+indices. For a stride-two window whose first sample is at `2*o - 1`, the expression
+can use an affine read and exclude positions outside the input:
 
 ```yaml
-- output: row_sum
-  axes: [r]
+- output: Y
+  indices_output: I
+  axes: [o]
   expr:
     reduce:
-      op: sum
+      op: max
       over: [k]
-      value: { read: { tensor: A, indices: [r, k] } }
+      value:
+        read:
+          tensor: A
+          indices: [{ affine: { terms: { o: 2, k: 1 }, offset: -1 } }]
+          bounds: exclude
 ```
 
-Body arithmetic is counted separately from the reduction work. Reductions cannot
-nest inside other reductions. A `min` or `max` reduction can read an input or a
-local temporary.
+Named-operation calls can nest, including in a reduction body; reductions
+cannot be nested. `matrix_mac` requires two direct reads that index its single
+reduction axis, without affine indices or excluded bounds.
+Use separate assignments and named local temporaries to reuse intermediate values.
+Local reads must use the producer's output axes in the same order. Each
+input must use one consistent index mapping within an assignment. Different
+assignments may read it differently. A `min` or `max` reduction
+can read a boundary input or a local temporary. Every explicitly
+tiled output axis that is not also reduced must occur in each assignment's
+output axes. When an axis is both an output and reduction axis, local row
+statistics can be streamed and recomputed for output chunks. This can reread
+inputs and repeat arithmetic; see the [ML catalog](../gwr-use-cases/examples/ml/README.md).
+Reducing a materialized local value across a tiled local axis requires a
+full-row plan or an inline scalar expression instead.
 
-Use `indices_output: I` on a `min` or `max` assignment to request an index
-result. It can accompany `output`, or replace it when only indices are needed.
-The index result has the same shape as the value result. Its datatype comes from
-its output tensor or temporary declaration. The simulator models its storage and
-traffic without calculating the indices.
+An explicit `matrix_mac` expression requires a matching capability. A sum of products
+uses scalar multiply and add capabilities regardless of its index shape.
+Partial results spanning batches stay in a destination or local scratch slot; a
+single matrix batch can keep its accumulator inside the engine. Local slots
+are 8-byte aligned, while memory traffic uses the actual tensor-view ranges.
+`--dump-stats` reports planned boundary traffic, including reloads across
+tiles, separately from the transfers observed during simulation. Sparse
+affine window accesses are enumerated within each tile, so large dilated
+windows should use tile sizes that bound the number of accesses per tile.
 
-### Affine windows and bounds
+The paired [fused region](examples/fused_region.yaml) and
+[materialized region](examples/materialized_region.yaml) perform the same add
+then multiply. The materialized graph exposes the intermediate as a tensor,
+adding a store, a reload, and a whole-tensor scheduling barrier. The
+[platform](examples/compute_region_platform.yaml) supplies separate add and
+multiply engines for a repeatable timing comparison.
 
-An affine index is a sum of axis terms and a constant offset. For example, this
-index means `2*o + k - 1`:
+## Buffered block pipelines
+
+Run the [small pipeline](examples/compute_region_pipeline.yaml) with its
+[matching platform](examples/compute_region_pipeline_platform.yaml) for a complete example.
+
+A compute node can opt into a bounded load/compute/store pipeline:
 
 ```yaml
-affine: { terms: { o: 2, k: 1 }, offset: -1 }
+tiling: {sizes: {b: 1, m: 512, n: 512, k: 256}}
+pipeline:
+  mode: overlap
+  input_buffers: 2
+  output_buffers: 1
+  prefetch_distance: 1
 ```
 
-Reads default to `bounds: require_in_range`. Use `bounds: exclude` inside a
-reduction to skip out-of-range samples. For a sum, excluded samples contribute
-no arithmetic or input traffic. This can model padded convolution windows.
+Explicit pipelines support static copies, scalar expressions, sum/min/max reductions,
+multi-axis reductions, affine/excluded windows, packed operands, supported native
+matrix calls and dependent multi-assignment programs. The existing qualified dense
+GEMM compiler remains a fast path. Instruction, accumulator precision, input types
+and conversions must match platform capabilities. Indexed metadata policies,
+scaled matrix payloads, `local_round_policy`, and boundary/local payload services
+reject explicit requests before execution.
 
-This program fragment takes the maximum of stride-two windows:
+A **tile** is the boundary-output region selected by the program's output-axis
+tiling. An **input chunk** is the boundary operand data for a scheduled compute
+step; reduction-axis tiling determines update sizes. These names apply to the
+program bindings and do not require GEMM axes. The generic executor keeps a
+separate **compute working arena** for operand copies, temporaries, retained
+reduction state and result scratch. Input buffers hold incoming chunks; output
+buffers hold all completed boundary outputs for one tile until real store ACKs.
+
+The complete reserved window is `input_buffers * input_slot_bytes +
+output_buffers * output_slot_bytes + compute_working_bytes`. Generic execution
+explicitly copies incoming slots into the working arena and completed results
+into output slots, so a stored result cannot alias a later compute result.
+Packed generic operands currently use conservative padding envelopes to cover
+fragmented nibble-aligned physical ranges; this can select smaller tiles than a
+future compacting implementation. Alignment and every requested slot are charged.
+
+`prefetch_distance` bounds chunks ahead of the consumer, including across tiles.
+It must be nonnegative and less than `input_buffers`. Assignment traversal uses
+the validated topological order; intermediate assignment completion gates
+successors. The final assignment permits prefetch of the next independent tile's
+boundary data. Serial mode waits for every compute step and tile store ACK.
+
+Both buffer counts may be any positive integer. Every configured slot,
+working arena and required scratch allocation must fit simultaneously in the
+PE SRAM pool, even when there are fewer remaining chunks or output tiles
+than slots. The entire window is reserved atomically. Insufficient physical
+capacity rejects the request; temporarily occupied capacity causes a wait.
+The simulator never reduces requested counts or spills implicitly.
+
+The platform's `block_execution` configuration supplies PE-wide stage limits
+and storage backing. More buffers create queue space; they do not create
+additional engines. Reads and acknowledged writes traverse the real LSU,
+cache, fabric and memory path. A whole-node consumer becomes eligible only
+after every output store completes. Buffer storage stays owned through
+outstanding requests, including when the requesting task is cancelled.
+
+Use `mode: serial` for a matched baseline with identical geometry, full
+buffer reservation, arithmetic and logical boundary accesses. Cache misses and
+physical memory traffic may change with scheduling. Timing may differ
+because `overlap` permits independent stages to run together. See the
+[Izanagi experiment](../gwr-use-cases/examples/izanagi/pipeline/README.md)
+for qualified compute assumptions and reproducible comparisons.
+
+## Transfers and communication
+
+A `kind: transfer` node copies tensor views with equal element counts and
+datatypes through
+its issuing PE's memory path. It binds exactly one input and output with data
+edges and needs no program or arithmetic capability:
 
 ```yaml
-extents: { o: 3, k: 2 }
-assignments:
-  - output: Y
-    indices_output: I
-    axes: [o]
-    expr:
-      reduce:
-        op: max
-        over: [k]
-        value:
-          read:
-            tensor: A
-            indices: [{ affine: { terms: { o: 2, k: 1 }, offset: -1 } }]
-            bounds: exclude
+- id: copy
+  kind: transfer
+  pe: pe0
+  buffer_bytes: 4096
+  input_views: [{ offsets: [0], shape: [128] }]
+  output_views: [{ offsets: [256], shape: [128] }]
 ```
 
-Declare `Y` and `I` as program outputs or temporaries. Their connected tensors
-or declarations supply the result datatypes.
-
-## Tiling and execution
-
-### Tile sizes
-
-An axis extent describes the full program invocation. `tiling.sizes` controls
-how much of each axis is processed at once:
-
-```yaml
-tiling: { sizes: { m: 16, n: 16, k: 32 } }
-```
-
-Here, output tiles cover up to 16 positions on `m` and `n`. Each contraction
-chunk covers up to 32 positions on `k`. Tails use the remaining positions. An
-omitted axis size covers its full extent.
-
-A tile size applies wherever its axis appears, including reduction chunks.
-Assignments with different output axes can run in separate inferred phases.
-Program tiling is separate from an execution unit's matrix service tile. See
-"Matrix service tiles" in `gwr-platform/README.md`.
-
-### Automatic assignment phases
-
-Assignment dependencies and `tiling.sizes` determine execution order and storage
-lifetimes. When a chunked axis occurs in some assignment outputs but not others,
-the runner separates the assignments into phases. Common output axes form outer
-loops. Ready assignments with matching remaining axes share a tile group. The
-planner keeps producer/consumer chains together and places independent row
-statistics before chunked pipelines where possible. Within a group, dependencies
-control assignment readiness and independent execution unit work can overlap.
-Assignments sharing an initial input mapping share its load.
-
-For example, fused softmax assignments `M = max(A)`, `S = sum(exp(A - M))`, and
-`Y = exp(A - M) / S` need only ordinary tiling:
-
-```yaml
-tiling: { sizes: { r: 1, k: 64 } }
-```
-
-For each row, the runner computes the maximum and sum once, retains both local
-statistics in SRAM, then produces output chunks. A 1,025-element FP32 row reads
-12,300 bytes and writes 4,100 bytes: three input passes and one output pass,
-without external traffic for the statistics. Final chunks cover the tail.
-
-A temporary belongs to the least enclosing scope of its producer and consumers.
-A chunked producer followed by a row reduction materializes the complete local
-row before that reduction begins. A producer and consumer with the same axes can
-instead keep their temporary chunk local. A boundary output consumed later in
-the same program is also retained locally without a boundary reread.
-
-Completed phases release scratch storage for reuse. Locals remain live until
-their last use. Preflight reserves the maximum safe working set before any
-memory requests. If a materialized row exceeds SRAM, choose another program or
-tile shape; the runner reports insufficient capacity without recomputing phases
-or spilling local tensors to external memory.
-
-### SRAM and partial results
-
-Each tile reserves PE SRAM for its working set. This includes input buffers,
-output buffers, temporaries, and reduction scratch. Each local slot's reserved
-size rounds up to a multiple of `SRAM_SLOT_ALIGNMENT_BYTES` (default 8) bytes.
-Memory traffic uses the actual tensor-view ranges.
-
-Partial results across compute batches use a destination or scratch slot. A
-single matrix batch can keep its accumulator inside the execution unit. An
-output conversion may require separate accumulator storage.
-
-Tiles can overlap while their combined SRAM reservations fit. All compute nodes
-on one PE share that capacity.
-
-### Assignment and execution unit scheduling
-
-An assignment starts when the values it reads are ready. The simulator groups
-independent operations into batches by execution unit. Each batch occupies one
-execution unit until it finishes. Batches sharing that execution unit wait for
-one another. Independent batches on different execution units can overlap.
-
-A compute node finishes after every tile has completed and stored its outputs.
-Only then can downstream compute nodes use the produced tensors.
-
-### Streamed row reductions
-
-A reduction streams its complete reduction extent in chunks set by
-`tiling.sizes`. A later chunked output reuses the completed statistic. Inline
-arithmetic in the reduction's `value` expression needs only intermediate chunk
-storage. Naming that arithmetic as a local tensor materializes the full region
-required by its later consumers, which can require more SRAM.
-
-Large sparse affine windows also need bounded tile sizes. Their accessed
-positions are enumerated within each tile.
-
-## Validation
-
-Building the graph checks IDs, edges, port bindings, and tensor views. It also
-checks programs, memory conflicts, and cycles across data edges. Creating a
-runnable timetable checks that named PEs exist in the platform. It also checks
-every compute node against its PE capabilities, tile SRAM limits, and memory
-mappings. These checks run automatically in `Timetable::new()`. They issue no
-memory requests.
-
-Raw program syntax and owned tensor bindings become an immutable
-`PreparedProgram`. Hardware-independent SRAM and traffic analysis traverses its
-lazy schedule using bounded memory; traversal time can still scale with the
-number of invocations. Preparing that program against a PE checks actual compute
-work and durations, touched addresses, and SRAM capacity. The resulting shared
-`PreparedTask` belongs to that exact PE instance, including when another PE has
-the same name. The timetable retains this handle for dispatch and accounting.
-Custom dispatchers can supply raw `ProgramTaskConfig` tasks; the PE prepares
-them before activation or any memory request.
-
-## Generate a timetable
-
-`gen-timetable` creates synthetic add, matrix-product, and max-reduction graphs.
-It uses the supplied platform to select PEs and tile sizes.
-
-```sh
-cargo run --release --bin gen-timetable -- \
-  --platform gwr-platform/examples/platform.yaml \
-  --out /tmp/generated-timetable.yaml \
-  --partition-size 16
-```
-
-### Generated operations
-
-The generator has three built-in program patterns:
-
-| Operation             | Selection weight      |
-| --------------------- | --------------------- |
-| Elementwise addition  | `--weight-add`        |
-| Matrix multiplication | `--weight-gemm`       |
-| Maximum reduction     | `--weight-reduce-max` |
-
-The weights control how often each operation is selected. Each weight defaults
-to 1. Set a weight to 0 to disable that operation. For example,
-`--weight-add 1 --weight-gemm 0 --weight-reduce-max 0` generates only additions.
-
-### Graph partitions
-
-The generator splits operations along an outer output dimension. Each partition
-becomes a compute node with matching tensor views. Partitions are assigned to
-eligible PEs in round-robin order. Each node contains its own inline program.
-
-By default, there is roughly one partition per eligible PE. `--partition-size N`
-requests about `N` positions along the split axis per partition. The partition
-count need not be a multiple of the PE count. `--max-compute-nodes` caps the
-total number of partitions. That cap may make partitions larger than requested.
-
-### Compute capabilities
-
-An operation can run only on PEs with matching compute capabilities and input
-datatypes. The generator skips operations that no PE supports for those
-datatypes. Generation fails if none of the enabled operations can run.
-
-### SRAM capacity
-
-The generator reduces internal tile sizes to fit the assigned PE's SRAM. It
-fails if even a one-element tile cannot fit. A graph partition defines the work
-assigned to one compute node. Internal tiles split that work into smaller pieces
-for execution on its PE.
-
-## Tracing and statistics
-
-### PE activity traces
-
-To record PE activity in Perfetto, run:
-
-```sh
-cargo run --release --bin gwr-timetable -- \
-  --platform gwr-timetable/examples/compute_region_platform.yaml \
-  --timetable gwr-timetable/examples/fused_add_mul.yaml \
-  --perfetto \
-  --perfetto-filter-regex '^top::pe0($|::lane::)' \
-  --perfetto-file pe-activity.pftrace
-```
-
-The filter includes `pe0` and its compute, compute-wait, and LSU activity lanes.
-Change `pe0` to another PE name, or omit the filter to include all tracked
-entities. `--perfetto` does not enable console or binary trace logging. The
-runner still prints a short run summary.
-
-### Planned and observed traffic
-
-Use `--dump-stats` to report planned boundary traffic and observed transfers.
-The planned counts include reloads across tiles and reduction chunks. Physical
-LSU accesses can transfer more bytes than the logical tensor payload. See
-`gwr-timetable/examples/tiny.yaml` for a larger graph with tensor views.
+The default buffer is 4096 bytes. It bounds each read-then-write payload;
+transfers use a separate serialized transfer resource and do not reserve the
+compute tile SRAM arena. Source and destination must be
+reachable through that PE's memory map. The copy counts actual movement,
+including packed sub-byte storage, without adding compute operations.
+Packed views must have matching physical byte counts, including alignment
+effects. Transfers use the PE's DMA issuer when configured and its LSU otherwise.

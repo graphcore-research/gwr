@@ -1,19 +1,6 @@
 # Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-operation_classes:
-  add:
-    operations: [add]
-    arity: 2
-  mul:
-    operations: [mul]
-    arity: 2
-  compare:
-    operations: [compare, maximum]
-    arity: 2
-  matrix:
-    operations: [matrix_mac]
-    arity: 2
-    flops_per_op: 2
+includes: [default_compute.yaml]
 
 memory_maps:
   # The default memory map for Processing Elements
@@ -33,30 +20,17 @@ fabrics:
 defaults:
   pe_config: &default_pe_config
     num_active_requests: 8
+    lsu_access_bytes: 32
     sram_bytes: 0x20_0000 # 2MB of SRAM
-    compute:
-      execution_units:
-        alu:
-          capabilities:
-            - { class: add, ops_per_tick: 16 }
-            - { class: mul, ops_per_tick: 4 }
-            - { class: compare, ops_per_tick: 16 }
-        matrix:
-          capabilities:
-            - { class: matrix, accumulator: fp32, ops_per_tick: 32 }
-
-address_spaces:
-  - name: pe_address_space
-    memory_map: pe_memory_map
-    access_bytes: 32
+    compute: basic_alu
 
 processing_elements:
   - name: pe_0_0
-    address_space: pe_address_space
+    memory_map: pe_memory_map
     config: *default_pe_config
   # Leave fabric endpoint (0,1) unused and connect it to null below.
   - name: pe_1_0
-    address_space: pe_address_space
+    memory_map: pe_memory_map
     config: *default_pe_config
   # No need to create PE for 1,1 as the HBM is connected there
 

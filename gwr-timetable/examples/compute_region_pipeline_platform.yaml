@@ -1,0 +1,31 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+operation_classes:
+ matrix: {operations: [matrix_mac], arity: 2, flops_per_op: 2}
+ cast: {operations: [convert], arity: 1, flops_per_op: 0}
+memory_maps: [{name: all, devices: [hbm]}]
+processing_elements:
+ - name: pe
+   memory_map: all
+   config:
+    num_active_requests: 32
+    lsu_access_bytes: 64
+    overhead_size_bytes: 0
+    sram_bytes: 4096
+    block_execution:
+     max_compute_tiles: 1
+     max_load_chunks: 1
+     max_store_tiles: 1
+     transfer_port: lsu
+     accumulator_storage: shared_sram
+    compute:
+     engines:
+      matrix:
+       matrix_accumulator_capacity_bytes: 256
+       capabilities: [{class: matrix, input_dtypes: [[fp8,fp8]], ops_per_tick: 8, execution: {instruction: test, accumulator: fp32, sparsity: dense}}]
+      vector:
+       capabilities: [{class: cast, input_dtypes: [[fp32]], ops_per_tick: 8}]
+memories:
+ - {name: hbm, kind: hbm, base_address: 0, config: {capacity_bytes: 65536, bw_bytes_per_tick: 16, delay_ticks: 5}}
+connections:
+ - {connect: [pe.pe, mem.hbm]}

@@ -4,30 +4,22 @@
 
 <!-- ANCHOR: overview -->
 
-`gwr-platform` defines the machine that runs a workload. A platform contains
-processing elements (PEs), memories, caches, fabrics, and their connections. The
-workload belongs in a separate timetable file. See `gwr-timetable/README.md` for
-that format.
+`gwr_platform` is the library used to define and build execution platforms from
+configuration files.
 
-The `gwr_platform` library loads and validates platform YAML. It builds the
-model components and connects their ports. It models time and resource use
-without calculating tensor values.
+A platform in GWR is the structural description of the machine that a workload
+runs on. It brings together named processing elements, memories, caches,
+fabrics, and the connections between them into one validated object.
 
-## File structure
+## What It Provides
 
-A platform file describes named resources and how they connect:
+The `gwr_platform` library provides:
 
-| Field                 | Purpose                                                                |
-| --------------------- | ---------------------------------------------------------------------- |
-| `memory_maps`         | Memories each PE can address.                                          |
-| `operation_classes`   | Groups of operations with the same number of inputs.                   |
-| `processing_elements` | PEs, their memory maps, SRAM, LSU settings, and execution units.       |
-| `memories`            | External storage, addresses, capacities, and service rates.            |
-| `caches`              | Optional caches between PEs and memory.                                |
-| `coherency_managers`  | Directories that coordinate coherent caches over backing memory maps.  |
-| `fabrics`             | Optional interconnects between resources.                              |
-| `connections`         | Pairs of endpoints to connect.                                         |
-| `defaults`            | Optional place to define YAML anchors for PE and cache configurations. |
+- YAML configuration file support.
+- build functions that construct memories, processing elements, caches, and
+  fabrics via the `gwr_platform::builder` module.
+- connection functions that wire a platform together via the
+  `gwr_platform::connect` module.
 
 ## Coherent Caches
 
@@ -54,8 +46,7 @@ these connections.
 Every selected manager must have the same positive line size as its cache.
 Memory ranges must align to that size, and each physical memory can belong to
 only one manager. Matching sizes need not be powers of two. The selected
-managers must cover the physical memory map backing the connected processing
-element's address space.
+managers must cover the connected processing element's memory map.
 
 Coherent caches retain `max_inflight_parents` and `max_inflight_fills` (both
 default to 64). The child bound includes read fills and exclusive acquisitions;
@@ -74,8 +65,7 @@ An example of a simple platform could include:
 - a processing element
 - an L1 cache
 - a backing memory
-- a memory map selecting the backing physical memories
-- an address space describing how the PE addresses those memories
+- a memory map describing what memory the PE can address
 
 For example:
 
@@ -91,11 +81,6 @@ memory_maps:
     devices:
       - mem0
 
-address_spaces:
-  - name: pe_address_space
-    memory_map: pe_memory_map
-    access_bytes: 32
-
 operation_classes:
   add:
     operations: [add]
@@ -103,14 +88,15 @@ operation_classes:
 
 processing_elements:
   - name: pe0
-    address_space: pe_address_space
+    memory_map: pe_memory_map
     config:
+      lsu_access_bytes: 32
       sram_bytes: 64KiB
       compute:
-        execution_units:
+        engines:
           vector:
             capabilities:
-              - { class: add, ops_per_tick: 32 }
+              - { class: add, ops_per_tick: 256 }
 
 caches:
   - name: l1_0
@@ -138,6 +124,11 @@ connections:
 # }
 ```
 
+Each memory in a processing element's memory map must have a base address and
+capacity that are multiples of that PE's `lsu_access_bytes` (32 by default).
+This keeps each aligned LSU access entirely within one mapped memory region.
+When PEs share a memory map, its memories must satisfy every PE's access size.
+
 Connect an unused fabric endpoint to `null` so its ingress and egress ports are
 deliberately left idle without causing an unconnected-port error when the
 simulator starts. For example: `connect: ['null', "fabric.fabric0@(11,16)"]`.
@@ -146,46 +137,9 @@ and memories cannot. Quote `null` in YAML so it is parsed as a string. See
 `gwr-platform/examples/platform_null_connection.yaml` for a complete
 configuration.
 
-## Address Spaces
+## Example
 
-Each processing element (PE) uses a named `address_space` to translate tensor
-addresses into destination devices and physical addresses. Each space references
-a `memory_map` and can be shared by several PEs.
-
-By default, all memories use passthrough mappings, so virtual and physical
-addresses are identical. To cycle successive accesses through a group of banks,
-add a striped region:
-
-```yaml
-address_spaces:
-  - name: striped_space
-    memory_map: pe_memory_map
-    access_bytes: 64
-    address_regions:
-      - policy: striped
-        devices: [hbm0, hbm1]
-```
-
-`access_bytes` sets both the LSU transfer size and stripe size. It must be
-positive and defaults to 32 bytes. Memory bases and capacities must be multiples
-of this size.
-
-Striped banks must come from the selected memory map, have equal capacities, and
-be contiguous in increasing physical address order. The region starts at the
-first bank's physical base and spans their combined capacity. Each bank can
-appear only once within an address space; unlisted memories retain passthrough
-mappings.
-
-See `gwr-platform/examples/simple_pe_striped_mem.yaml` for a complete example.
-
-The memory map and connections serve different purposes. The map defines which
-memory addresses the PE can use. The connections define the route taken by
-memory requests and responses.
-
-## Load a platform in Rust
-
-`Platform::from_file()` reads YAML, validates it, and builds the model. Use
-`Platform::from_string()` to load YAML held in a string.
+Load a platform from YAML and inspect the resulting structure:
 
 ```rust,no_run
 use std::path::Path;
@@ -212,561 +166,256 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 <!-- ANCHOR_END: overview -->
 
-## Processing elements
+## Internal routed-link bandwidth
 
-Each PE names its address space and declares its configuration:
+A routed fabric may declare `internal_link_bits_per_tick` independently of its
+external `port_bits_per_tick`. This will give every node-to-node connection an
+independent limiter in each direction. Streams sharing one directed link compete
+for that bandwidth; opposite directions and disjoint links can overlap. Omitting
+the setting provides only a node-to-node hop delay.
 
 ```yaml
-address_spaces:
-  - name: pe_space
-    memory_map: mm
-    access_bytes: 32
+config:
+  port_bits_per_tick: 65536
+  internal_link_bits_per_tick: 256
+```
+
+The rate must be positive and functional fabrics reject this setting. It does
+not change routing, external port rates, buffers, or hop delays. YAML output
+preserves explicit values and omits absent ones; `gen-fabric` continues to omit
+the setting by default.
+
+The limiter charges `ceil(total_packet_bytes * 8 / bits_per_tick)` ticks,
+including the packet type's declared overhead. It forwards before waiting for
+this rate limit interval and delays the upstream acknowledgement after
+downstream acceptance. The first packet can therefore arrive before the interval
+ends; subsequent traffic on the same link is spaced by that interval. This
+models throughput rather than waiting for physical serialization before
+delivery.
+
+Downstream stalls propagate back-pressure once the finite packet pipeline and
+configured ingress/egress byte buffers fill. Each positive hop delay allows at
+most `ticks_per_hop` pending packets plus one packet held by its output task.
+`ticks_per_hop` must be positive; zero-tick hops are rejected. Routers and
+arbiters also hold a finite number of packets while forwarding. These are
+packet-count pipeline limits, separate from the configured byte-buffer
+capacities.
+
+## Cache ranges and fill admission
+
+Cache read misses fetch entire aligned `line_size_bytes` lines and return the
+original request's payload. Requests spanning multiple lines wait for every
+required fill. Writes retain their original byte traffic and invalidate every
+overlapping line. Overlapping allocating reads share pending line fills;
+`NoAllocate` misses fetch full lines without populating the cache. Replacement
+and invalidation prevent old responses from marking new cache contents valid.
+
+Every physical memory's base address and capacity must be multiples of every
+configured cache line size and effective LSU access size. For power-of-two
+sizes, alignment to the largest size satisfies this rule. Other sizes must
+satisfy each alignment separately. Validation applies to all memories, including
+ones absent from PE memory maps, and rejects invalid boundaries before building
+the simulator.
+
+`max_inflight_parents` bounds tracked original client reads (parents) and
+`max_inflight_fills` bounds downstream fills; both default to 64. Large reads
+stream through these bounds. Completion waits for every required fill and its
+full response ingress service. Original client headers and each downstream fill
+header are charged at their respective request service points. Hits and
+completed misses share the client return-service bandwidth.
+
+`Cache::traffic_snapshot()` separates logical client payload, rounded downstream
+payload, headers, hits, misses and coalescing. `inflight_fills_snapshot()`
+reports current and peak physical fill occupancy. The cache remains an analytic
+round-robin model without coherence or numerical data evaluation; these settings
+do not establish hardware calibration.
+
+<!-- ANCHOR: compute_engines -->
+
+## Operation classes and compute engines
+
+Capabilities can live in a catalog shared by multiple platform files. A
+catalog contains `operation_classes` and `compute_profiles`; each profile is
+the complete engine configuration for one PE. For example,
+`examples/default_compute.yaml` defines `basic_alu` with 16 adds, 4
+multiplies, and 16 compares per tick on its ALU, plus a separate engine for
+32 matrix MACs per tick. Its `wide_alu` profile has a separate matrix engine
+for 256 MACs per tick:
+
+```yaml
+includes: [default_compute.yaml]
 processing_elements:
   - name: pe0
-    address_space: pe_space
-    config:
-      num_active_requests: 8
-      overhead_size_bytes: 8
-      sram_bytes: 64KiB
-      compute:
-        execution_units:
-          vector:
-            capabilities:
-              - { class: add, ops_per_tick: 32 }
+    memory_map: mm
+    config: { compute: basic_alu }
 ```
 
-This fragment assumes `mm` and the `add` operation class are declared elsewhere
-in the file.
+This is a catalog/PE configuration fragment. A runnable platform also needs
+the `mm` memory map, memories, and connections, as in the example above.
 
-### SRAM and memory requests
+`includes` paths are relative to the file that declares them. Catalogs can
+include other catalogs. Re-importing the same file is harmless; duplicate
+definition names, include cycles, missing files, and unknown profile names are
+errors. A platform may also define its own classes and profiles alongside its
+topology, or put an inline `engines` map in a PE's `compute` field. Use
+`Platform::from_file` for includes; `from_string` accepts only self-contained
+YAML. `gen-fabric` writes the default catalog beside its output and selects
+`basic_alu` by default. It accepts
+`--compute-catalog` and `--compute-profile` to select another catalog/profile.
 
-For an explanation of program tiles, see
-[Tiling and execution](../gwr-timetable/README.md#tiling-and-execution).
-
-| Setting                      | Meaning                                              |
-| ---------------------------- | ---------------------------------------------------- |
-| `sram_bytes`                 | Shared storage capacity for program tiles.           |
-| `num_active_requests`        | Shared limit on outstanding read and write requests. |
-| Address-space `access_bytes` | Size of each aligned LSU memory access and stripe.   |
-| `overhead_size_bytes`        | Protocol overhead added to memory packets.           |
-| `compute`                    | Named execution units and their capabilities.        |
-
-Loads and stores share one LSU request path and one pool of request slots. A
-slot remains occupied until the response arrives. A partial access still
-transfers a full aligned LSU block. Memory, cache, and fabric models determine
-service time and backpressure.
-
-Program tiles reserve SRAM while they execute. Tiles can overlap when their
-combined reservations fit. SRAM capacity and execution unit availability are
-separate constraints.
-
-### Repeated configurations
-
-Execution units are declared in the PE configuration. The optional `defaults`
-section stores YAML anchors; it does not automatically apply or merge a PE or
-cache configuration. Reference an anchor explicitly at each resource that needs
-it:
-
-```yaml
-defaults:
-  pe_config: &shared_pe
-    lsu_access_bytes: 32
-    sram_bytes: 64KiB
-    compute:
-      execution_units:
-        vector:
-          capabilities:
-            - { class: add, input_dtypes: [[fp32, fp32]], ops_per_tick: 32 }
-processing_elements:
-  - { name: pe0, memory_map: mm, config: *shared_pe }
-  - { name: pe1, memory_map: mm, config: *shared_pe }
-```
-
-This fragment assumes `mm` and the `add` operation class exist. Each alias
-reuses the entire anchored mapping. Repeat a configuration with explicit changes
-when PEs need different settings. See `examples/platform.yaml` for a complete
-multi-PE platform using whole-configuration aliases.
-
-Omitted fields in a PE's actual `config` receive built-in field defaults:
-`num_active_requests: 8`, `lsu_access_bytes: 32`, `overhead_size_bytes: 8`, and
-`sram_bytes: 1MiB`. These apply independently of `defaults`; `compute` must
-always be supplied. `--explain` on `gwr-timetable` prints effective PE settings.
-
-For matched runnable recipes, use
-`gwr-timetable/examples/compute_region_platform.yaml` with `add_mul.yaml` or
-`fused_add_mul.yaml` from the same directory. Use
-`gwr-timetable/examples/destination_precision_platform.yaml` with
-`destination_precision.yaml` for nested FP32 work and BF16 output conversion.
-The [timetable run commands](../gwr-timetable/README.md#run-an-example) and
-[Rust example](../gwr-timetable/README.md#load-prepare-and-run-in-rust) load
-these pairs.
-
-## Memories and address maps
-
-A memory declares a physical address range and service settings:
-
-```yaml
-memories:
-  - name: mem0
-    kind: hbm
-    base_address: 0x1000_0000
-    config:
-      capacity_bytes: 1GiB
-      bw_bytes_per_tick: 32
-      delay_ticks: 40
-memory_maps:
-  - name: mm
-    devices: [mem0]
-```
-
-`kind` selects the memory model, such as `hbm` or `ddr`. `capacity_bytes`
-defines the range starting at `base_address`. `bw_bytes_per_tick` sets the
-memory service rate. `delay_ticks` sets its delay. Use distinct address ranges
-for distinct physical memories.
-
-### Address and capacity units
-
-Memory addresses and capacities accept integers, hexadecimal values, and size
-strings. Size strings include `64KiB` and `1GiB`. The PE's `sram_bytes` accepts
-these size strings too.
-
-### Memory alignment
-
-Each memory base address and capacity must be aligned to the access size of
-every address space that includes it. They must also be aligned to every
-configured cache line size. Cache alignment validation checks all physical
-memories, including memories absent from PE maps.
-
-For power-of-two sizes, alignment to the largest size satisfies every
-requirement. Other sizes must satisfy each alignment separately. These rules
-keep LSU accesses and cache fills inside memory boundaries.
-
-## Connections
-
-Each `connect` entry names two endpoints:
-
-```yaml
-connections:
-  - { connect: [pe.pe0, cache.l1_0.dev] }
-  - { connect: [cache.l1_0.mem, mem.mem0] }
-```
-
-Each connection carries requests in one direction and responses in the other.
-Cache `.dev` is the side facing a PE or other requester. Cache `.mem` is the
-side facing downstream memory.
-
-### Endpoint names
-
-| Form                     | Endpoint                                |
-| ------------------------ | --------------------------------------- |
-| `pe.pe0`                 | PE named `pe0`.                         |
-| `mem.mem0`               | Memory named `mem0`.                    |
-| `cache.l1_0.dev`         | Requester-facing cache port.            |
-| `cache.l1_0.mem`         | Memory-facing cache port.               |
-| `fabric.fabric0@(1,2)`   | Port 0 at column 1, row 2 of `fabric0`. |
-| `fabric.fabric0@(1,2).1` | Port 1 at that fabric node.             |
-
-### Unused ports
-
-Connect an unused fabric or cache endpoint to the string `null`:
-
-```yaml
-connections:
-  - { connect: ["null", "fabric.fabric0@(11,16)"] }
-```
-
-This leaves that endpoint idle without an unconnected-port error. PE and memory
-endpoints cannot connect to `null`. Quote `'null'` so YAML treats it as a
-string. See `gwr-platform/examples/platform_null_connection.yaml` for a complete
-example.
-
-<!-- ANCHOR: compute_execution_units -->
-
-## Execution units and capabilities
-
-### Operation classes
-
-A class groups named operations with the same number of inputs. Declare classes
-at the platform level:
+The platform declares named operation classes. A class lists instruction names
+with a shared input arity and FLOP-equivalent weight.
+Instruction names are lowercase in both the class and program calls.
+Each PE then declares its engines and the rate at which each engine executes a
+class. No compute capability is assumed when it is absent from the platform.
 
 ```yaml
 operation_classes:
   arithmetic: { operations: [add, mul], arity: 2 }
-  trig: { operations: [sin, cos, tan], arity: 1 }
   matrix: { operations: [matrix_mac], arity: 2, flops_per_op: 2 }
+  trig: { operations: [sin, cos, tan], arity: 1 }
+processing_elements:
+  - name: pe0
+    memory_map: mm
+    config:
+      compute:
+        engines:
+          vector:
+            capabilities:
+              - { class: arithmetic, input_dtypes: [[fp16, fp16], [bf16, bf16]], ops_per_tick: 32 }
+              - { class: trig, ops_per_tick: 32 }
+          matrix:
+            capabilities:
+              - { class: matrix, ops_per_tick: 128 }
 ```
 
-`arity` is the number of inputs per operation. Operation names must be lowercase
-in both platform declarations and program calls. `flops_per_op` weights
-operation counts for FLOP statistics. It defaults to 1 and does not change the
-service rate.
+`input_dtypes` contains exact, ordered combinations of length `arity`.
+Omitting it matches combinations that have no explicit entry for that
+operation. An explicit entry wins over a fallback even when it is on another
+engine. If several engines match the selected declaration, a batch takes the
+first available engine; independent batches can use those engines concurrently.
+Output datatypes come from the timetable's tensor and temporary
+declarations; they do not affect engine selection. The simulator currently
+does not validate whether an operation's output datatype is appropriate for
+its input datatypes. `flops_per_op` defaults to one; matrix MACs commonly use two.
 
-### Execution unit declarations
+A program can call any declared instruction using
+`{ sin: [{ read: { tensor: A, indices: [i] } }] }`.
+The program derives input datatypes from its tensors. The simulator tracks
+typed work and movement; it does not calculate output values. Named operation
+counts and weighted FLOP equivalents appear in statistics.
 
-Each named execution unit is an independent PE hardware resource. The simulation
-`Engine` advances simulated time and runs these resources. Its capabilities
-describe the operations and datatypes it can execute. Capabilities on the same
-execution unit share its throughput and scheduling slot.
+An engine runs one batch at a time. Operations assigned to one engine share
+its throughput, while independent engines overlap. For an engine batch, the
+service time is `ceil(sum(count / ops_per_tick))`. A `matrix_mac` expression
+requires a matching capability, including its explicit execution mode when
+supplied. Fused temporaries stay in SRAM. A tensor edge between compute nodes
+requires the full producer node to complete before consumers proceed.
 
-```yaml
-compute:
-  execution_units:
-    vector:
-      capabilities:
-        - { class: arithmetic, input_dtypes: [[fp16, fp16]], ops_per_tick: 32 }
-        - { class: trig, ops_per_tick: 32 }
-    general:
-      capabilities:
-        - { class: arithmetic, ops_per_tick: 8 }
-    matrix:
-      capabilities:
-        - { class: matrix, accumulator: fp32, ops_per_tick: 128 }
-```
+### Execution modes and quantized storage
 
-Place `compute` inside a PE's `config`. Every PE needs execution unit
-declarations. No capability is assumed when it is absent.
-
-| Capability field      | Meaning                                                                        |
-| --------------------- | ------------------------------------------------------------------------------ |
-| `class`               | Platform operation class supported by this execution unit.                     |
-| `input_dtypes`        | Optional list of ordered input datatype combinations.                          |
-| `ops_per_tick`        | Operations per tick for the whole execution unit. Must be positive and finite. |
-| `accumulator`         | Required accumulator datatype for matrix capabilities.                         |
-| `matrix_service_tile` | Optional block shape used to calculate matrix service time.                    |
-
-### Input datatype matching
-
-Each `input_dtypes` entry must contain `arity` datatypes, in operand order. For
-example, `[fp16, bf16]` differs from `[bf16, fp16]`. Omitting `input_dtypes`
-supplies a default for combinations without an explicit declaration.
-
-For each operation, matching considers all execution units on the PE. If any
-capability explicitly lists the requested inputs, only those matches are
-eligible. Otherwise, capabilities without `input_dtypes` are eligible. Matrix
-capabilities must also match the requested accumulator datatype. This
-accumulator check applies before choosing between explicit and default
-declarations.
-
-In the example above, FP16 addition uses `vector` at 32 operations per tick. It
-waits if `vector` is busy; it cannot use `general` instead. FP32 addition uses
-`general` at 8 operations per tick. No capability explicitly lists FP32
-addition.
-
-### Program calls and operation counts
-
-A timetable program calls an operation by name:
-
-```yaml
-sin:
-  - { read: { tensor: A, indices: [i] } }
-```
-
-Operand datatypes come from the program's tensors and intermediate expressions.
-Output datatypes come from its tensor and temporary declarations. Every scalar
-call result, including nested calls, uses its assignment destination dtype;
-reads retain their declared dtype. FP32 leaves do not promote intermediate
-results. Implicit scalar result transitions add no `convert` work. Output
-datatypes do not select execution units. For FP32 arithmetic before a BF16
-store, use a FP32 temporary and a separate explicit `convert` assignment;
-wrapping a nested expression in `convert` does not create a child dtype scope.
-See
-[Destination precision](../gwr-timetable/README.md#destination-precision-and-nested-calls)
-and the
-[operation cost table](../gwr-timetable/README.md#modeled-operation-costs). The
-simulator does not check every operation's output datatype against its inputs.
-
-Statistics report named operation counts and weighted FLOP equivalents. For
-example, 16 matrix MACs with `flops_per_op: 2` contribute 32 FLOPs. The model
-does not calculate numerical results.
-
-### Batch scheduling
-
-A compute batch groups work to execute on one execution unit. It holds that
-execution unit until it finishes. Other batches needing the same execution unit
-wait. Independent batches on different execution units can overlap. When several
-execution units match, an available eligible execution unit can run the batch.
-
-A program can produce several batches as it executes. Its data dependencies
-determine which work can overlap. Fused temporaries stay in SRAM. A downstream
-compute node waits until its producer has stored all output tiles.
-
-### Service time
-
-A compute batch takes `ceil(sum(count / ops_per_tick))` ticks, excluding queue
-time. The sum includes each operation's count and matching capability rate. For
-example, 32 `sin` operations and 32 `cos` operations share the `vector`
-execution unit. At 32 operations per tick, that batch takes two ticks. Matrix
-service tiles can increase the count used for timing.
-
-### Matrix accumulators
-
-Matrix capabilities declare their accumulator datatype:
+Typed capabilities may additionally select an explicit execution mode. The
+following fragment describes BF16 matrix operands with a tensor instruction
+and an FP32 accumulator:
 
 ```yaml
 - class: matrix
   input_dtypes: [[bf16, bf16]]
-  accumulator: fp32
   ops_per_tick: 128
+  execution: { instruction: tensor, accumulator: fp32 }
 ```
 
-The program requests the same datatype inside `matrix_mac`:
+Match that mode in the program's `matrix_mac` expression with
+`execution: { instruction: tensor, accumulator: fp32 }`. Conversion to an
+output's narrower datatype is accounted for separately and needs the
+corresponding `convert` capability. Storage dtype alone does not establish
+an executable quantized matrix mode: a workload must declare scale metadata
+and unpack/dequantize work where required by its chosen lowering. Program
+`metadata_inputs` are full-view boundary inputs loaded for each output tile
+even when arithmetic does not index them.
+
+### Block execution resources
+
+A PE that accepts timetable `pipeline` requests explicitly declares:
 
 ```yaml
-matrix_mac:
-  accumulator: fp32
-  over: [k]
-  args:
-    - { read: { tensor: A, indices: [m, k] } }
-    - { read: { tensor: B, indices: [k, n] } }
+block_execution:
+  max_compute_tiles: 1
+  max_load_chunks: 1
+  max_store_tiles: 1
+  transfer_port: lsu
+  accumulator_storage: shared_sram
+  # Optional shared combined-direction local staging bandwidth:
+  # local_memory_service: {bytes_per_tick: 256}
 ```
 
-Both declarations require `accumulator`. Other operations omit it. The datatype
-specifies the precision retained across contraction chunks. It also affects the
-storage required for partial results.
+These are PE-wide admission limits shared by all pipeline nodes. The initial
+implementation requires all three limits to equal one and supports the LSU
+route and shared SRAM backing shown above. Timetable buffer counts are
+independent of these limits. Generic programs use a separate working arena
+for operand copies, temporaries, reduction state and current results, alongside
+all requested input/output slots. The native matrix accumulator occupies the SRAM window once
+and also requires retained capacity on its selected matrix engine; retaining
+capacity does not keep that engine busy between compute steps.
 
-If the output datatype differs, each result incurs one final `convert`
-operation. The conversion runs after all contraction chunks finish. The platform
-must declare the conversion capability too.
+Without `local_memory_service`, local storage capacity and lifetimes are
+modelled but local staging bandwidth is unmodelled. When selected, one byte
+service is shared across input staging writes, operand reads, accumulator
+readout, final output writes and output drains. Generic paths also charge the
+slot-to-working-arena and working-arena-to-output copies they actually perform. This does not add external
+traffic or charge per-MAC accumulator accesses. Its rate must be positive
+and qualified by the scenario. It cannot coexist with source-specific
+`local_payload_service` until their resource sharing is defined.
 
-### Matrix operand layouts
+## Modelling a machine
 
-Transposed operands are common in ML workloads:
-[linear layers](https://docs.pytorch.org/docs/stable/generated/torch.nn.Linear.html)
-compute `X * Wᵀ + bias`, and
-[scaled dot-product attention](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html)
-forms `Q * Kᵀ`.
+Begin with physical ownership and address ranges: assign memories to PEs,
+declare the addressable devices in each memory map, and connect local and
+remote paths explicitly. A memory map makes storage addressable; the
+connections determine which links and service resources requests traverse.
+Then declare compute classes, operand types, execution modes, engine rates,
+LSU request sizes, SRAM admission capacity, and memory/link rates and delays.
+State the clock period used to convert rates per tick to rates per second.
 
-For `Y[m,n] = sum_k A * B`, `matrix_mac` supports all four operand orientations:
+For specific topologies, workload experiments, provenance, and calibration
+workflows, see the [`gwr-use-cases` package][gwr-use-cases]. It owns
+the analytic GB200 references and model generators built on this library.
 
-| Transposed operands | First operand: stored shape and read | Second operand: stored shape and read |
-| ------------------- | ------------------------------------ | ------------------------------------- |
-| Neither             | `[M, K]`, `A[m,k]`                   | `[K, N]`, `B[k,n]`                    |
-| First only          | `[K, M]`, `A[k,m]`                   | `[K, N]`, `B[k,n]`                    |
-| Second only         | `[M, K]`, `A[m,k]`                   | `[N, K]`, `B[n,k]`                    |
-| Both                | `[K, M]`, `A[k,m]`                   | `[N, K]`, `B[n,k]`                    |
+<!-- ANCHOR_END: compute_engines -->
 
-The same per-operand rule applies within each matrix batch. The contraction axis
-remains `k` and the output remains `[M, N]` in every case.
+See [the matrix/vector example](examples/compute_engines.yaml).
 
-**Execution unit assumption:** every eligible matrix execution unit can consume
-either operand, or both operands together, in these transposed orientations at
-its declared MAC rate. This applies with and without `matrix_service_tile`. No
-implicit transpose operation, data copy, repacking buffer, additional compute
-work, or temporary SRAM reservation is inserted or charged for changing the
-orientation. Logical `m`, `n` and `k`, accumulator demand and service-tile
-padding are independent of the operands' stored axis order.
+[gwr-use-cases]: ../gwr-use-cases/README.md
 
-Memory accesses still follow the declared tensor shapes, indices and views.
-Transposed layouts can change access ranges, packet counts, cache behaviour and
-memory timing, especially when the program is tiled. The assumption removes an
-additional layout-conversion cost; it does not guarantee identical memory costs
-for every layout. A platform requiring a separate transpose or repacking step
-must model its cost explicitly; execution unit capabilities do not currently
-describe operand-layout restrictions.
+### Address-to-memory striping
 
-### Matrix service tiles
-
-`matrix_service_tile` models an execution unit that processes matrix work in
-fixed-size blocks. Declare it on a matrix capability:
+Memory maps default to contiguous physical placement. An optional policy spreads
+successive stripes across an explicitly ordered group of physical memories:
 
 ```yaml
-- class: matrix
-  input_dtypes: [[bf16, bf16]]
-  accumulator: fp32
-  ops_per_tick: 128
-  matrix_service_tile: { m: 16, n: 16, k: 16 }
+memory_maps:
+  - name: local
+    devices: [hbm0, hbm1, ddr0]
+    address_mapping:
+      mode: striped # change only this to contiguous for a matched baseline
+      stripe_bytes: 64
+      groups:
+        - name: hbm
+          devices: [hbm0, hbm1]
 ```
 
-Multiplying an `m × k` matrix by a `k × n` matrix produces an `m × n` result.
-`k` is the contraction dimension. For each program tile and contraction chunk,
-each dimension rounds up to a service-tile multiple. The product of the rounded
-dimensions determines the MAC count used for timing for each matrix. Independent
-matrices in a batch are charged separately; the batch count is not padded.
+Groups must contain at least two distinct equal-capacity memories whose physical
+windows form one adjacent span. Bases and capacities must align to the power-of-two
+stripe size, which must also be a multiple of every applicable LSU fetch and cache
+line size. Group settings remain present and validated in `contiguous` mode.
+Ungrouped memories keep contiguous placement. HBM and DDR can therefore use
+different policies without changing tensor addresses or capacity.
 
-A `2 × 5` by `5 × 3` multiplication has 30 logical MACs. The declaration above
-charges a `16 × 16 × 16` block, or 4,096 MACs. At 128 MACs per tick, it takes 32
-ticks on an idle execution unit. Without the service tile, it takes
-`ceil(30 / 128) = 1` tick.
-
-Only compute time uses the rounded dimensions. Traffic, SRAM, accumulator
-demand, and reported operation counts use actual dimensions. The program's
-`tiling` setting separately controls how its work is split.
-
-All three service-tile dimensions must be positive. The capability must
-explicitly list input datatypes. Its class must contain only the two-input
-`matrix_mac` operation. Every matrix operation carries logical dimensions, even
-when no service tile is configured. The runner derives them from direct,
-in-range operand indices and the current program tile:
-
-- Output axes used only by the first operand form `m`.
-- Output axes used only by the second operand form `n`.
-- Output axes shared by both operands, or absent from both, form independent
-  batches.
-- The single contraction axis supplies `k`.
-
-Multiple axes in one role multiply into that role's extent. Singleton operand
-dimensions broadcast over their named logical axes. Batched matrices, broadcast
-operands and transposed indices use the same geometry path. Logical MACs are
-`batches * m * n * k`; a separate MAC count cannot replace these dimensions.
-Without a service tile, timing uses this logical count. With a service tile, it
-uses `batches * rounded_m * rounded_n * rounded_k`.
-
-### Matrix accumulator capacity
-
-An execution unit can optionally limit its accumulator storage:
-
-```yaml
-matrix:
-  matrix_accumulator_capacity_bytes: 4096
-  capabilities:
-    - class: matrix
-      input_dtypes: [[bf16, bf16]]
-      accumulator: fp32
-      ops_per_tick: 128
-```
-
-The limit applies to the logical output tile, independently of PE SRAM. An
-`m × n` tile with an FP32 accumulator needs `m * n * 4` bytes. Service-tile
-rounding does not increase this demand. Batched operations multiply the demand
-by the batch count. An execution unit cannot run a batch whose demand exceeds
-its limit. Omitting the setting leaves accumulator capacity unconstrained.
-
-The capacity must be positive. Matrix capabilities on that execution unit must
-explicitly list input datatypes.
-
-<!-- ANCHOR_END: compute_execution_units -->
-
-## Caches
-
-This section describes non-coherent caches. See
-[Coherent Caches](#coherent-caches) for coherent-cache configuration and
-behavior.
-
-Caches sit between requesters and downstream memory. They model line fills,
-replacement, service bandwidth, and finite request capacity. They do not model
-numerical data.
-
-```yaml
-caches:
-  - name: l1_0
-    config:
-      line_size_bytes: 32
-      bw_bytes_per_tick: 32
-      num_ways: 4
-      num_sets: 128
-      delay_ticks: 4
-      max_inflight_parents: 64
-      max_inflight_fills: 64
-```
-
-### Lines and writes
-
-A read miss fetches a whole aligned cache line. A request crossing line
-boundaries waits for every required fill. Concurrent reads of the same missing
-line can share a fill. A `NoAllocate` read miss fetches whole lines without
-retaining them in the cache.
-
-Writes keep their original byte traffic and invalidate overlapping lines.
-Replacement and invalidation prevent stale responses from installing old
-contents. Every memory range must meet the line-alignment rules described above.
-
-### Request and fill limits
-
-`max_inflight_parents` limits tracked original client reads.
-`max_inflight_fills` limits downstream line reads awaiting responses. Both
-default to 64. Large reads issue their fills as capacity becomes available.
-
-A read completes after all its fills and return-data service finish. Original
-requests and downstream fills each incur their own protocol headers. Hits and
-completed misses share the bandwidth used to return data to clients.
-
-### Cache statistics
-
-`Cache::traffic_snapshot()` reports client payload, downstream payload, and
-headers. It also reports hits, misses, and shared fills.
-`inflight_fills_snapshot()` reports current and peak fill occupancy. These are
-analytical model statistics, not hardware calibration results.
-
-## Fabrics
-
-A fabric connects resources through a grid of nodes. Its declaration sets the
-grid size and model kind.
-
-```yaml
-fabrics:
-  - name: fabric0
-    kind: routed
-    columns: 2
-    rows: 2
-    config:
-      routing: column-first
-      ticks_per_hop: 1
-      port_bits_per_tick: 65536
-      internal_link_bits_per_tick: 256
-```
-
-A `functional` fabric estimates transit delay from the horizontal and vertical
-hop count. A `routed` fabric models traffic through individual routers and
-links. Only routed fabrics support internal link bandwidth limits. Fabric
-endpoints use column and row coordinates, as shown in the connections section.
-
-### External ports and internal links
-
-`port_bits_per_tick` sets the external port service rate.
-`internal_link_bits_per_tick` optionally limits each directed node-to-node link.
-Traffic sharing one directed link competes for its bandwidth. Opposite
-directions and disjoint links can overlap.
-
-The internal rate must be positive and is supported only by routed fabrics.
-Omitting it leaves node-to-node timing governed by hop delay without an internal
-bandwidth limiter. It does not change routes, external port rates, buffers, or
-hop delays. YAML output preserves an explicit rate and omits an absent one.
-
-### Internal link timing
-
-The limiter charges `ceil(total_packet_bytes * 8 / internal_link_bits_per_tick)`
-ticks. The packet size includes protocol overhead. It forwards the packet before
-waiting for that interval. It then delays the upstream acknowledgement after
-downstream acceptance.
-
-The first packet can arrive before the interval ends. Later traffic on the same
-link is spaced by the interval. This models throughput rather than physical
-serialization latency.
-
-### Buffers and backpressure
-
-A downstream stall eventually fills the packet pipeline and byte buffers. Once
-these fill, upstream senders must wait.
-
-`ticks_per_hop` must be positive. Each hop can queue up to `ticks_per_hop`
-packets. It can also hold one packet while forwarding. Routers and arbiters can
-also hold packets while forwarding. These packet-count limits are separate from
-`rx_buffer_bytes` and `tx_buffer_bytes`.
-
-## Generate a fabric platform
-
-`gen-fabric` creates a platform around a two-dimensional fabric. For example:
-
-```sh
-cargo run --release --bin gen-fabric -- \
-  --out /tmp/platform.yaml \
-  --pe-adds-per-tick 32 \
-  --pe-muls-per-tick 8 \
-  --pe-compares-per-tick 32 \
-  --pe-matrix-macs-per-tick 128
-```
-
-The first three rates configure the shared ALU execution unit. The matrix rate
-configures a separate execution unit with an FP32 accumulator. Each matrix MAC
-counts as two FLOPs. The generator omits the internal link bandwidth limit by
-default.
-
-## Choose model parameters
-
-Start with physical storage and address ranges. Assign memories to PE maps, then
-connect local and remote paths. Next, declare compute capabilities, SRAM
-capacity, and LSU access sizes. Set memory, cache, and link rates and delays.
-
-Rates are measured per tick of the component's clock. State the clock period
-when comparing results in units per second. Choose service tiles and capacity
-limits to represent the machine being studied.
+For a logical offset `a` within a group of `N` memories and stripe size `S`, the
+destination is `(a / S) % N` and its local offset is `(a / (S*N))*S + a%S`.
+Requests carry the translated absolute physical address through the existing
+cache and fabric models. Cache indexing consequently uses physical addresses;
+changing placement may also change cache set conflicts. Clients sharing data
+must select equivalent mappings. Direct atomics in actively striped windows are
+currently rejected during preflight; contiguous and ungrouped atomics retain
+their existing behavior. Striping changes placement, not configured bandwidth.

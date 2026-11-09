@@ -1,0 +1,47 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+memory_maps:
+  - name: mm
+    devices: [memory]
+operation_classes:
+  matrix: { operations: [matrix_mac], arity: 2, flops_per_op: 2 }
+  add: { operations: [add], arity: 2 }
+  mul: { operations: [mul], arity: 2 }
+  compare: { operations: [compare, maximum], arity: 2 }
+processing_elements:
+  - name: pe0
+    memory_map: mm
+    config:
+      sram_bytes: 1MiB
+      compute:
+        engines:
+          matrix:
+            capabilities:
+              - class: matrix
+                input_dtypes: [[fp16, fp16], [bf16, bf16]]
+                ops_per_tick: 400
+              - class: matrix
+                input_dtypes: [[fp32, fp32]]
+                ops_per_tick: 100
+          vector:
+            capabilities:
+              - class: add
+                input_dtypes: [[fp16, fp16], [bf16, bf16]]
+                ops_per_tick: 200
+              - class: add
+                input_dtypes: [[fp32, fp32]]
+                ops_per_tick: 100
+              - class: mul
+                input_dtypes: [[fp32, fp32], [fp16, fp16], [bf16, bf16]]
+                ops_per_tick: 100
+              - class: compare
+                input_dtypes: [[fp32, fp32], [fp16, fp16], [bf16, bf16]]
+                ops_per_tick: 100
+memories:
+  - name: memory
+    kind: hbm
+    base_address: 0
+    config:
+      capacity_bytes: 1GiB
+connections:
+  - connect: [pe.pe0, mem.memory]

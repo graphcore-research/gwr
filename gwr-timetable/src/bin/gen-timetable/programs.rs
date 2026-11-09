@@ -6,15 +6,12 @@ use std::collections::BTreeMap;
 
 use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
-#[cfg(test)]
-use gwr_models::processing_element::program::PreparedProgram;
-use gwr_models::processing_element::program::TensorSpec;
 use gwr_models::processing_element::program::syntax::{
     AssignmentSpec, BoundsMode, ExprSpec, IndexSpec, ProgramSpec, ReductionOp, TemporarySpec,
 };
-use gwr_models::processing_element::tensors::dtype::DataType;
+use gwr_models::processing_element::program::validate::TensorSpec;
 
-pub(super) fn build_reduce_max_program(
+pub(super) fn reduce_max_program(
     input: &TensorSpec,
     include_indices: bool,
 ) -> Result<ProgramSpec, SimError> {
@@ -31,6 +28,9 @@ pub(super) fn build_reduce_max_program(
         .map(IndexSpec::Axis)
         .collect();
     Ok(ProgramSpec {
+        metadata_inputs: vec![],
+        indexed_metadata_inputs: vec![],
+        local_round_policy: None,
         inputs: vec!["A".into()],
         outputs: if include_indices {
             vec!["Y".into(), "I".into()]
@@ -46,13 +46,13 @@ pub(super) fn build_reduce_max_program(
             expr: ExprSpec::Reduce {
                 op: ReductionOp::Max,
                 over: vec!["k".into()],
-                value: Box::new(build_tensor_read_expression("A", indices)),
+                value: Box::new(read("A", indices)),
             },
         }],
     })
 }
 
-pub(super) fn build_add_program(
+pub(super) fn add_program(
     inputs: &[TensorSpec],
     output: &TensorSpec,
 ) -> Result<ProgramSpec, SimError> {
@@ -84,6 +84,9 @@ pub(super) fn build_add_program(
         );
     }
     Ok(ProgramSpec {
+        metadata_inputs: vec![],
+        indexed_metadata_inputs: vec![],
+        local_round_policy: None,
         inputs: vec!["A".into(), "B".into()],
         outputs: vec!["Y".into()],
         temporaries: BTreeMap::new(),
@@ -95,47 +98,20 @@ pub(super) fn build_add_program(
             expr: ExprSpec::Call {
                 op: "add".into(),
                 args: vec![
-                    build_tensor_read_expression("A", operand_indices.remove(0)),
-                    build_tensor_read_expression("B", operand_indices.remove(0)),
+                    read("A", operand_indices.remove(0)),
+                    read("B", operand_indices.remove(0)),
                 ],
+                attrs: BTreeMap::new(),
             },
         }],
     })
 }
 
-pub(super) fn build_gemm_program(
+#[expect(clippy::too_many_lines)]
+pub(super) fn gemm_program(
     inputs: &[TensorSpec],
     output: &TensorSpec,
-    accumulator: DataType,
 ) -> Result<ProgramSpec, SimError> {
-    let batch_rank = validate_gemm_shapes(inputs, output)?;
-    let batch_axes = (0..batch_rank)
-        .map(|index| format!("b{index}"))
-        .collect::<Vec<_>>();
-    let product = build_matrix_product_expression(inputs, accumulator, &batch_axes);
-    let axes = batch_axes
-        .into_iter()
-        .chain(["m".into(), "n".into()])
-        .collect();
-    let mut program = ProgramSpec {
-        inputs: vec!["A".into(), "B".into()],
-        outputs: vec!["Y".into()],
-        temporaries: BTreeMap::new(),
-        extents: BTreeMap::new(),
-        assignments: vec![AssignmentSpec {
-            output: Some("Y".into()),
-            indices_output: None,
-            axes,
-            expr: product,
-        }],
-    };
-    if let Some(bias) = inputs.get(2) {
-        add_matrix_bias(&mut program, bias, output);
-    }
-    Ok(program)
-}
-
-fn validate_gemm_shapes(inputs: &[TensorSpec], output: &TensorSpec) -> Result<usize, SimError> {
     if !(2..=3).contains(&inputs.len())
         || inputs[0].shape.len() < 2
         || inputs[1].shape.len() < 2
@@ -156,6 +132,7 @@ fn validate_gemm_shapes(inputs: &[TensorSpec], output: &TensorSpec) -> Result<us
     if k != rhs_k || output.shape[batch_rank..] != [m, n] {
         return sim_error!("matrix constructor shape mismatch");
     }
+    let mut batch_axes = Vec::new();
     for index in 0..batch_rank {
         let lhs_size = if index >= batch_rank - (lhs_rank - 2) {
             inputs[0].shape[index - (batch_rank - (lhs_rank - 2))]
@@ -173,22 +150,14 @@ fn validate_gemm_shapes(inputs: &[TensorSpec], output: &TensorSpec) -> Result<us
         if output.shape[index] != lhs_size.max(rhs_size) {
             return sim_error!("matrix output batch shape mismatch");
         }
+        batch_axes.push(format!("b{index}"));
     }
     if inputs.len() == 3 && inputs[2].shape != [n] && inputs[2].shape != output.shape {
         return sim_error!("matrix bias must have shape [n] or the output shape");
     }
-    Ok(batch_rank)
-}
-
-fn build_matrix_product_expression(
-    inputs: &[TensorSpec],
-    accumulator: DataType,
-    batch_axes: &[String],
-) -> ExprSpec {
     let m_axis = IndexSpec::Axis("m".into());
     let n_axis = IndexSpec::Axis("n".into());
     let k_axis = IndexSpec::Axis("k".into());
-    let batch_rank = batch_axes.len();
     let batch_indices = |rank: usize| {
         batch_axes[batch_rank - (rank - 2)..]
             .iter()
@@ -196,56 +165,77 @@ fn build_matrix_product_expression(
             .map(IndexSpec::Axis)
             .collect::<Vec<_>>()
     };
-    let mut lhs_indices = batch_indices(inputs[0].shape.len());
-    lhs_indices.extend([m_axis, k_axis.clone()]);
-    let mut rhs_indices = batch_indices(inputs[1].shape.len());
-    rhs_indices.extend([k_axis, n_axis]);
-    ExprSpec::MatrixMac {
-        accumulator,
-        args: vec![
-            build_tensor_read_expression("A", lhs_indices),
-            build_tensor_read_expression("B", rhs_indices),
-        ],
+    let mut lhs_indices = batch_indices(lhs_rank);
+    lhs_indices.extend([m_axis.clone(), k_axis.clone()]);
+    let mut rhs_indices = batch_indices(rhs_rank);
+    rhs_indices.extend([k_axis.clone(), n_axis.clone()]);
+    let product = ExprSpec::MatrixMac {
+        execution: None,
+        quantization: None,
+        args: vec![read("A", lhs_indices), read("B", rhs_indices)],
         over: vec!["k".into()],
-    }
-}
-
-fn add_matrix_bias(program: &mut ProgramSpec, bias: &TensorSpec, output: &TensorSpec) {
-    let product = &mut program.assignments[0];
-    product.output = Some("product".into());
-    let axes = product.axes.clone();
-    let product_indices = axes
-        .iter()
-        .cloned()
-        .map(IndexSpec::Axis)
-        .collect::<Vec<_>>();
-    let bias_indices = if bias.shape.len() == 1 {
-        vec![IndexSpec::Axis("n".into())]
-    } else {
-        product_indices.clone()
     };
-    program.inputs.push("bias".into());
-    program.temporaries.insert(
-        "product".into(),
-        TemporarySpec {
-            dtype: output.dtype,
-        },
-    );
-    program.assignments.push(AssignmentSpec {
-        output: Some("Y".into()),
-        indices_output: None,
-        axes,
-        expr: ExprSpec::Call {
-            op: "add".into(),
-            args: vec![
-                build_tensor_read_expression("product", product_indices),
-                build_tensor_read_expression("bias", bias_indices),
-            ],
-        },
-    });
+    let axes = batch_axes
+        .into_iter()
+        .chain(["m".into(), "n".into()])
+        .collect::<Vec<_>>();
+    let mut program = ProgramSpec {
+        metadata_inputs: vec![],
+        indexed_metadata_inputs: vec![],
+        local_round_policy: None,
+        inputs: vec!["A".into(), "B".into()],
+        outputs: vec!["Y".into()],
+        temporaries: BTreeMap::new(),
+        extents: BTreeMap::new(),
+        assignments: Vec::new(),
+    };
+    if inputs.len() == 3 {
+        program.inputs.push("bias".into());
+        program.temporaries.insert(
+            "product".into(),
+            TemporarySpec {
+                dtype: output.dtype,
+            },
+        );
+        program.assignments.push(AssignmentSpec {
+            output: Some("product".into()),
+            indices_output: None,
+            axes: axes.clone(),
+            expr: product,
+        });
+        let bias_indices = if inputs[2].shape.len() == 1 {
+            vec![n_axis]
+        } else {
+            axes.iter().cloned().map(IndexSpec::Axis).collect()
+        };
+        program.assignments.push(AssignmentSpec {
+            output: Some("Y".into()),
+            indices_output: None,
+            axes: axes.clone(),
+            expr: ExprSpec::Call {
+                op: "add".into(),
+                args: vec![
+                    read(
+                        "product",
+                        axes.iter().cloned().map(IndexSpec::Axis).collect(),
+                    ),
+                    read("bias", bias_indices),
+                ],
+                attrs: BTreeMap::new(),
+            },
+        });
+    } else {
+        program.assignments.push(AssignmentSpec {
+            output: Some("Y".into()),
+            indices_output: None,
+            axes,
+            expr: product,
+        });
+    }
+    Ok(program)
 }
 
-fn build_tensor_read_expression(tensor: &str, indices: Vec<IndexSpec>) -> ExprSpec {
+fn read(tensor: &str, indices: Vec<IndexSpec>) -> ExprSpec {
     ExprSpec::Read {
         tensor: tensor.into(),
         indices,
@@ -255,15 +245,11 @@ fn build_tensor_read_expression(tensor: &str, indices: Vec<IndexSpec>) -> ExprSp
 
 #[cfg(test)]
 mod tests {
-    use gwr_models::processing_element::program::ProgramBindings;
+    use gwr_models::processing_element::program::validate::{RegionBindings, validate_program};
     use gwr_models::processing_element::tensors::dtype::DataType;
     use gwr_models::processing_element::tensors::{Tensor, TensorView};
 
     use super::*;
-
-    fn view(shape: &[usize], dtype: DataType, addr: u64) -> TensorView {
-        TensorView::new_full(Tensor::new(shape, &dtype, addr).unwrap())
-    }
 
     #[test]
     fn reduce_max_has_optional_indices_output() {
@@ -271,24 +257,23 @@ mod tests {
             shape: vec![2, 3, 4],
             dtype: DataType::Fp32,
         };
-        let values_only = build_reduce_max_program(&input, false).unwrap();
-        let with_indices = build_reduce_max_program(&input, true).unwrap();
+        let values_only = reduce_max_program(&input, false).unwrap();
+        let with_indices = reduce_max_program(&input, true).unwrap();
         assert_eq!(values_only.outputs, ["Y"]);
         assert_eq!(with_indices.outputs, ["Y", "I"]);
         assert_eq!(
             with_indices.assignments[0].indices_output.as_deref(),
             Some("I")
         );
-        let region = PreparedProgram::new(
+        let region = validate_program(
             &with_indices,
-            ProgramBindings {
+            &RegionBindings {
                 inputs: vec![view(&[2, 3, 4], DataType::Fp32, 0)],
                 outputs: vec![
                     view(&[2, 3], DataType::Fp32, 128),
                     view(&[2, 3], DataType::Int64, 256),
                 ],
             },
-            None,
         )
         .unwrap();
         assert_eq!(region.extent("k"), Some(4));
@@ -296,8 +281,8 @@ mod tests {
     }
 
     #[test]
-    fn add_constructor_builds_a_valid_elementwise_program() {
-        let add = build_add_program(
+    fn constructors_emit_valid_single_path_programs() {
+        let add = add_program(
             &[
                 TensorSpec {
                     shape: vec![3, 4],
@@ -314,23 +299,19 @@ mod tests {
             },
         )
         .unwrap();
-        PreparedProgram::new(
+        validate_program(
             &add,
-            ProgramBindings {
+            &RegionBindings {
                 inputs: vec![
                     view(&[3, 4], DataType::Fp32, 0),
                     view(&[3, 4], DataType::Fp32, 100),
                 ],
                 outputs: vec![view(&[3, 4], DataType::Fp32, 200)],
             },
-            None,
         )
         .unwrap();
-    }
 
-    #[test]
-    fn gemm_constructor_infers_output_shape_and_reduction_extent() {
-        let gemm = build_gemm_program(
+        let gemm = gemm_program(
             &[
                 TensorSpec {
                     shape: vec![2, 4],
@@ -345,19 +326,17 @@ mod tests {
                 shape: vec![2, 3],
                 dtype: DataType::Fp32,
             },
-            DataType::Fp32,
         )
         .unwrap();
-        let region = PreparedProgram::new(
+        let region = validate_program(
             &gemm,
-            ProgramBindings {
+            &RegionBindings {
                 inputs: vec![
                     view(&[2, 4], DataType::Fp16, 300),
                     view(&[4, 3], DataType::Fp16, 400),
                 ],
                 outputs: vec![view(&[2, 3], DataType::Fp32, 500)],
             },
-            None,
         )
         .unwrap();
         assert_eq!(region.extent("k"), Some(4));
@@ -365,7 +344,7 @@ mod tests {
     }
 
     #[test]
-    fn validates_batched_matrix_program_with_broadcast_inputs_and_bias() {
+    fn batched_matrix_constructor_handles_broadcast_and_bias() {
         let inputs = [
             TensorSpec {
                 shape: vec![2, 1, 3, 5],
@@ -384,10 +363,10 @@ mod tests {
             shape: vec![2, 4, 3, 7],
             dtype: DataType::Fp32,
         };
-        let program = build_gemm_program(&inputs, &output, DataType::Fp32).unwrap();
-        let region = PreparedProgram::new(
+        let program = gemm_program(&inputs, &output).unwrap();
+        let region = validate_program(
             &program,
-            ProgramBindings {
+            &RegionBindings {
                 inputs: vec![
                     view(&inputs[0].shape, inputs[0].dtype, 0),
                     view(&inputs[1].shape, inputs[1].dtype, 512),
@@ -395,9 +374,12 @@ mod tests {
                 ],
                 outputs: vec![view(&output.shape, output.dtype, 2048)],
             },
-            None,
         )
         .unwrap();
         assert_eq!(region.value("product").unwrap().shape, output.shape);
+    }
+
+    fn view(shape: &[usize], dtype: DataType, addr: u64) -> TensorView {
+        TensorView::new_full(Tensor::new(shape, &dtype, addr).unwrap())
     }
 }

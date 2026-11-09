@@ -1,23 +1,19 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
 use std::cmp::Reverse;
-use std::collections::{BTreeSet, BinaryHeap, HashSet};
+use std::collections::{BTreeSet, BinaryHeap, HashSet, VecDeque};
 use std::fmt;
-use std::fmt::{Display, Formatter};
 use std::ops::Range;
 
 use gwr_engine::sim_error;
 use gwr_engine::types::SimResult;
 use gwr_models::processing_element::tensors::TensorView;
 
-use super::{ComputeTensorDirection, NodeDraft, TimetableEdge};
+use super::{ComputeTensorDirection, TimetableEdge, TimetableGraph};
 
-pub(super) fn validate(
-    nodes: &[NodeDraft],
-    edges: &[TimetableEdge],
-    topological_positions: &[usize],
-) -> SimResult {
-    let mut accesses = edges
+pub(super) fn validate(graph: &TimetableGraph) -> SimResult {
+    let mut accesses = graph
+        .edges()
         .iter()
         .filter_map(TimetableEdge::tensor_connection)
         .map(|connection| TensorAccess {
@@ -32,7 +28,7 @@ pub(super) fn validate(
         .collect::<Vec<_>>();
     accesses.sort_by_key(|access| access.view.address_bounds().start);
 
-    let mut dependencies = DependencyOrder::new(nodes, topological_positions);
+    let mut dependencies = DependencyOrder::new(graph);
     let mut active_reads = BTreeSet::new();
     let mut active_writes = BTreeSet::new();
     let mut ending = BinaryHeap::new();
@@ -63,7 +59,7 @@ pub(super) fn validate(
                     second: current,
                     ranges,
                 }
-                .into_error(nodes);
+                .into_error(graph);
             }
         }
 
@@ -92,11 +88,11 @@ struct AccessConflict<'a> {
 }
 
 impl AccessConflict<'_> {
-    fn into_error(self, nodes: &[NodeDraft]) -> SimResult {
-        let first_node = nodes[self.first.node].id();
-        let second_node = nodes[self.second.node].id();
-        let first_tensor = nodes[self.first.tensor].id();
-        let second_tensor = nodes[self.second.tensor].id();
+    fn into_error(self, graph: &TimetableGraph) -> SimResult {
+        let first_node = graph.nodes()[self.first.node].id();
+        let second_node = graph.nodes()[self.second.node].id();
+        let first_tensor = graph.nodes()[self.first.tensor].id();
+        let second_tensor = graph.nodes()[self.second.tensor].id();
         let (first_range, second_range) = self.ranges;
 
         match (self.first.kind, self.second.kind) {
@@ -176,8 +172,8 @@ enum AccessKind {
     Write,
 }
 
-impl Display for AccessKind {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+impl fmt::Display for AccessKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Read => formatter.write_str("reads"),
             Self::Write => formatter.write_str("writes"),
@@ -186,18 +182,16 @@ impl Display for AccessKind {
 }
 
 struct DependencyOrder<'a> {
-    nodes: &'a [NodeDraft],
-    topological_positions: &'a [usize],
+    graph: &'a TimetableGraph,
     current: Option<usize>,
     ancestors: ReachabilitySearch,
     descendants: ReachabilitySearch,
 }
 
 impl<'a> DependencyOrder<'a> {
-    fn new(nodes: &'a [NodeDraft], topological_positions: &'a [usize]) -> Self {
+    fn new(graph: &'a TimetableGraph) -> Self {
         Self {
-            nodes,
-            topological_positions,
+            graph,
             current: None,
             ancestors: ReachabilitySearch::default(),
             descendants: ReachabilitySearch::default(),
@@ -214,12 +208,12 @@ impl<'a> DependencyOrder<'a> {
             self.descendants.clear();
         }
 
-        if self.topological_positions[other] < self.topological_positions[current] {
+        if self.graph.topological_position(other) < self.graph.topological_position(current) {
             self.ancestors
-                .contains(self.nodes, current, other, SearchDirection::Ancestors)
+                .contains(self.graph, current, other, SearchDirection::Ancestors)
         } else {
             self.descendants
-                .contains(self.nodes, current, other, SearchDirection::Descendants)
+                .contains(self.graph, current, other, SearchDirection::Descendants)
         }
     }
 }
@@ -227,7 +221,7 @@ impl<'a> DependencyOrder<'a> {
 #[derive(Default)]
 struct ReachabilitySearch {
     reached: HashSet<usize>,
-    pending: Vec<usize>,
+    pending: VecDeque<usize>,
 }
 
 impl ReachabilitySearch {
@@ -238,27 +232,30 @@ impl ReachabilitySearch {
 
     fn contains(
         &mut self,
-        nodes: &[NodeDraft],
+        graph: &TimetableGraph,
         start: usize,
         target: usize,
         direction: SearchDirection,
     ) -> bool {
         if self.reached.is_empty() {
             self.reached.insert(start);
-            self.pending.push(start);
+            self.pending.push_back(start);
         }
 
         while !self.reached.contains(&target) {
-            let Some(node) = self.pending.pop() else {
+            // Most conflicts are ordered by nearby cache-version or producer
+            // dependencies. Breadth-first search checks those short paths
+            // before walking a whole unrelated branch of the model.
+            let Some(node) = self.pending.pop_front() else {
                 return false;
             };
             let adjacent = match direction {
-                SearchDirection::Ancestors => &nodes[node].predecessors,
-                SearchDirection::Descendants => &nodes[node].successors,
+                SearchDirection::Ancestors => graph.nodes()[node].predecessors(),
+                SearchDirection::Descendants => graph.nodes()[node].successors(),
             };
             for adjacent in adjacent {
                 if self.reached.insert(*adjacent) {
-                    self.pending.push(*adjacent);
+                    self.pending.push_back(*adjacent);
                 }
             }
         }
@@ -274,73 +271,71 @@ enum SearchDirection {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::DependencyOrder;
     use crate::timetable_file::TimetableFile;
 
     #[test]
+    fn short_dependency_path_does_not_scan_a_long_alternative() {
+        use super::{ReachabilitySearch, SearchDirection};
+        let mut nodes = Vec::new();
+        let mut edges = Vec::new();
+        for index in 0..1000 {
+            nodes.push(format!("{{ id: n{index}, kind: compute, program: {{ inputs: [], outputs: [], assignments: [] }} }}"));
+        }
+        for index in 2..999 {
+            edges.push(format!(
+                "{{ from: n{index}, to: n{}, kind: dependency }}",
+                index + 1
+            ));
+        }
+        edges.push("{ from: n0, to: n1, kind: dependency }".into());
+        edges.push("{ from: n0, to: n2, kind: dependency }".into());
+        edges.push("{ from: n1, to: n999, kind: dependency }".into());
+        let source = format!("nodes: [{}]\nedges: [{}]", nodes.join(","), edges.join(","));
+        let mut graph = TimetableFile::from_string(&source)
+            .unwrap()
+            .into_graph()
+            .unwrap();
+        // Put the unrelated long branch first in depth-first search order.
+        graph.nodes[999].predecessors = vec![1, 998];
+        graph.nodes[0].successors = vec![1, 2];
+        for (start, target, direction) in [
+            (999, 0, SearchDirection::Ancestors),
+            (0, 999, SearchDirection::Descendants),
+        ] {
+            let mut search = ReachabilitySearch::default();
+            assert!(search.contains(&graph, start, target, direction));
+            assert!(
+                search.reached.len() < 20,
+                "nearby dependency explored {} nodes",
+                search.reached.len()
+            );
+        }
+    }
+
+    #[test]
     fn searches_dependencies_lazily_in_each_direction() {
-        let file = TimetableFile::from_string(
+        let graph = TimetableFile::from_string(
             r"
 nodes:
   - { id: initial, kind: tensor, config: { addr: 10, dtype: int8, shape: [1] } }
-  - id: compute0
-    kind: compute
-    program:
-      inputs: [A]
-      outputs: [Y]
-      assignments:
-        - output: Y
-          axes: [i]
-          expr:
-            identity:
-              - read: { tensor: A, indices: [i] }
+  - { id: compute0, kind: compute, program: { inputs: [A], outputs: [Y], assignments: [{ output: Y, axes: [i], expr: { identity: [{ read: { tensor: A, indices: [i] } }] } }] } }
   - { id: tensor0, kind: tensor, config: { addr: 0, dtype: int8, shape: [1] } }
-  - id: compute1
-    kind: compute
-    program:
-      inputs: [A]
-      outputs: [Y]
-      assignments:
-        - output: Y
-          axes: [i]
-          expr:
-            identity:
-              - read: { tensor: A, indices: [i] }
+  - { id: compute1, kind: compute, program: { inputs: [A], outputs: [Y], assignments: [{ output: Y, axes: [i], expr: { identity: [{ read: { tensor: A, indices: [i] } }] } }] } }
   - { id: tensor1, kind: tensor, config: { addr: 1, dtype: int8, shape: [1] } }
-  - id: compute2
-    kind: compute
-    program:
-      inputs: [A]
-      outputs: []
-      assignments: []
+  - { id: compute2, kind: compute, program: { inputs: [A], outputs: [], assignments: [] } }
 edges:
-  - { from: initial, to: compute0.A, kind: data }
-  - { from: compute0.Y, to: tensor0, kind: data }
-  - { from: tensor0, to: compute1.A, kind: data }
-  - { from: compute1.Y, to: tensor1, kind: data }
-  - { from: tensor1, to: compute2.A, kind: data }
+  - { from: initial, to: compute0, kind: data }
+  - { from: compute0, to: tensor0, kind: data }
+  - { from: tensor0, to: compute1, kind: data }
+  - { from: compute1, to: tensor1, kind: data }
+  - { from: tensor1, to: compute2, kind: data }
 ",
         )
+        .unwrap()
+        .into_graph()
         .unwrap();
-        let mut nodes = file
-            .nodes
-            .into_iter()
-            .map(|node| NodeDraft::new(node).unwrap().0)
-            .collect::<Vec<_>>();
-        for edge in file.edges {
-            let from = nodes
-                .iter()
-                .position(|node| node.id() == edge.from_node_id())
-                .unwrap();
-            let to = nodes
-                .iter()
-                .position(|node| node.id() == edge.to_node_id())
-                .unwrap();
-            nodes[from].successors.push(to);
-            nodes[to].predecessors.push(from);
-        }
-        let topological_positions = (0..nodes.len()).collect::<Vec<_>>();
-        let mut dependencies = DependencyOrder::new(&nodes, &topological_positions);
+        let mut dependencies = DependencyOrder::new(&graph);
 
         assert_eq!(dependencies.current, None);
         assert!(dependencies.ancestors.reached.is_empty());

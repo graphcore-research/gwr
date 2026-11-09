@@ -5,7 +5,7 @@ use gwr_timetable::ComputeTensorDirection;
 use gwr_timetable::timetable_file::TimetableFile;
 
 #[test]
-fn graph_resolves_named_tensor_connections() {
+fn graph_resolves_tensor_connections_and_implicit_edge_indices() {
     let graph = TimetableFile::from_string(
         r"
 nodes:
@@ -14,14 +14,11 @@ nodes:
     config: { addr: 4096, dtype: int8, shape: [2, 4] }
   - id: compute
     kind: compute
-    program:
-      inputs: [A]
-      outputs: []
-      assignments: []
+    program: { inputs: [A], outputs: [], assignments: [] }
     input_views:
-      A: { offsets: [0, 1], shape: [2, 1] }
+      - { offsets: [0, 1], shape: [2, 1] }
 edges:
-  - { from: input, to: compute.A, kind: data }
+  - { from: input, to: compute, kind: data }
 ",
     )
     .unwrap()
@@ -30,15 +27,15 @@ edges:
 
     assert_eq!(graph.nodes()[0].id(), "input");
     assert_eq!(graph.nodes()[1].id(), "compute");
-    assert_eq!(graph.nodes()[1].input_edges(), &[0]);
+    assert_eq!(graph.nodes()[1].input_edges(), &[Some(0)]);
     assert_eq!(graph.nodes()[0].successors(), &[1]);
     assert_eq!(graph.nodes()[1].predecessors(), &[0]);
 
     let edge = &graph.edges()[0];
     assert_eq!(edge.from().node(), 0);
-    assert_eq!(edge.from_port_name(&graph), None);
+    assert_eq!(edge.from().edge_index(), Some(0));
     assert_eq!(edge.to().node(), 1);
-    assert_eq!(edge.to_port_name(&graph), Some("A"));
+    assert_eq!(edge.to().edge_index(), Some(0));
 
     let connection = edge.tensor_connection().unwrap();
     assert_eq!(connection.tensor_node(), 0);

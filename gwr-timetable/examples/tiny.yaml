@@ -58,7 +58,6 @@ nodes:
           axes: [b, m, n]
           expr:
             matrix_mac:
-              accumulator: fp32
               over: [k]
               args:
                 - { read: { tensor: A, indices: [b, m, k] } }
@@ -75,25 +74,25 @@ nodes:
 
 edges:
   - from: tensor_A
-    to: add.A
+    to: add
     kind: data
 
   - from: tensor_B
-    to: add.B
+    to: add
     kind: data
 
-  - from: add.Y
+  - from: add
     to: tensor_C
     kind: data
 
   - from: tensor_C
-    to: gemm.A
+    to: gemm.0
     kind: data
 
   - from: tensor_D
-    to: gemm.B
+    to: gemm.1
     kind: data
 
-  - from: gemm.Y
+  - from: gemm
     to: tensor_E
     kind: data

@@ -10,7 +10,7 @@ use gwr_track::entity::Entity;
 
 use crate::memory::memory_access::MemoryAccess;
 use crate::memory::memory_map::MemoryMap;
-use crate::memory::traits::{AccessMemory, CacheAccess};
+use crate::memory::traits::AccessMemory;
 
 /// Builds a simulation test harness for models that implement `AccessMemory`.
 ///
@@ -491,8 +491,8 @@ where
 impl gwr_components::test_helpers::ValueCheck<MemoryAccess> for MemoryAccess {
     fn assert_matches(&self, check_id: &str, actual: &MemoryAccess) {
         assert_eq!(
-            CacheAccess::cache_hint(actual),
-            CacheAccess::cache_hint(self),
+            crate::memory::traits::CacheAccess::cache_hint(actual),
+            crate::memory::traits::CacheAccess::cache_hint(self),
             "{check_id}: cache hint mismatch",
         );
         MemoryAccessMatcher::assert_matches(self, check_id, actual);
@@ -521,7 +521,9 @@ pub fn create_read(
     src_addr: u64,
     overhead_size_bytes: usize,
 ) -> MemoryAccess {
-    let dst_device = memory_map.resolve_access(dst_addr, num_bytes).unwrap();
+    let resolved = memory_map.resolve_access(dst_addr, num_bytes).unwrap();
+    let dst_device = resolved.device;
+    let dst_addr = resolved.physical_address;
     let (src_device, _) = memory_map.lookup(src_addr).unwrap();
     MemoryAccess::new(
         created_by,
@@ -544,7 +546,9 @@ pub fn create_write(
     src_addr: u64,
     overhead_size_bytes: usize,
 ) -> MemoryAccess {
-    let dst_device = memory_map.resolve_access(dst_addr, num_bytes).unwrap();
+    let resolved = memory_map.resolve_access(dst_addr, num_bytes).unwrap();
+    let dst_device = resolved.device;
+    let dst_addr = resolved.physical_address;
     let (src_device, _) = memory_map.lookup(src_addr).unwrap();
     MemoryAccess::new(
         created_by,
@@ -567,7 +571,9 @@ pub fn create_write_np(
     src_addr: u64,
     overhead_size_bytes: usize,
 ) -> MemoryAccess {
-    let dst_device = memory_map.resolve_access(dst_addr, num_bytes).unwrap();
+    let resolved = memory_map.resolve_access(dst_addr, num_bytes).unwrap();
+    let dst_device = resolved.device;
+    let dst_addr = resolved.physical_address;
     let (src_device, _) = memory_map.lookup(src_addr).unwrap();
     MemoryAccess::new(
         created_by,

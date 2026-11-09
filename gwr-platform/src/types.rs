@@ -7,20 +7,87 @@ use clap::ValueEnum;
 use gwr_models::fabric::FabricPortSelection;
 use gwr_models::fabric::node::FabricRoutingAlgorithm;
 use gwr_models::processing_element::compute::{ComputeConfig, OperationClass};
-use serde::de::{Deserializer, Error};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de};
 use yaml_serde::Value;
+
+/// Same as `parse_u64_byte_str` but returns a `usize`.
+pub fn parse_usize_byte_str<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let value = parse_u64_byte_str(deserializer)?;
+    usize::try_from(value).map_err(|error| {
+        de::Error::custom(format!("{value} cannot be represented as usize: {error}"))
+    })
+}
+
+/// Same as `parse_u64_byte_str` but returns a `Option<u64>`.
+pub fn parse_optional_u64_byte_str<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    Ok(Some(parse_u64_byte_str(deserializer)?))
+}
+
+/// Parse a value which could be an integer or a string and return u64 value
+///
+/// The string can be a hex string with underscores or a Byte string that
+/// specifies units. Some examples are:
+///  0x10000000
+///  0x1000_0000
+///  10B
+///  10M, 10MB, 10MiB
+///
+/// Or specified as number of bits in which case the number returned will be the
+/// number of bytes:
+///  80b, 80Mb, 80Mbit
+pub fn parse_u64_byte_str<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    // We need to first deserialize to a generic `Value` so that we can
+    // support the case where it is already a u64.
+    let value: Value = Deserialize::deserialize(deserializer)?;
+
+    if let Some(number) = value.as_u64() {
+        // It already is a u64, so simply return that
+        return Ok(number);
+    }
+
+    let s = match value.as_str() {
+        Some(s) => s.to_owned(),
+        None => {
+            return Err(de::Error::custom(format!(
+                "'{value:?}': Unsupported type for Deserialize (should be u64 or String)"
+            )));
+        }
+    };
+
+    // Convert to lowercase in order to standardise any 0x prefix
+    let lowercase = s.to_lowercase();
+
+    if lowercase.starts_with("0x") {
+        let without_underscore = lowercase.replace('_', "");
+        let without_0x = without_underscore.trim_start_matches("0x");
+        u64::from_str_radix(without_0x, 16)
+            .map_err(|e| de::Error::custom(format!("Unable to parse {s} as hex string: {e}")))
+    } else {
+        // Don't ignore case so that bit (b) and Byte (B) can be distinguished
+        let ignore_case = false;
+        let num_bytes = Byte::parse_str(&s, ignore_case)
+            .map_err(|e| de::Error::custom(format!("Unable to parse {s} as Byte string: {e}")))?;
+        Ok(num_bytes.as_u64())
+    }
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlatformConfig {
-    /// Named operation classes shared by processing-element capabilities.
     #[serde(default)]
     pub operation_classes: BTreeMap<String, OperationClass>,
-    pub memory_maps: Vec<MemoryMapSection>,
-    /// Named virtual address spaces referenced by processing elements.
     #[serde(default)]
-    pub address_spaces: Vec<AddressSpaceSection>,
+    pub compute_profiles: BTreeMap<String, ComputeConfig>,
+    pub memory_maps: Vec<MemoryMapSection>,
     pub defaults: Option<DefaultsSection>,
     pub processing_elements: Option<Vec<ProcessingElementSection>>,
     pub caches: Option<Vec<CacheSection>>,
@@ -40,69 +107,108 @@ pub struct DefaultsSection {
 #[serde(deny_unknown_fields)]
 pub struct MemoryMapSection {
     pub name: String,
+    /// Optional round-robin placement; omission preserves contiguous mapping.
+    #[serde(default)]
+    pub address_mapping: Option<AddressMappingSection>,
     /// Names of memories included in this map.
     pub devices: Vec<String>,
 }
 
-/// An explicit mapping policy for memories in a named address space.
-#[derive(Debug, Deserialize, Clone, PartialEq)]
-#[serde(deny_unknown_fields, tag = "policy", rename_all = "lowercase")]
-pub enum AddressRegionSection {
-    /// Consecutive `access_bytes` chunks rotate over the listed banks.
-    Striped {
-        /// Nonempty list of equal-capacity memories from the selected memory
-        /// map. Banks must be physically contiguous in increasing address
-        /// order. The virtual base is the first bank's physical base; the
-        /// virtual capacity is the sum of the bank capacities.
-        devices: Vec<String>,
-    },
+/// Placement policy retained in platform files even when striping is disabled.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct AddressMappingSection {
+    pub mode: AddressMappingMode,
+    pub stripe_bytes: u64,
+    pub groups: Vec<MemoryStripeGroupSection>,
 }
 
-/// A named PE virtual address space backed by a physical memory map.
-#[derive(Debug, Deserialize, Clone, PartialEq)]
+/// Contiguous placement is the compatibility baseline; striped is opt-in.
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AddressMappingMode {
+    Contiguous,
+    Striped,
+}
+
+/// Ordered members of one capacity-preserving stripe group.
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(deny_unknown_fields)]
-pub struct AddressSpaceSection {
-    /// Name referenced by [`ProcessingElementSection::address_space`].
+pub struct MemoryStripeGroupSection {
     pub name: String,
-    /// Name of the physical memory map supplying this address space's memories.
-    pub memory_map: String,
-    /// PE memory access granularity and stripe width in bytes.
-    /// Defaults to 32 and must be positive.
-    pub access_bytes: Option<usize>,
-    /// Explicit mapping policies. Unclaimed memories use identity passthrough;
-    /// omitting this field or using an empty list makes the whole map
-    /// passthrough. Each memory may appear at most once here, but may be reused
-    /// by other address spaces.
-    pub address_regions: Option<Vec<AddressRegionSection>>,
+    pub devices: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct ProcessingElementSection {
     pub name: String,
-    /// Name of the virtual address space used for this PE's memory accesses.
-    pub address_space: String,
+    pub memory_map: String,
+    /// Optional memory map for a connected independent `.dma` issuer.
+    /// Omission makes DMA use the compute memory map.
+    #[serde(default, deserialize_with = "parse_optional_map_name")]
+    pub dma_memory_map: Option<String>,
     pub config: ProcessingElementConfigSection,
 }
 
-/// Serialized processing-element settings and compute capabilities.
+fn parse_optional_map_name<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    let value = Option::<yaml_serde::Value>::deserialize(deserializer)?;
+    value
+        .map(|value| match value {
+            yaml_serde::Value::String(name) => Ok(name),
+            _ => Err(serde::de::Error::custom("DMA memory map must be a string")),
+        })
+        .transpose()
+}
+
 #[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ProcessingElementConfigSection {
     pub num_active_requests: Option<usize>,
+    pub lsu_access_bytes: Option<usize>,
     pub overhead_size_bytes: Option<usize>,
-    /// Scratchpad capacity in bytes, using the default when omitted.
     #[serde(default, deserialize_with = "parse_optional_u64_byte_str")]
     pub sram_bytes: Option<u64>,
-    /// Execution units and their scalar or matrix capabilities.
-    pub compute: Option<ComputeConfig>,
+    #[serde(default)]
+    pub boundary_payload_service: Option<BoundaryPayloadServiceSection>,
+    /// Caller logical local-temporary bytes/actual 1 ns tick, not vendor SRAM.
+    #[serde(default)]
+    pub local_payload_service: Option<LocalPayloadServiceSection>,
+    /// Optional PE-wide bounded block execution limits.
+    #[serde(default)]
+    pub block_execution:
+        Option<gwr_models::processing_element::block_execution::BlockExecutionConfig>,
+    pub compute: Option<ComputeSelection>,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct LocalPayloadServiceSection {
+    pub bytes_per_tick: u64,
+}
+
+/// Explicit caller combined-direction boundary payload, not local hardware
+/// traffic.
+#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct BoundaryPayloadServiceSection {
+    pub bytes_per_tick: u64,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum ComputeSelection {
+    Named(String),
+    Inline(ComputeConfig),
 }
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct CacheSection {
-    pub coherency_managers: Option<Vec<String>>,
     pub name: String,
+    pub coherency_managers: Option<Vec<String>>,
     pub config: CacheConfigSection,
 }
 
@@ -162,6 +268,33 @@ pub struct MemoryConfigSection {
     pub capacity_bytes: u64,
     pub bw_bytes_per_tick: Option<usize>,
     pub delay_ticks: Option<usize>,
+    /// Optional analytic FIFO byte service; omission preserves legacy timing.
+    pub arrival_aware_service: Option<MemoryServiceSection>,
+    /// Explicit caller atomic capabilities sharing that exact service budget.
+    #[serde(default)]
+    pub atomic_service: Option<gwr_models::memory::atomic::AtomicServiceConfig>,
+}
+
+/// One total admission bound including queued, active and undelivered
+/// responses. Uses configured integer bytes/tick and requires the actual
+/// native1ns clock.
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryServiceSection {
+    /// Nonphysical descriptor limit1..=4096; not a hardware queue-depth claim.
+    pub max_pending_requests: usize,
+    /// Explicit caller-assumed address service lanes; absent preserves recipe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lanes: Option<MemoryServiceLanesSection>,
+}
+
+/// Caller-assumed relative modulo stripes and integral native1ns rates.
+/// This does not certify physical HBM channels, mapping or per-stack rates.
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryServiceLanesSection {
+    pub interleave_bytes: u64,
+    pub bytes_per_tick: Vec<u64>,
 }
 
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, ValueEnum)]
@@ -198,73 +331,4 @@ pub struct CoherencyManagerConfigSection {
     pub line_size_bytes: Option<usize>,
     /// Positive directory work budget per tick; omitted means unlimited.
     pub operations_per_tick: Option<usize>,
-}
-
-/// Same as `parse_u64_byte_str` but returns a `usize`.
-pub fn parse_usize_byte_str<'de, D>(deserializer: D) -> Result<usize, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value = parse_u64_byte_str(deserializer)?;
-    usize::try_from(value)
-        .map_err(|error| Error::custom(format!("{value} cannot be represented as usize: {error}")))
-}
-
-/// Same as `parse_u64_byte_str` but returns a `Option<u64>`.
-pub fn parse_optional_u64_byte_str<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    Ok(Some(parse_u64_byte_str(deserializer)?))
-}
-
-/// Parse a value which could be an integer or a string and return u64 value
-///
-/// The string can be a hex string with underscores or a Byte string that
-/// specifies units. Some examples are:
-///  0x10000000
-///  0x1000_0000
-///  10B
-///  10M, 10MB, 10MiB
-///
-/// Or specified as number of bits in which case the number returned will be the
-/// number of bytes:
-///  80b, 80Mb, 80Mbit
-pub fn parse_u64_byte_str<'de, D>(deserializer: D) -> Result<u64, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    // We need to first deserialize to a generic `Value` so that we can
-    // support the case where it is already a u64.
-    let value: Value = Deserialize::deserialize(deserializer)?;
-
-    if let Some(number) = value.as_u64() {
-        // It already is a u64, so simply return that
-        return Ok(number);
-    }
-
-    let s = match value.as_str() {
-        Some(s) => s.to_owned(),
-        None => {
-            return Err(Error::custom(format!(
-                "'{value:?}': Unsupported type for Deserialize (should be u64 or String)"
-            )));
-        }
-    };
-
-    // Convert to lowercase in order to standardise any 0x prefix
-    let lowercase = s.to_lowercase();
-
-    if lowercase.starts_with("0x") {
-        let without_underscore = lowercase.replace('_', "");
-        let without_0x = without_underscore.trim_start_matches("0x");
-        u64::from_str_radix(without_0x, 16)
-            .map_err(|e| Error::custom(format!("Unable to parse {s} as hex string: {e}")))
-    } else {
-        // Don't ignore case so that bit (b) and Byte (B) can be distinguished
-        let ignore_case = false;
-        let num_bytes = Byte::parse_str(&s, ignore_case)
-            .map_err(|e| Error::custom(format!("Unable to parse {s} as Byte string: {e}")))?;
-        Ok(num_bytes.as_u64())
-    }
 }

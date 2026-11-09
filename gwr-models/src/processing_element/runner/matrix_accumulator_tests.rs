@@ -1,83 +1,123 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 //! Unexecuted private native accumulator/SRAM/activity controls.
 use std::cell::Cell;
-use std::future::Future;
-use std::task::Poll;
 
-use futures::future::poll_fn;
-use gwr_engine::engine::Engine;
+use async_trait::async_trait;
 
-use super::matrix_test_fixture::*;
 use super::*;
-use crate::memory::Memory;
 use crate::memory::memory_access::MemoryAccess;
+use crate::memory::memory_map::MemoryMap;
+use crate::memory::{Memory, MemoryConfig};
 use crate::processing_element::tensors::Tensor;
 use crate::processing_element::tensors::dtype::DataType;
-
-const MATRIX_ROWS: usize = 8;
-const MATRIX_COLUMNS: usize = 8;
-const REDUCTION_ELEMENTS: usize = 16;
-const ACCUMULATOR_CAPACITY_BYTES: u64 = (MATRIX_ROWS * MATRIX_COLUMNS * BYTES_PER_FP32) as u64;
-const INPUT_BYTES: usize = (MATRIX_ROWS + MATRIX_COLUMNS) * REDUCTION_ELEMENTS * BYTES_PER_BF16;
-const SERVICE_OBSERVATION_TICK: u64 = 30;
-
-fn run_compute_wait_with_capacity(capacity: Option<u64>) -> (u64, usize) {
-    let mut engine = Engine::default();
-    let (runner, memory, done) = runner_with_accumulator_capacity(&mut engine, capacity, false);
-    let inspect = runner.clone();
-    let final_inspect = runner.clone();
-    let clock = engine.default_clock();
-    let finish_clock = clock.clone();
-    let end = Rc::new(Cell::new(0));
-    let finish = end.clone();
-    engine.spawner().spawn(async move {
-        runner.run_program(0, &square_matrix_program_task()).await?;
-        finish.set(finish_clock.tick_now().tick());
+use crate::processing_element::{ProcessingElement, ProcessingElementConfig};
+struct Completed(Cell<usize>);
+#[async_trait(?Send)]
+impl crate::processing_element::dispatch::Dispatch for Completed {
+    fn task_by_id(&self, _: usize) -> Result<Task, SimError> {
+        unreachable!()
+    }
+    fn set_task_active(&self, _: usize) -> SimResult {
         Ok(())
-    });
-    engine.spawner().spawn(async move {
-        clock.wait_ticks(SERVICE_OBSERVATION_TICK)?.await;
-        assert_compute_holds_resources(&inspect, capacity);
+    }
+    fn set_task_completed(&self, _: usize) -> SimResult {
+        self.0.set(self.0.get() + 1);
         Ok(())
-    });
-    engine.run().unwrap();
-    assert_runner_resources_released(&final_inspect);
-    assert_eq!(done.0.get(), 1);
-    assert_eq!(
-        (memory.bytes_read(), memory.bytes_written()),
-        (2 * LSU_ACCESS_BYTES, LSU_ACCESS_BYTES)
-    );
-    let (_, peak, _, _) = final_inspect.compute_scheduler.accumulator_state_for_test();
-    assert_eq!(
-        peak,
-        vec![if capacity.is_some() {
-            ACCUMULATOR_CAPACITY_BYTES
-        } else {
-            0
-        }]
-    );
-    let peak_sram_bytes = final_inspect.stats.borrow().peak_sram_bytes;
-    (end.get(), peak_sram_bytes)
+    }
+    fn ready_task_indices(&self, _: &str) -> Result<(bool, Vec<usize>), SimError> {
+        Ok((true, vec![]))
+    }
+    async fn wait_for_change(&self) {
+        futures::future::pending::<()>().await
+    }
+    fn total_tasks_for_pe(&self, _: &str) -> usize {
+        0
+    }
 }
-
-fn square_matrix_program_task() -> ProgramTaskConfig {
-    let mut task = matrix_program_task(MATRIX_ROWS, MATRIX_COLUMNS, REDUCTION_ELEMENTS);
-    task.id = "square".into();
-    task
+fn program() -> ProgramTaskConfig {
+    let view = |shape: &[usize], dtype, base| {
+        TensorView::new_full(Tensor::new(shape, &dtype, base).unwrap())
+    };
+    ProgramTaskConfig{pipeline: None,id:"skinny".into(),tiling:None,program:yaml_serde::from_str("inputs: [A,B]\noutputs: [Y]\nassignments:\n - output: Y\n   axes: [m,n]\n   expr: {matrix_mac: {over: [k], execution: {instruction: tensor, accumulator: fp32, sparsity: dense}, args: [{read: {tensor: A, indices: [m,k]}}, {read: {tensor: B, indices: [k,n]}}]}}\n").unwrap(),inputs:vec![view(&[8,16],DataType::Bf16,0),view(&[16,8],DataType::Bf16,65536)],outputs:vec![view(&[8,8],DataType::Fp32,131072)]}
 }
-
-fn runner_with_accumulator_capacity(
-    engine: &mut Engine,
+fn fixture(
+    engine: &mut gwr_engine::engine::Engine,
     capacity: Option<u64>,
     replicated: bool,
+    boundary: Option<u64>,
 ) -> (TaskRunner, Rc<Memory<MemoryAccess>>, Rc<Completed>) {
-    matrix_runner_fixture(
+    let clock = engine.default_clock();
+    let mut map = MemoryMap::new();
+    map.insert(0, 262144, gwr_engine::types::DeviceId(0))
+        .unwrap();
+    let map = Rc::new(map);
+    let policy = "";
+    let budget = capacity
+        .map(|v| format!("matrix_accumulator_capacity_bytes: {v}, "))
+        .unwrap_or_default();
+    let engine_cfg = format!(
+        "{budget}capabilities: [{{class: matrix,input_dtypes: [[bf16,bf16]],ops_per_tick: 1,execution: {{instruction: tensor,accumulator: fp32,sparsity: dense}}{policy}}}]"
+    );
+    let compute = if replicated {
+        format!("engines: {{matrix0: {{{engine_cfg}}}, matrix1: {{{engine_cfg}}}}}")
+    } else {
+        format!("engines: {{matrix0: {{{engine_cfg}}}}}")
+    };
+    let cfg = ProcessingElementConfig {
+        block_execution: None,
+        num_active_requests: 16,
+        lsu_access_bytes: 65536,
+        overhead_size_bytes: 0,
+        sram_bytes: 65536,
+        boundary_payload_service: boundary,
+        local_payload_service: None,
+        compute: yaml_serde::from_str(&compute).unwrap(),
+        operation_classes: yaml_serde::from_str("matrix: {operations: [matrix_mac],arity: 2}")
+            .unwrap(),
+    };
+    let pe = ProcessingElement::new_and_register(
         engine,
-        &matrix_processing_element_config(1, false, capacity, replicated),
+        &clock,
+        engine.top(),
+        "pe",
+        &map,
+        &cfg,
+        gwr_engine::types::DeviceId(1),
     )
+    .unwrap();
+    let memory = Memory::new_and_register(
+        engine,
+        &clock,
+        engine.top(),
+        "memory",
+        MemoryConfig::new(0, 262144, 65536, 0),
+    )
+    .unwrap();
+    pe.connect_port_tx(memory.port_rx()).unwrap();
+    memory.connect_port_tx(pe.port_rx()).unwrap();
+    let done = Rc::new(Completed(Cell::new(0)));
+    let dispatcher: Dispatcher = done.clone();
+    pe.set_dispatcher(&dispatcher);
+    let runner = TaskRunner {
+        block_execution: None,
+        entity: pe.entity.clone(),
+        clock,
+        dispatcher,
+        lsu: pe.lsu.clone(),
+        compute_model: pe.compute_model.clone(),
+        compute_scheduler: pe.compute_scheduler.clone(),
+        sram: pe.sram.clone(),
+        sram_bytes: cfg.sram_bytes,
+        boundary_payload: pe.boundary_payload.clone(),
+        local_payload: pe.local_payload.clone(),
+        stats: pe.stats.clone(),
+        activity_lanes: pe.activity_lanes.clone(),
+        flop_monitor: None,
+    };
+    (runner, memory, done)
 }
 
-fn assert_runner_resources_released(runner: &TaskRunner) {
+fn idle(runner: &TaskRunner) {
     let (current, _, used, pending) = runner.compute_scheduler.accumulator_state_for_test();
     assert!(current.iter().all(|v| *v == 0));
     assert!(used.iter().all(|v| !*v));
@@ -99,75 +139,91 @@ fn assert_runner_resources_released(runner: &TaskRunner) {
             .all(|lane| lane.borrow().active_count_for_test() == 0)
     );
 }
-
-fn assert_compute_holds_resources(runner: &TaskRunner, capacity: Option<u64>) {
-    let (current, _, used, _) = runner.compute_scheduler.accumulator_state_for_test();
-    assert_eq!(
-        current,
-        vec![if capacity.is_some() {
-            ACCUMULATOR_CAPACITY_BYTES
-        } else {
-            0
-        }]
-    );
-    assert_eq!(used, vec![true]);
-    assert!(runner.sram.used() > 0);
-    assert_eq!(runner.stats.borrow().read_bytes, INPUT_BYTES);
-    assert_eq!(runner.stats.borrow().written_bytes, 0);
-    assert_eq!(
-        runner.activity_lanes.compute[0]
-            .borrow()
-            .active_count_for_test(),
-        1
-    );
-}
-
 #[test]
-fn matrix_service_wait_holds_accumulator_demand_and_sram_until_completion() {
-    let without_capacity = run_compute_wait_with_capacity(None);
-    let with_capacity = run_compute_wait_with_capacity(Some(ACCUMULATOR_CAPACITY_BYTES));
-    assert_eq!(without_capacity, with_capacity);
+fn actual_compute_wait_holds_logical_demand_and_existing_sram_until_completion() {
+    let mut results = Vec::new();
+    for capacity in [None, Some(256)] {
+        let mut engine = gwr_engine::engine::Engine::default();
+        let (runner, memory, done) = fixture(&mut engine, capacity, false, None);
+        let inspect = runner.clone();
+        let final_inspect = runner.clone();
+        let clock = engine.default_clock();
+        let finish_clock = clock.clone();
+        let end = Rc::new(Cell::new(0));
+        let finish = end.clone();
+        engine.spawner().spawn(async move {
+            runner.run_program(0, &program()).await?;
+            finish.set(finish_clock.tick_now().tick());
+            Ok(())
+        });
+        engine.spawner().spawn(async move {
+            clock.wait_ticks(30)?.await;
+            let (current, _, used, _) = inspect.compute_scheduler.accumulator_state_for_test();
+            assert_eq!(current, vec![if capacity.is_some() { 256 } else { 0 }]);
+            assert_eq!(used, vec![true]);
+            assert!(inspect.sram.used() > 0);
+            assert_eq!(inspect.stats.borrow().read_bytes, 512);
+            assert_eq!(inspect.stats.borrow().written_bytes, 0);
+            assert_eq!(
+                inspect.activity_lanes.compute[0]
+                    .borrow()
+                    .active_count_for_test(),
+                1
+            );
+            Ok(())
+        });
+        engine.run().unwrap();
+        idle(&final_inspect);
+        assert_eq!(done.0.get(), 1);
+        assert_eq!(
+            (memory.bytes_read(), memory.bytes_written()),
+            (131072, 65536)
+        );
+        let (_, peak, _, _) = final_inspect.compute_scheduler.accumulator_state_for_test();
+        assert_eq!(peak, vec![if capacity.is_some() { 256 } else { 0 }]);
+        results.push((end.get(), final_inspect.stats.borrow().peak_sram_bytes));
+    }
+    assert_eq!(results[0], results[1]);
 }
-
 #[test]
 fn cancel_polled_runner_service_releases_accumulator_sram_and_activity() {
-    let mut engine = Engine::default();
-    let (runner, memory, done) =
-        runner_with_accumulator_capacity(&mut engine, Some(ACCUMULATOR_CAPACITY_BYTES), false);
+    let mut engine = gwr_engine::engine::Engine::default();
+    let (runner, memory, done) = fixture(&mut engine, Some(256), false, None);
     let inspect = runner.clone();
     let final_inspect = runner.clone();
     let clock = engine.default_clock();
     engine.spawner().spawn(async move {
-        let task = square_matrix_program_task();
+        let task = program();
         let mut job = Box::pin(runner.run_program(0, &task));
-        for _ in 0..SERVICE_OBSERVATION_TICK {
-            poll_fn(|cx| {
-                assert!(Future::poll(job.as_mut(), cx).is_pending());
-                Poll::Ready(())
+        for _ in 0..30 {
+            futures::future::poll_fn(|cx| {
+                assert!(std::future::Future::poll(job.as_mut(), cx).is_pending());
+                std::task::Poll::Ready(())
             })
             .await;
             clock.wait_ticks(1)?.await;
         }
         assert_eq!(
             inspect.compute_scheduler.accumulator_state_for_test().0,
-            vec![ACCUMULATOR_CAPACITY_BYTES]
+            vec![256]
         );
-        assert_eq!(inspect.stats.borrow().read_bytes, INPUT_BYTES);
+        assert_eq!(inspect.stats.borrow().read_bytes, 512);
         assert_eq!(inspect.stats.borrow().written_bytes, 0);
         assert!(inspect.sram.used() > 0);
         drop(job);
-        assert_runner_resources_released(&inspect);
-        // Another task can use the resources released by cancellation.
+        idle(&inspect);
+        // Retry actual execution through the same runner and memory, not a new
+        // scheduler.
         runner.run_program(1, &task).await?;
-        assert_runner_resources_released(&inspect);
+        idle(&inspect);
         Ok(())
     });
     engine.run().unwrap();
-    assert_runner_resources_released(&final_inspect);
+    idle(&final_inspect);
     assert_eq!(done.0.get(), 1);
     assert_eq!(
         (memory.bytes_read(), memory.bytes_written()),
-        (4 * LSU_ACCESS_BYTES, LSU_ACCESS_BYTES)
+        (262144, 65536)
     );
     assert_eq!(
         (
@@ -181,18 +237,17 @@ fn cancel_polled_runner_service_releases_accumulator_sram_and_activity() {
             .compute_scheduler
             .accumulator_state_for_test()
             .1,
-        vec![ACCUMULATOR_CAPACITY_BYTES]
+        vec![256]
     );
 }
-
 #[test]
-fn matrix_tile_exceeding_accumulator_capacity_is_rejected_before_resource_use() {
-    let mut engine = Engine::default();
-    let (runner, memory, done) = runner_with_accumulator_capacity(&mut engine, Some(128), false);
+fn oversized_tile_rejects_before_configured_boundary_sram_activity_or_payload() {
+    let mut engine = gwr_engine::engine::Engine::default();
+    let (runner, memory, done) = fixture(&mut engine, Some(128), false, Some(1));
     let inspect = runner.clone();
     engine
         .spawner()
-        .spawn(async move { runner.run_program(0, &square_matrix_program_task()).await });
+        .spawn(async move { runner.run_program(0, &program()).await });
     let error = engine.run().unwrap_err();
     assert!(
         error
@@ -200,6 +255,7 @@ fn matrix_tile_exceeding_accumulator_capacity_is_rejected_before_resource_use() 
             .contains("matrix accumulator capacity cannot hold"),
         "{error}"
     );
+    idle(&inspect);
     assert_eq!(done.0.get(), 0);
     assert_eq!(inspect.stats.borrow().peak_sram_bytes, 0);
     assert_eq!(
@@ -219,6 +275,18 @@ fn matrix_tile_exceeding_accumulator_capacity_is_rejected_before_resource_use() 
             .unwrap(),
         0
     );
+    let b = inspect.boundary_payload.as_ref().unwrap().snapshot();
+    assert_eq!(
+        (
+            b.admitted_read_bytes,
+            b.admitted_write_bytes,
+            b.completed_read_bytes,
+            b.completed_write_bytes,
+            b.canceled_read_bytes,
+            b.canceled_write_bytes
+        ),
+        (0, 0, 0, 0, 0, 0)
+    );
     assert_eq!(
         inspect.compute_scheduler.accumulator_state_for_test().1,
         vec![0]
@@ -226,41 +294,46 @@ fn matrix_tile_exceeding_accumulator_capacity_is_rejected_before_resource_use() 
 }
 
 #[test]
-fn broadcast_matrix_operand_reserves_accumulator_for_the_logical_output() {
-    const OUTPUT_EXTENT: usize = 8;
-    const REDUCTION_ELEMENTS: usize = 16;
-    const BF16_BYTES: usize = 2;
-    const FP32_BYTES: usize = 4;
-    let mut engine = Engine::default();
-    let (runner, memory, done) =
-        runner_with_accumulator_capacity(&mut engine, Some(ACCUMULATOR_CAPACITY_BYTES), false);
+fn unsupported_geometry_rejects_before_configured_boundary_and_activity() {
+    let mut engine = gwr_engine::engine::Engine::default();
+    let (runner, memory, done) = fixture(&mut engine, Some(256), false, Some(1));
     let inspect = runner.clone();
-    let mut task = square_matrix_program_task();
-    task.inputs[1] = TensorView::new_full(
-        Tensor::new(&[REDUCTION_ELEMENTS, 1], &DataType::Bf16, RHS_BASE_ADDRESS).unwrap(),
-    );
-    task.program.extents.insert("n".into(), OUTPUT_EXTENT);
+    let mut task = program();
+    task.inputs[1] = TensorView::new_full(Tensor::new(&[16, 1], &DataType::Bf16, 65536).unwrap());
+    task.program.extents.insert("n".into(), 8);
     engine
         .spawner()
         .spawn(async move { runner.run_program(0, &task).await });
-    engine.run().unwrap();
-    assert_runner_resources_released(&inspect);
-    assert_eq!(done.0.get(), 1);
-    let input_bytes = (OUTPUT_EXTENT * REDUCTION_ELEMENTS + REDUCTION_ELEMENTS) * BF16_BYTES;
-    let output_bytes = OUTPUT_EXTENT * OUTPUT_EXTENT * FP32_BYTES;
+    let error = engine.run().unwrap_err();
+    assert!(
+        error.to_string().contains("matrix service requires"),
+        "{error}"
+    );
+    idle(&inspect);
+    assert_eq!(done.0.get(), 0);
+    assert_eq!(inspect.stats.borrow().peak_sram_bytes, 0);
     assert_eq!(
         (
             inspect.stats.borrow().read_bytes,
             inspect.stats.borrow().written_bytes
         ),
-        (input_bytes, output_bytes)
+        (0, 0)
     );
+    assert_eq!((memory.bytes_read(), memory.bytes_written()), (0, 0));
+    let b = inspect.boundary_payload.as_ref().unwrap().snapshot();
     assert_eq!(
-        (memory.bytes_read(), memory.bytes_written()),
-        (2 * LSU_ACCESS_BYTES, LSU_ACCESS_BYTES)
+        (
+            b.admitted_read_bytes,
+            b.admitted_write_bytes,
+            b.completed_read_bytes,
+            b.completed_write_bytes,
+            b.canceled_read_bytes,
+            b.canceled_write_bytes
+        ),
+        (0, 0, 0, 0, 0, 0)
     );
     assert_eq!(
         inspect.compute_scheduler.accumulator_state_for_test().1,
-        vec![ACCUMULATOR_CAPACITY_BYTES]
+        vec![0]
     );
 }

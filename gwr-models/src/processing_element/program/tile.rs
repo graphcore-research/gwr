@@ -8,27 +8,76 @@ use std::ops::Range;
 use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
 
-use super::syntax::TileSpec;
-use super::validate::ProgramFacts;
-use crate::processing_element::program::executable::Expr;
+use super::syntax::{ExprSpec, TileSpec};
+use super::validate::ValidatedRegion;
 
-pub(in crate::processing_element) fn plan_tiles(
-    region: &ProgramFacts,
+pub fn plan_tiles(
+    region: &ValidatedRegion,
     tiling: Option<&TileSpec>,
 ) -> Result<TileSchedule, SimError> {
     let mut parallel = Vec::new();
     let mut seen_parallel = BTreeSet::new();
     let mut reduction = BTreeSet::new();
     for assignment in &region.program.assignments {
-        for axis in &assignment.axes {
-            if seen_parallel.insert(axis.clone()) {
-                parallel.push(axis.clone());
+        if assignment
+            .output
+            .as_ref()
+            .is_some_and(|name| region.program.outputs.contains(name))
+            || assignment
+                .indices_output
+                .as_ref()
+                .is_some_and(|name| region.program.outputs.contains(name))
+        {
+            for axis in &assignment.axes {
+                if seen_parallel.insert(axis.clone()) {
+                    parallel.push(axis.clone());
+                }
             }
         }
         collect_reductions(&assignment.expr, &mut reduction);
     }
+    let mut known = seen_parallel;
+    known.extend(reduction.iter().cloned());
     let default_sizes = BTreeMap::new();
     let sizes = tiling.map_or(&default_sizes, |spec| &spec.sizes);
+    for (axis, step) in sizes {
+        if !known.contains(axis) {
+            return sim_error!("unknown tile axis {axis}");
+        }
+        if *step == 0 {
+            return sim_error!("tile size for {axis} must be positive");
+        }
+        if *step < region.extents[axis] && parallel.contains(axis) && reduction.contains(axis) {
+            for assignment in &region.program.assignments {
+                if !assignment.axes.contains(axis)
+                    && assignment
+                        .output
+                        .as_ref()
+                        .is_some_and(|name| region.program.outputs.contains(name))
+                {
+                    return sim_error!(
+                        "recomputed reduction values must be local temporaries when axis {axis} is tiled"
+                    );
+                }
+                if reduction_reads_materialized_axis(&assignment.expr, axis, region) {
+                    return sim_error!(
+                        "reduction of tiled local axis {axis} requires an inline scalar expression or a materialized full-row plan"
+                    );
+                }
+            }
+        }
+        if *step < region.extents[axis]
+            && parallel.contains(axis)
+            && !reduction.contains(axis)
+            && region
+                .program
+                .assignments
+                .iter()
+                .any(|assignment| !assignment.axes.contains(axis))
+        {
+            return sim_error!("tile axis {axis} must occur in every assignment output");
+        }
+    }
     let axis_steps = |names: Vec<String>| -> Result<Vec<AxisStep>, SimError> {
         names
             .into_iter()
@@ -49,13 +98,21 @@ pub(in crate::processing_element) fn plan_tiles(
 }
 
 #[derive(Clone, Debug)]
-pub(in crate::processing_element) struct TileSchedule {
+pub struct TileSchedule {
     outputs: Vec<AxisStep>,
     reductions: Vec<AxisStep>,
 }
 
 impl TileSchedule {
-    pub(in crate::processing_element) fn tiles(&self) -> impl Iterator<Item = RegionTile> + '_ {
+    /// Consume a schedule into an owned, lazy output-tile iterator.
+    pub fn into_tiles(self) -> impl Iterator<Item = RegionTile> {
+        IntervalProduct::new(self.outputs).map(move |output_intervals| RegionTile {
+            output_intervals,
+            reductions: self.reductions.clone(),
+        })
+    }
+
+    pub fn tiles(&self) -> impl Iterator<Item = RegionTile> + '_ {
         IntervalProduct::new(self.outputs.clone()).map(|output_intervals| RegionTile {
             output_intervals,
             reductions: self.reductions.clone(),
@@ -64,52 +121,28 @@ impl TileSchedule {
 }
 
 #[derive(Clone, Debug)]
-pub(in crate::processing_element) struct RegionTile {
-    pub(in crate::processing_element) output_intervals: BTreeMap<String, Range<usize>>,
+pub struct RegionTile {
+    pub output_intervals: BTreeMap<String, Range<usize>>,
     reductions: Vec<AxisStep>,
 }
 
 impl RegionTile {
-    pub(in crate::processing_element) fn new(
-        output_intervals: BTreeMap<String, Range<usize>>,
-        reductions: BTreeMap<String, usize>,
-        region: &ProgramFacts,
-    ) -> Result<Self, SimError> {
-        for (axis, interval) in &output_intervals {
-            let extent = region
-                .extent(axis)
-                .ok_or_else(|| SimError(format!("unknown tile axis {axis}")))?;
-            if interval.start >= interval.end || interval.end > extent {
-                return sim_error!("invalid tile interval for {axis}");
-            }
-        }
-        let reductions = reductions
-            .into_iter()
-            .map(|(name, step)| {
-                let extent = region
-                    .extent(&name)
-                    .ok_or_else(|| SimError(format!("unknown reduction axis {name}")))?;
-                if step == 0 {
-                    return sim_error!("reduction tile size for {name} must be positive");
-                }
-                Ok(AxisStep { name, extent, step })
-            })
-            .collect::<Result<Vec<_>, SimError>>()?;
-        Ok(Self {
-            output_intervals,
-            reductions,
-        })
-    }
-
-    #[cfg(test)]
-    pub(in crate::processing_element) fn reduction_chunks(&self) -> IntervalProduct {
+    pub fn reduction_chunks(&self) -> impl Iterator<Item = BTreeMap<String, Range<usize>>> + '_ {
         IntervalProduct::new(self.reductions.clone())
     }
 
-    pub(in crate::processing_element) fn reduction_chunks_for(
+    pub fn reduction_chunk_count(&self) -> Result<usize, SimError> {
+        self.reductions.iter().try_fold(1usize, |count, axis| {
+            count
+                .checked_mul(axis.extent.div_ceil(axis.step))
+                .ok_or_else(|| SimError("reduction chunk count overflows".into()))
+        })
+    }
+
+    pub fn reduction_chunks_for(
         &self,
         axes: &[String],
-    ) -> IntervalProduct {
+    ) -> impl Iterator<Item = BTreeMap<String, Range<usize>>> + '_ {
         let selected = self
             .reductions
             .iter()
@@ -119,10 +152,7 @@ impl RegionTile {
         IntervalProduct::new(selected)
     }
 
-    pub(in crate::processing_element) fn reduction_chunk_count_for(
-        &self,
-        axes: &[String],
-    ) -> Result<usize, SimError> {
+    pub fn reduction_chunk_count_for(&self, axes: &[String]) -> Result<usize, SimError> {
         self.reductions
             .iter()
             .filter(|step| axes.contains(&step.name))
@@ -134,14 +164,14 @@ impl RegionTile {
     }
 }
 
-pub(in crate::processing_element) struct IntervalProduct {
+struct IntervalProduct {
     axes: Vec<AxisStep>,
     starts: Vec<usize>,
     exhausted: bool,
 }
 
 impl IntervalProduct {
-    pub(in crate::processing_element) fn new(axes: Vec<AxisStep>) -> Self {
+    fn new(axes: Vec<AxisStep>) -> Self {
         let starts = vec![0; axes.len()];
         Self {
             axes,
@@ -187,14 +217,65 @@ impl Iterator for IntervalProduct {
 }
 
 #[derive(Clone, Debug)]
-pub(in crate::processing_element) struct AxisStep {
-    pub name: String,
-    pub extent: usize,
-    pub step: usize,
+struct AxisStep {
+    name: String,
+    extent: usize,
+    step: usize,
 }
 
-fn collect_reductions(expr: &Expr, axes: &mut BTreeSet<String>) {
-    axes.extend(expr.reduction_axes().iter().cloned());
+fn collect_reductions(expr: &ExprSpec, axes: &mut BTreeSet<String>) {
+    match expr {
+        ExprSpec::Read { .. } => {}
+        ExprSpec::Call { args, .. } => {
+            for arg in args {
+                collect_reductions(arg, axes);
+            }
+        }
+        ExprSpec::MatrixMac { args, over, .. } => {
+            axes.extend(over.iter().cloned());
+            for arg in args {
+                collect_reductions(arg, axes);
+            }
+        }
+        ExprSpec::Reduce { over, value, .. } => {
+            axes.extend(over.iter().cloned());
+            collect_reductions(value, axes);
+        }
+    }
+}
+
+fn reduction_reads_materialized_axis(
+    expr: &ExprSpec,
+    axis: &str,
+    region: &ValidatedRegion,
+) -> bool {
+    match expr {
+        ExprSpec::Reduce { over, value, .. } if over.iter().any(|name| name == axis) => {
+            reads_local_axis(value, axis, region)
+        }
+        ExprSpec::MatrixMac { over, args, .. } if over.iter().any(|name| name == axis) => {
+            args.iter().any(|arg| reads_local_axis(arg, axis, region))
+        }
+        ExprSpec::Call { args, .. } => args
+            .iter()
+            .any(|arg| reduction_reads_materialized_axis(arg, axis, region)),
+        _ => false,
+    }
+}
+
+fn reads_local_axis(expr: &ExprSpec, axis: &str, region: &ValidatedRegion) -> bool {
+    match expr {
+        ExprSpec::Read {
+            tensor, indices, ..
+        } => {
+            !region.program.inputs.contains(tensor)
+                && indices.iter().any(
+                    |index| matches!(index, super::syntax::IndexSpec::Axis(name) if name == axis),
+                )
+        }
+        ExprSpec::Call { args, .. } => args.iter().any(|arg| reads_local_axis(arg, axis, region)),
+        _ => false,
+    }
 }
 
 #[cfg(test)]

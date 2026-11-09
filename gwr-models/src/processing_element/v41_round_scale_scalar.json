@@ -1,0 +1,331 @@
+{
+  "inputs": [
+    "A",
+    "ShiftU",
+    "Mask",
+    "MantissaMask",
+    "ZeroU",
+    "Bias",
+    "OneI",
+    "ZeroI",
+    "ShiftI"
+  ],
+  "outputs": [
+    "Y"
+  ],
+  "temporaries": {
+    "Bits": {
+      "dtype": "uint32"
+    },
+    "ExpBits": {
+      "dtype": "uint32"
+    },
+    "MaskedExp": {
+      "dtype": "uint32"
+    },
+    "ExpI": {
+      "dtype": "int32"
+    },
+    "Exponent": {
+      "dtype": "int32"
+    },
+    "Mantissa": {
+      "dtype": "uint32"
+    },
+    "Nonzero": {
+      "dtype": "bool"
+    },
+    "Increment": {
+      "dtype": "int32"
+    },
+    "Ceil": {
+      "dtype": "int32"
+    },
+    "Rebiased": {
+      "dtype": "int32"
+    },
+    "Assembled": {
+      "dtype": "int32"
+    }
+  },
+  "assignments": [
+    {
+      "output": "Bits",
+      "axes": [
+        "b"
+      ],
+      "expr": {
+        "reinterpret": [
+          {
+            "read": {
+              "tensor": "A",
+              "indices": [
+                "b"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "output": "ExpBits",
+      "axes": [
+        "b"
+      ],
+      "expr": {
+        "shift_right": [
+          {
+            "read": {
+              "tensor": "Bits",
+              "indices": [
+                "b"
+              ]
+            }
+          },
+          {
+            "read": {
+              "tensor": "ShiftU",
+              "indices": []
+            }
+          }
+        ]
+      }
+    },
+    {
+      "output": "MaskedExp",
+      "axes": [
+        "b"
+      ],
+      "expr": {
+        "bitand": [
+          {
+            "read": {
+              "tensor": "ExpBits",
+              "indices": [
+                "b"
+              ]
+            }
+          },
+          {
+            "read": {
+              "tensor": "Mask",
+              "indices": []
+            }
+          }
+        ]
+      }
+    },
+    {
+      "output": "ExpI",
+      "axes": [
+        "b"
+      ],
+      "expr": {
+        "convert": [
+          {
+            "read": {
+              "tensor": "MaskedExp",
+              "indices": [
+                "b"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "output": "Exponent",
+      "axes": [
+        "b"
+      ],
+      "expr": {
+        "sub": [
+          {
+            "read": {
+              "tensor": "ExpI",
+              "indices": [
+                "b"
+              ]
+            }
+          },
+          {
+            "read": {
+              "tensor": "Bias",
+              "indices": []
+            }
+          }
+        ]
+      }
+    },
+    {
+      "output": "Mantissa",
+      "axes": [
+        "b"
+      ],
+      "expr": {
+        "bitand": [
+          {
+            "read": {
+              "tensor": "Bits",
+              "indices": [
+                "b"
+              ]
+            }
+          },
+          {
+            "read": {
+              "tensor": "MantissaMask",
+              "indices": []
+            }
+          }
+        ]
+      }
+    },
+    {
+      "output": "Nonzero",
+      "axes": [
+        "b"
+      ],
+      "expr": {
+        "not_equal": [
+          {
+            "read": {
+              "tensor": "Mantissa",
+              "indices": [
+                "b"
+              ]
+            }
+          },
+          {
+            "read": {
+              "tensor": "ZeroU",
+              "indices": []
+            }
+          }
+        ]
+      }
+    },
+    {
+      "output": "Increment",
+      "axes": [
+        "b"
+      ],
+      "expr": {
+        "select": [
+          {
+            "read": {
+              "tensor": "Nonzero",
+              "indices": [
+                "b"
+              ]
+            }
+          },
+          {
+            "read": {
+              "tensor": "OneI",
+              "indices": []
+            }
+          },
+          {
+            "read": {
+              "tensor": "ZeroI",
+              "indices": []
+            }
+          }
+        ]
+      }
+    },
+    {
+      "output": "Ceil",
+      "axes": [
+        "b"
+      ],
+      "expr": {
+        "add": [
+          {
+            "read": {
+              "tensor": "Exponent",
+              "indices": [
+                "b"
+              ]
+            }
+          },
+          {
+            "read": {
+              "tensor": "Increment",
+              "indices": [
+                "b"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "output": "Rebiased",
+      "axes": [
+        "b"
+      ],
+      "expr": {
+        "add": [
+          {
+            "read": {
+              "tensor": "Ceil",
+              "indices": [
+                "b"
+              ]
+            }
+          },
+          {
+            "read": {
+              "tensor": "Bias",
+              "indices": []
+            }
+          }
+        ]
+      }
+    },
+    {
+      "output": "Assembled",
+      "axes": [
+        "b"
+      ],
+      "expr": {
+        "shift_left": [
+          {
+            "read": {
+              "tensor": "Rebiased",
+              "indices": [
+                "b"
+              ]
+            }
+          },
+          {
+            "read": {
+              "tensor": "ShiftI",
+              "indices": []
+            }
+          }
+        ]
+      }
+    },
+    {
+      "output": "Y",
+      "axes": [
+        "b"
+      ],
+      "expr": {
+        "reinterpret": [
+          {
+            "read": {
+              "tensor": "Assembled",
+              "indices": [
+                "b"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

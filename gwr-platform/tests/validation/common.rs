@@ -3,22 +3,20 @@
 use std::collections::BTreeMap;
 
 use gwr_models::processing_element::compute::{
-    CapabilityConfig, CapabilityKind, ComputeConfig, ExecutionUnitConfig, OperationClass,
+    CapabilityConfig, ComputeConfig, EngineConfig, OperationClass,
 };
 pub(crate) use gwr_platform::types::{
-    AddressSpaceSection, CacheConfigSection, CacheSection, ConnectSection, FabricConfigSection,
-    FabricKind, FabricSection, MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
+    CacheConfigSection, CacheSection, ConnectSection, FabricConfigSection, FabricKind,
+    FabricSection, MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
     PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
 };
-
-const BASIC_OPERATION_CLASSES: [&str; 3] = ["add", "mul", "compare"];
 
 pub(crate) fn platform() -> PlatformConfig {
     PlatformConfig {
         coherency_managers: None,
+        compute_profiles: Default::default(),
         operation_classes: basic_classes(),
         memory_maps: Vec::new(),
-        address_spaces: Vec::new(),
         defaults: None,
         processing_elements: None,
         caches: None,
@@ -29,7 +27,7 @@ pub(crate) fn platform() -> PlatformConfig {
 }
 
 pub(crate) fn basic_classes() -> BTreeMap<String, OperationClass> {
-    BASIC_OPERATION_CLASSES
+    ["add", "mul", "compare"]
         .into_iter()
         .map(|name| {
             (
@@ -50,52 +48,46 @@ pub(crate) fn memory(name: &str, base_address: u64, capacity_bytes: u64) -> Memo
         kind: MemoryKind::HBM,
         base_address,
         config: MemoryConfigSection {
+            atomic_service: None,
             capacity_bytes,
             bw_bytes_per_tick: None,
             delay_ticks: None,
+            arrival_aware_service: None,
         },
     }
 }
 
-pub(crate) fn address_space(name: &str, memory_map: &str) -> AddressSpaceSection {
-    AddressSpaceSection {
-        name: name.to_string(),
-        memory_map: memory_map.to_string(),
-        access_bytes: None,
-        address_regions: None,
-    }
-}
-
-pub(crate) fn processing_element(name: &str, address_space: &str) -> ProcessingElementSection {
+pub(crate) fn processing_element(name: &str, memory_map: &str) -> ProcessingElementSection {
     ProcessingElementSection {
         name: name.to_string(),
-        address_space: address_space.to_string(),
+        memory_map: memory_map.to_string(),
+        dma_memory_map: None,
         config: ProcessingElementConfigSection {
+            block_execution: None,
             num_active_requests: None,
+            lsu_access_bytes: None,
             overhead_size_bytes: None,
             sram_bytes: None,
-            compute: Some(basic_compute()),
+            boundary_payload_service: None,
+            local_payload_service: None,
+            compute: Some(gwr_platform::types::ComputeSelection::Inline(
+                basic_compute(),
+            )),
         },
-    }
-}
-
-pub(crate) fn memory_map(name: &str, devices: &[&str]) -> MemoryMapSection {
-    MemoryMapSection {
-        name: name.to_string(),
-        devices: devices.iter().map(|name| (*name).to_string()).collect(),
     }
 }
 
 pub(crate) fn basic_compute() -> ComputeConfig {
     ComputeConfig {
-        execution_units: BTreeMap::from([(
+        engines: BTreeMap::from([(
             "alu".into(),
-            ExecutionUnitConfig {
+            EngineConfig {
                 matrix_accumulator_capacity_bytes: None,
-                capabilities: BASIC_OPERATION_CLASSES
+                capabilities: ["add", "mul", "compare"]
                     .into_iter()
                     .map(|class| CapabilityConfig {
-                        kind: CapabilityKind::Scalar,
+                        matrix_service_tile: None,
+                        execution: None,
                         class: class.into(),
                         input_dtypes: None,
                         ops_per_tick: 16.0,
@@ -103,6 +95,14 @@ pub(crate) fn basic_compute() -> ComputeConfig {
                     .collect(),
             },
         )]),
+    }
+}
+
+pub(crate) fn memory_map(name: &str, devices: &[&str]) -> MemoryMapSection {
+    MemoryMapSection {
+        address_mapping: None,
+        name: name.to_string(),
+        devices: devices.iter().map(|name| (*name).to_string()).collect(),
     }
 }
 

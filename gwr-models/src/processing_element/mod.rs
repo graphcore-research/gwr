@@ -21,12 +21,11 @@
 //! that are managed by the `LoadStoreUnit`
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Display};
 use std::rc::Rc;
 
 use async_trait::async_trait;
-use compute::{ComputeConfig, ComputeModel, ComputeScheduler, OperationClass};
+use compute::{ComputeConfig, ComputeModel, ComputeScheduler};
 use gwr_components::capacity_allocator::CapacityAllocator;
 use gwr_engine::engine::Engine;
 use gwr_engine::executor::Spawner;
@@ -39,38 +38,43 @@ use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_track::debug;
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
-use program::{PreparedProgram, ProgramBindings};
 use serde::{Deserialize, Serialize};
-use task::{PreparedTask, ProgramTaskConfig, Task};
 
 use crate::log_stats;
 use crate::memory::memory_access::MemoryAccess;
-use crate::processing_element::address_space::AddressSpace;
+use crate::memory::memory_map::MemoryMap;
 use crate::processing_element::dispatch::Dispatch;
 use crate::processing_element::flop_monitor::FlopMonitor;
 use crate::processing_element::load_store_unit::LoadStoreUnit;
-use crate::processing_element::tensors::TensorView;
 
 mod activity;
 use activity::{ActivityLanes, ProcessingElementActivityLanes};
-
-pub mod address_space;
+pub mod block_execution;
+mod block_runtime;
+pub use block_runtime::BlockExecutionSnapshot;
+pub use load_store_unit::LsuIssueSnapshot;
+mod boundary_payload;
 pub mod compute;
 pub mod dispatch;
 mod flop_monitor;
 mod load_store_unit;
+pub mod local_payload;
+mod packet_arbiter;
 pub mod program;
 mod runner;
-pub use program::analysis::estimate_peak_tile_sram;
 use runner::TaskRunner;
-
+pub use runner::estimate_peak_tile_sram;
+pub(crate) use runner::streamed_matrix::LocalOperandHandle;
 pub mod task;
 pub mod tensors;
 
 #[derive(EntityGet, EntityDisplay)]
 pub struct ProcessingElement {
     entity: Rc<Entity>,
+    atomic_memory_map: Rc<MemoryMap>,
     lsu: Rc<LoadStoreUnit>,
+    dma: RefCell<Option<Rc<LoadStoreUnit>>>,
+    transfer_resource: gwr_resources::Resource,
     clock: Clock,
     spawner: Spawner,
 
@@ -78,97 +82,120 @@ pub struct ProcessingElement {
     compute_scheduler: ComputeScheduler,
     sram: CapacityAllocator,
     sram_bytes: usize,
+    block_execution: Option<Rc<block_runtime::BlockExecutionResources>>,
+    boundary_payload: Option<Rc<boundary_payload::BoundaryPayloadService>>,
+    local_payload: Option<Rc<boundary_payload::BoundaryPayloadService>>,
     stats: Rc<RefCell<ProcessingElementStats>>,
     activity_lanes: Rc<ProcessingElementActivityLanes>,
     dispatcher: RefCell<Option<Dispatcher>>,
     flop_monitor: Option<Rc<FlopMonitor>>,
 }
 
-#[async_trait(?Send)]
-impl Runnable for ProcessingElement {
-    async fn run(&self) -> SimResult {
-        let dispatcher = self
-            .dispatcher
-            .borrow()
-            .as_ref()
-            .ok_or_else(|| SimError("Started without dispatcher".to_string()))?
-            .clone();
-
-        let pe_name = self.entity.name.as_str();
-        let (mut complete, mut ready_node_indices) = dispatcher.ready_task_indices(pe_name)?;
-        let runner = Rc::new(TaskRunner {
-            entity: self.entity.clone(),
-            clock: self.clock.clone(),
-            dispatcher: dispatcher.clone(),
-            lsu: self.lsu.clone(),
-            #[cfg(test)]
-            compute_model: self.compute_model.clone(),
-            compute_scheduler: self.compute_scheduler.clone(),
-            sram: self.sram.clone(),
-            sram_bytes: self.sram_bytes,
-            stats: self.stats.clone(),
-            activity_lanes: self.activity_lanes.clone(),
-            flop_monitor: self.flop_monitor.clone(),
-        });
-
-        loop {
-            if complete {
-                break;
+impl ProcessingElement {
+    /// Static admitted target/path/group validation, before activation. Does
+    /// not ask the live service whether a future control milestone happened.
+    pub(crate) fn validate_streamed_target(
+        &self,
+        config: &runner::streamed_matrix::StreamedMatrixTaskConfig,
+        target: &crate::memory::atomic::AtomicTargetSender,
+    ) -> SimResult {
+        // Validate only the source-selected valid rows/column-block words;
+        // unrelated unused C columns need not map. All four bytes of every
+        // selected BF16 pair must resolve to the same actual shared target.
+        for row in 0..config.m {
+            for col in (0..64).step_by(2) {
+                let address = config.c.tensor().addr()
+                    + ((row * config.n + config.n_offset + col) * 2) as u64;
+                self.validate_atomic_memory_binding(target, target.device(), address)?;
             }
-            if ready_node_indices.is_empty() {
-                // Wait for something to change
-                dispatcher.wait_for_change().await;
-            } else {
-                // Spawn all so they can run in parallel
-                for task_idx in ready_node_indices.drain(..) {
-                    let task = match dispatcher.task_by_id(task_idx)? {
-                        Task::ProgramTask { config } => self.prepare_program_task(*config)?,
-                        Task::PreparedProgram { task } => {
-                            if !task.belongs_to(&self.entity) {
-                                return sim_error!(
-                                    "prepared task belongs to another processing element"
-                                );
-                            }
-                            task
-                        }
-                        Task::SyncTask { .. } => {
-                            return sim_error!("synchronization tasks are unsupported");
-                        }
-                    };
-                    dispatcher.set_task_active(task_idx)?;
-
-                    let runner = Rc::clone(&runner);
-                    self.spawner
-                        .spawn(async move { runner.run(task_idx, task).await });
-                }
-            }
-
-            (complete, ready_node_indices) = dispatcher.ready_task_indices(pe_name)?;
         }
-        debug!(self.entity ; "PE {pe_name} DONE");
+        for chunk in 0..config.chunk_count() {
+            self.lsu
+                .validate_source_target(config.issues(chunk)?, target.device())?;
+        }
         Ok(())
     }
-}
+    pub fn preflight_streamed_matrix(
+        &self,
+        config: &runner::streamed_matrix::StreamedMatrixTaskConfig,
+    ) -> SimResult {
+        config.validate()?;
+        if self.sram_bytes < runner::streamed_matrix::LDS_BYTES {
+            return Err(gwr_engine::types::SimError(
+                "stream LDS requires 49152B".into(),
+            ));
+        }
+        for chunk in 0..config.chunk_count() {
+            self.lsu.validate_source_issues(config.issues(chunk)?)?;
+        }
+        let work = compute::ComputeWork::matrix_mac(
+            vec![
+                tensors::dtype::DataType::Bf16,
+                tensors::dtype::DataType::Bf16,
+            ],
+            compute::MatrixWorkShape {
+                m: 32,
+                n: 64,
+                k: 128,
+            },
+        )?
+        .with_execution(Some(config.execution.clone()));
+        self.compute_model.lower(&work)?;
+        self.compute_model.lower(&compute::ComputeWork::operation(
+            "convert",
+            vec![tensors::dtype::DataType::Fp32],
+            2048,
+        ))?;
+        Ok(())
+    }
+    pub fn preflight_atomic_task(&self, config: &task::AtomicTaskConfig) -> SimResult {
+        config.validate_for_pe(self)
+    }
+    pub fn validate_atomic_memory_binding(
+        &self,
+        target: &crate::memory::atomic::AtomicTargetSender,
+        device: u64,
+        address: u64,
+    ) -> SimResult {
+        self.validate_atomic_word_mapping(device, address)?;
+        self.validate_atomic_direct_target(target)
+    }
+    pub(crate) fn validate_atomic_direct_target(
+        &self,
+        target: &crate::memory::atomic::AtomicTargetSender,
+    ) -> SimResult {
+        self.lsu.validate_atomic_direct_target(target)
+    }
+    pub fn validate_atomic_word_mapping(&self, device: u64, address: u64) -> SimResult {
+        for offset in 0..4 {
+            let byte = address
+                .checked_add(offset)
+                .ok_or_else(|| SimError("atomic word address overflows".into()))?;
+            if self.atomic_memory_map.is_striped_address(byte) {
+                return Err(SimError(
+                    "direct atomic address translation in striped memory is unsupported".into(),
+                ));
+            }
+            if self.atomic_memory_map.lookup(byte).map(|(id, _)| id.0) != Some(device) {
+                return Err(SimError(
+                    "assigned PE atomic word is unmapped or maps to another memory".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
 
-impl ProcessingElement {
     pub fn new_and_register(
         engine: &Engine,
         clock: &Clock,
         parent: &Rc<Entity>,
         name: &str,
-        address_space: &Rc<AddressSpace>,
+        memory_map: &Rc<MemoryMap>,
         pe_config: &ProcessingElementConfig,
         device_id: DeviceId,
     ) -> Result<Rc<Self>, SimError> {
         Self::new_and_register_with_renames(
-            engine,
-            clock,
-            parent,
-            name,
-            None,
-            address_space,
-            pe_config,
-            device_id,
+            engine, clock, parent, name, None, memory_map, pe_config, device_id,
         )
     }
 
@@ -179,23 +206,25 @@ impl ProcessingElement {
         parent: &Rc<Entity>,
         name: &str,
         aka: Option<&Aka>,
-        address_space: &Rc<AddressSpace>,
+        memory_map: &Rc<MemoryMap>,
         pe_config: &ProcessingElementConfig,
         device_id: DeviceId,
     ) -> Result<Rc<Self>, SimError> {
         pe_config
             .validate()
             .map_err(|error| SimError(format!("{parent}::{name}: {error}")))?;
+        let local_payload = pe_config
+            .local_payload_service
+            .map(|rate| boundary_payload::BoundaryPayloadService::new(rate, clock))
+            .transpose()?;
+        let boundary_payload = pe_config
+            .boundary_payload_service
+            .map(|rate| boundary_payload::BoundaryPayloadService::new(rate, clock))
+            .transpose()?;
         let entity = Rc::new(Entity::new(parent, name));
 
         let lsu = LoadStoreUnit::new_and_register(
-            engine,
-            clock,
-            &entity,
-            aka,
-            pe_config,
-            address_space,
-            device_id,
+            engine, clock, &entity, aka, pe_config, memory_map, device_id,
         )?;
         let monitor_window_size = entity.tracker.monitoring_window_size_for(entity.id);
         let flop_monitor = monitor_window_size.map(|window_size_ticks| {
@@ -212,9 +241,17 @@ impl ProcessingElement {
             entity.clone(),
             &compute_model,
         ));
+        let block_execution = pe_config
+            .block_execution
+            .clone()
+            .map(|config| block_runtime::BlockExecutionResources::new(config, clock, &entity))
+            .transpose()?;
         let rc_self = Rc::new(Self {
             entity: entity.clone(),
+            atomic_memory_map: memory_map.clone(),
             lsu,
+            dma: RefCell::new(None),
+            transfer_resource: gwr_resources::Resource::new(1),
             clock: clock.clone(),
             spawner: engine.spawner(),
 
@@ -222,6 +259,9 @@ impl ProcessingElement {
             compute_scheduler,
             sram,
             sram_bytes: pe_config.sram_bytes,
+            block_execution,
+            boundary_payload,
+            local_payload,
             stats: Rc::new(RefCell::new(ProcessingElementStats::default())),
             activity_lanes,
 
@@ -232,16 +272,58 @@ impl ProcessingElement {
         Ok(rc_self)
     }
 
-    /// Effective hardware settings retained by this PE after default
-    /// resolution.
-    #[must_use]
-    pub fn configuration_description(&self) -> String {
-        format!(
-            "SRAM capacity: {} bytes; {}; execution units: {}",
-            self.sram_bytes,
-            self.lsu.configuration_description(),
-            self.compute_model.execution_unit_names().join(", "),
-        )
+    /// Validate a copy's views and memory mappings before simulation starts.
+    pub fn preflight_transfer_task(
+        &self,
+        config: &crate::transfer::TransferTaskConfig,
+    ) -> SimResult {
+        config.validate()?;
+        let issuer = self
+            .dma
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| self.lsu.clone());
+        issuer.validate_mapped_view(&config.source)?;
+        issuer.validate_mapped_view(&config.destination)?;
+        Ok(())
+    }
+
+    /// Add an independent DMA memory issuer before simulation starts.
+    pub fn configure_dma(
+        &self,
+        engine: &Engine,
+        clock: &Clock,
+        memory_map: &Rc<MemoryMap>,
+        config: &ProcessingElementConfig,
+        device_id: DeviceId,
+    ) -> SimResult {
+        let dma_parent = Rc::new(Entity::new(&self.entity, "dma"));
+        let lsu = LoadStoreUnit::new_and_register(
+            engine,
+            clock,
+            &dma_parent,
+            None,
+            config,
+            memory_map,
+            device_id,
+        )?;
+        *self.dma.borrow_mut() = Some(lsu);
+        Ok(())
+    }
+
+    pub fn connect_dma_tx(&self, port: PortStateResult<MemoryAccess>) -> SimResult {
+        self.dma
+            .borrow()
+            .as_ref()
+            .ok_or_else(|| SimError("DMA interface is not configured".into()))?
+            .connect_port_tx(port)
+    }
+
+    pub fn dma_rx(&self) -> PortStateResult<MemoryAccess> {
+        match self.dma.borrow().as_ref() {
+            Some(dma) => dma.port_rx(),
+            None => Err(SimError("DMA interface is not configured".into())),
+        }
     }
 
     pub fn set_dispatcher(&self, dispatcher: &Dispatcher) {
@@ -264,7 +346,6 @@ impl ProcessingElement {
         }
     }
 
-    /// Retained FLOP-equivalent count for completed compute work.
     #[must_use]
     pub fn total_flops(&self) -> usize {
         self.stats.borrow().machine_ops.flop_equivalents()
@@ -286,66 +367,95 @@ impl ProcessingElement {
         self.stats.borrow().written_bytes
     }
 
-    /// Completed logical read and write bytes, before LSU packetization.
     #[must_use]
     pub fn memory_traffic_bytes(&self) -> (usize, usize) {
         let stats = self.stats.borrow();
         (stats.read_bytes, stats.written_bytes)
     }
 
-    /// Bind raw syntax and prepare it for this exact PE, without side effects.
-    pub fn prepare_program_task(
-        &self,
-        config: ProgramTaskConfig,
-    ) -> Result<Rc<PreparedTask>, SimError> {
-        let program = Rc::new(PreparedProgram::new(
+    /// Validate typed operations and peak tile storage without issuing requests
+    /// or reserving engines. This uses the same lowering and admission rules as
+    /// execution, so unsupported modes fail before publishing a workload.
+    pub fn preflight_program_task(&self, config: &task::ProgramTaskConfig) -> SimResult {
+        self.lsu.validate_program_views(config)?;
+        if config.pipeline.is_some() {
+            for view in config.inputs.iter().chain(&config.outputs) {
+                self.lsu.validate_aligned_view(view)?;
+            }
+            if self.boundary_payload.is_some() {
+                return sim_error!(
+                    "pipeline with boundary_payload_service is unsupported; use block_execution local_memory_service"
+                );
+            }
+            let resources = self
+                .block_execution
+                .as_ref()
+                .ok_or_else(|| SimError("pipeline requires block_execution support".into()))?;
+            let plan =
+                runner::program_pipeline::compile(config, &self.compute_model, &resources.config)?;
+            if self.local_payload.is_some() {
+                return sim_error!("pipeline with local_payload_service is unsupported");
+            }
+            plan.validate_capacity(config, self.sram_bytes)?;
+            return Ok(());
+        }
+        local_payload::preflight(config, self.local_payload.is_some(), self.sram_bytes)?;
+        let region = program::validate::validate_program(
             &config.program,
-            ProgramBindings {
-                inputs: config.inputs,
-                outputs: config.outputs,
+            &program::validate::RegionBindings {
+                inputs: config.inputs.clone(),
+                outputs: config.outputs.clone(),
             },
-            config.tiling.as_ref(),
-        )?);
-        self.prepare_program(config.id, program)
+        )?;
+        let schedule = program::tile::plan_tiles(&region, config.tiling.as_ref())?;
+        runner::preflight_program(&self.compute_model, &region, &schedule)?;
+        let tiling = config.tiling.clone().unwrap_or_default();
+        let peak =
+            estimate_peak_tile_sram(&config.program, &config.inputs, &config.outputs, &tiling)?;
+        if peak > self.sram_bytes {
+            return sim_error!(
+                "{} tile requires {peak} SRAM bytes, available {}",
+                config.id,
+                self.sram_bytes
+            );
+        }
+        Ok(())
     }
 
-    /// Immutable compute capabilities used for workload selection.
-    pub fn compute_model(&self) -> &ComputeModel {
-        &self.compute_model
+    #[must_use]
+    /// Local logical service snapshot; never included in external PE/HBM
+    /// counters.
+    pub fn local_payload_snapshot(&self) -> Option<local_payload::LocalPayloadSnapshot> {
+        self.local_payload.as_ref().map(|s| s.snapshot().into())
     }
 
-    /// Virtual address space used by this processing element.
-    pub fn address_space(&self) -> &AddressSpace {
-        self.lsu.address_space()
+    /// Aggregate block pipeline service and storage observations.
+    pub fn block_execution_snapshot(&self) -> Option<BlockExecutionSnapshot> {
+        self.block_execution
+            .as_ref()
+            .map(|resources| resources.snapshot())
     }
 
-    /// Check the actual touched bytes of a view against this PE's map.
-    pub fn validate_mapped_view(&self, view: &TensorView) -> SimResult {
-        self.lsu.validate_mapped_view(view)
+    /// Actual packet counts and producer waits, shared by ordinary and
+    /// pipelined transfers.
+    #[must_use]
+    pub fn lsu_issue_snapshot(&self) -> LsuIssueSnapshot {
+        self.lsu.issue_snapshot()
     }
 
-    /// Prepare a shared bound program for this exact PE instance.
-    ///
-    /// Checks actual invocations, durations, touched memory mappings and SRAM
-    /// capacity before activation, without issuing requests. Retain the
-    /// returned handle for dispatch and accounting; it cannot execute on
-    /// another PE.
-    pub fn prepare_program(
+    /// Pure complete workspace demand using this PE's actual compute and stage
+    /// configuration.
+    pub fn program_workspace_bytes(
         &self,
-        id: String,
-        program: Rc<PreparedProgram>,
-    ) -> Result<Rc<PreparedTask>, SimError> {
-        PreparedTask::prepare(
-            id,
-            program,
-            self.entity.clone(),
-            &self.lsu,
+        config: &task::ProgramTaskConfig,
+    ) -> Result<usize, SimError> {
+        estimate_program_workspace(
+            config,
             &self.compute_model,
-            self.sram_bytes,
+            self.block_execution.as_ref().map(|r| &r.config),
         )
     }
 
-    /// Maximum simultaneous SRAM reservation observed during execution.
     pub fn peak_sram_bytes(&self) -> usize {
         self.stats.borrow().peak_sram_bytes
     }
@@ -361,6 +471,126 @@ impl ProcessingElement {
             )
             .with_data(stats.read_bytes, stats.written_bytes),
         );
+        if let Some(snapshot) = self.block_execution_snapshot()
+            && snapshot.peak_reserved_window_bytes != 0
+        {
+            gwr_track::info!(self.entity; "Block pipeline: {snapshot:?}");
+            gwr_track::info!(self.entity; "LSU issue: {:?}", self.lsu_issue_snapshot());
+        }
+    }
+}
+
+#[async_trait(?Send)]
+impl Runnable for ProcessingElement {
+    async fn run(&self) -> SimResult {
+        let dispatcher = self
+            .dispatcher
+            .borrow()
+            .as_ref()
+            .ok_or_else(|| SimError("Started without dispatcher".to_string()))?
+            .clone();
+
+        let pe_name = self.entity.name.as_str();
+        let (mut complete, mut ready_node_indices) = dispatcher.ready_task_indices(pe_name)?;
+
+        loop {
+            if complete {
+                break;
+            }
+            if ready_node_indices.is_empty() {
+                // Wait for something to change
+                dispatcher.wait_for_ready(pe_name).await?;
+            } else {
+                // Spawn all so they can run in parallel
+                for task_idx in ready_node_indices.drain(..) {
+                    match dispatcher.task_by_id(task_idx)? {
+                        task::Task::ProgramTask { config } => {
+                            self.preflight_program_task(&config)?
+                        }
+                        task::Task::TransferTask { config } => {
+                            self.preflight_transfer_task(&config)?
+                        }
+                        task::Task::StreamedMatrix { config } => config.validate_for_pe(self)?,
+                        task::Task::AtomicEffect { config } => {
+                            self.preflight_atomic_task(&config)?
+                        }
+                        task::Task::AtomicControlJoin { config } => config.validate_for_pe(self)?,
+                        task::Task::SyncTask { .. } => (),
+                    }
+                    dispatcher.set_task_active(task_idx)?;
+
+                    if let task::Task::TransferTask { config } = dispatcher.task_by_id(task_idx)? {
+                        let lsu = self
+                            .dma
+                            .borrow()
+                            .clone()
+                            .unwrap_or_else(|| self.lsu.clone());
+                        let resource = self.transfer_resource.clone();
+                        let lanes = self.activity_lanes.clone();
+                        let stats = self.stats.clone();
+                        let dispatcher = dispatcher.clone();
+                        self.spawner.spawn(async move {
+                            config.validate()?;
+                            let _reservation =
+                                gwr_resources::base::ResourceGuard::new(resource).await;
+                            let group = lanes.create_group(&config.id);
+                            for (source, destination) in config.chunks() {
+                                let bytes = usize::try_from(source.end - source.start).unwrap();
+                                lsu.access_ranges(
+                                    gwr_engine::types::AccessType::ReadRequest,
+                                    [source],
+                                    &lanes.lsu_read,
+                                    &config.id,
+                                    &group,
+                                )
+                                .await?;
+                                lsu.access_ranges(
+                                    gwr_engine::types::AccessType::WriteNonPostedRequest,
+                                    [destination],
+                                    &lanes.lsu_write,
+                                    &config.id,
+                                    &group,
+                                )
+                                .await?;
+                                let mut stats = stats.borrow_mut();
+                                stats.read_bytes = stats
+                                    .read_bytes
+                                    .checked_add(bytes)
+                                    .ok_or_else(|| SimError("transfer reads overflow".into()))?;
+                                stats.written_bytes = stats
+                                    .written_bytes
+                                    .checked_add(bytes)
+                                    .ok_or_else(|| SimError("transfer writes overflow".into()))?;
+                            }
+                            dispatcher.set_task_completed(task_idx)
+                        });
+                        continue;
+                    }
+                    let runner = TaskRunner {
+                        entity: self.entity.clone(),
+                        clock: self.clock.clone(),
+                        dispatcher: dispatcher.clone(),
+                        lsu: self.lsu.clone(),
+                        compute_model: self.compute_model.clone(),
+                        compute_scheduler: self.compute_scheduler.clone(),
+                        sram: self.sram.clone(),
+                        sram_bytes: self.sram_bytes,
+                        block_execution: self.block_execution.clone(),
+                        boundary_payload: self.boundary_payload.clone(),
+                        local_payload: self.local_payload.clone(),
+                        stats: self.stats.clone(),
+                        activity_lanes: self.activity_lanes.clone(),
+                        flop_monitor: self.flop_monitor.clone(),
+                    };
+                    self.spawner
+                        .spawn(async move { runner.run(task_idx).await });
+                }
+            }
+
+            (complete, ready_node_indices) = dispatcher.ready_task_indices(pe_name)?;
+        }
+        debug!(self.entity ; "PE {pe_name} DONE");
+        Ok(())
     }
 }
 
@@ -393,7 +623,7 @@ impl ProcessingElementStatsDisplay {
 }
 
 impl Display for ProcessingElementStatsDisplay {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let total_flops = self.machine_ops.flop_equivalents as u128;
         let time_now_s = self.time_now_ns / 1e9;
         let total_gflops = total_flops as f64 / 1e9;
@@ -423,17 +653,26 @@ pub struct ProcessingElementConfig {
     /// The number of outstanding requests can the LSU handle at once
     pub num_active_requests: usize,
 
+    /// The maximum number of bytes in each memory access
+    pub lsu_access_bytes: usize,
+
     /// The number of bytes of protocol overhead for each memory transaction
     pub overhead_size_bytes: usize,
 
     /// The total number of local SRAM storage bytes available to the PE
     pub sram_bytes: usize,
 
-    /// Typed execution units.
+    /// Optional caller combined-direction packed boundary B/actual1ns tick.
+    /// This is not a physical SRAM/VMEM rate; None preserves the old path.
+    pub boundary_payload_service: Option<u64>,
+    /// Separate combined-direction logical local debt budget; None is legacy.
+    pub local_payload_service: Option<u64>,
+    /// Optional PE-wide bounded block execution support.
+    pub block_execution: Option<block_execution::BlockExecutionConfig>,
+
+    /// Typed compute engines.
     pub compute: ComputeConfig,
-    /// Named operation signatures and accounting costs shared by execution
-    /// units.
-    pub operation_classes: BTreeMap<String, OperationClass>,
+    pub operation_classes: std::collections::BTreeMap<String, compute::OperationClass>,
 }
 
 impl ProcessingElementConfig {
@@ -441,8 +680,25 @@ impl ProcessingElementConfig {
         if self.num_active_requests == 0 {
             return sim_error!("LSU request-slot count must be greater than zero");
         }
+        if self.lsu_access_bytes == 0 {
+            return sim_error!("LSU access size must be greater than zero");
+        }
         if self.sram_bytes == 0 {
             return sim_error!("PE SRAM capacity must be greater than zero");
+        }
+        if let Some(rate) = self.boundary_payload_service {
+            boundary_payload::BoundaryPayloadService::validate_rate(rate)?;
+        }
+        if let Some(rate) = self.local_payload_service {
+            boundary_payload::BoundaryPayloadService::validate_rate(rate)?;
+        }
+        if let Some(config) = &self.block_execution {
+            config.validate()?;
+            if config.local_memory_service.is_some() && self.local_payload_service.is_some() {
+                return sim_error!(
+                    "block_execution local_memory_service cannot share a PE with local_payload_service"
+                );
+            }
         }
         ComputeModel::new(&self.compute, &self.operation_classes)?;
         Ok(())
@@ -457,34 +713,28 @@ struct ProcessingElementStats {
     peak_sram_bytes: usize,
 }
 
-/// Logical operation counts and their separately accumulated FLOP equivalents.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct MachineOpCounts {
-    /// Logical operation counts keyed by declared operation name.
-    pub by_operation: BTreeMap<String, usize>,
-    /// Sum of each logical operation count multiplied by its declared FLOP
-    /// cost.
+    pub by_operation: std::collections::BTreeMap<String, usize>,
     pub flop_equivalents: usize,
 }
 
 impl MachineOpCounts {
-    pub(crate) fn single(op: &str, count: usize, flops_per_op: usize) -> Result<Self, SimError> {
+    pub fn single(op: &str, count: usize, flops_per_op: usize) -> Result<Self, SimError> {
         Ok(Self {
-            by_operation: BTreeMap::from([(op.to_owned(), count)]),
+            by_operation: std::collections::BTreeMap::from([(op.to_owned(), count)]),
             flop_equivalents: count
                 .checked_mul(flops_per_op)
                 .ok_or_else(|| SimError("FLOP-equivalent count overflows".into()))?,
         })
     }
 
-    /// Return the retained FLOP-equivalent contribution.
     #[must_use]
     pub fn flop_equivalents(&self) -> usize {
         self.flop_equivalents
     }
 
-    /// Sum named logical operation counts, rejecting an overflowing total.
     pub fn checked_operation_total(&self) -> Result<usize, SimError> {
         self.by_operation.values().try_fold(0usize, |total, count| {
             total
@@ -493,8 +743,6 @@ impl MachineOpCounts {
         })
     }
 
-    /// Merge counts, rejecting overflow of any operation or FLOP-equivalent
-    /// sum.
     pub fn checked_add(self, other: Self) -> Result<Self, SimError> {
         let mut by_operation = self.by_operation;
         for (op, count) in other.by_operation {
@@ -514,59 +762,25 @@ impl MachineOpCounts {
     }
 }
 
-#[cfg(test)]
-mod matrix_test_fixture;
-
-#[cfg(test)]
-mod address_space_tests {
-    use super::address_space::AddressRegionPolicy;
-    use super::matrix_test_fixture::{
-        LSU_ACCESS_BYTES, MEMORY_CAPACITY_BYTES, matrix_processing_element_config,
-        matrix_program_task,
-    };
-    use super::tensors::dtype::DataType;
-    use super::tensors::{Tensor, TensorView};
-    use super::*;
-
-    #[test]
-    fn program_preflight_validates_virtual_boundaries_in_a_striped_address_space() {
-        const PHYSICAL_BASE: u64 = 0x10_0000;
-        let mut engine = Engine::default();
-        let clock = engine.default_clock();
-        let mut space = AddressSpace::new(LSU_ACCESS_BYTES as u64).unwrap();
-        space
-            .insert(
-                0,
-                MEMORY_CAPACITY_BYTES as u64,
-                AddressRegionPolicy::Striped {
-                    device_size_bytes: MEMORY_CAPACITY_BYTES as u64 / 2,
-                    banks: vec![
-                        (DeviceId(0), PHYSICAL_BASE),
-                        (DeviceId(2), 2 * PHYSICAL_BASE),
-                    ],
-                },
-            )
-            .unwrap();
-        let config = matrix_processing_element_config(256, false, None, false);
-        let pe = ProcessingElement::new_and_register(
-            &engine,
-            &clock,
-            engine.top(),
-            "pe",
-            &Rc::new(space),
-            &config,
-            DeviceId(1),
+/// Pure config-aware workspace estimation for ordinary and pipelined programs.
+pub fn estimate_program_workspace(
+    config: &task::ProgramTaskConfig,
+    model: &ComputeModel,
+    limits: Option<&block_execution::BlockExecutionConfig>,
+) -> Result<usize, SimError> {
+    if config.pipeline.is_some() {
+        Ok(runner::program_pipeline::compile(
+            config,
+            model,
+            limits.ok_or_else(|| SimError("pipeline requires block_execution support".into()))?,
+        )?
+        .bytes())
+    } else {
+        estimate_peak_tile_sram(
+            &config.program,
+            &config.inputs,
+            &config.outputs,
+            &config.tiling.clone().unwrap_or_default(),
         )
-        .unwrap();
-        let mut task = matrix_program_task(4, 4, 4);
-        pe.prepare_program_task(task.clone()).unwrap();
-        // Physical bank addresses must not be accepted as virtual bindings.
-        task.outputs[0] =
-            TensorView::new_full(Tensor::new(&[4, 4], &DataType::Fp32, PHYSICAL_BASE).unwrap());
-        let error = pe.prepare_program_task(task).expect_err("unmapped output");
-        assert!(
-            error.to_string().contains("unmapped touched bytes"),
-            "{error}"
-        );
     }
 }

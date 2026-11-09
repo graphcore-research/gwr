@@ -14,7 +14,7 @@ fn rejects_zero_sized_views() {
             tensor("input", 0, DataType::Fp32, &[4]),
             compute("compute", vec![view(&[0], &[0])], vec![]),
         ],
-        vec![data_edge("input", "compute.input0")],
+        vec![data_edge("input", "compute")],
     );
 
     let err = timetable_file.validate().unwrap_err();
@@ -68,7 +68,7 @@ fn accepts_a_tensor_at_the_final_physical_byte() {
 #[test]
 fn compute_node_rejects_unknown_view_field() {
     let err = TimetableFile::from_string(
-        r"
+        "
 nodes:
   - id: add0
     kind: compute
@@ -78,10 +78,10 @@ nodes:
       assignments: []
     pe: pe0
     input_views:
-      A:
-        offsets: [0]
+      - offsets: [0]
         shape: [4]
         stride: [1]
+      -
 
 edges:
 ",
@@ -91,18 +91,18 @@ edges:
 }
 
 #[test]
-fn rejects_compute_input_view_outside_tensor() {
+fn compute_input_view_outside_tensor() {
     let (top, platform, mut timetable_file) = create_default_timetable_file();
     let NodeSection::Compute { input_views, .. } = &mut timetable_file.nodes[2] else {
         panic!("expected compute node");
     };
-    input_views.insert(
-        "A".into(),
-        TensorViewSection {
+    *input_views = Some(vec![
+        Some(TensorViewSection {
             shape: vec![3, 10, 10],
             offsets: vec![1, 1, 1],
-        },
-    );
+        }),
+        None,
+    ]);
 
     let err = build_timetable(&top, timetable_file, &platform).unwrap_err();
     assert!(format!("{err}").contains(
@@ -111,18 +111,15 @@ fn rejects_compute_input_view_outside_tensor() {
 }
 
 #[test]
-fn rejects_compute_output_view_outside_tensor() {
+fn compute_output_view_outside_tensor() {
     let (top, platform, mut timetable_file) = create_default_timetable_file();
     let NodeSection::Compute { output_views, .. } = &mut timetable_file.nodes[2] else {
         panic!("expected compute node");
     };
-    output_views.insert(
-        "Y".into(),
-        TensorViewSection {
-            shape: vec![3, 10, 100],
-            offsets: vec![0, 0, 0],
-        },
-    );
+    *output_views = Some(vec![Some(TensorViewSection {
+        shape: vec![3, 10, 100],
+        offsets: vec![0, 0, 0],
+    })]);
 
     let err = build_timetable(&top, timetable_file, &platform).unwrap_err();
     assert!(format!("{err}").contains(
@@ -131,7 +128,7 @@ fn rejects_compute_output_view_outside_tensor() {
 }
 
 #[test]
-fn rejects_a_view_on_a_disconnected_named_port() {
+fn rejects_a_view_on_a_disconnected_tensor_index() {
     let timetable_file = timetable(
         vec![compute("compute", vec![view(&[0], &[1]), None], vec![])],
         vec![],
@@ -140,12 +137,12 @@ fn rejects_a_view_on_a_disconnected_named_port() {
     let error = timetable_file.validate().unwrap_err().to_string();
     assert_eq!(
         error,
-        "Compute node 'compute' declares an input view for disconnected port 'input0'"
+        "Compute node 'compute' declares an input view for disconnected tensor index 0"
     );
 }
 
 #[test]
-fn rejects_an_unbound_program_input_port() {
+fn rejects_an_unbound_program_port() {
     let error = timetable(vec![compute("compute", vec![None], vec![None])], vec![])
         .validate()
         .unwrap_err();

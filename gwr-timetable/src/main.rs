@@ -2,8 +2,8 @@
 
 //! A simple front-end for running a [Timetable] on a [Platform].
 
-use std::error::Error;
-use std::fs::write;
+use std::fs;
+use std::io::IsTerminal;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -16,19 +16,25 @@ use gwr_engine::time::clock::Clock;
 use gwr_engine::types::SimResult;
 use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_platform::Platform;
+use gwr_timetable::Timetable;
 use gwr_timetable::timetable_file::TimetableFile;
-use gwr_timetable::{Timetable, Workload};
 use gwr_track::Track;
 use gwr_track::builder::{TrackerArgs, setup_trackers};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
-use log::Level;
 
-fn main() -> Result<()> {
+fn main() {
+    if let Err(error) = run() {
+        eprintln!("Error: {error}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<()> {
     let mut args = Cli::parse();
     args.tracker
-        .ensure_visiblity(args.dump_stats, "--dump-stats", Level::Info);
+        .ensure_visiblity(args.dump_stats, "--dump-stats", log::Level::Info);
 
-    let tracker: Rc<dyn Track> = setup_trackers(&args.tracker.trackers_config()).unwrap();
+    let tracker: Rc<dyn Track> = setup_trackers(&args.tracker.trackers_config())?;
     let mut engine = Engine::new(&tracker);
     let clock = engine.default_clock();
     let platform = Rc::new(Platform::from_file(
@@ -45,21 +51,14 @@ fn main() -> Result<()> {
     let graph = timetable_file.into_graph()?;
 
     let timetable = Rc::new(Timetable::new(engine.top(), graph, &platform)?);
-    println!("Loaded timetable with {num_nodes} nodes, {num_edges} edges.");
-
-    if args.explain {
-        print!("{}", timetable.preparation_description());
-    }
-    if args.check || args.explain {
-        println!("Preparation successful; simulation was not run.");
-        return Ok(());
-    }
-
     let dispatcher: Rc<dyn Dispatch> = timetable.clone();
     platform.attach_dispatcher(&dispatcher);
 
+    println!("Loaded timetable with {num_nodes} nodes, {num_edges} edges.");
+
+    let progress_log = args.progress && !std::io::stderr().is_terminal();
     let mut progress_bars = None;
-    if args.progress {
+    if args.progress && !progress_log {
         let workload = timetable.workload_totals()?;
         timetable.enable_completed_workload_tracking()?;
         let bars = ProgressBars::new(workload);
@@ -76,11 +75,25 @@ fn main() -> Result<()> {
                 snapshot.active_task_count,
             )
         })
+    } else if progress_log {
+        engine.run_with_executor_observer(Duration::from_secs(1), |snapshot| {
+            log_progress(
+                &timetable,
+                &clock,
+                num_nodes,
+                snapshot.stats,
+                snapshot.active_task_count,
+            );
+            Ok(())
+        })
     } else {
         engine.run()
     };
     let run_elapsed = run_started.elapsed();
     let executor_stats = engine.executor_stats();
+    if progress_log {
+        log_progress(&timetable, &clock, num_nodes, executor_stats, 0);
+    }
 
     if let Some(progress_bars) = progress_bars {
         progress_bars.update(&timetable, &clock, executor_stats, 0)?;
@@ -111,11 +124,28 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+fn log_progress(
+    timetable: &Timetable,
+    clock: &Clock,
+    total: usize,
+    stats: ExecutorStats,
+    tasks: usize,
+) {
+    eprintln!(
+        "Progress {} / {total} nodes | {}",
+        timetable.num_graph_nodes_completed(),
+        activity_message(
+            timetable.num_graph_nodes_active(),
+            stats,
+            tasks,
+            clock.time_now_ns()
+        )
+    );
+}
+
 fn refresh_interval(progress_hz: NonZeroU32) -> Duration {
     Duration::from_secs(1) / progress_hz.get()
 }
-
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 /// Command-line arguments.
 #[derive(Parser)]
@@ -123,15 +153,6 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 struct Cli {
     #[command(flatten)]
     tracker: TrackerArgs,
-
-    /// Prepare and validate the platform and timetable without running
-    /// simulation.
-    #[arg(long)]
-    check: bool,
-
-    /// Print retained preparation facts and exit without running simulation.
-    #[arg(long)]
-    explain: bool,
 
     /// Show runtime progress for completed nodes, memory traffic, compute,
     /// active timetable nodes and executor activity. Executor task counts do
@@ -173,10 +194,12 @@ fn parse_progress_hz(value: &str) -> std::result::Result<NonZeroU32, String> {
     Ok(progress_hz)
 }
 
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
 #[derive(Clone)]
 struct ProgressBars {
     _multi: MultiProgress,
-    workload: Workload,
+    workload: gwr_timetable::Workload,
     nodes: ProgressBar,
     reads: ProgressBar,
     writes: ProgressBar,
@@ -185,11 +208,14 @@ struct ProgressBars {
 }
 
 impl ProgressBars {
-    fn new(workload: Workload) -> Self {
+    fn new(workload: gwr_timetable::Workload) -> Self {
         Self::with_draw_target(workload, ProgressDrawTarget::stderr())
     }
 
-    fn with_draw_target(workload: Workload, draw_target: ProgressDrawTarget) -> Self {
+    fn with_draw_target(
+        workload: gwr_timetable::Workload,
+        draw_target: ProgressDrawTarget,
+    ) -> Self {
         let multi = MultiProgress::with_draw_target(draw_target);
         let bar_style =
             ProgressStyle::with_template("{prefix:>12} [{wide_bar:.cyan/blue}] {msg:<50!}")
@@ -313,7 +339,7 @@ fn progress_message(actual: usize, expected: usize, unit: &str) -> String {
 
 fn write_error_mermaid(timetable: &Timetable, path: &Path) {
     let mermaid = timetable.render_mermaid();
-    if let Err(err) = write(path, mermaid) {
+    if let Err(err) = fs::write(path, mermaid) {
         eprintln!(
             "Failed to write Mermaid timetable state to '{}': {err}",
             path.display()
@@ -346,7 +372,6 @@ mod tests {
     use std::time::Duration;
 
     use gwr_engine::executor::ExecutorStats;
-    use log::Level;
 
     use super::*;
 
@@ -394,9 +419,9 @@ mod tests {
         let mut args = Cli::try_parse_from(["gwr-timetable"]).unwrap();
 
         args.tracker
-            .ensure_visiblity(args.dump_stats, "--dump-stats", Level::Info);
+            .ensure_visiblity(args.dump_stats, "--dump-stats", log::Level::Info);
 
-        assert!(!args.tracker.level_enabled(Level::Info));
+        assert!(!args.tracker.level_enabled(log::Level::Info));
     }
 
     #[test]
@@ -404,9 +429,9 @@ mod tests {
         let mut args = Cli::try_parse_from(["gwr-timetable", "--dump-stats"]).unwrap();
 
         args.tracker
-            .ensure_visiblity(args.dump_stats, "--dump-stats", Level::Info);
+            .ensure_visiblity(args.dump_stats, "--dump-stats", log::Level::Info);
 
-        assert!(args.tracker.level_enabled(Level::Info));
+        assert!(args.tracker.level_enabled(log::Level::Info));
     }
 
     #[test]

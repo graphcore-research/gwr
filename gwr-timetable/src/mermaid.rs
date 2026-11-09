@@ -106,18 +106,29 @@ fn render_node_label(graph: &TimetableGraph, node_index: usize, node: &Timetable
         return format!("([{}])", escape_mermaid_label(&label));
     }
 
+    if node.is_transfer() {
+        return format!(
+            "[\"{}\"]",
+            escape_mermaid_label(&format!(
+                "{}\ntransfer\n{}\nbuffer {} bytes",
+                node.id(),
+                node.pe().unwrap_or("?"),
+                node.transfer_buffer_bytes().unwrap()
+            ))
+        );
+    }
     let program = node.program().expect("non-tensor node has a program");
     let views = graph
         .compute_views(node_index)
         .expect("non-tensor node has compute views");
     let pe = node.pe().unwrap_or("?");
-    let input_str = create_view_string(program.input_names(), views.inputs());
-    let output_str = create_view_string(program.output_names(), views.outputs());
+    let input_str = create_view_string("input", views.inputs());
+    let output_str = create_view_string("output", views.outputs());
     format!(
         "[\"{}\"]",
         escape_mermaid_label(&format!(
             "{input_str}\n{} assignments\n{}\n{pe}\n\n{output_str}",
-            program.assignment_count(),
+            program.assignments.len(),
             node.id()
         ))
     )
@@ -129,15 +140,22 @@ fn escape_mermaid_label(s: &str) -> String {
         .replace('\n', "<br/>")
 }
 
-fn create_view_string(names: &[String], views: &[TensorView]) -> String {
+fn create_view_string(prefix: &str, views: &[Option<TensorView>]) -> String {
     let mut result = String::new();
-    for (name, view) in names.iter().zip(views) {
-        let _ = writeln!(
-            result,
-            "{name}: {} @ {}",
-            shape_string(view.shape().dims()),
-            shape_string(view.offsets())
-        );
+    for (idx, maybe_view) in views.iter().enumerate() {
+        match maybe_view {
+            None => {
+                let _ = writeln!(result, "{prefix}{idx}: None");
+            }
+            Some(view) => {
+                let _ = writeln!(
+                    result,
+                    "{prefix}{idx}: {} @ {}",
+                    shape_string(view.shape().dims()),
+                    shape_string(view.offsets())
+                );
+            }
+        }
     }
     result
 }

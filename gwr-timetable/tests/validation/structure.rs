@@ -1,7 +1,5 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use std::path::Path;
-
 use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::tensors::dtype::DataType;
 use gwr_timetable::timetable_file::{
@@ -36,7 +34,7 @@ fn rejects_compute_to_compute_data_edges() {
             compute("producer", vec![], vec![None]),
             compute("consumer", vec![None], vec![]),
         ],
-        vec![data_edge("producer.output0", "consumer.input0")],
+        vec![data_edge("producer", "consumer")],
     );
 
     let err = timetable_file.validate().unwrap_err();
@@ -48,9 +46,10 @@ fn rejects_compute_to_compute_data_edges() {
 
 #[test]
 fn tiny_example_is_valid() {
-    let timetable_file =
-        TimetableFile::from_file(&Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/tiny.yaml"))
-            .unwrap();
+    let timetable_file = TimetableFile::from_file(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/tiny.yaml"),
+    )
+    .unwrap();
 
     timetable_file.validate().unwrap();
 }
@@ -85,7 +84,7 @@ edges:
 }
 
 #[test]
-fn rejects_unknown_processing_element_on_compute_node() {
+fn invalid_node_pe() {
     let (top, platform, mut timetable_file) = create_default_timetable_file();
     let NodeSection::Compute { pe, .. } = &mut timetable_file.nodes[2] else {
         panic!("expected compute node");
@@ -97,7 +96,7 @@ fn rejects_unknown_processing_element_on_compute_node() {
 }
 
 #[test]
-fn rejects_duplicate_node_ids() {
+fn duplicate_node_id() {
     let (top, platform, mut timetable_file) = create_default_timetable_file();
     timetable_file.nodes.push(NodeSection::Tensor {
         id: "tensor1".to_string(),
@@ -113,7 +112,7 @@ fn rejects_duplicate_node_ids() {
 }
 
 #[test]
-fn rejects_unknown_source_node_in_data_edge() {
+fn invalid_from_edge_pe() {
     let (top, platform, mut timetable_file) = create_default_timetable_file();
     timetable_file.edges.push(EdgeSection {
         from: "node2".to_string(),
@@ -126,7 +125,7 @@ fn rejects_unknown_source_node_in_data_edge() {
 }
 
 #[test]
-fn rejects_unknown_destination_node_in_data_edge() {
+fn invalid_to_edge_pe() {
     let (top, platform, mut timetable_file) = create_default_timetable_file();
     timetable_file.edges.push(EdgeSection {
         from: "add0".to_string(),
@@ -139,7 +138,7 @@ fn rejects_unknown_destination_node_in_data_edge() {
 }
 
 #[test]
-fn rejects_port_on_tensor_endpoint() {
+fn dotted_endpoint_is_parsed_as_a_logical_node_id() {
     let (_, _, mut timetable_file) = create_default_timetable_file();
     timetable_file.edges.push(EdgeSection {
         from: "tensor0.invalid".to_string(),
@@ -148,26 +147,27 @@ fn rejects_port_on_tensor_endpoint() {
     });
 
     let err = timetable_file.validate().unwrap_err();
-    assert!(format!("{err}").contains("Tensor node 'tensor0' endpoint must be a plain node ID"));
+    assert!(format!("{err}").contains("Edge contains invalid from Node ID 'tensor0.invalid'"));
 }
 
 #[test]
-fn rejects_duplicate_named_input_binding() {
+fn duplicate_explicit_tensor_index_after_implicit_index() {
     let (_, _, mut timetable_file) = create_default_timetable_file();
-    timetable_file.edges[0].to = "add0.A".to_string();
+    timetable_file.edges[0].to = "add0".to_string();
     timetable_file.edges.push(EdgeSection {
         from: "tensor0".to_string(),
-        to: "add0.A".to_string(),
+        to: "add0.0".to_string(),
         kind: EdgeKind::Data,
     });
 
     let err = timetable_file.validate().unwrap_err();
-    assert!(format!("{err}").contains("input port 'A' is connected more than once"));
+    assert!(format!("{err}").contains("input tensor index 0 is connected more than once"));
 }
 
 #[test]
-fn tensor_fanout_binds_distinct_named_inputs() {
+fn sparse_explicit_and_implicit_tensor_indices_are_allowed() {
     let (top, platform, mut timetable_file) = create_default_timetable_file();
+    timetable_file.edges[0].from = "tensor0.5".to_string();
     timetable_file.edges[1].from = "tensor0".to_string();
 
     timetable_file.validate().unwrap();
@@ -176,21 +176,42 @@ fn tensor_fanout_binds_distinct_named_inputs() {
 }
 
 #[test]
-fn rejects_unknown_named_input_port() {
+fn maximum_tensor_index_does_not_materialize_intervening_indices() {
+    let (top, platform, mut timetable_file) = create_default_timetable_file();
+    timetable_file.edges[0].from = format!("tensor0.{}", usize::MAX);
+
+    timetable_file.validate().unwrap();
+    build_timetable(&top, timetable_file, &platform).unwrap();
+}
+
+#[test]
+fn duplicate_sparse_tensor_indices_are_rejected() {
+    let (_, _, mut timetable_file) = create_default_timetable_file();
+    timetable_file.edges[0].from = "tensor0.5".to_string();
+    timetable_file.edges[1].from = "tensor0.5".to_string();
+
+    let err = timetable_file.validate().unwrap_err();
+    assert!(format!("{err}").contains("output tensor index 5 is connected more than once"));
+}
+
+#[test]
+fn explicit_tensor_index_is_checked_before_tracking_occupancy() {
     let timetable_file = timetable(
         vec![
             tensor("input", 0, DataType::Fp32, &[1]),
             compute("compute", vec![None], vec![]),
         ],
-        vec![data_edge("input", "compute.unknown")],
+        vec![data_edge("input", "compute.1000000000")],
     );
 
     let err = timetable_file.validate().unwrap_err();
-    assert!(format!("{err}").contains("Node 'compute' has unknown input port 'unknown'"));
+    assert!(
+        format!("{err}").contains("Node 'compute' input tensor index 1000000000 is out of range")
+    );
 }
 
 #[test]
-fn resolves_many_tensor_fanout_edges_in_source_order() {
+fn resolves_many_implicit_tensor_indices_in_source_order() {
     const NUM_CONNECTIONS: usize = 50_000;
 
     let mut nodes = Vec::with_capacity(NUM_CONNECTIONS + 1);
@@ -199,13 +220,28 @@ fn resolves_many_tensor_fanout_edges_in_source_order() {
     for index in 0..NUM_CONNECTIONS {
         let compute_id = format!("consumer{index}");
         nodes.push(compute(&compute_id, vec![None], vec![]));
-        edges.push(data_edge("input", &format!("{compute_id}.input0")));
+        edges.push(data_edge("input", &compute_id));
     }
 
     let graph = timetable(nodes, edges).into_graph().unwrap();
     for (tensor_index, edge) in graph.edges().iter().enumerate() {
-        assert_eq!(edge.from().node(), 0);
-        assert_eq!(edge.to().node(), tensor_index + 1);
-        assert_eq!(edge.to_port_name(&graph), Some("input0"));
+        assert_eq!(edge.from().edge_index(), Some(tensor_index));
     }
+}
+
+#[test]
+fn dotted_logical_node_ids_resolve_with_explicit_tensor_ports() {
+    let (_, _, mut file) = create_default_timetable_file();
+    for node in &mut file.nodes {
+        match node {
+            NodeSection::Compute { id, .. }
+            | NodeSection::Transfer { id, .. }
+            | NodeSection::Tensor { id, .. } => *id = format!("layer.0.{id}"),
+        }
+    }
+    for edge in &mut file.edges {
+        edge.from = format!("layer.0.{}", edge.from);
+        edge.to = format!("layer.0.{}", edge.to);
+    }
+    file.validate().unwrap();
 }

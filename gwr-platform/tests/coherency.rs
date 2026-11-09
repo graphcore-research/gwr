@@ -4,36 +4,6 @@ use gwr_platform::types::PlatformConfig;
 const DEFAULT_LINE_SIZE_BYTES: usize = 32;
 const BACKING_MEMORY_CAPACITY_BYTES: u64 = 1536;
 
-fn create_coherent_platform_config(
-    cache_line_size_bytes: usize,
-    manager_line_size_bytes: usize,
-) -> PlatformConfig {
-    yaml_serde::from_str(&format!(
-        r"
-operation_classes:
-  add: {{ operations: [add], arity: 2 }}
-
-memory_maps:
-  - name: backing
-    devices: [memory]
-memories:
-  - name: memory
-    kind: hbm
-    base_address: 0
-    config: {{capacity_bytes: {BACKING_MEMORY_CAPACITY_BYTES}}}
-caches:
-  - name: cache
-    coherency_managers: [directory]
-    config: {{line_size_bytes: {cache_line_size_bytes}, max_inflight_parents: 1, max_inflight_fills: 1}}
-coherency_managers:
-  - name: directory
-    memory_map: backing
-    config: {{line_size_bytes: {manager_line_size_bytes}}}
-"
-    ))
-    .unwrap()
-}
-
 #[test]
 fn manager_processing_rate_survives_yaml_roundtrip_without_a_line_size() {
     let mut cfg = create_coherent_platform_config(DEFAULT_LINE_SIZE_BYTES, DEFAULT_LINE_SIZE_BYTES);
@@ -152,7 +122,7 @@ fn independently_selected_managers_cannot_own_the_same_backing_memory() {
 }
 
 #[test]
-fn upstream_pe_address_space_must_be_covered_by_selected_managers() {
+fn upstream_pe_memory_map_must_be_covered_by_selected_managers() {
     // Add memory that the selected directory does not cover.
     let mut cfg = create_coherent_platform_config(DEFAULT_LINE_SIZE_BYTES, DEFAULT_LINE_SIZE_BYTES);
     let mut other = cfg.memories.as_ref().unwrap()[0].clone();
@@ -160,30 +130,18 @@ fn upstream_pe_address_space_must_be_covered_by_selected_managers() {
     other.base_address = BACKING_MEMORY_CAPACITY_BYTES;
     cfg.memories.as_mut().unwrap().push(other);
 
-    // Expose both memories through the processing element address space.
+    // Expose both memories through the processing element memory map.
     cfg.memory_maps.push(gwr_platform::types::MemoryMapSection {
         name: "pe_map".into(),
+        address_mapping: None,
         devices: vec!["memory".into(), "other".into()],
     });
-    cfg.address_spaces
-        .push(gwr_platform::types::AddressSpaceSection {
-            name: "pe_space".into(),
-            memory_map: "pe_map".into(),
-            access_bytes: None,
-            address_regions: None,
-        });
     cfg.processing_elements = Some(vec![gwr_platform::types::ProcessingElementSection {
         name: "pe".into(),
-        address_space: "pe_space".into(),
+        memory_map: "pe_map".into(),
+        dma_memory_map: None,
         config: yaml_serde::from_str(
-            r"
-compute:
-  execution_units:
-    vector:
-      capabilities:
-        - class: add
-          ops_per_tick: 256
-",
+            "compute: {engines: {vector: {capabilities: [{class: add, ops_per_tick: 256}]}}}",
         )
         .unwrap(),
     }]);
@@ -200,4 +158,33 @@ compute:
             .to_string()
             .contains("no coherency manager for Memory 'other'")
     );
+}
+
+fn create_coherent_platform_config(
+    cache_line_size_bytes: usize,
+    manager_line_size_bytes: usize,
+) -> PlatformConfig {
+    yaml_serde::from_str(&format!(
+        r"
+operation_classes:
+  add: {{ operations: [add], arity: 2 }}
+memory_maps:
+  - name: backing
+    devices: [memory]
+memories:
+  - name: memory
+    kind: hbm
+    base_address: 0
+    config: {{capacity_bytes: {BACKING_MEMORY_CAPACITY_BYTES}}}
+caches:
+  - name: cache
+    coherency_managers: [directory]
+    config: {{line_size_bytes: {cache_line_size_bytes}, max_inflight_parents: 1, max_inflight_fills: 1}}
+coherency_managers:
+  - name: directory
+    memory_map: backing
+    config: {{line_size_bytes: {manager_line_size_bytes}}}
+"
+    ))
+    .unwrap()
 }

@@ -3,7 +3,7 @@
 #![doc(test(attr(deny(unused_must_use))))]
 #![doc = std::include_str!(concat!(env!("OUT_DIR"), "/crate-docs.md"))]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt::{self, Display};
 use std::path::Path;
 use std::rc::Rc;
@@ -16,8 +16,6 @@ use gwr_model_builder::EntityGet;
 use gwr_models::cache::coherency_manager::CoherencyManager;
 use gwr_models::cache::{Cache, CacheStatsDisplay};
 use gwr_models::fabric::Fabric;
-use gwr_models::fabric::functional::FunctionalFabric;
-use gwr_models::fabric::routed::RoutedFabric;
 use gwr_models::log_stats;
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::{Memory, MemoryStatsDisplay};
@@ -27,25 +25,23 @@ use gwr_models::processing_element::{
 };
 use gwr_track::entity::{Entity, GetEntity};
 
+use crate::builder::{
+    build_caches_from_configs, build_fabric_destination_port_maps, build_memories_from_configs,
+    build_memory_maps, build_pes_from_configs,
+};
 use crate::connect::connect_ports;
 use crate::connection_id::fabric_port_endpoint_id;
-use crate::resolved::ResolvedFabric;
-use crate::types::{FabricKind, PlatformConfig};
+use crate::types::PlatformConfig;
 
 pub mod builder;
+pub mod catalog;
 mod connect;
 pub mod connection_id;
-mod resolved;
+mod memory_mapping;
+pub mod rates;
 pub mod types;
 mod validation;
 pub mod yaml;
-
-type ProcessingElements = Vec<Rc<ProcessingElement>>;
-type Caches = Vec<Rc<Cache<MemoryAccess>>>;
-type Fabrics = Vec<Rc<dyn Fabric<MemoryAccess>>>;
-type Memories = Vec<Rc<Memory<MemoryAccess>>>;
-type DeviceIds = HashMap<String, DeviceId>;
-type NameToIdxMap = HashMap<String, usize>;
 
 #[derive(EntityGet)]
 /// A validated machine topology built from platform configuration.
@@ -66,7 +62,7 @@ pub struct Platform {
     memories: Memories,
     memories_idx_by_id: NameToIdxMap,
     device_names_by_id: HashMap<u64, String>,
-    reachable_memories: Vec<HashSet<DeviceId>>,
+    atomic_connections: Vec<Vec<connection_id::ConnectionEndpointId>>,
 }
 
 impl fmt::Debug for Platform {
@@ -83,8 +79,7 @@ impl Platform {
         clock: &Clock,
         platform_path: &Path,
     ) -> Result<Self, SimError> {
-        let s = std::fs::read_to_string(platform_path)
-            .map_err(|e| SimError(format!("Unable to read {}: {e}", platform_path.display())))?;
+        let s = catalog::load_yaml_with_includes(platform_path, catalog::CatalogTarget::Platform)?;
         Platform::from_string(engine, clock, &s)
     }
 
@@ -93,101 +88,66 @@ impl Platform {
         clock: &Clock,
         platform_config: &str,
     ) -> Result<Self, SimError> {
+        catalog::reject_string_includes(platform_config)?;
         let cfg: PlatformConfig = yaml_serde::from_str(platform_config)
             .map_err(|e| SimError(format!("yaml_serde::from_str failed: {e}")))?;
-        Platform::from_config(engine, clock, &cfg)
+        Platform::build(engine, clock, &cfg)
     }
 
-    /// Build a platform from an already parsed configuration.
-    ///
-    /// Validates effective settings, references and routing before registering
-    /// runtime models and connecting their ports.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if configuration validation or model construction
-    /// fails.
-    pub fn from_config(
-        engine: &Engine,
-        clock: &Clock,
-        cfg: &PlatformConfig,
-    ) -> Result<Self, SimError> {
-        let resolved = cfg.resolve()?;
+    fn build(engine: &Engine, clock: &Clock, cfg: &PlatformConfig) -> Result<Self, SimError> {
+        let effective = cfg.validated()?;
+        let device_ids = assign_device_ids(cfg)?;
+
         let top = engine.top();
-        let memories = resolved
-            .memories
-            .into_iter()
-            .map(|memory| Memory::new_and_register(engine, clock, top, &memory.name, memory.config))
-            .collect::<Result<Vec<_>, _>>()?;
-        let processing_elements = resolved
-            .pes
-            .into_iter()
-            .map(|pe| {
-                ProcessingElement::new_and_register(
-                    engine,
-                    clock,
-                    top,
-                    &pe.name,
-                    &pe.address_space,
-                    &pe.config,
-                    pe.device_id,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let caches = resolved
-            .caches
-            .into_iter()
-            .map(|cache| match cache.coherence {
-                Some(coherence) => Cache::new_coherent_and_register(
-                    engine,
-                    clock,
-                    top,
-                    &cache.name,
-                    cache.config,
-                    coherence,
-                ),
-                None => Cache::new_and_register(engine, clock, top, &cache.name, cache.config),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let managers = resolved
-            .managers
-            .into_iter()
-            .map(|(name, config)| {
-                CoherencyManager::new_and_register(engine, clock, top, &name, config)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let coherency_managers = managers
+        let (memories, memories_idx_by_id) =
+            build_memories_from_configs(engine, clock, top, cfg, &effective.memories)?;
+        let memory_maps = build_memory_maps(cfg, &memories, &memories_idx_by_id, &device_ids)?;
+        let (processing_elements, pes_idx_by_id) = build_pes_from_configs(
+            engine,
+            clock,
+            top,
+            cfg,
+            &effective.processing_elements,
+            &memory_maps,
+            &device_ids,
+        )?;
+        let (caches, caches_idx_by_id) = build_caches_from_configs(
+            engine,
+            clock,
+            top,
+            cfg,
+            &effective.caches,
+            &memory_maps,
+            &device_ids,
+        )?;
+        let coherency_managers =
+            builder::build_coherency_managers(engine, clock, top, cfg, &memory_maps, &device_ids)?;
+        let fabric_destination_port_maps = build_fabric_destination_port_maps(cfg, &device_ids)?;
+        let (fabrics, fabrics_idx_by_id) =
+            crate::builder::build_fabrics(engine, clock, top, cfg, &fabric_destination_port_maps)?;
+        let device_names_by_id = device_ids
             .iter()
-            .map(|manager| (manager.entity().name.clone(), manager.clone()))
-            .collect();
-        let fabrics = resolved
-            .fabrics
-            .into_iter()
-            .map(|fabric| register_fabric(engine, clock, fabric))
-            .collect::<Result<Vec<_>, _>>()?;
-        let pes_idx_by_id = processing_elements
-            .iter()
-            .enumerate()
-            .map(|(index, pe)| (pe.entity().name.clone(), index))
-            .collect();
-        let memories_idx_by_id = memories
-            .iter()
-            .enumerate()
-            .map(|(index, memory)| (memory.entity().name.clone(), index))
-            .collect();
-        let caches_idx_by_id = caches
-            .iter()
-            .enumerate()
-            .map(|(index, cache)| (cache.entity().name.clone(), index))
-            .collect();
-        let fabrics_idx_by_id = fabrics
-            .iter()
-            .enumerate()
-            .map(|(index, fabric)| (fabric.entity().name.clone(), index))
+            .map(|(name, device_id)| (device_id.0, name.clone()))
             .collect();
 
         let parent = engine.top();
         let entity = Rc::new(Entity::new(parent, "platform"));
+        let atomic_connections = cfg
+            .connections
+            .as_ref()
+            .map(|connections| {
+                connections
+                    .iter()
+                    .map(|c| {
+                        c.connect
+                            .iter()
+                            .map(|id| connection_id::parse_connection_endpoint_id(id))
+                            .collect::<Result<Vec<_>, _>>()
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
         let platform = Platform {
             entity,
             processing_elements,
@@ -199,21 +159,11 @@ impl Platform {
             fabrics_idx_by_id,
             memories,
             memories_idx_by_id,
-            device_names_by_id: resolved.device_names_by_id,
-            reachable_memories: resolved.reachable_memories,
+            device_names_by_id,
+            atomic_connections,
         };
-        connect_ports(engine, clock, &platform, &managers, &resolved.connections)?;
+        connect_ports(engine, clock, &platform, cfg)?;
         Ok(platform)
-    }
-
-    /// Mapped physical devices reachable from a PE through platform
-    /// connections.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if `pe_name` does not identify a processing element.
-    pub fn reachable_memories(&self, pe_name: &str) -> Result<&HashSet<DeviceId>, SimError> {
-        Ok(&self.reachable_memories[self.pe_idx_from_name(pe_name)?])
     }
 
     pub fn coherency_manager(&self, name: &str) -> Result<&Rc<CoherencyManager>, SimError> {
@@ -250,6 +200,21 @@ impl Platform {
             .collect()
     }
 
+    /// Stable names for per-device native activity snapshots.
+    #[must_use]
+    pub fn memory_names(&self) -> Vec<String> {
+        let mut names = self.memories_idx_by_id.keys().cloned().collect::<Vec<_>>();
+        names.sort();
+        names
+    }
+
+    #[must_use]
+    pub fn cache_names(&self) -> Vec<String> {
+        let mut names = self.caches_idx_by_id.keys().cloned().collect::<Vec<_>>();
+        names.sort();
+        names
+    }
+
     pub fn cache(&self, cache_name: &str) -> Result<&Rc<Cache<MemoryAccess>>, SimError> {
         let idx = self.cache_idx_from_name(cache_name)?;
         Ok(&self.caches[idx])
@@ -272,6 +237,98 @@ impl Platform {
             Some(idx) => Ok(*idx),
             None => sim_error!("No Fabric '{fabric_name}'"),
         }
+    }
+
+    pub fn validate_atomic_issuer(&self, pe_name: &str, device: u64, address: u64) -> SimResult {
+        self.pe(pe_name)?.validate_atomic_memory_binding(
+            &self
+                .atomic_memory_by_device(device)?
+                .atomic_target()
+                .unwrap(),
+            device,
+            address,
+        )?;
+        let memory = self
+            .device_names_by_id
+            .get(&device)
+            .ok_or_else(|| SimError("unknown atomic target device".into()))?;
+        let mut touching = 0usize;
+        let mut direct = false;
+        for endpoints in &self.atomic_connections {
+            if endpoints
+                .iter()
+                .any(|e| matches!(e,connection_id::ConnectionEndpointId::Pe{name} if name==pe_name))
+            {
+                touching += 1;
+                direct=endpoints.len()==2 && endpoints.iter().any(|e|matches!(e,connection_id::ConnectionEndpointId::Mem{name} if name==memory));
+            }
+        }
+        if touching != 1 || !direct {
+            return Err(SimError(
+                "atomic assigned PE requires an actual cache-free direct memory connection".into(),
+            ));
+        }
+        Ok(())
+    }
+    pub fn bind_atomic_task(
+        self: &Rc<Self>,
+        pe_name: &str,
+        id: String,
+        device: u64,
+        address: u64,
+        effect: gwr_models::memory::atomic::Effect,
+    ) -> Result<gwr_models::processing_element::task::AtomicTaskConfig, SimError> {
+        self.validate_atomic_issuer(pe_name, device, address)?;
+        let target = self
+            .atomic_memory_by_device(device)?
+            .atomic_target()
+            .unwrap();
+        let config = gwr_models::processing_element::task::AtomicTaskConfig::new(
+            id, target, device, address, effect,
+        )?
+        .with_physical_issuer(self.pe(pe_name)?);
+        self.pe(pe_name)?.preflight_atomic_task(&config)?;
+        Ok(config)
+    }
+    pub fn bind_atomic_controlled_task(
+        self: &Rc<Self>,
+        pe_name: &str,
+        id: String,
+        device: u64,
+        address: u64,
+        effect: gwr_models::memory::atomic::Effect,
+        controller: Rc<gwr_models::memory::atomic::SplitKController>,
+    ) -> Result<gwr_models::processing_element::task::AtomicTaskConfig, SimError> {
+        self.validate_atomic_issuer(pe_name, device, address)?;
+        let config = gwr_models::processing_element::task::AtomicTaskConfig::new_controlled(
+            id,
+            self.atomic_memory_by_device(device)?
+                .atomic_target()
+                .unwrap(),
+            device,
+            address,
+            effect,
+            controller,
+        )?
+        .with_physical_issuer(self.pe(pe_name)?);
+        self.pe(pe_name)?.preflight_atomic_task(&config)?;
+        Ok(config)
+    }
+    pub fn atomic_memory_by_device(
+        &self,
+        device: u64,
+    ) -> Result<&Rc<Memory<MemoryAccess>>, SimError> {
+        let name = self
+            .device_names_by_id
+            .get(&device)
+            .ok_or_else(|| SimError("unknown atomic target device".into()))?;
+        let memory = self.memory(name)?;
+        if memory.atomic_target().is_none() {
+            return Err(SimError(
+                "target has no explicit shared atomic service".into(),
+            ));
+        }
+        Ok(memory)
     }
 
     pub fn memory(&self, memory_name: &str) -> Result<&Rc<Memory<MemoryAccess>>, SimError> {
@@ -474,27 +531,11 @@ impl Display for Platform {
     }
 }
 
-fn register_fabric(
-    engine: &Engine,
-    clock: &Clock,
-    fabric: ResolvedFabric,
-) -> Result<Rc<dyn Fabric<MemoryAccess>>, SimError> {
-    let top = engine.top();
-    let model: Rc<dyn Fabric<MemoryAccess>> = match fabric.kind {
-        FabricKind::Functional => {
-            FunctionalFabric::new_and_register(engine, clock, top, &fabric.name, fabric.config)?
-        }
-        FabricKind::Routed => RoutedFabric::new_and_register(
-            engine,
-            clock,
-            top,
-            &fabric.name,
-            fabric.config,
-            fabric.routing,
-        )?,
-    };
-    Ok(model)
-}
+type ProcessingElements = Vec<Rc<ProcessingElement>>;
+type Caches = Vec<Rc<Cache<MemoryAccess>>>;
+type Fabrics = Vec<Rc<dyn Fabric<MemoryAccess>>>;
+type Memories = Vec<Rc<Memory<MemoryAccess>>>;
+type NameToIdxMap = HashMap<String, usize>;
 
 fn assign_device_ids(cfg: &PlatformConfig) -> Result<DeviceIds, SimError> {
     let mut device_id = 0;
@@ -542,5 +583,20 @@ fn assign_device_ids(cfg: &PlatformConfig) -> Result<DeviceIds, SimError> {
         }
         device_id += 1;
     }
+    if let Some(connections) = &cfg.connections {
+        for connection in connections {
+            for endpoint in &connection.connect {
+                if let connection_id::ConnectionEndpointId::Pe { name } =
+                    connection_id::parse_connection_endpoint_id(endpoint)?
+                    && name.ends_with(".dma")
+                    && !device_ids.contains_key(&name)
+                {
+                    device_ids.insert(name, DeviceId(device_id));
+                    device_id += 1;
+                }
+            }
+        }
+    }
     Ok(device_ids)
 }
+type DeviceIds = HashMap<String, DeviceId>;
