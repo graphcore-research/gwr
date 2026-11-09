@@ -18,6 +18,12 @@ pub struct CacheFillToken {
 
 pub trait ReadMemory {
     fn read(&self) -> Vec<u8>;
+
+    /// Whether the endpoint can execute ordinary numerical transactions.
+    #[cfg(feature = "functional")]
+    fn supports_functional(&self) -> bool {
+        false
+    }
 }
 
 /// Trait implemented by all types that memory components support

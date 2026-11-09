@@ -277,6 +277,8 @@ impl LoadStoreUnit {
             Some(storage),
             Some(source_stats),
             Packetisation::ExplicitSourceVectors,
+            #[cfg(feature = "functional")]
+            None,
         )
         .await
     }
@@ -300,9 +302,99 @@ impl LoadStoreUnit {
             None,
             None,
             Packetisation::OrdinaryAligned,
+            #[cfg(feature = "functional")]
+            None,
         )
         .await
     }
+    #[cfg(feature = "functional")]
+    pub(crate) fn validate_functional_mapping(&self) -> SimResult {
+        if self.state.memory_map.has_striping() {
+            return sim_error!("functional mode does not support striped memory maps");
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "functional")]
+    pub(crate) async fn access_ranges_functional(
+        &self,
+        access_type: AccessType,
+        ranges: impl IntoIterator<Item = Range<u128>>,
+        activity_lanes: &Rc<RefCell<ActivityLanes>>,
+        activity_name: &str,
+        group: &Rc<EntityGroup>,
+        context: &crate::memory::FunctionalContext,
+    ) -> SimResult {
+        self.validate_functional_mapping()?;
+        self.access_ranges_with_storage(
+            access_type,
+            ranges,
+            activity_lanes,
+            activity_name,
+            group,
+            None,
+            None,
+            Packetisation::OrdinaryAligned,
+            Some(context),
+        )
+        .await
+    }
+
+    /// One bounded DMA chunk, using the same real read and write requests.
+    pub(crate) async fn transfer_chunk(
+        &self,
+        source: Range<u128>,
+        destination: Range<u128>,
+        lanes: &super::activity::ProcessingElementActivityLanes,
+        name: &str,
+        group: &Rc<EntityGroup>,
+        #[cfg(feature = "functional")] context: Option<&crate::memory::FunctionalContext>,
+    ) -> SimResult {
+        #[cfg(feature = "functional")]
+        if let Some(context) = context {
+            self.access_ranges_functional(
+                AccessType::ReadRequest,
+                [source.clone()],
+                &lanes.lsu_read,
+                name,
+                group,
+                context,
+            )
+            .await?;
+            context.copy_bytes(
+                source.start as u64,
+                destination.start as u64,
+                (source.end - source.start) as usize,
+            )?;
+            return self
+                .access_ranges_functional(
+                    AccessType::WriteNonPostedRequest,
+                    [destination],
+                    &lanes.lsu_write,
+                    name,
+                    group,
+                    context,
+                )
+                .await;
+        }
+        self.access_ranges(
+            AccessType::ReadRequest,
+            [source],
+            &lanes.lsu_read,
+            name,
+            group,
+        )
+        .await?;
+        self.access_ranges(
+            AccessType::WriteNonPostedRequest,
+            [destination],
+            &lanes.lsu_write,
+            name,
+            group,
+        )
+        .await
+    }
+
     pub(crate) fn issue_snapshot(&self) -> LsuIssueSnapshot {
         let mut s = self.state.issue.borrow().clone();
         s.outstanding_packets = self
@@ -336,6 +428,8 @@ impl LoadStoreUnit {
             Some(custody),
             None,
             Packetisation::OrdinaryAligned,
+            #[cfg(feature = "functional")]
+            None,
         )
         .await
     }
@@ -358,6 +452,7 @@ impl LoadStoreUnit {
         storage: Option<Rc<dyn std::any::Any>>,
         source_stats: Option<Rc<RefCell<super::ProcessingElementStats>>>,
         packetisation: Packetisation,
+        #[cfg(feature = "functional")] functional: Option<&crate::memory::FunctionalContext>,
     ) -> SimResult {
         let completion = Rc::new(TransferCompletion::new());
 
@@ -443,6 +538,16 @@ impl LoadStoreUnit {
                         request_slot_idx,
                     )?;
 
+                    #[cfg(feature = "functional")]
+                    let access = {
+                        let mut access = access;
+                        access.functional = functional
+                            .map(|context| {
+                                context.packet(access_type, access_address, covered_bytes)
+                            })
+                            .transpose()?;
+                        access
+                    };
                     {
                         let state = self.state.clone();
                         let completion = completion.clone();
@@ -711,11 +816,19 @@ impl LsuState {
         }
 
         // Take and drop the response
-        if guard[slot_idx].response.take().is_none() {
+        let response = guard[slot_idx].response.take();
+        if response.is_none() {
             return sim_error!("handle_response_in_slot called with response in slot {slot_idx}.");
         }
 
-        // TODO: do something with the response
+        #[cfg(feature = "functional")]
+        if let Some(response) = response
+            && let Some(packet) = &response.functional
+        {
+            packet.receive(response.access_type())?;
+        }
+        #[cfg(not(feature = "functional"))]
+        drop(response);
 
         Ok(())
     }

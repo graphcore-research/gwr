@@ -81,6 +81,8 @@ pub(super) struct TaskRunner {
     pub(super) stats: Rc<RefCell<ProcessingElementStats>>,
     pub(super) activity_lanes: Rc<ProcessingElementActivityLanes>,
     pub(super) flop_monitor: Option<Rc<FlopMonitor>>,
+    #[cfg(feature = "functional")]
+    pub(super) functional: Option<crate::memory::FunctionalContext>,
 }
 
 impl TaskRunner {
@@ -99,9 +101,14 @@ impl TaskRunner {
         if let Some(service) = &self.boundary_payload {
             match access_type {
                 AccessType::ReadRequest => {
-                    self.lsu
-                        .access_ranges(access_type, ranges, activity_lanes, activity_name, group)
-                        .await?;
+                    self.payload_access_ranges(
+                        access_type,
+                        ranges,
+                        activity_lanes,
+                        activity_name,
+                        group,
+                    )
+                    .await?;
                     // External payload is real even if local admission or its
                     // wait fails.
                     self.record_read_bytes(payload_bytes)?;
@@ -115,15 +122,19 @@ impl TaskRunner {
                         .reserve(BoundaryPayloadDirection::Read, payload_bytes)?
                         .complete()
                         .await?;
-                    self.lsu
-                        .access_ranges(access_type, ranges, activity_lanes, activity_name, group)
-                        .await
+                    self.payload_access_ranges(
+                        access_type,
+                        ranges,
+                        activity_lanes,
+                        activity_name,
+                        group,
+                    )
+                    .await
                 }
                 _ => Err(SimError("unsupported program boundary access type".into())),
             }
         } else {
-            self.lsu
-                .access_ranges(access_type, ranges, activity_lanes, activity_name, group)
+            self.payload_access_ranges(access_type, ranges, activity_lanes, activity_name, group)
                 .await?;
             if matches!(access_type, AccessType::ReadRequest) {
                 self.record_read_bytes(payload_bytes)?;
@@ -131,6 +142,33 @@ impl TaskRunner {
             Ok(())
         }
     }
+    async fn payload_access_ranges(
+        &self,
+        access_type: AccessType,
+        ranges: impl IntoIterator<Item = Range<u128>>,
+        activity_lanes: &Rc<RefCell<ActivityLanes>>,
+        activity_name: &str,
+        group: &Rc<EntityGroup>,
+    ) -> SimResult {
+        #[cfg(feature = "functional")]
+        if let Some(context) = &self.functional {
+            return self
+                .lsu
+                .access_ranges_functional(
+                    access_type,
+                    ranges,
+                    activity_lanes,
+                    activity_name,
+                    group,
+                    context,
+                )
+                .await;
+        }
+        self.lsu
+            .access_ranges(access_type, ranges, activity_lanes, activity_name, group)
+            .await
+    }
+
     pub(super) async fn run(self, task_idx: usize) -> SimResult {
         let task = self.dispatcher.task_by_id(task_idx)?;
         match task {

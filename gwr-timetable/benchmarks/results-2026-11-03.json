@@ -1,0 +1,1649 @@
+{
+  "copyright": "Copyright (c) 2026 Graphcore Ltd. All rights reserved.",
+  "verified_hardware": {
+    "cpu": "Apple M4 Pro",
+    "cpu_probe": "/usr/sbin/sysctl -n machdep.cpu.brand_string outside sandbox",
+    "logical_cpus": 14,
+    "torch_host_threads": 10
+  },
+  "notes": [
+    "Samples are unchanged from their original report files.",
+    "Earlier reports predate automatic binary/environment metadata; executable hashes below were recorded after measurement from preserved artifacts.",
+    "GPU results are PyTorch host-only, not a production GWR GPU backend."
+  ],
+  "binaries": {
+    "default-timing": "1062ec7a16c9edc81a15a020423c30e3a9ba584b4c9f3cbae870a4ab32df6dc5",
+    "scalar-fp32-v1": "60580c83b0cc0e0355ba4f5c765a3f7fc5c1460b6af5ce8c3f36ce022589b3f3",
+    "optimized-fp32-v1": "1f6529765b5c6ec3b0d11a00432dd18d20ada80e3e3bcfd976f8c1663850c1a3",
+    "optimized-fp32-v2": "fba26627810c976b018591ef5bbec57ad077b40c738d25573a230e2df89d1207"
+  },
+  "measurements": {
+    "scalar_baseline": {
+      "torch": "2.14.0",
+      "cpu_threads": 10,
+      "mps_available": false,
+      "results": [
+        {
+          "size": 64,
+          "flops": 524288,
+          "default": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.03661579202162102,
+              "engine_seconds": 0.0,
+              "simulated_ns": 1054.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.02587120799580589,
+              "engine_seconds": 0.0,
+              "simulated_ns": 1054.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.025860416993964463,
+              "engine_seconds": 0.0,
+              "simulated_ns": 1054.0,
+              "max_absolute_error": null
+            }
+          ],
+          "timing": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.023734625021461397,
+              "engine_seconds": 0.0,
+              "simulated_ns": 1054.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.019586832961067557,
+              "engine_seconds": 0.0,
+              "simulated_ns": 1054.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.020398291992023587,
+              "engine_seconds": 0.0,
+              "simulated_ns": 1054.0,
+              "max_absolute_error": null
+            }
+          ],
+          "functional": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.052376958017703146,
+              "engine_seconds": 0.031,
+              "simulated_ns": 1054.0,
+              "max_absolute_error": 9.5367431640625e-07
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.054939249996095896,
+              "engine_seconds": 0.033,
+              "simulated_ns": 1054.0,
+              "max_absolute_error": 9.5367431640625e-07
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.05305074999341741,
+              "engine_seconds": 0.03,
+              "simulated_ns": 1054.0,
+              "max_absolute_error": 9.5367431640625e-07
+            }
+          ]
+        },
+        {
+          "size": 128,
+          "flops": 4194304,
+          "default": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.024165417009498924,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.02125425002304837,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.022011208988260478,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            }
+          ],
+          "timing": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.022218666970729828,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.02123299997765571,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.020130000018980354,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            }
+          ],
+          "functional": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.26778562500840053,
+              "engine_seconds": 0.248,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": 1.5497207641601562e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.27811837499029934,
+              "engine_seconds": 0.247,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": 1.5497207641601562e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.28017929202178493,
+              "engine_seconds": 0.245,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": 1.5497207641601562e-06
+            }
+          ]
+        },
+        {
+          "size": 512,
+          "flops": 268435456,
+          "default": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.02999783301493153,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.022781542036682367,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.020514417032245547,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            }
+          ],
+          "timing": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.02127016696613282,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.020571166998706758,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.02121950004948303,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            }
+          ],
+          "functional": [
+            {
+              "status": "ok",
+              "wall_seconds": 20.876502500032075,
+              "engine_seconds": 20.845,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": 5.0067901611328125e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 19.57790254201973,
+              "engine_seconds": 19.425,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": 5.0067901611328125e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 18.32182858401211,
+              "engine_seconds": 18.295,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": 5.0067901611328125e-06
+            }
+          ]
+        }
+      ]
+    },
+    "dense_cpu": {
+      "torch": "2.14.0",
+      "cpu_threads": 10,
+      "mps_available": false,
+      "results": [
+        {
+          "size": 128,
+          "flops": 4194304,
+          "default": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.10969550005393103,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.029131165996659547,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.028735750005580485,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            }
+          ],
+          "timing": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.40259274997515604,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.02155379200121388,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.021025124995503575,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            }
+          ],
+          "functional": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.022024040983524173,
+              "engine_seconds": 0.001,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": 1.6689300537109375e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.02144479099661112,
+              "engine_seconds": 0.001,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": 1.6689300537109375e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.021661500039044768,
+              "engine_seconds": 0.001,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": 1.6689300537109375e-06
+            }
+          ]
+        },
+        {
+          "size": 512,
+          "flops": 268435456,
+          "default": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.019449374987743795,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.018386917014140636,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.018758416001219302,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            }
+          ],
+          "timing": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.02027687500230968,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.020171417039819062,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.02041858294978738,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            }
+          ],
+          "functional": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.037628832971677184,
+              "engine_seconds": 0.011,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": 4.5299530029296875e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.03803079196950421,
+              "engine_seconds": 0.011,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": 4.5299530029296875e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.03710962500190362,
+              "engine_seconds": 0.011,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": 4.5299530029296875e-06
+            }
+          ]
+        },
+        {
+          "size": 1024,
+          "flops": 2147483648,
+          "default": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.022442291025072336,
+              "engine_seconds": 0.0,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.02067133301170543,
+              "engine_seconds": 0.0,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.01978424994740635,
+              "engine_seconds": 0.0,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": null
+            }
+          ],
+          "timing": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.020846167055424303,
+              "engine_seconds": 0.0,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.020460125000681728,
+              "engine_seconds": 0.0,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.020454666984733194,
+              "engine_seconds": 0.0,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": null
+            }
+          ],
+          "functional": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.0834985829424113,
+              "engine_seconds": 0.041,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": 6.198883056640625e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.08222491695778444,
+              "engine_seconds": 0.039,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": 6.198883056640625e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.08586854202440009,
+              "engine_seconds": 0.04,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": 6.198883056640625e-06
+            }
+          ]
+        },
+        {
+          "size": 2048,
+          "flops": 17179869184,
+          "default": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.035775583994109184,
+              "engine_seconds": 0.001,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.026167166011873633,
+              "engine_seconds": 0.001,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.025257457979023457,
+              "engine_seconds": 0.001,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": null
+            }
+          ],
+          "timing": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.027006875025108457,
+              "engine_seconds": 0.001,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.025402374973054975,
+              "engine_seconds": 0.001,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.02424187504220754,
+              "engine_seconds": 0.001,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": null
+            }
+          ],
+          "functional": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.28579795896075666,
+              "engine_seconds": 0.173,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": 1.239776611328125e-05
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.28753233404131606,
+              "engine_seconds": 0.172,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": 1.239776611328125e-05
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.28605649998644367,
+              "engine_seconds": 0.169,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": 1.239776611328125e-05
+            }
+          ]
+        },
+        {
+          "size": 4096,
+          "flops": 137438953472,
+          "default": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.030743208015337586,
+              "engine_seconds": 0.002,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.029737040982581675,
+              "engine_seconds": 0.002,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.03065375000005588,
+              "engine_seconds": 0.002,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": null
+            }
+          ],
+          "timing": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.022745834023226053,
+              "engine_seconds": 0.002,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.024348916951566935,
+              "engine_seconds": 0.002,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.02256737498100847,
+              "engine_seconds": 0.002,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": null
+            }
+          ],
+          "functional": [
+            {
+              "status": "ok",
+              "wall_seconds": 1.1490051670116372,
+              "engine_seconds": 0.717,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": 1.621246337890625e-05
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 1.0655530000221916,
+              "engine_seconds": 0.681,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": 1.621246337890625e-05
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 1.0609102080343291,
+              "engine_seconds": 0.669,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": 1.621246337890625e-05
+            }
+          ]
+        }
+      ]
+    },
+    "dense_cpu_word_masks": {
+      "platform": "macOS-26.3-arm64-arm-64bit",
+      "cpu_model": "arm",
+      "logical_cpus": 14,
+      "binaries": {
+        "functional": {
+          "path": "/private/tmp/gwr-gemm-bench/optimized-fp32-v2",
+          "sha256": "fba26627810c976b018591ef5bbec57ad077b40c738d25573a230e2df89d1207"
+        },
+        "default": {
+          "path": "/private/tmp/gwr-gemm-bench/default-timing",
+          "sha256": "1062ec7a16c9edc81a15a020423c30e3a9ba584b4c9f3cbae870a4ab32df6dc5"
+        }
+      },
+      "torch": "2.14.0",
+      "torch_cpu_threads": 10,
+      "mps_available": false,
+      "results": [
+        {
+          "size": 128,
+          "flops": 4194304,
+          "default": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.03030287497676909,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.026874832983594388,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.024927333055529743,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.02515058300923556,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.023630291980225593,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            }
+          ],
+          "timing": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.2980192090035416,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.021344083012081683,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.022398791974410415,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.02111170900752768,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.02155204099835828,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": null
+            }
+          ],
+          "functional": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.021248374949209392,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": 1.6689300537109375e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.02012808300787583,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": 1.6689300537109375e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.019604208995588124,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": 1.6689300537109375e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.019754374981857836,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": 1.6689300537109375e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.02020079200156033,
+              "engine_seconds": 0.0,
+              "simulated_ns": 8222.0,
+              "max_absolute_error": 1.6689300537109375e-06
+            }
+          ]
+        },
+        {
+          "size": 512,
+          "flops": 268435456,
+          "default": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.01799608301371336,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.017936082964297384,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.018395083025097847,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.017799582972656935,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.017676584015134722,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            }
+          ],
+          "timing": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.019853167003020644,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.019593374978285283,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.019569292024243623,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.019104791979771107,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.01929033297346905,
+              "engine_seconds": 0.0,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": null
+            }
+          ],
+          "functional": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.021350625029299408,
+              "engine_seconds": 0.001,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": 4.5299530029296875e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.022117249958682805,
+              "engine_seconds": 0.001,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": 4.5299530029296875e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.022544958046637475,
+              "engine_seconds": 0.001,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": 4.5299530029296875e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.022283790982328355,
+              "engine_seconds": 0.001,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": 4.5299530029296875e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.02208341599907726,
+              "engine_seconds": 0.001,
+              "simulated_ns": 524363.0,
+              "max_absolute_error": 4.5299530029296875e-06
+            }
+          ]
+        },
+        {
+          "size": 1024,
+          "flops": 2147483648,
+          "default": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.019625874992925674,
+              "engine_seconds": 0.0,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.020106750016566366,
+              "engine_seconds": 0.0,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.01819708402035758,
+              "engine_seconds": 0.0,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.017346833017654717,
+              "engine_seconds": 0.0,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.017820875043980777,
+              "engine_seconds": 0.0,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": null
+            }
+          ],
+          "timing": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.01931779197184369,
+              "engine_seconds": 0.0,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.019492833002004772,
+              "engine_seconds": 0.0,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.020114333019591868,
+              "engine_seconds": 0.0,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.020012458960991353,
+              "engine_seconds": 0.0,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.01983595796627924,
+              "engine_seconds": 0.0,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": null
+            }
+          ],
+          "functional": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.030032249982468784,
+              "engine_seconds": 0.005,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": 6.198883056640625e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.03231341700302437,
+              "engine_seconds": 0.005,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": 6.198883056640625e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.029569334001280367,
+              "engine_seconds": 0.005,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": 6.198883056640625e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.02929391694488004,
+              "engine_seconds": 0.005,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": 6.198883056640625e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.029095790989231318,
+              "engine_seconds": 0.005,
+              "simulated_ns": 4194523.0,
+              "max_absolute_error": 6.198883056640625e-06
+            }
+          ]
+        },
+        {
+          "size": 2048,
+          "flops": 17179869184,
+          "default": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.03485379199264571,
+              "engine_seconds": 0.001,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.020074207975994796,
+              "engine_seconds": 0.001,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.01934354199329391,
+              "engine_seconds": 0.001,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.018227249966003,
+              "engine_seconds": 0.001,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.018592833017464727,
+              "engine_seconds": 0.001,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": null
+            }
+          ],
+          "timing": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.0204613339737989,
+              "engine_seconds": 0.001,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.01952245901338756,
+              "engine_seconds": 0.001,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.020665749965701252,
+              "engine_seconds": 0.001,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.02092066698241979,
+              "engine_seconds": 0.001,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.020445792004466057,
+              "engine_seconds": 0.001,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": null
+            }
+          ],
+          "functional": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.06501595897134393,
+              "engine_seconds": 0.024,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": 1.239776611328125e-05
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.06436491699423641,
+              "engine_seconds": 0.018,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": 1.239776611328125e-05
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.06949200003873557,
+              "engine_seconds": 0.018,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": 1.239776611328125e-05
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.06278812501113862,
+              "engine_seconds": 0.018,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": 1.239776611328125e-05
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.07120787497842684,
+              "engine_seconds": 0.018,
+              "simulated_ns": 33555227.0,
+              "max_absolute_error": 1.239776611328125e-05
+            }
+          ]
+        },
+        {
+          "size": 4096,
+          "flops": 137438953472,
+          "default": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.03263745899312198,
+              "engine_seconds": 0.002,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.027725334046408534,
+              "engine_seconds": 0.002,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.029210624983534217,
+              "engine_seconds": 0.002,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.02846287499414757,
+              "engine_seconds": 0.002,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.026192624995019287,
+              "engine_seconds": 0.002,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": null
+            }
+          ],
+          "timing": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.026769292016979307,
+              "engine_seconds": 0.003,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.025511167012155056,
+              "engine_seconds": 0.002,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.024599416996352375,
+              "engine_seconds": 0.002,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.02379604201996699,
+              "engine_seconds": 0.002,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.022912041982635856,
+              "engine_seconds": 0.002,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": null
+            }
+          ],
+          "functional": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.3223940840107389,
+              "engine_seconds": 0.149,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": 1.621246337890625e-05
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.27571324998280033,
+              "engine_seconds": 0.121,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": 1.621246337890625e-05
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.2745203329832293,
+              "engine_seconds": 0.122,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": 1.621246337890625e-05
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.27822170802392066,
+              "engine_seconds": 0.123,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": 1.621246337890625e-05
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.27369433298008516,
+              "engine_seconds": 0.124,
+              "simulated_ns": 268438555.0,
+              "max_absolute_error": 1.621246337890625e-05
+            }
+          ]
+        }
+      ]
+    },
+    "tiled": {
+      "platform": "macOS-26.3-arm64-arm-64bit",
+      "cpu_model": "arm",
+      "logical_cpus": 14,
+      "binaries": {
+        "functional": {
+          "path": "/private/tmp/gwr-gemm-bench/optimized-fp32-v2",
+          "sha256": "fba26627810c976b018591ef5bbec57ad077b40c738d25573a230e2df89d1207"
+        },
+        "default": {
+          "path": "/private/tmp/gwr-gemm-bench/default-timing",
+          "sha256": "1062ec7a16c9edc81a15a020423c30e3a9ba584b4c9f3cbae870a4ab32df6dc5"
+        }
+      },
+      "torch": "2.14.0",
+      "torch_cpu_threads": 10,
+      "tile_size": 128,
+      "mps_available": false,
+      "results": [
+        {
+          "size": 1024,
+          "flops": 2147483648,
+          "default": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.15960133296903223,
+              "engine_seconds": 0.124,
+              "simulated_ns": 4213969.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.16047050000634044,
+              "engine_seconds": 0.125,
+              "simulated_ns": 4213969.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.1606922919745557,
+              "engine_seconds": 0.125,
+              "simulated_ns": 4213969.0,
+              "max_absolute_error": null
+            }
+          ],
+          "timing": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.17049500002758577,
+              "engine_seconds": 0.131,
+              "simulated_ns": 4213969.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.17161337501602247,
+              "engine_seconds": 0.132,
+              "simulated_ns": 4213969.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.16788645804626867,
+              "engine_seconds": 0.131,
+              "simulated_ns": 4213969.0,
+              "max_absolute_error": null
+            }
+          ],
+          "functional": [
+            {
+              "status": "ok",
+              "wall_seconds": 0.23151070799212903,
+              "engine_seconds": 0.183,
+              "simulated_ns": 4213969.0,
+              "max_absolute_error": 6.198883056640625e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.23674941703211516,
+              "engine_seconds": 0.183,
+              "simulated_ns": 4213969.0,
+              "max_absolute_error": 6.198883056640625e-06
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 0.23011975002009422,
+              "engine_seconds": 0.18,
+              "simulated_ns": 4213969.0,
+              "max_absolute_error": 6.198883056640625e-06
+            }
+          ]
+        },
+        {
+          "size": 2048,
+          "flops": 17179869184,
+          "default": [
+            {
+              "status": "ok",
+              "wall_seconds": 1.7739981660270132,
+              "engine_seconds": 1.735,
+              "simulated_ns": 33632696.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 1.7611220000544563,
+              "engine_seconds": 1.732,
+              "simulated_ns": 33632696.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 1.7716687089996412,
+              "engine_seconds": 1.734,
+              "simulated_ns": 33632696.0,
+              "max_absolute_error": null
+            }
+          ],
+          "timing": [
+            {
+              "status": "ok",
+              "wall_seconds": 1.8994371669832617,
+              "engine_seconds": 1.858,
+              "simulated_ns": 33632696.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 1.8999423750210553,
+              "engine_seconds": 1.864,
+              "simulated_ns": 33632696.0,
+              "max_absolute_error": null
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 1.8948788339621387,
+              "engine_seconds": 1.859,
+              "simulated_ns": 33632696.0,
+              "max_absolute_error": null
+            }
+          ],
+          "functional": [
+            {
+              "status": "ok",
+              "wall_seconds": 3.4708907500025816,
+              "engine_seconds": 3.309,
+              "simulated_ns": 33632696.0,
+              "max_absolute_error": 1.239776611328125e-05
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 2.50162224995438,
+              "engine_seconds": 2.389,
+              "simulated_ns": 33632696.0,
+              "max_absolute_error": 1.239776611328125e-05
+            },
+            {
+              "status": "ok",
+              "wall_seconds": 2.6308856660034508,
+              "engine_seconds": 2.518,
+              "simulated_ns": 33632696.0,
+              "max_absolute_error": 1.239776611328125e-05
+            }
+          ]
+        }
+      ]
+    },
+    "pytorch_host": {
+      "torch": "2.14.0",
+      "cpu_threads": 10,
+      "mps_available": true,
+      "results": [
+        {
+          "size": 128,
+          "flops": 4194304,
+          "host": {
+            "cpu": {
+              "kernel_seconds": [
+                6.417045369744301e-06,
+                5.875015631318092e-06,
+                5.583977326750755e-06,
+                5.582987796515226e-06,
+                5.499983672052622e-06,
+                5.374953616410494e-06,
+                5.207955837249756e-06
+              ],
+              "with_transfers_seconds": [
+                9.583949577063322e-06,
+                6.458023563027382e-06,
+                6.208021659404039e-06,
+                5.791021976619959e-06,
+                5.999987479299307e-06,
+                5.584035534411669e-06,
+                6.04201341047883e-06
+              ],
+              "kernel_median_seconds": 5.582987796515226e-06,
+              "with_transfers_median_seconds": 6.04201341047883e-06,
+              "max_absolute_error": 1.6689300537109375e-06
+            },
+            "mps": {
+              "kernel_seconds": [
+                0.00030937499832361937,
+                0.00017504201969131827,
+                0.00018804200226441026,
+                0.0002366660046391189,
+                0.00018666696269065142,
+                0.00022837502183392644,
+                0.00017020804807543755
+              ],
+              "with_transfers_seconds": [
+                0.0006325840367935598,
+                0.0006246659904718399,
+                0.0005244999774731696,
+                0.0008587919874116778,
+                0.0012579160393215716,
+                0.0005321670323610306,
+                0.0006766250007785857
+              ],
+              "kernel_median_seconds": 0.00018804200226441026,
+              "with_transfers_median_seconds": 0.0006325840367935598,
+              "max_absolute_error": 1.6689300537109375e-06
+            }
+          }
+        },
+        {
+          "size": 512,
+          "flops": 268435456,
+          "host": {
+            "cpu": {
+              "kernel_seconds": [
+                0.00010695797391235828,
+                0.00011095899390056729,
+                0.00010387500515207648,
+                0.00010204198770225048,
+                0.00010262499563395977,
+                0.00010183296399191022,
+                0.00010216597001999617
+              ],
+              "with_transfers_seconds": [
+                0.00010729202767834067,
+                0.00011283298954367638,
+                0.00010124995606020093,
+                0.00010120798833668232,
+                0.00010050000855699182,
+                9.9916011095047e-05,
+                9.995797881856561e-05
+              ],
+              "kernel_median_seconds": 0.00010262499563395977,
+              "with_transfers_median_seconds": 0.00010120798833668232,
+              "max_absolute_error": 4.5299530029296875e-06
+            },
+            "mps": {
+              "kernel_seconds": [
+                0.00039900001138448715,
+                0.0003981250338256359,
+                0.000413375033531338,
+                0.0004189169849269092,
+                0.00044791604159399867,
+                0.0004152499604970217,
+                0.0006949579692445695
+              ],
+              "with_transfers_seconds": [
+                0.0008437919896095991,
+                0.0008087499882094562,
+                0.0008919169777072966,
+                0.001235084026120603,
+                0.0012086249771527946,
+                0.001646124990656972,
+                0.0010302079608663917
+              ],
+              "kernel_median_seconds": 0.0004152499604970217,
+              "with_transfers_median_seconds": 0.0010302079608663917,
+              "max_absolute_error": 4.5299530029296875e-06
+            }
+          }
+        },
+        {
+          "size": 1024,
+          "flops": 2147483648,
+          "host": {
+            "cpu": {
+              "kernel_seconds": [
+                0.00079774996265769,
+                0.0007178329979069531,
+                0.000789457990322262,
+                0.0006999580073170364,
+                0.0006802909774705768,
+                0.0007258330006152391,
+                0.0007055000169202685
+              ],
+              "with_transfers_seconds": [
+                0.0007802079780958593,
+                0.0007087920093908906,
+                0.0007385829812847078,
+                0.0006869580247439444,
+                0.0006899169529788196,
+                0.0007110000005923212,
+                0.000739166047424078
+              ],
+              "kernel_median_seconds": 0.0007178329979069531,
+              "with_transfers_median_seconds": 0.0007110000005923212,
+              "max_absolute_error": 6.198883056640625e-06
+            },
+            "mps": {
+              "kernel_seconds": [
+                0.001933292020112276,
+                0.0017626250046305358,
+                0.001772125018760562,
+                0.001839917036704719,
+                0.0017687919898889959,
+                0.0020610420033335686,
+                0.001951750018633902
+              ],
+              "with_transfers_seconds": [
+                0.002509291982278228,
+                0.002962042053695768,
+                0.0025442090118303895,
+                0.0025302920257672668,
+                0.0025232500047422945,
+                0.0027852500206790864,
+                0.0026582920108921826
+              ],
+              "kernel_median_seconds": 0.001839917036704719,
+              "with_transfers_median_seconds": 0.0025442090118303895,
+              "max_absolute_error": 6.198883056640625e-06
+            }
+          }
+        },
+        {
+          "size": 2048,
+          "flops": 17179869184,
+          "host": {
+            "cpu": {
+              "kernel_seconds": [
+                0.006255541986320168,
+                0.00650929199764505,
+                0.005929791019298136,
+                0.005592500034254044,
+                0.0056682919966988266,
+                0.005529708985704929,
+                0.005649209022521973
+              ],
+              "with_transfers_seconds": [
+                0.006968208006583154,
+                0.006379416969139129,
+                0.005787250003777444,
+                0.005456957966089249,
+                0.005443583999294788,
+                0.005636582965962589,
+                0.005558750010095537
+              ],
+              "kernel_median_seconds": 0.0056682919966988266,
+              "with_transfers_median_seconds": 0.005636582965962589,
+              "max_absolute_error": 1.239776611328125e-05
+            },
+            "mps": {
+              "kernel_seconds": [
+                0.0066176659893244505,
+                0.002785333024803549,
+                0.0027578749577514827,
+                0.002810707956086844,
+                0.0029534169589169323,
+                0.00275387498550117,
+                0.002744583005551249
+              ],
+              "with_transfers_seconds": [
+                0.0056766250054351985,
+                0.004394708026666194,
+                0.004318875027820468,
+                0.004656042030546814,
+                0.004424707964062691,
+                0.004108750028535724,
+                0.004299624997656792
+              ],
+              "kernel_median_seconds": 0.002785333024803549,
+              "with_transfers_median_seconds": 0.004394708026666194,
+              "max_absolute_error": 1.239776611328125e-05
+            }
+          }
+        },
+        {
+          "size": 4096,
+          "flops": 137438953472,
+          "host": {
+            "cpu": {
+              "kernel_seconds": [
+                0.04508691595401615,
+                0.0449762080097571,
+                0.04614399996353313,
+                0.045336709008552134,
+                0.04449112497968599,
+                0.04455824999604374,
+                0.04587791598169133
+              ],
+              "with_transfers_seconds": [
+                0.052815541974268854,
+                0.0453775420319289,
+                0.0456587920198217,
+                0.04556470800889656,
+                0.044241541996598244,
+                0.04449866694631055,
+                0.04622062499402091
+              ],
+              "kernel_median_seconds": 0.04508691595401615,
+              "with_transfers_median_seconds": 0.04556470800889656,
+              "max_absolute_error": 1.621246337890625e-05
+            },
+            "mps": {
+              "kernel_seconds": [
+                0.020806665997952223,
+                0.020215124997776,
+                0.020801834005396813,
+                0.020420124987140298,
+                0.020716583996545523,
+                0.021009334013797343,
+                0.020232749986462295
+              ],
+              "with_transfers_seconds": [
+                0.024775750003755093,
+                0.02496295899618417,
+                0.025762208038941026,
+                0.025565083022229373,
+                0.025705916981678456,
+                0.025259542046114802,
+                0.025470332999248058
+              ],
+              "kernel_median_seconds": 0.020716583996545523,
+              "with_transfers_median_seconds": 0.025470332999248058,
+              "max_absolute_error": 1.621246337890625e-05
+            }
+          }
+        }
+      ]
+    }
+  }
+}
