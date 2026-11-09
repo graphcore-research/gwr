@@ -546,6 +546,7 @@ impl SourceGraph {
                         }
                         if section == "caches"
                             && let Some(managers) = item.get_mut("coherency_managers")
+                            && !managers.is_null()
                         {
                             for manager in managers
                                 .as_sequence_mut()
