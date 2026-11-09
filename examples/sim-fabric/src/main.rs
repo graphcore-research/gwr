@@ -167,6 +167,14 @@ fn create_config(engine: &Engine, args: &Cli) -> Result<(Rc<FabricConfig>, usize
         },
         identity_destination_port_map(num_fabric_ports),
     )?;
+    let config = if args.routed {
+        config.with_paths(gwr_models::fabric::paths::FabricPathConfig {
+            bw_bits_per_tick: args.port_bits_per_tick,
+            ..Default::default()
+        })?
+    } else {
+        config
+    };
     let config = Rc::new(config);
 
     let num_payload_bytes_to_send = args.bytes_to_send;

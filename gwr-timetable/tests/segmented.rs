@@ -209,7 +209,7 @@ fn compute_segments_use_one_native_engine_and_shared_compute_resource() {
     let (mut engine, platform, d) = setup();
     for (id, addr) in [("left", 12288), ("right", 16384)] {
         let yaml = format!(
-            r#"
+            r"
 nodes:
  - {{id: A,kind: tensor,config: {{addr: 4096,dtype: fp32,shape: [16]}}}}
  - {{id: B,kind: tensor,config: {{addr: 8192,dtype: fp32,shape: [16]}}}}
@@ -228,7 +228,7 @@ edges:
  - {{from: A,to: {id}.0,kind: data}}
  - {{from: B,to: {id}.1,kind: data}}
  - {{from: {id}.0,to: Y,kind: data}}
-"#
+"
         );
         let graph = TimetableFile::from_string(&yaml)
             .unwrap()
@@ -364,7 +364,7 @@ fn completed_facts_survive_retirement_and_release_later_work_without_numeric_arc
     let (mut e, p, d) = setup();
     let first = segment(&e, &p, "first", 4096, 8192);
     let weak = Rc::downgrade(&first);
-    let receipt = d.publish(first, Default::default()).unwrap();
+    let receipt = d.publish(first, SegmentRelease::default()).unwrap();
     let handle = d.task_handle(receipt.tasks["first"]).unwrap();
     assert!(d.completed_fact(&handle).is_err());
     assert!(d.retire_segment(&receipt).is_err());
@@ -440,7 +440,7 @@ fn retirement_reuses_resident_budget_for_many_actual_publications() {
         for index in 0..200 {
             let yaml=format!("nodes:\n - {{id: A,kind: tensor,config: {{addr: 4096,dtype: fp32,shape: [16]}}}}\n - {{id: B,kind: tensor,config: {{addr: 8192,dtype: fp32,shape: [16]}}}}\n - {{id: transfer{index},kind: transfer,pe: pe0,buffer_bytes: 64}}\nedges:\n - {{from: A,to: transfer{index},kind: data}}\n - {{from: transfer{index},to: B,kind: data}}\n");
             let graph=Rc::new(Timetable::new(&top,TimetableFile::from_string(&yaml)?.into_graph()?,&p)?);
-            let parents=previous.iter().cloned().collect::<Vec<_>>();let (publication,_)=observer.publish_boundaries_after(graph,Default::default(),&[],&parents)?;
+            let parents=previous.iter().cloned().collect::<Vec<_>>();let (publication,_)=observer.publish_boundaries_after(graph,SegmentRelease::default(),&[],&parents)?;
             let handle=publication.handles().values().next().unwrap().clone();if let Some(old)=last_id{assert!(handle.id()>old)}last_id=Some(handle.id());
             loop{let changed=observer.subscribe_changes();if observer.completed_fact(&handle).is_ok(){break}changed.await;}
             observer.retire_segment(&publication)?;previous=Some(handle);
@@ -483,7 +483,7 @@ fn retiring_fast_segment_does_not_require_unrelated_native_lane_to_drain() {
     let slow = d
         .publish(
             Rc::new(Timetable::new(e.top(), slow.into_graph().unwrap(), &p).unwrap()),
-            Default::default(),
+            SegmentRelease::default(),
         )
         .unwrap();
     let fast_handle = d.task_handle(fast.tasks["fast"]).unwrap();

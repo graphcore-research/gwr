@@ -9,7 +9,7 @@ fn block_execution_roundtrips_when_it_is_the_only_explicit_configuration() {
     let source = format!(
         "memory_maps: [{{name: mm, devices: []}}]\nprocessing_elements:\n  - name: p0\n    memory_map: mm\n    config: &cfg {{block_execution: {LIMITS}}}\n  - name: p1\n    memory_map: mm\n    config: *cfg\n"
     );
-    let different = LIMITS.replace("}", ", local_memory_service: {bytes_per_tick: 7}}");
+    let different = LIMITS.replace('}', ", local_memory_service: {bytes_per_tick: 7}}");
     let source = format!(
         "{source}  - name: p2\n    memory_map: mm\n    config: {{block_execution: {different}}}\n"
     );
@@ -60,12 +60,12 @@ fn block_execution_defaults_and_invalid_limits() {
             assert!(platform_with_limits(Some(&limits)).validate().is_err());
         }
     }
-    let zero_rate = LIMITS.replace("}", ", local_memory_service: {bytes_per_tick: 0}}");
+    let zero_rate = LIMITS.replace('}', ", local_memory_service: {bytes_per_tick: 0}}");
     assert!(platform_with_limits(Some(&zero_rate)).validate().is_err());
     for invalid in [
         LIMITS.replace("lsu", "dma"),
         LIMITS.replace("shared_sram", "dedicated"),
-        LIMITS.replace("}", ", surprise: 1}"),
+        LIMITS.replace('}', ", surprise: 1}"),
     ] {
         assert!(
             yaml_serde::from_str::<

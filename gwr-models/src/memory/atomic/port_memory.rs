@@ -97,6 +97,7 @@ impl SimObject for AtomicReply {}
 #[derive(Clone)]
 pub struct AtomicControlHandle(Rc<AtomicService>);
 impl AtomicControlHandle {
+    #[must_use]
     pub fn snapshot(&self) -> AtomicSnapshot {
         self.0.snapshot()
     }

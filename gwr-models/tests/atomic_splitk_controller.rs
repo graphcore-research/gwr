@@ -54,6 +54,10 @@ fn pair(p: u32) -> Effect {
     }
 }
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep complete setup execution and assertions of this scenario together"
+)]
 fn actual_zero_polls_arrival_permutations_dynamic_last_resets_and_all_output_ack_join() {
     for slow in [0u32, 1] {
         let mut engine = Engine::default();

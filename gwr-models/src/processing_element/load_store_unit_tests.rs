@@ -71,7 +71,7 @@ fn waiting_read_issues_before_long_store_finishes() {
         let group = Rc::new(EntityGroup::new(&lsu.entity, "fair"));
         let store = lsu.access_ranges_retaining(
             AccessType::WriteNonPostedRequest,
-            [0..512],
+            std::iter::once(0..512),
             &lanes,
             "store",
             &group,
@@ -81,7 +81,7 @@ fn waiting_read_issues_before_long_store_finishes() {
             lsu.clock.wait_ticks(1)?.await;
             lsu.access_ranges_retaining(
                 AccessType::ReadRequest,
-                [512..576],
+                std::iter::once(512..576),
                 &lanes,
                 "load",
                 &group,
@@ -135,7 +135,7 @@ fn ordinary_custody_keeps_64_byte_blocks() {
         let group = Rc::new(EntityGroup::new(&lsu.entity, "transfer"));
         let transfer = lsu.access_ranges_retaining(
             AccessType::ReadRequest,
-            [8..16],
+            std::iter::once(8..16),
             &lanes,
             "load",
             &group,
@@ -165,7 +165,7 @@ fn delayed_reply_holds_slot_generation() {
         let weak = Rc::downgrade(&owner);
         let mut transfer = Box::pin(lsu.access_ranges_retaining(
             AccessType::ReadRequest,
-            [8..16],
+            std::iter::once(8..16),
             &lanes,
             "load",
             &group,
@@ -276,7 +276,7 @@ fn cancelled_before_issue_returns_only_acquired_credits() {
         let weak = Rc::downgrade(&owner);
         let mut transfer = Box::pin(lsu.access_ranges_retaining(
             AccessType::ReadRequest,
-            [0..8],
+            std::iter::once(0..8),
             &lanes,
             "load",
             &group,
@@ -293,7 +293,7 @@ fn cancelled_before_issue_returns_only_acquired_credits() {
         let held = lsu.state.serialiser.request().await;
         let mut blocked = Box::pin(lsu.access_ranges_retaining(
             AccessType::ReadRequest,
-            [0..8],
+            std::iter::once(0..8),
             &lanes,
             "load",
             &group,
@@ -327,7 +327,7 @@ fn retained_read_and_nonposted_write_drain_real_ports_after_caller_drop() {
             local_payload_service: None,
             block_execution: None,
             compute: yaml_serde::from_str("engines: {}").unwrap(),
-            operation_classes: Default::default(),
+            operation_classes: std::collections::BTreeMap::default(),
         };
         let lsu = LoadStoreUnit::new_and_register(
             &engine,
@@ -356,7 +356,7 @@ fn retained_read_and_nonposted_write_drain_real_ports_after_caller_drop() {
             let weak = Rc::downgrade(&owner);
             let mut transfer = Box::pin(lsu.access_ranges_retaining(
                 access_type,
-                [8..16],
+                std::iter::once(8..16),
                 &lanes,
                 "transfer",
                 &group,
@@ -444,7 +444,7 @@ fn striped_cancelled_request_keeps_custody_until_reply() {
         let weak = Rc::downgrade(&owner);
         let mut transfer = Box::pin(lsu.access_ranges_retaining(
             AccessType::ReadRequest,
-            [64..128],
+            std::iter::once(64..128),
             &lanes,
             "load",
             &group,

@@ -9,10 +9,31 @@ use gwr_engine::types::SimError;
 use yaml_serde::{Mapping, Value};
 
 pub fn load_yaml_with_includes(path: &Path, target: CatalogTarget) -> Result<String, SimError> {
+    if matches!(target, CatalogTarget::Platform) {
+        let (yaml, _) = load_catalog(path, target)?;
+        let value: Value = yaml_serde::from_str(&yaml).map_err(|e| SimError(e.to_string()))?;
+        if !["level", "instances", "ports", "repeat_connections"]
+            .iter()
+            .any(|key| value.get(key).is_some())
+        {
+            return Ok(yaml);
+        }
+        return Ok(crate::composition::load_source(path)?
+            .materialize(crate::composition::DEFAULT_MATERIALIZATION_LIMIT)?
+            .resolved_yaml);
+    }
+    load_catalog(path, target).map(|(yaml, _)| yaml)
+}
+
+pub(crate) fn load_catalog(
+    path: &Path,
+    target: CatalogTarget,
+) -> Result<(String, BTreeMap<String, String>), SimError> {
     let mut loader = Loader {
         active: Vec::new(),
         visited: HashSet::new(),
         definitions: BTreeMap::new(),
+        files: BTreeMap::new(),
     };
     let mut root = loader.load(path, true)?;
     for section in SECTIONS {
@@ -29,8 +50,9 @@ pub fn load_yaml_with_includes(path: &Path, target: CatalogTarget) -> Result<Str
             root.insert(Value::String((*section).into()), Value::Mapping(entries));
         }
     }
-    yaml_serde::to_string(&root)
-        .map_err(|error| SimError(format!("Unable to serialize merged YAML: {error}")))
+    let yaml = yaml_serde::to_string(&root)
+        .map_err(|error| SimError(format!("Unable to serialize merged YAML: {error}")))?;
+    Ok((yaml, loader.files))
 }
 
 /// Convert one already resolved platform YAML value to complete JSON.
@@ -105,16 +127,18 @@ pub fn reject_string_includes(yaml: &str) -> Result<(), SimError> {
         yaml_serde::from_str(yaml).map_err(|error| SimError(format!("Invalid YAML: {error}")))?;
     if value
         .as_mapping()
-        .is_some_and(|map| map.contains_key("includes"))
+        .is_some_and(|map| map.contains_key("includes") || map.contains_key("instances"))
     {
         return Err(SimError(
-            "YAML includes require a file path; use from_file instead of from_string".into(),
+            "YAML includes/instances require a file path; use from_file instead of from_string"
+                .into(),
         ));
     }
     Ok(())
 }
 
 struct Loader {
+    files: BTreeMap<String, String>,
     active: Vec<PathBuf>,
     visited: HashSet<PathBuf>,
     definitions: BTreeMap<(String, String), (Value, PathBuf)>,
@@ -142,6 +166,10 @@ impl Loader {
         }
         let contents = std::fs::read_to_string(&path)
             .map_err(|error| SimError(format!("Unable to read {}: {error}", path.display())))?;
+        self.files.insert(
+            path.display().to_string(),
+            crate::composition::hash_bytes(contents.as_bytes()),
+        );
         let value: Value = yaml_serde::from_str(&contents)
             .map_err(|error| SimError(format!("Invalid YAML in {}: {error}", path.display())))?;
         let mut map = value

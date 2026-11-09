@@ -56,12 +56,15 @@ pub struct BlockPipelinePlan {
     chunks: usize,
 }
 impl BlockPipelinePlan {
+    #[must_use]
     pub fn storage(&self) -> &BlockStorageDemand {
         &self.storage
     }
+    #[must_use]
     pub fn output_tile_count(&self) -> usize {
         self.outputs
     }
+    #[must_use]
     pub fn input_chunk_count(&self) -> usize {
         self.chunks
     }
@@ -97,24 +100,31 @@ pub struct OutputTilePlan {
     shape: Vec<usize>,
 }
 impl OutputTilePlan {
+    #[must_use]
     pub fn output_tile_id(&self) -> usize {
         self.id
     }
+    #[must_use]
     pub fn output_view(&self) -> &TensorView {
         &self.output
     }
+    #[must_use]
     pub fn accumulator_shape(&self) -> &[usize] {
         &self.shape
     }
+    #[must_use]
     pub fn accumulator_dtype(&self) -> DataType {
         self.geometry.dtype
     }
+    #[must_use]
     pub fn accumulator_bytes(&self) -> u64 {
         (self.shape[0] * self.shape[1] * (self.geometry.dtype.num_bits() / 8)) as u64
     }
+    #[must_use]
     pub fn finalisation(&self) -> &ExecutionPlan {
         &self.finalisation
     }
+    #[must_use]
     pub fn chunk_count(&self) -> usize {
         self.geometry.k_extent.div_ceil(self.geometry.k_step)
     }
@@ -157,18 +167,23 @@ pub struct InputChunkPlan {
     shape: MatrixWorkShape,
 }
 impl InputChunkPlan {
+    #[must_use]
     pub fn output_tile_id(&self) -> usize {
         self.output
     }
+    #[must_use]
     pub fn chunk_index(&self) -> usize {
         self.index
     }
+    #[must_use]
     pub fn operands(&self) -> &[TensorView] {
         &self.operands
     }
+    #[must_use]
     pub fn batch(&self) -> &EngineBatch {
         &self.batch
     }
+    #[must_use]
     pub fn matrix_shape(&self) -> MatrixWorkShape {
         self.shape
     }
@@ -220,6 +235,14 @@ fn slice(
 }
 /// Validate geometry and capabilities without allocating storage or issuing
 /// work.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep matrix pipeline shape validation and derived geometry in one planner"
+)]
+#[expect(
+    clippy::many_single_char_names,
+    reason = "Use conventional matrix dimensions and operand names"
+)]
 pub fn plan_block_pipeline(
     config: &ProgramTaskConfig,
     model: &ComputeModel,
@@ -279,7 +302,7 @@ pub fn plan_block_pipeline(
             .position(|n| n == name)
             .ok_or_else(|| error("matrix operands must be boundary inputs"))?;
         let view = &config.inputs[i];
-        if view.dtype().num_bits() % 8 != 0 {
+        if !view.dtype().num_bits().is_multiple_of(8) {
             return Err(error("packed inputs are unsupported"));
         }
         if names.len() != view.shape().dims().len()
@@ -326,7 +349,7 @@ pub fn plan_block_pipeline(
             "explicit accumulator precision must match destination",
         ));
     }
-    if dtype.num_bits() % 8 != 0 || config.outputs[0].dtype().num_bits() % 8 != 0 {
+    if dtype.num_bits() % 8 != 0 || !config.outputs[0].dtype().num_bits().is_multiple_of(8) {
         return Err(error("packed accumulator/output storage is unsupported"));
     }
     if !model.has_explicit_capability(&CapabilityKey {
@@ -551,7 +574,7 @@ mod tests {
         k: usize,
     ) -> (ProgramTaskConfig, ComputeModel, BlockExecutionConfig) {
         let program = yaml_serde::from_str(
-            r#"
+            r"
 inputs: [a, b]
 outputs: [c]
 temporaries: {acc: {dtype: fp32}}
@@ -568,7 +591,7 @@ assignments:
 - output: c
   axes: [batch, m, n]
   expr: {convert: [{read: {tensor: acc, indices: [batch, m, n]}}]}
-"#,
+",
         )
         .unwrap();
         let view = |shape: &[usize], dtype, addr| {
@@ -590,7 +613,7 @@ assignments:
             ],
             outputs: vec![view(&[b, m, n], DataType::Fp16, 2 << 40)],
         };
-        let hardware:ComputeConfig=yaml_serde::from_str(r#"
+        let hardware:ComputeConfig=yaml_serde::from_str(r"
 engines:
   matrix:
     matrix_accumulator_capacity_bytes: 1048576
@@ -599,7 +622,7 @@ engines:
   vector:
     capabilities:
     - {class: convert, input_dtypes: [[fp32]], ops_per_tick: 256}
-"#).unwrap();
+").unwrap();
         let classes=yaml_serde::from_str("matrix: {operations: [matrix_mac], arity: 2, flops_per_op: 2}\nconvert: {operations: [convert], arity: 1, flops_per_op: 0}").unwrap();
         let limits=yaml_serde::from_str("max_compute_tiles: 1\nmax_load_chunks: 1\nmax_store_tiles: 1\ntransfer_port: lsu\naccumulator_storage: shared_sram").unwrap();
         (
@@ -615,14 +638,14 @@ engines:
         assert_eq!(
             plan.storage(),
             &BlockStorageDemand {
-                input_slot_bytes: 262144,
+                input_slot_bytes: 262_144,
                 input_slots: 2,
-                accumulator_bytes: 1048576,
-                output_slot_bytes: 524288,
+                accumulator_bytes: 1_048_576,
+                output_slot_bytes: 524_288,
                 output_slots: 1,
                 scratch_bytes: 0,
                 alignment_bytes: 0,
-                sram_bytes: 2097152
+                sram_bytes: 2_097_152
             }
         );
         assert_eq!(plan.output_tile_count(), 512);
@@ -645,17 +668,17 @@ engines:
         }
         assert_eq!(
             (macs, converts, reads, writes),
-            (274877906944, 134217728, 1073741824, 268435456)
+            (274_877_906_944, 134_217_728, 1_073_741_824, 268_435_456)
         );
     }
     #[test]
     fn arbitrary_buffer_counts_charge_the_complete_window() {
         let (mut config, model, limits) = fixture(1, 512, 512, 256);
         for (i, o, total) in [
-            (3, 1, 2359296),
-            (4, 1, 2621440),
-            (2, 2, 2621440),
-            (3, 2, 2883584),
+            (3, 1, 2_359_296),
+            (4, 1, 2_621_440),
+            (2, 2, 2_621_440),
+            (3, 2, 2_883_584),
         ] {
             let r = config.pipeline.as_mut().unwrap();
             r.input_buffers = i;
@@ -678,10 +701,10 @@ engines:
         // Physical B is transposed: preserve semantic k/n role independently.
         config.inputs[1] =
             TensorView::new_full(Tensor::new(&[2, 7, 11], &DataType::Fp8, 1 << 40).unwrap());
-        if let ExprSpec::MatrixMac { args, .. } = &mut config.program.assignments[0].expr {
-            if let ExprSpec::Read { indices, .. } = &mut args[1] {
-                indices.swap(1, 2);
-            }
+        if let ExprSpec::MatrixMac { args, .. } = &mut config.program.assignments[0].expr
+            && let ExprSpec::Read { indices, .. } = &mut args[1]
+        {
+            indices.swap(1, 2);
         }
         let plan = plan_block_pipeline(&config, &model, &limits).unwrap();
         let mut output = BTreeSet::new();
@@ -810,10 +833,10 @@ engines:
             .unwrap()
             .sizes
             .insert("batch".into(), 1);
-        if let ExprSpec::MatrixMac { args, .. } = &mut config.program.assignments[0].expr {
-            if let ExprSpec::Read { bounds, .. } = &mut args[0] {
-                *bounds = BoundsMode::Exclude;
-            }
+        if let ExprSpec::MatrixMac { args, .. } = &mut config.program.assignments[0].expr
+            && let ExprSpec::Read { bounds, .. } = &mut args[0]
+        {
+            *bounds = BoundsMode::Exclude;
         }
         assert!(plan_block_pipeline(&config, &model, &limits).is_err());
     }

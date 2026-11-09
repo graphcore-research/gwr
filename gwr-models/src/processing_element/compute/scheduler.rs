@@ -273,15 +273,14 @@ impl State {
                 // and eventually releasing that storage. The ordered scan
                 // still grants the oldest currently capacity-eligible request.
                 continue;
-            } else {
-                self.used[engine] = true;
-                // One exclusive batch: assign its demand, never sum contenders.
-                self.current_bytes[engine] = request.bytes;
-                self.peak_bytes[engine] =
-                    self.peak_bytes[engine].max(request.bytes + self.retained_bytes[engine]);
-                request.granted = true;
-                wake.push(request.waker.clone());
             }
+            self.used[engine] = true;
+            // One exclusive batch: assign its demand, never sum contenders.
+            self.current_bytes[engine] = request.bytes;
+            self.peak_bytes[engine] =
+                self.peak_bytes[engine].max(request.bytes + self.retained_bytes[engine]);
+            request.granted = true;
+            wake.push(request.waker.clone());
         }
         wake
     }
@@ -404,6 +403,10 @@ mod matrix_accumulator_tests {
         clean(&s);
     }
     #[test]
+    #[expect(
+        clippy::many_single_char_names,
+        reason = "Use conventional matrix dimensions and operand names"
+    )]
     fn independent_engines_and_scheduler_instances_hold_separate_demands() {
         let a = scheduler(vec![Some(256), Some(512)]);
         let b = scheduler(vec![Some(256)]);
@@ -511,9 +514,11 @@ pub struct AccumulatorLease {
     owner: Rc<RetainedOwner>,
 }
 impl AccumulatorLease {
+    #[must_use]
     pub fn engine(&self) -> EngineId {
         self.owner.engine
     }
+    #[must_use]
     pub fn bytes(&self) -> u64 {
         self.owner.bytes
     }
@@ -610,11 +615,13 @@ pub struct RetainedComputeReservation {
     _owner: Rc<RetainedOwner>,
 }
 impl RetainedComputeReservation {
+    #[must_use]
     pub fn engine(&self) -> EngineId {
         self.batch.engine()
     }
 }
 impl ComputeScheduler {
+    #[must_use]
     pub fn retain_accumulator(&self, engine: EngineId, bytes: u64) -> AcquireAccumulator {
         AcquireAccumulator {
             state: self.state.clone(),
@@ -624,28 +631,37 @@ impl ComputeScheduler {
             done: false,
         }
     }
-    pub async fn acquire_with_retained_accumulator(
+    /// Reserve compute while retaining the validated accumulator owner.
+    ///
+    /// The returned future owns its lifetime guard, so callers can release a
+    /// `RefCell` borrow of the source lease before awaiting admission.
+    pub fn acquire_with_retained_accumulator(
         &self,
         lease: &AccumulatorLease,
         batch: &super::EngineBatch,
-    ) -> Result<RetainedComputeReservation, SimError> {
-        {
-            let s = self.state.borrow();
-            if !Rc::ptr_eq(&self.state, &lease.owner.state)
-                || s.retained_live.get(&lease.owner.id)
-                    != Some(&(lease.owner.engine, lease.owner.bytes))
-                || batch.matrix_accumulator_bytes > lease.bytes()
-                || !batch.alternatives.iter().any(|(e, _)| *e == lease.engine())
-            {
+    ) -> impl Future<Output = Result<RetainedComputeReservation, SimError>> + use<> {
+        let valid = {
+            let state = self.state.borrow();
+            Rc::ptr_eq(&self.state, &lease.owner.state)
+                && state.retained_live.get(&lease.owner.id)
+                    == Some(&(lease.owner.engine, lease.owner.bytes))
+                && batch.matrix_accumulator_bytes <= lease.bytes()
+                && batch
+                    .alternatives
+                    .iter()
+                    .any(|(engine, _)| *engine == lease.engine())
+        };
+        let owner = lease.owner.clone();
+        let acquire = self.acquire(lease.engine());
+        async move {
+            if !valid {
                 return sim_error!("foreign/stale/wrong-engine retained accumulator lease");
             }
+            Ok(RetainedComputeReservation {
+                batch: acquire.await?,
+                _owner: owner,
+            })
         }
-        let owner = lease.owner.clone();
-        let reservation = self.acquire(lease.engine()).await?;
-        Ok(RetainedComputeReservation {
-            batch: reservation,
-            _owner: owner,
-        })
     }
 }
 impl State {
@@ -709,6 +725,7 @@ mod retained_accumulator_tests {
         let mut ordinary = scheduler.acquire_with_accumulator(EngineId(0), 8192);
         assert!(poll(&mut ordinary).is_pending());
         let batch = super::super::EngineBatch {
+            actions: BTreeMap::default(),
             matrix_accumulator_bytes: 8192,
             engine: EngineId(0),
             alternatives: vec![(EngineId(0), 1)],
@@ -820,6 +837,7 @@ mod retained_accumulator_tests {
         };
         let foreign = scheduler(Some(8192));
         let batch = super::super::EngineBatch {
+            actions: BTreeMap::default(),
             matrix_accumulator_bytes: 8192,
             engine: EngineId(0),
             alternatives: vec![(EngineId(0), 1)],

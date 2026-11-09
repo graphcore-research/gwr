@@ -91,7 +91,7 @@ fn parse_cache_port_id(s: &str) -> Result<CachePortId, SimError> {
 
 fn parse_fabric_port_id(s: &str) -> Result<ConnectionEndpointId, SimError> {
     static FABRIC_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"^fabric\.([A-Za-z0-9_]+)@\((\d+),(\d+)\)(?:\.(.*))?$").unwrap()
+        Regex::new(r"^fabric\.([A-Za-z0-9_\[\]/]+)@\((\d+),(\d+)\)(?:\.(.*))?$").unwrap()
     });
 
     let caps = FABRIC_RE

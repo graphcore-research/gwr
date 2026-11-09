@@ -39,7 +39,7 @@ fn default_validation_preserves_implicit_dtype_transitions_but_guard_rejects_the
         let region = scalar(&expr, D::Fp32, D::Bf16);
         let error = validate_homogeneous_scalar_assignments(&region, &["Y"]).unwrap_err();
         assert!(
-            error.0.contains("Y") && error.0.contains("Fp32") && error.0.contains("Bf16"),
+            error.0.contains('Y') && error.0.contains("Fp32") && error.0.contains("Bf16"),
             "{error}"
         );
     }

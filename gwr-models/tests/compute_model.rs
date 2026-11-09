@@ -198,6 +198,10 @@ fn class(operations: &[&str], arity: usize, flops_per_op: usize) -> OperationCla
     }
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Test fixtures transfer their class maps into the model builder"
+)]
 fn model(
     classes: BTreeMap<String, OperationClass>,
     engines: &[(&str, Vec<CapabilityConfig>)],

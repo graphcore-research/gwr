@@ -22,7 +22,7 @@ fn releases_wait_for_native_completion_and_idle_without_early_exit() {
         .unwrap(),
     );
     let file = TimetableFile::from_string(
-        r#"
+        r"
 nodes:
  - {id: A,kind: tensor,config: {addr: 4096,dtype: fp32,shape: [16]}}
  - {id: B,kind: tensor,config: {addr: 8192,dtype: fp32,shape: [16]}}
@@ -34,7 +34,7 @@ edges:
  - {from: first,to: B,kind: data}
  - {from: B,to: second,kind: data}
  - {from: second,to: C,kind: data}
-"#,
+",
     )
     .unwrap();
     let timetable =
@@ -93,7 +93,7 @@ fn combined_release_cycles_and_unknown_prerequisites_are_rejected() {
         .unwrap(),
     );
     let file = TimetableFile::from_string(
-        r#"
+        r"
 nodes:
  - {id: A,kind: tensor,config: {addr: 4096,dtype: fp32,shape: [16]}}
  - {id: B,kind: tensor,config: {addr: 8192,dtype: fp32,shape: [16]}}
@@ -105,7 +105,7 @@ edges:
  - {from: first,to: B,kind: data}
  - {from: A,to: second,kind: data}
  - {from: second,to: C,kind: data}
-"#,
+",
     )
     .unwrap();
     let timetable =

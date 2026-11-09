@@ -13,7 +13,7 @@ This shows a minimal runnable simulation with custom [component] behavior.
 How to run it:
 
 ```bash
-cargo run --bin flaky-component -- --seed 1 --drop 0.5 --num-packets 1000
+cargo run --release --bin flaky-component -- --seed 1 --drop 0.5 --num-packets 1000
 ```
 
 Try varying `--drop` and comparing the number of packets received.
@@ -27,7 +27,7 @@ As with all the examples, you can determine the command-line arguments by
 running with `--help`:
 
 ```bash
-cargo run --bin flaky-with-delay -- --help
+cargo run --release --bin flaky-with-delay -- --help
 ```
 
 Try varying the delay as well as the drop rate.
@@ -40,19 +40,31 @@ depending on command-line arguments.
 Compare running:
 
 ```bash
-cargo run --bin scrambler
+cargo run --release --bin scrambler
 ```
 
 against
 
 ```bash
-cargo run --bin scrambler -- -s
+cargo run --release --bin scrambler -- -s
 ```
 
 ## System Exploration Examples
 
 These examples show GWR being used to build larger systems that you might find
 in silicon devices.
+
+### Machine and workload use cases
+
+The
+[`gwr-use-cases` package](https://github.com/graphcore-research/gwr/tree/main/gwr-use-cases)
+contains GB200 topologies, pinned DeepSeek V4-Flash scenarios, generic GPT/ResNet
+workload generators, and ML/communication examples. It depends on the reusable
+platform and timetable libraries. Experiment generators run from
+`gwr-use-cases`; the `gwr-timetable` binary remains the simulation runner.
+Start with the package's reduced V4 workflow, inspect the generation report,
+then increase geometry or scenario size. Machine rates remain uncalibrated;
+the package records the assumptions and measurements needed to interpret results.
 
 <!-- prettier-ignore-start -->
 
@@ -71,7 +83,7 @@ Try running it and varying the data and credit delays and the size of the data
 buffer which controls the number of credits that can be issued:
 
 ```bash
-cargo run --bin sim-pipe -- --stdout --pipe-data-delay 10 --pipe-buffer-entries 10 --pipe-credit-delay 10
+cargo run --release --bin sim-pipe -- --stdout --pipe-data-delay 10 --pipe-buffer-entries 10 --pipe-credit-delay 10
 ```
 
 If you now vary the size of the pipe buffer or the delays you will see the
@@ -87,7 +99,7 @@ priority, buffer sizes, or trace settings without rebuilding a long command by
 hand.
 
 ```bash
-cargo run --bin terminus -- run --recipe examples/sim-ring/recipes/explore_ring_priorities.yaml
+cargo run --release --bin terminus -- run --recipe examples/sim-ring/recipes/explore_ring_priorities.yaml
 ```
 
 You will notice how having a fair priority for ring traffic causes deadlock and
@@ -103,7 +115,7 @@ abstraction modelled, which you will see produce quite different performance
 numbers:
 
 ```bash
-cargo run --bin terminus -- run --recipe examples/sim-fabric/recipes/explore_model.yaml
+cargo run --release --bin terminus -- run --recipe examples/sim-fabric/recipes/explore_model.yaml
 ```
 
 You can show that with a different traffic pattern the two models do produce
@@ -117,7 +129,7 @@ There is also a recipe to show how to explore the impact of the fabric data
 ticks per hop:
 
 ```bash
-cargo run --bin terminus -- run --recipe examples/sim-fabric/recipes/explore_ticks_per_hop.yaml
+cargo run --release --bin terminus -- run --recipe examples/sim-fabric/recipes/explore_ticks_per_hop.yaml
 ```
 
 [component]: ../components/chapter.md

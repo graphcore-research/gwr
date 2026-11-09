@@ -228,6 +228,7 @@ impl AtomicJoinConfig {
     pub fn validate_for_pe(&self, pe: &super::ProcessingElement) -> gwr_engine::types::SimResult {
         self.binding.validate_for_pe(pe)
     }
+    #[must_use]
     pub fn observation(&self) -> crate::memory::atomic::ControllerObservation {
         self.controller.observation()
     }

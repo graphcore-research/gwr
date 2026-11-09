@@ -17,7 +17,7 @@ fn fixture(format: &str, layout: &str, k: usize) -> (yaml_serde::Value, RegionBi
     let view = |shape: &[usize], dtype, addr| {
         TensorView::new_full(Tensor::new(shape, &dtype, addr).unwrap())
     };
-    let mut yaml: yaml_serde::Value = yaml_serde::from_str(&format!(r#"
+    let mut yaml: yaml_serde::Value = yaml_serde::from_str(&format!(r"
 inputs: [A, B, SA, SB, GA, GB]
 metadata_inputs: [SA, SB, GA, GB]
 outputs: [Y]
@@ -34,7 +34,7 @@ assignments:
      quantization:
       - {{format: {format}, block_size: {block}, block_scales: SA, global_scale: GA, layout: {layout}}}
       - {{format: {format}, block_size: {block}, block_scales: SB, global_scale: GB, layout: {layout}}}
-"#)).unwrap();
+")).unwrap();
     if !nv {
         for operand in yaml["assignments"][0]["expr"]["matrix_mac"]["quantization"]
             .as_sequence_mut()
@@ -97,7 +97,7 @@ fn native_matrix_rejects_missing_or_wrong_scale_contracts() {
                     .remove(yaml_serde::Value::String("quantization".into()));
             }
             "missing_load" => {
-                yaml["metadata_inputs"] = yaml_serde::from_str("[SB, GA, GB]").unwrap()
+                yaml["metadata_inputs"] = yaml_serde::from_str("[SB, GA, GB]").unwrap();
             }
             "wrong_block" => mac["quantization"][0]["block_size"] = 32.into(),
             "missing_global" => {
@@ -108,11 +108,11 @@ fn native_matrix_rejects_missing_or_wrong_scale_contracts() {
             }
             "wrong_shape" => {
                 bindings.inputs[2] =
-                    TensorView::new_full(Tensor::new(&[2, 2], &DataType::Fp8, 8192).unwrap())
+                    TensorView::new_full(Tensor::new(&[2, 2], &DataType::Fp8, 8192).unwrap());
             }
             "wrong_dtype" => {
                 bindings.inputs[2] =
-                    TensorView::new_full(Tensor::new(&[2, 3], &DataType::Fp32, 8192).unwrap())
+                    TensorView::new_full(Tensor::new(&[2, 3], &DataType::Fp32, 8192).unwrap());
             }
             "wrong_instruction" => mac["execution"]["instruction"] = "tensor".into(),
             "mixed_formats" => mac["quantization"][1]["format"] = "mxfp4".into(),

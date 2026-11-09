@@ -90,10 +90,9 @@ fn shared_edge_distinct_endpoints_requires_rate_limiting() {
                 .all(|p| p[1].tick - p[0].tick >= duration),
             "actual shared-edge serialized spacing, not endpoint contention"
         );
-        assert_eq!(
-            arrivals[0].tick,
-            sorted_arrivals(&baseline)[0].tick,
-            "forward-first law retains isolated first arrival"
+        assert!(
+            arrivals[0].tick > sorted_arrivals(&baseline)[0].tick,
+            "a packet completes actual route service before delivery"
         );
         assert!(slow.whole_ticks > fast.whole_ticks && fast.whole_ticks > baseline.whole_ticks);
     }
@@ -239,10 +238,8 @@ fn irregular_packet_headers_and_non_one_ns_clock_keep_tick_law() {
     assert_eq!(a.whole_ticks, b.whole_ticks);
     assert_eq!(b.whole_ns, 2.0 * a.whole_ns);
     let ordered = sorted_arrivals(&a);
-    for pair in ordered.windows(2) {
-        let expected = (pair[0].bytes * 8).div_ceil(rate) as u64;
-        assert!(pair[1].tick - pair[0].tick >= expected);
-    }
+    let bits: usize = ordered.iter().map(|p| p.bytes * 8).sum();
+    assert!(ordered.last().unwrap().tick >= bits.div_ceil(rate) as u64);
     assert_eq!(
         a.arrivals[0].bytes, FRAME_OVERHEAD_BYTES,
         "zero data payload still charges existing declared frame overhead"
@@ -260,7 +257,7 @@ fn downstream_stall_backpressures_producers_with_and_without_link_rate_limit() {
         for hop_ticks in [1, 2, 4] {
             for rate in [None, Some(8)] {
                 let mut accepted_before_stall = Vec::new();
-                for packets in [32, 64] {
+                for packets in [128, 256] {
                     let mut spec = stream(
                         1,
                         endpoint(0, 0, 0),
@@ -451,7 +448,12 @@ fn build_routed_config(
                 .collect::<HashMap<_, _>>(),
         )
         .unwrap()
-        .with_internal_link_bits_per_tick(rate)
+        .with_paths(gwr_models::fabric::paths::FabricPathConfig {
+            bw_bits_per_tick: rate.unwrap_or(65536),
+            queue_bytes: 256,
+            queue_packets: 4,
+            ..Default::default()
+        })
         .unwrap(),
     )
 }

@@ -26,10 +26,10 @@ struct SingleTask {
 #[async_trait(?Send)]
 impl Dispatch for SingleTask {
     fn task_by_id(&self, _: usize) -> Result<Task, SimError> {
-        if self.completed.get() > 0 {
-            if let Some(task) = &self.next_task {
-                return Ok(task.clone());
-            }
+        if self.completed.get() > 0
+            && let Some(task) = &self.next_task
+        {
+            return Ok(task.clone());
         }
         Ok(self.task.clone())
     }
@@ -59,7 +59,7 @@ impl Dispatch for SingleTask {
 
 fn source(first_bytes: u64, second_base: u64, second_bytes: u64) -> String {
     format!(
-        r#"
+        r"
 memory_maps:
  - name: local
    devices: [m0, m1, out]
@@ -87,7 +87,7 @@ connections:
  - {{connect: [mem.m0, 'fabric.f@(1,0)']}}
  - {{connect: [mem.m1, 'fabric.f@(2,0)']}}
  - {{connect: [mem.out, 'fabric.f@(3,0)']}}
-"#
+"
     )
 }
 
@@ -239,8 +239,7 @@ fn cache_rejects_physical_boundaries_not_aligned_to_whole_lines() {
     let mut engine = Engine::default();
     let clock = engine.default_clock();
     let error = Platform::from_string(&engine, &clock, &cached(&source(2, 2, 2), 4))
-        .err()
-        .expect("unaligned cache memory must fail platform validation");
+        .expect_err("unaligned cache memory must fail platform validation");
     assert!(error.to_string().contains("4-byte fetch size"), "{error}");
 }
 

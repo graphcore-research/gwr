@@ -24,7 +24,7 @@ fn platform(mode: &str, cached: bool) -> String {
         ""
     };
     format!(
-        r#"
+        r"
 operation_classes:
  add: {{operations: [add], arity: 2}}
 memory_maps:
@@ -48,11 +48,11 @@ fabrics:
  - {{connect: {link}}}
 {extra} - {{connect: [mem.m0, 'fabric.f@(1,0)']}}
  - {{connect: [mem.m1, 'fabric.f@(2,0)']}}
-"#
+"
     )
 }
 
-const COPY: &str = r#"
+const COPY: &str = r"
 nodes:
  - {id: A, kind: tensor, config: {addr: 0, dtype: int8, shape: [1024]}}
  - {id: Y, kind: tensor, config: {addr: 4096, dtype: int8, shape: [1024]}}
@@ -66,7 +66,7 @@ nodes:
 edges:
  - {from: A, to: copy, kind: data}
  - {from: copy, to: Y, kind: data}
-"#;
+";
 
 fn run(mode: &str, cached: bool) -> (u64, Vec<(usize, usize)>) {
     let mut engine = Engine::default();

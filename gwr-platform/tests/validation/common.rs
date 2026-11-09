@@ -135,7 +135,7 @@ pub(crate) fn fabric(name: &str) -> FabricSection {
             rx_buffer_bytes: None,
             tx_buffer_bytes: None,
             port_bits_per_tick: None,
-            internal_link_bits_per_tick: None,
+            paths: None,
             routing: None,
             port_selection: None,
         },
