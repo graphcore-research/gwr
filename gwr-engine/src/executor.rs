@@ -54,6 +54,7 @@ use std::time::Duration;
 use std::{mem, thread};
 
 use futures::task::WakerRef;
+use gwr_std::error::SimResult;
 use gwr_track::entity::Entity;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -61,7 +62,6 @@ use rand::seq::SliceRandom;
 
 use crate::time::clock::Clock;
 use crate::time::simtime::SimTime;
-use crate::types::SimResult;
 
 fn no_op(_: *const ()) {
     unreachable!("borrowed executor waker must not be consumed or dropped");
@@ -237,7 +237,7 @@ impl Executor {
         observer: impl FnMut(ExecutorSnapshot) -> SimResult,
     ) -> SimResult {
         if minimum_interval.is_zero() {
-            return Err(crate::types::SimError(
+            return Err(gwr_std::error::SimError(
                 "executor observer interval must be positive".to_string(),
             ));
         }
@@ -701,7 +701,7 @@ mod tests {
         let tracker = dev_null_tracker();
         let top = toplevel(&tracker, "top");
         let (executor, spawner) = new_executor_and_spawner(&top);
-        spawner.spawn(async { Err(crate::types::SimError("failed".to_string())) });
+        spawner.spawn(async { Err(gwr_std::error::SimError("failed".to_string())) });
 
         let result = executor.run();
 
@@ -720,14 +720,14 @@ mod tests {
         let tracker = dev_null_tracker();
         let top = toplevel(&tracker, "top");
         let (executor, spawner) = new_executor_and_spawner(&top);
-        spawner.spawn(async { Err(crate::types::SimError("task failed".to_string())) });
+        spawner.spawn(async { Err(gwr_std::error::SimError("task failed".to_string())) });
 
         let mut snapshots = Vec::new();
         let refresh_due = AtomicBool::new(true);
         let error = executor
             .run_internal(Some(&refresh_due), |snapshot| {
                 snapshots.push(snapshot);
-                Err(crate::types::SimError("observer failed".to_string()))
+                Err(gwr_std::error::SimError("observer failed".to_string()))
             })
             .unwrap_err();
 
@@ -759,7 +759,7 @@ mod tests {
         let refresh_due = AtomicBool::new(true);
         let first_error = executor
             .run_internal(Some(&refresh_due), |_| {
-                Err(crate::types::SimError("observer failed".to_string()))
+                Err(gwr_std::error::SimError("observer failed".to_string()))
             })
             .unwrap_err();
         assert_eq!(first_error.to_string(), "observer failed");

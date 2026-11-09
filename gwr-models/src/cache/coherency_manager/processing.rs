@@ -8,7 +8,8 @@ use gwr_engine::events::repeated::Repeated;
 use gwr_engine::port::{InPort, OutPort};
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Event, SimObject};
-use gwr_engine::types::{AccessType, SimResult};
+use gwr_engine::types::AccessType;
+use gwr_std::error::SimResult;
 
 use super::{CoherenceOp, CoherencyManager};
 use crate::cache::traits::CoherentAccess;

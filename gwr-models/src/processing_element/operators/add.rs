@@ -6,8 +6,8 @@
 
 use std::rc::Rc;
 
-use gwr_engine::sim_error;
-use gwr_engine::types::{SimError, SimResult};
+use gwr_std::error::{SimError, SimResult};
+use gwr_std::sim_error;
 use rand::RngExt;
 
 use super::{Operator, Shape, Tensor, TensorPartition, TensorPartitions};
@@ -133,7 +133,7 @@ impl OperatorAdd {
         inputs: &[Option<Tensor>],
         _expand_ratio: f64,
         _rng: &mut impl RngExt,
-    ) -> Result<Vec<Option<Tensor>>, gwr_engine::types::SimError> {
+    ) -> Result<Vec<Option<Tensor>>, gwr_std::error::SimError> {
         let (input_a, input_b) = validate_inputs(inputs)?;
 
         let output_shape = broadcast_shapes(input_a.shape(), input_b.shape())?;
@@ -154,7 +154,7 @@ impl OperatorAdd {
         outputs: &[Option<Tensor>],
         expand_ratio: f64,
         rng: &mut impl RngExt,
-    ) -> Result<Vec<Option<Tensor>>, gwr_engine::types::SimError> {
+    ) -> Result<Vec<Option<Tensor>>, gwr_std::error::SimError> {
         let output = validate_outputs(outputs)?;
 
         // We cannot shrink both inputs because we need to preserve one that

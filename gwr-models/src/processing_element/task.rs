@@ -2,8 +2,8 @@
 
 use std::rc::Rc;
 
-use gwr_engine::sim_error;
-use gwr_engine::types::SimError;
+use gwr_std::error::SimError;
+use gwr_std::sim_error;
 use rand::RngExt;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};

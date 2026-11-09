@@ -2,7 +2,7 @@
 
 [package]
 name = "gwr-spotter"
-version = "0.11.0"
+version = "0.12.0"
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -28,7 +28,7 @@ axum = { version = "0.8.9", default-features = false, features = ["http1", "http
 capnp.workspace = true
 clap.workspace = true
 crossterm.workspace = true
-gwr-track = { path = "../gwr-track", version = "0.13.0" }
+gwr-track = { path = "../gwr-track", version = "0.14.0" }
 itertools.workspace = true
 log.workspace = true
 ratatui.workspace = true

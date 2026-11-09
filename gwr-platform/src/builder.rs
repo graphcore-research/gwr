@@ -6,7 +6,6 @@ use std::rc::Rc;
 
 use gwr_engine::engine::Engine;
 use gwr_engine::time::clock::Clock;
-use gwr_engine::types::SimError;
 use gwr_models::cache::coherency_manager::{CoherencyManager, CoherencyManagerConfig};
 use gwr_models::cache::{Cache, CacheConfig, CoherenceConfig};
 use gwr_models::fabric::functional::FunctionalFabric;
@@ -19,6 +18,7 @@ use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::memory_map::MemoryMap;
 use gwr_models::memory::{Memory, MemoryConfig};
 use gwr_models::processing_element::{ProcessingElement, ProcessingElementConfig};
+use gwr_std::error::SimError;
 use gwr_track::entity::{Entity, GetEntity};
 
 use crate::connection_id::{CachePortId, ConnectionEndpointId, parse_connection_endpoint_id};

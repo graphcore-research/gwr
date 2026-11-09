@@ -3,13 +3,13 @@
 use std::rc::Rc;
 
 use gwr_engine::test_helpers::start_test;
-use gwr_engine::types::SimError;
 use gwr_models::processing_element::MachineOpCounts;
 pub(crate) use gwr_models::processing_element::dispatch::Dispatch;
 pub(crate) use gwr_models::processing_element::operators::dtype::DataType;
 pub(crate) use gwr_models::processing_element::operators::{OperatorCustom, OperatorMaxPool};
 pub(crate) use gwr_models::processing_element::task::ComputeOp;
 use gwr_platform::Platform;
+use gwr_std::error::SimError;
 pub(crate) use gwr_timetable::Timetable;
 pub(crate) use gwr_timetable::timetable_file::{
     EdgeKind, EdgeSection, NodeSection, TensorConfigSection, TensorViewSection, TimetableFile,

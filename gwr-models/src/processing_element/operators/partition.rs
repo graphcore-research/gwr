@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use gwr_engine::types::SimError;
+use gwr_std::error::SimError;
 
 use super::TensorView;
 

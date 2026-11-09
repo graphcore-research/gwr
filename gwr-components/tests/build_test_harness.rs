@@ -6,7 +6,7 @@ use std::rc::Rc;
 use gwr_components::build_component_harness;
 use gwr_engine::port::PortStateResult;
 use gwr_engine::traits::SimObject;
-use gwr_engine::types::SimResult;
+use gwr_std::error::SimResult;
 
 #[allow(dead_code)]
 struct HarnessPortShapes<T>(PhantomData<T>);

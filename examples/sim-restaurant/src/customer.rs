@@ -10,7 +10,7 @@ use gwr_engine::events::repeated::Repeated;
 use gwr_engine::executor::Spawner;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::Event;
-use gwr_engine::types::SimResult;
+use gwr_std::error::SimResult;
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 

@@ -9,11 +9,11 @@ use std::task::{Context, Poll};
 
 use futures::Future;
 use futures::future::FusedFuture;
+use gwr_std::error::SimResult;
+use gwr_std::sim_error;
 
 use super::waiting::Waiting;
-use crate::sim_error;
 use crate::traits::{BoxFuture, Event};
-use crate::types::SimResult;
 
 pub struct OnceState<T>
 where

@@ -2,8 +2,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use gwr_engine::sim_error;
-use gwr_engine::types::{SimError, SimResult};
+use gwr_std::error::{SimError, SimResult};
+use gwr_std::sim_error;
 
 use crate::builder::EffectiveConfigs;
 use crate::connection_id::{CachePortId, ConnectionEndpointId, parse_connection_endpoint_id};

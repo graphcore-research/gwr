@@ -11,13 +11,13 @@ use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::Event;
-use gwr_engine::types::SimError;
 use gwr_models::processing_element::MachineOpCounts;
 use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::operators::dtype::DataType;
 use gwr_models::processing_element::operators::{OperatorCustom, Tensor, TensorView};
 use gwr_models::processing_element::task::{ComputeOp, ComputeTaskConfig, Task};
 use gwr_platform::Platform;
+use gwr_std::error::SimError;
 
 /// A struct that implements `Dispatch`
 ///
@@ -64,14 +64,14 @@ impl Dispatch for TestDispatcher {
         }
     }
 
-    fn set_task_active(&self, task_idx: usize) -> gwr_engine::types::SimResult {
+    fn set_task_active(&self, task_idx: usize) -> gwr_std::error::SimResult {
         let mut handle = self.started_tasks.borrow_mut();
         handle.insert(task_idx);
         self.change.notify();
         Ok(())
     }
 
-    fn set_task_completed(&self, task_idx: usize) -> gwr_engine::types::SimResult {
+    fn set_task_completed(&self, task_idx: usize) -> gwr_std::error::SimResult {
         let mut handle = self.completed_tasks.borrow_mut();
         handle.insert(task_idx);
         self.change.notify();

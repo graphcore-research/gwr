@@ -21,8 +21,9 @@ clap.workspace = true
 crossterm.workspace = true
 futures.workspace = true
 gwr-components = { path = "../../gwr-components", version = "0.13.0" }
-gwr-engine = { path = "../../gwr-engine", version = "0.16.0" }
-gwr-track = { path = "../../gwr-track", features = ["perfetto"], version = "0.13.0" }
+gwr-engine = { path = "../../gwr-engine", version = "0.17.0" }
+gwr-std = { path = "../../gwr-std", version = "0.1.0" }
+gwr-track = { path = "../../gwr-track", features = ["perfetto"], version = "0.14.0" }
 log.workspace = true
 rand.workspace = true
 ratatui.workspace = true

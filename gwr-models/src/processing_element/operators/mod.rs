@@ -4,7 +4,7 @@
 
 use std::rc::Rc;
 
-use gwr_engine::types::{SimError, SimResult};
+use gwr_std::error::{SimError, SimResult};
 
 use crate::processing_element::{ComputeCapabilities, MachineOpCounts};
 

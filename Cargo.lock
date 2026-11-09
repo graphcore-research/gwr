@@ -949,6 +949,7 @@ dependencies = [
  "gwr-components",
  "gwr-engine",
  "gwr-model-builder",
+ "gwr-std",
  "gwr-track",
  "rand 0.10.3",
 ]
@@ -962,6 +963,7 @@ dependencies = [
  "gwr-components",
  "gwr-engine",
  "gwr-model-builder",
+ "gwr-std",
  "gwr-track",
  "rand 0.10.3",
 ]
@@ -1199,6 +1201,7 @@ dependencies = [
  "gwr-engine",
  "gwr-model-builder",
  "gwr-resources",
+ "gwr-std",
  "gwr-track",
  "log",
  "paste",
@@ -1258,7 +1261,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-engine"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1267,6 +1270,7 @@ dependencies = [
  "futures",
  "gwr-build",
  "gwr-components",
+ "gwr-std",
  "gwr-track",
  "log",
  "mimalloc",
@@ -1299,6 +1303,7 @@ dependencies = [
  "gwr-engine",
  "gwr-model-builder",
  "gwr-resources",
+ "gwr-std",
  "gwr-track",
  "log",
  "paste",
@@ -1353,6 +1358,7 @@ dependencies = [
  "gwr-engine",
  "gwr-model-builder",
  "gwr-models",
+ "gwr-std",
  "gwr-track",
  "log",
  "regex",
@@ -1378,12 +1384,13 @@ version = "0.1.0"
 dependencies = [
  "gwr-build",
  "gwr-engine",
+ "gwr-std",
  "gwr-track",
 ]
 
 [[package]]
 name = "gwr-spotter"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "axum",
  "capnp",
@@ -1399,6 +1406,10 @@ dependencies = [
  "tokio",
  "tower",
 ]
+
+[[package]]
+name = "gwr-std"
+version = "0.1.0"
 
 [[package]]
 name = "gwr-terminus"
@@ -1428,6 +1439,7 @@ dependencies = [
  "gwr-model-builder",
  "gwr-models",
  "gwr-platform",
+ "gwr-std",
  "gwr-track",
  "indicatif",
  "log",
@@ -1439,7 +1451,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-track"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "capnp",
  "capnpc",
@@ -2846,6 +2858,7 @@ dependencies = [
  "gwr-components",
  "gwr-engine",
  "gwr-model-builder",
+ "gwr-std",
  "gwr-track",
 ]
 
@@ -3005,6 +3018,7 @@ dependencies = [
  "gwr-engine",
  "gwr-model-builder",
  "gwr-models",
+ "gwr-std",
  "gwr-track",
  "indicatif",
  "log",
@@ -3023,6 +3037,7 @@ dependencies = [
  "gwr-engine",
  "gwr-model-builder",
  "gwr-models",
+ "gwr-std",
  "gwr-track",
  "indicatif",
  "log",
@@ -3038,6 +3053,7 @@ dependencies = [
  "futures",
  "gwr-components",
  "gwr-engine",
+ "gwr-std",
  "gwr-track",
  "log",
  "rand 0.10.3",
@@ -3053,6 +3069,7 @@ dependencies = [
  "gwr-engine",
  "gwr-model-builder",
  "gwr-models",
+ "gwr-std",
  "gwr-track",
  "indicatif",
  "log",

@@ -7,8 +7,8 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
-use gwr_engine::sim_error;
-use gwr_engine::types::SimResult;
+use gwr_std::error::SimResult;
+use gwr_std::sim_error;
 
 struct ResourceState {
     // Number of requests that can be handled concurrently

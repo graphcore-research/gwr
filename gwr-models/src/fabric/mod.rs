@@ -18,9 +18,9 @@ use std::fmt::{self, Display};
 
 use clap::ValueEnum;
 use gwr_engine::port::PortStateResult;
-use gwr_engine::sim_error;
 use gwr_engine::traits::{Routable, SimObject};
-use gwr_engine::types::{SimError, SimResult};
+use gwr_std::error::{SimError, SimResult};
+use gwr_std::sim_error;
 use gwr_track::entity::GetEntity;
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::SplitMix64;

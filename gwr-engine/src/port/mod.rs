@@ -30,16 +30,16 @@ use std::task::{Context, Poll, Waker};
 
 use futures::Future;
 use futures::future::FusedFuture;
+use gwr_std::error::{SimError, SimResult};
+use gwr_std::sim_error;
 use gwr_track::connect;
 use gwr_track::entity::{Entity, GetEntity};
 use gwr_track::tracker::aka::Aka;
 
 use crate::engine::Engine;
 use crate::port::monitor::Monitor;
-use crate::sim_error;
 use crate::time::clock::Clock;
 use crate::traits::SimObject;
-use crate::types::{SimError, SimResult};
 
 pub mod monitor;
 

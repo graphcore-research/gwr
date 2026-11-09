@@ -5,7 +5,7 @@ use std::rc::Rc;
 use gwr_engine::engine::Engine;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::SimObject;
-use gwr_engine::types::SimError;
+use gwr_std::error::SimError;
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
 

@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
 use clap::{Args, Command};
-use gwr_engine::sim_error;
-use gwr_engine::types::SimError;
+use gwr_std::error::SimError;
+use gwr_std::sim_error;
 
 use crate::time_of_day::TimeOfDay;
 

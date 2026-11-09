@@ -61,8 +61,9 @@ use gwr_engine::executor::Spawner;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Runnable, SimObject};
-use gwr_engine::types::{AccessType, DeviceId, SimError, SimResult};
+use gwr_engine::types::{AccessType, DeviceId};
 use gwr_model_builder::{EntityDisplay, EntityGet};
+use gwr_std::error::{SimError, SimResult};
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
 

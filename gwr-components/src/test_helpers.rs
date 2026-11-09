@@ -10,7 +10,7 @@ use gwr_engine::engine::Engine;
 use gwr_engine::port::{InPort, PortPut};
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::SimObject;
-use gwr_engine::types::SimResult;
+use gwr_std::error::SimResult;
 use gwr_track::entity::Entity;
 #[doc(hidden)]
 pub use paste::paste;
@@ -236,7 +236,7 @@ pub async fn expect_value<T, E>(
     receiver: &mut InPort<T>,
     expected: &E,
     location: &str,
-) -> Result<T, gwr_engine::types::SimError>
+) -> Result<T, gwr_std::error::SimError>
 where
     T: SimObject,
     E: ValueCheck<T>,
@@ -255,13 +255,13 @@ pub struct HarnessScript<P> {
 
 #[doc(hidden)]
 pub type HarnessScriptFuture<P> =
-    std::pin::Pin<Box<dyn std::future::Future<Output = Result<P, gwr_engine::types::SimError>>>>;
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<P, gwr_std::error::SimError>>>>;
 
 impl<P> HarnessScript<P> {
     pub fn new<F, Fut>(run: F) -> Self
     where
         F: FnOnce(P) -> Fut + Clone + 'static,
-        Fut: std::future::Future<Output = Result<P, gwr_engine::types::SimError>> + 'static,
+        Fut: std::future::Future<Output = Result<P, gwr_std::error::SimError>> + 'static,
     {
         Self {
             run: Rc::new(move |ports| Box::pin(run.clone()(ports))),
@@ -315,7 +315,7 @@ macro_rules! __define_harness_script {
                                 @take runner_ports; $d variant, selectors.next().unwrap()
                             );
                         )*
-                        let result: gwr_engine::types::SimResult = (async $d body).await;
+                        let result: gwr_std::error::SimResult = (async $d body).await;
                         #[allow(unused_mut, unused_variables)]
                         let mut selectors = selected_ports.iter().copied();
                         $d(script_port!(
@@ -1061,7 +1061,7 @@ macro_rules! build_component_harness {
                 where
                     F: FnOnce([<$harness Ports>]<$item_ty>) -> Fut
                         + Clone + 'static,
-                    Fut: std::future::Future<Output = Result<[<$harness Ports>]<$item_ty>, gwr_engine::types::SimError>> + 'static,
+                    Fut: std::future::Future<Output = Result<[<$harness Ports>]<$item_ty>, gwr_std::error::SimError>> + 'static,
                 {
                     let mut unique_ports = std::collections::HashSet::new();
                     for port in &ports {
@@ -1279,7 +1279,7 @@ macro_rules! build_component_harness {
                     steps: Vec<Step<$item_ty, $expected_ty>>,
                     clock: gwr_engine::time::clock::Clock,
                     spawner: gwr_engine::executor::Spawner,
-                ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self, gwr_engine::types::SimError>> + 'static>>
+                ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self, gwr_std::error::SimError>> + 'static>>
                 where
                     $($rx_ty: Clone + 'static,)*
                     $($tx_expected_ty: Clone + $crate::test_helpers::ValueCheck<$tx_ty> + 'static,)*
@@ -1321,7 +1321,7 @@ macro_rules! build_component_harness {
                                             complete_tx
                                                 .send((branch_location.clone(), result))
                                                 .unwrap_or_else(|_| panic!("{branch_location}: parallel step receiver dropped"));
-                                            Ok::<(), gwr_engine::types::SimError>(())
+                                            Ok::<(), gwr_std::error::SimError>(())
                                         });
                                         completions.push(complete_rx);
                                     }
@@ -1601,7 +1601,7 @@ macro_rules! build_component_harness {
                     pub async fn [<expect_no_ $tx_field _traffic>](
                         &mut self,
                         ticks: u64,
-                    ) -> gwr_engine::types::SimResult {
+                    ) -> gwr_std::error::SimResult {
                         $crate::test_helpers::expect_no_traffic(
                             stringify!($tx_field),
                             &self.clock,
@@ -1702,7 +1702,7 @@ macro_rules! build_component_harness {
                                 .run_steps(vec![step], clock.clone(), spawner.clone())
                                 .await?;
                         }
-                        gwr_engine::sim_error!("test harness completed")
+                        gwr_std::sim_error!("test harness completed")
                     });
 
                     match self.engine.run() {

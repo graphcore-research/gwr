@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use gwr_engine::engine::Engine;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::Runnable;
-use gwr_engine::types::SimResult;
+use gwr_std::error::SimResult;
 use gwr_track::entity::{Entity, EntityMonitor};
 
 pub struct FlopMonitor {

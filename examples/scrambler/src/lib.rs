@@ -35,8 +35,8 @@ use gwr_engine::engine::Engine;
 use gwr_engine::port::PortStateResult;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::SimObject;
-use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet, Runnable};
+use gwr_std::error::{SimError, SimResult};
 use gwr_track::entity::Entity;
 
 #[derive(EntityGet, EntityDisplay, Runnable)]

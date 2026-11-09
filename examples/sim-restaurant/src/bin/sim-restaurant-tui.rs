@@ -5,7 +5,7 @@
 //! See `sim-restaurant/src/lib.rs` for details.
 
 use clap::Parser;
-use gwr_engine::types::SimError;
+use gwr_std::error::SimError;
 use sim_restaurant::config::{RestaurantArgs, RestaurantConfig};
 use sim_restaurant::sim::run_recorded_scenario;
 use sim_restaurant::{Staffing, tui};

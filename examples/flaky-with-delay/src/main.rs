@@ -25,7 +25,7 @@ use gwr_components::source::Source;
 use gwr_components::{connect_port, option_box_repeat};
 use gwr_engine::engine::Engine;
 use gwr_engine::run_simulation;
-use gwr_engine::types::SimResult;
+use gwr_std::error::SimResult;
 
 /// Command-line arguments.
 #[derive(Parser)]

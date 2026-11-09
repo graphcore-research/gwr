@@ -12,9 +12,9 @@ use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
 use futures::future::FusedFuture;
+use gwr_std::error::{SimError, SimResult};
 
 use crate::traits::{Resolve, Resolver};
-use crate::types::{SimError, SimResult};
 
 pub mod phase {
     pub const BEGIN: u32 = 0;

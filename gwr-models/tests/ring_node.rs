@@ -12,9 +12,9 @@ use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::Routable;
-use gwr_engine::types::SimError;
 use gwr_models::ethernet_frame::{EthernetFrame, SRC_MAC_BYTES, mac_to_u64};
 use gwr_models::ring_node::{IO_INDEX, RING_INDEX, RingConfig, RingNode};
+use gwr_std::error::SimError;
 
 struct TestAlgorithm(u64);
 

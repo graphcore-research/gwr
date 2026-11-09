@@ -6,10 +6,10 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gwr_engine::events::repeated::Repeated;
-use gwr_engine::sim_error;
 use gwr_engine::traits::Event;
-use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
+use gwr_std::error::{SimError, SimResult};
+use gwr_std::sim_error;
 use gwr_track::entity::Entity;
 
 /// A reusable capacity allocator for object counts, bytes, or other units.

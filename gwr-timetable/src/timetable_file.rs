@@ -4,10 +4,10 @@
 
 use std::path::Path;
 
-use gwr_engine::sim_error;
-use gwr_engine::types::{SimError, SimResult};
 use gwr_models::processing_element::operators::dtype::DataType;
 use gwr_models::processing_element::task::ComputeOp;
+use gwr_std::error::{SimError, SimResult};
+use gwr_std::sim_error;
 use serde::{Deserialize, Serialize};
 
 use crate::graph::TimetableGraph;

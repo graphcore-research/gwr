@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
 use async_trait::async_trait;
-use gwr_engine::types::{SimError, SimResult};
+use gwr_std::error::{SimError, SimResult};
 
 use crate::processing_element::task::Task;
 
