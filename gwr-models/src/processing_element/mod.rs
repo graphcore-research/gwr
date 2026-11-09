@@ -51,6 +51,7 @@ mod flop_monitor;
 mod load_store_unit;
 pub mod operators;
 pub mod task;
+pub mod tensors;
 
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub enum MachineOp {
