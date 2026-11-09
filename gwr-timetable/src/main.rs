@@ -49,7 +49,12 @@ fn run() -> Result<()> {
     let tracker: Rc<dyn Track> = setup_trackers(&args.tracker.trackers_config())?;
     let mut engine = Engine::new(&tracker);
     if args.roofline_analyze {
-        return run_roofline_analysis(&args.platform, &args.timetable, engine.top());
+        return run_roofline_analysis(
+            &args.platform,
+            &args.timetable,
+            engine.top(),
+            args.roofline_lsu_packets,
+        );
     }
     let clock = engine.default_clock();
     let platform_yaml = gwr_platform::catalog::load_yaml_with_includes(
@@ -207,6 +212,7 @@ fn run_roofline_analysis(
     platform_path: &Path,
     timetable_path: &Path,
     log_entity: &Rc<gwr_track::entity::Entity>,
+    aligned_lsu: bool,
 ) -> Result<()> {
     let timing = std::env::var_os("GWR_ROOFLINE_TIMINGS").is_some();
     let started = Instant::now();
@@ -234,7 +240,11 @@ fn run_roofline_analysis(
             timetable_started.elapsed().as_secs_f64()
         );
     }
-    let report = RooflineAnalyzer::analyze_graph(&config, &graph)?;
+    let report = if aligned_lsu {
+        RooflineAnalyzer::analyze_graph_lsu_aligned(&config, &graph)?
+    } else {
+        RooflineAnalyzer::analyze_graph(&config, &graph)?
+    };
     println!("Ran simulation. Time now {:.2}ns", report.estimated_ticks);
     for line in report.summary_lines() {
         gwr_track::info!(log_entity.as_ref(); "{line}");
@@ -300,6 +310,11 @@ struct Cli {
     /// advancing the simulation clock.
     #[arg(long)]
     roofline_analyze: bool,
+
+    /// Charge full aligned LSU packets instead of useful bytes in roofline
+    /// analysis.
+    #[arg(long, requires = "roofline_analyze")]
+    roofline_lsu_packets: bool,
 
     /// Export aggregate typed compute actions without enabling trace recording
     #[arg(long)]

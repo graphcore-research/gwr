@@ -69,3 +69,56 @@ fn dump_stats_enables_roofline_info_output() {
         String::from_utf8_lossy(&output.stdout)
     );
 }
+
+#[test]
+fn aligned_lsu_policy_is_explicit_and_reports_full_packet_payload() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("copy.yaml");
+    std::fs::write(
+        &path,
+        r#"
+nodes:
+  - {id: A, kind: tensor, config: {addr: 4096, dtype: fp32, shape: [1]}}
+  - id: copy
+    kind: compute
+    pe: pe0
+    program:
+      inputs: [A]
+      outputs: [Y]
+      assignments:
+        - {output: Y, axes: [i], expr: {read: {tensor: A, indices: [i]}}}
+  - {id: Y, kind: tensor, config: {addr: 8192, dtype: fp32, shape: [1]}}
+edges:
+  - {from: A, to: copy, kind: data}
+  - {from: copy, to: Y, kind: data}
+"#,
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_gwr-timetable"))
+        .args([
+            "--roofline-analyze",
+            "--roofline-lsu-packets",
+            "--stdout",
+            "--platform",
+            "examples/compute_region_platform.yaml",
+            "--timetable",
+        ])
+        .arg(path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Memory traffic: 64 bytes"));
+}
+
+#[test]
+fn aligned_lsu_flag_requires_roofline_mode() {
+    let output = Command::new(env!("CARGO_BIN_EXE_gwr-timetable"))
+        .arg("--roofline-lsu-packets")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+}
