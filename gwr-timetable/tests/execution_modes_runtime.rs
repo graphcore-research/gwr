@@ -165,7 +165,7 @@ edges:
     );
     let pe = platform.pe("pe0").unwrap();
     let ops = pe.machine_ops();
-    assert_eq!(pe.memory_traffic_bytes(), (143500, 4100));
+    assert_eq!(pe.memory_traffic_bytes(), (143_500, 4100));
     assert_eq!(ops.by_operation.get("compare"), Some(&17408));
     assert_eq!(ops.by_operation.get("add"), Some(&17408));
     assert_eq!(ops.by_operation.get("exp"), Some(&18450));

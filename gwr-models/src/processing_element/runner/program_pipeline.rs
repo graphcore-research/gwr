@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 //! Generic static programs share the ordinary assignment source. Bounded
 //! workers own input generations, a compute arena and acknowledged outputs.
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -11,8 +11,8 @@ use gwr_components::capacity_allocator::CapacityAllocator;
 use gwr_engine::types::{AccessType, SimError, SimResult};
 use gwr_track::entity::EntityGroup;
 
+use super::TaskRunner;
 use super::block_pipeline::{Slot, Slots, Window};
-use super::{ActivityLanes, TaskRunner};
 use crate::processing_element::block_execution::BlockExecutionConfig;
 use crate::processing_element::block_runtime::Stage;
 use crate::processing_element::compute::{AccumulatorLease, ComputeModel, ExecutionPlan};
@@ -249,19 +249,41 @@ impl AssignmentIo<'_> {
             )),
         }
     }
+    /// Retain ordinary operand layouts so analytical traffic stays lazy.
+    pub async fn staged_view(
+        &mut self,
+        view: &TensorView,
+        name: &str,
+        group: Option<&Rc<EntityGroup>>,
+    ) -> SimResult {
+        self.staged_access_ranges(
+            AccessType::ReadRequest,
+            view.address_ranges(),
+            view.layout().num_access_bytes(),
+            name,
+            group,
+        )
+        .await
+    }
     pub async fn staged_access_ranges(
         &mut self,
         kind: AccessType,
         ranges: impl IntoIterator<Item = Range<u128>>,
         bytes: usize,
-        lanes: &Rc<RefCell<ActivityLanes>>,
         name: &str,
-        group: &Rc<EntityGroup>,
+        group: Option<&Rc<EntityGroup>>,
     ) -> SimResult {
         match self {
             Self::Live(r) => {
-                r.staged_access_ranges(kind, ranges, bytes, lanes, name, group)
-                    .await
+                r.staged_access_ranges(
+                    kind,
+                    ranges,
+                    bytes,
+                    &r.activity_lanes.lsu_read,
+                    name,
+                    group.unwrap(),
+                )
+                .await
             }
             Self::Planned(tx) => tx
                 .send(Event::Read(Read {
@@ -278,11 +300,14 @@ impl AssignmentIo<'_> {
         config: &ProgramTaskConfig,
         tile: &RegionTile,
         name: &str,
-        group: &Rc<EntityGroup>,
+        group: Option<&Rc<EntityGroup>>,
         plan: ExecutionPlan,
     ) -> SimResult {
         match self {
-            Self::Live(r) => r.run_program_plan(config, tile, name, group, plan).await,
+            Self::Live(r) => {
+                r.run_program_plan(config, tile, name, group.unwrap(), plan)
+                    .await
+            }
             Self::Planned(tx) => tx
                 .send(Event::Compute(name.into(), plan, true))
                 .await
@@ -401,9 +426,8 @@ impl TaskRunner {
                         AccessType::ReadRequest,
                         view.address_ranges(),
                         view.layout().num_access_bytes(),
-                        &self.activity_lanes.lsu_read,
                         &format!("{} {name} initial read", config.id),
-                        &group,
+                        Some(&group),
                     )
                     .await?;
                     initial_reads = true;
@@ -422,11 +446,12 @@ impl TaskRunner {
                     io.event(Event::LocalRead(read_bytes))
                         .await
                         .map_err(|_| closed())?;
-                    self.emit_program_assignment(
+                    super::assignment::emit_program_assignment(
+                        &self.compute_model,
                         config,
                         &plan.region,
                         &tile,
-                        &group,
+                        Some(&group),
                         *index,
                         &mut io,
                     )
@@ -715,7 +740,7 @@ impl TaskRunner {
         let (ack, wait) = oneshot::channel();
         tx.send(Ready::Step {
             slot,
-            credit: credit,
+            credit,
             bytes,
             name,
             plan,

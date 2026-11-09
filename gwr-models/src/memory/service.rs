@@ -146,6 +146,10 @@ impl<T: SimObject> Service<T> {
     /// Address and role are captured from the validated original request.
     /// Preview all affected lane debt and byte counters before one parent
     /// commit. Omitted lanes retain the previous aggregate cursor exactly.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Admit payload and completion accounting atomically"
+    )]
     pub(super) fn accept_payload(
         &self,
         arrival: u64,
@@ -196,7 +200,7 @@ impl<T: SimObject> Service<T> {
                         .max(arrival_units)
                         .checked_add(payload as u128)
                         .ok_or_else(|| SimError("memory lane byte debt overflows".into()))?;
-                    let rounded = end / rate + u128::from(end % rate != 0);
+                    let rounded = end / rate + u128::from(!end.is_multiple_of(rate));
                     completion = completion.max(
                         u64::try_from(rounded)
                             .map_err(|_| SimError("memory lane service tick overflows".into()))?,
@@ -326,6 +330,90 @@ impl<T: SimObject> Service<T> {
             self.changed.notify();
         }
     }
+}
+
+/// Nonphysical bounded lane-vector allocation limit, unrelated to capacity.
+const MAX_MEMORY_SERVICE_LANES: usize = 256;
+
+pub(super) fn validate_lane_config(interleave: u64, rates: &[u64], aggregate: usize) -> SimResult {
+    validate_lane_geometry(interleave, rates.len())?;
+    let mut total = 0usize;
+    for &rate in rates {
+        let rate = usize::try_from(rate).map_err(|e| SimError(e.to_string()))?;
+        if rate == 0 {
+            return Err(SimError("memory lane rates must be positive".into()));
+        }
+        total = total
+            .checked_add(rate)
+            .ok_or_else(|| SimError("memory lane rate sum overflows".into()))?;
+    }
+    if total > aggregate {
+        return Err(SimError(
+            "memory lane rate sum exceeds aggregate bandwidth".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_lane_geometry(interleave: u64, count: usize) -> SimResult {
+    if !interleave.is_power_of_two() || count == 0 || count > MAX_MEMORY_SERVICE_LANES {
+        return Err(SimError(
+            "memory lanes require power-of-two stripe and count within1..=256".into(),
+        ));
+    }
+    usize::try_from(interleave).map_err(|e| SimError(e.to_string()))?;
+    Ok(())
+}
+
+/// Conserved payload bytes per caller-declared relative modulo service lane.
+/// Uses bounded lane storage and arithmetic full stripe cycles, never children
+/// per byte/stripe. This is not a physical HBM address mapping certificate.
+/// Zero accounting is allowed here only; real Memory intake rejects zero.
+pub fn payload_by_lane(
+    base: u64,
+    address: u64,
+    bytes: usize,
+    interleave: u64,
+    count: usize,
+) -> Result<Vec<usize>, SimError> {
+    validate_lane_geometry(interleave, count)?;
+    let start = address
+        .checked_sub(base)
+        .ok_or_else(|| SimError("memory lane address below base".into()))?;
+    if bytes != 0 {
+        let size = u64::try_from(bytes).map_err(|e| SimError(e.to_string()))?;
+        super::checked_last_address(address, size)
+            .ok_or_else(|| SimError("memory lane payload range overflows".into()))?;
+    }
+    let start = u128::from(start);
+    let end = start
+        .checked_add(bytes as u128)
+        .ok_or_else(|| SimError("memory lane range overflows".into()))?;
+    let stripe = u128::from(interleave);
+    let period = stripe
+        .checked_mul(count as u128)
+        .ok_or_else(|| SimError("memory lane period overflows".into()))?;
+    let mut result = Vec::new();
+    result
+        .try_reserve_exact(count)
+        .map_err(|e| SimError(e.to_string()))?;
+    for lane in 0..count {
+        let lane_start = stripe * lane as u128;
+        let prefix = |position: u128| -> Result<u128, SimError> {
+            let complete = (position / period)
+                .checked_mul(stripe)
+                .ok_or_else(|| SimError("memory lane byte count overflows".into()))?;
+            let partial = (position % period).saturating_sub(lane_start).min(stripe);
+            complete
+                .checked_add(partial)
+                .ok_or_else(|| SimError("memory lane byte count overflows".into()))
+        };
+        let payload = prefix(end)?
+            .checked_sub(prefix(start)?)
+            .ok_or_else(|| SimError("memory lane count underflows".into()))?;
+        result.push(usize::try_from(payload).map_err(|e| SimError(e.to_string()))?);
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -501,88 +589,4 @@ mod tests {
             2
         );
     }
-}
-
-/// Nonphysical bounded lane-vector allocation limit, unrelated to capacity.
-const MAX_MEMORY_SERVICE_LANES: usize = 256;
-
-pub(super) fn validate_lane_config(interleave: u64, rates: &[u64], aggregate: usize) -> SimResult {
-    validate_lane_geometry(interleave, rates.len())?;
-    let mut total = 0usize;
-    for &rate in rates {
-        let rate = usize::try_from(rate).map_err(|e| SimError(e.to_string()))?;
-        if rate == 0 {
-            return Err(SimError("memory lane rates must be positive".into()));
-        }
-        total = total
-            .checked_add(rate)
-            .ok_or_else(|| SimError("memory lane rate sum overflows".into()))?;
-    }
-    if total > aggregate {
-        return Err(SimError(
-            "memory lane rate sum exceeds aggregate bandwidth".into(),
-        ));
-    }
-    Ok(())
-}
-
-fn validate_lane_geometry(interleave: u64, count: usize) -> SimResult {
-    if !interleave.is_power_of_two() || count == 0 || count > MAX_MEMORY_SERVICE_LANES {
-        return Err(SimError(
-            "memory lanes require power-of-two stripe and count within1..=256".into(),
-        ));
-    }
-    usize::try_from(interleave).map_err(|e| SimError(e.to_string()))?;
-    Ok(())
-}
-
-/// Conserved payload bytes per caller-declared relative modulo service lane.
-/// Uses bounded lane storage and arithmetic full stripe cycles, never children
-/// per byte/stripe. This is not a physical HBM address mapping certificate.
-/// Zero accounting is allowed here only; real Memory intake rejects zero.
-pub fn payload_by_lane(
-    base: u64,
-    address: u64,
-    bytes: usize,
-    interleave: u64,
-    count: usize,
-) -> Result<Vec<usize>, SimError> {
-    validate_lane_geometry(interleave, count)?;
-    let start = address
-        .checked_sub(base)
-        .ok_or_else(|| SimError("memory lane address below base".into()))?;
-    if bytes != 0 {
-        let size = u64::try_from(bytes).map_err(|e| SimError(e.to_string()))?;
-        super::checked_last_address(address, size)
-            .ok_or_else(|| SimError("memory lane payload range overflows".into()))?;
-    }
-    let start = u128::from(start);
-    let end = start
-        .checked_add(bytes as u128)
-        .ok_or_else(|| SimError("memory lane range overflows".into()))?;
-    let stripe = u128::from(interleave);
-    let period = stripe
-        .checked_mul(count as u128)
-        .ok_or_else(|| SimError("memory lane period overflows".into()))?;
-    let mut result = Vec::new();
-    result
-        .try_reserve_exact(count)
-        .map_err(|e| SimError(e.to_string()))?;
-    for lane in 0..count {
-        let lane_start = stripe * lane as u128;
-        let prefix = |position: u128| -> Result<u128, SimError> {
-            let complete = (position / period)
-                .checked_mul(stripe)
-                .ok_or_else(|| SimError("memory lane byte count overflows".into()))?;
-            let partial = (position % period).saturating_sub(lane_start).min(stripe);
-            complete
-                .checked_add(partial)
-                .ok_or_else(|| SimError("memory lane byte count overflows".into()))
-        };
-        let payload = prefix(end)?
-            .checked_sub(prefix(start)?)
-            .ok_or_else(|| SimError("memory lane count underflows".into()))?;
-        result.push(usize::try_from(payload).map_err(|e| SimError(e.to_string()))?);
-    }
-    Ok(result)
 }

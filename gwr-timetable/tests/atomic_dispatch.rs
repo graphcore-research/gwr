@@ -79,7 +79,7 @@ impl Dispatch for CountDispatch {
         self.scheduled.ready_task_indices(pe)
     }
     async fn wait_for_change(&self) {
-        self.scheduled.wait_for_change().await
+        self.scheduled.wait_for_change().await;
     }
     async fn wait_for_ready(&self, pe: &str) -> SimResult {
         self.scheduled.wait_for_ready(pe).await
@@ -276,7 +276,7 @@ fn happy_first_actual_pe_map_and_cache_fabric_routes_reject_before_activity() {
     let other=platform().replace("devices: [hbm]","devices: [other]")
         .replace(direct," - name: other\n   kind: hbm\n   base_address: 8192\n   config: {capacity_bytes: 256, bw_bytes_per_tick: 64, delay_ticks: 0}\nconnections:\n - {connect: [pe.pe0, mem.hbm]}\n");
     let cached=platform().replace(direct,"caches:\n - name: c\n   config: {line_size_bytes: 16, num_sets: 16, num_ways: 1, bw_bytes_per_tick: 64, delay_ticks: 0}\nconnections:\n - {connect: [pe.pe0, cache.c.dev]}\n - {connect: [cache.c.mem, mem.hbm]}\n");
-    let routed=platform().replace(direct,"fabrics:\n - name: f\n   kind: routed\n   columns: 2\n   rows: 1\n   config: {fabric_ports_per_node: 6, ticks_per_hop: 1, ticks_overhead: 0, rx_buffer_bytes: 64, tx_buffer_bytes: 64, port_bits_per_tick: 64}\nconnections:\n - {connect: [pe.pe0, 'fabric.f@(0,0).0']}\n - {connect: ['fabric.f@(1,0).0', mem.hbm]}\n");
+    let routed=platform().replace(direct,"fabrics:\n - name: f\n   kind: routed\n   columns: 2\n   rows: 1\n   config: {fabric_ports_per_node: 6, ticks_per_hop: 1, ticks_overhead: 0, rx_buffer_bytes: 64, tx_buffer_bytes: 64, paths: {count: 1, bw_bits_per_tick: 64, selection: {policy: address-xor-fold-v1, address_shift: 6}, queue_bytes: 64, queue_packets: 8}}\nconnections:\n - {connect: [pe.pe0, 'fabric.f@(0,0).0']}\n - {connect: ['fabric.f@(1,0).0', mem.hbm]}\n");
     for (yaml, expected) in [
         (unmapped, "unmapped or maps"),
         (other, "unmapped or maps"),
@@ -392,6 +392,10 @@ fn actual_pe_word_mapping_checks_unmapped_tail_and_split_device_not_only_start()
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "The end-to-end protocol fixture checks actual publication, polling, acknowledgement and join transitions together."
+)]
 fn actual_dynamic_timetable_polls_and_join_use_real_received_values_and_ack_windows() {
     use gwr_models::memory::atomic::{ControlEffect, ControlGroup, SourceFlags};
     let group = ControlGroup {

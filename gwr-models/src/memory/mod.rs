@@ -52,6 +52,18 @@ pub struct MemoryConfig {
 }
 
 impl MemoryConfig {
+    /// Fixed memory service latency in simulation clock ticks.
+    #[must_use]
+    pub fn delay_ticks(&self) -> usize {
+        self.delay_ticks
+    }
+
+    /// Shared payload service rate for reads and writes, in bytes per tick.
+    #[must_use]
+    pub fn bw_bytes_per_tick(&self) -> usize {
+        self.bw_bytes_per_tick
+    }
+
     #[must_use]
     pub fn new(
         base_address: u64,
@@ -279,7 +291,7 @@ where
                 *device,
                 config.base_address,
                 u64::try_from(config.capacity_bytes).map_err(|e| SimError(e.to_string()))?,
-                service.clone(),
+                service,
             )?),
             None => None,
         };
@@ -442,6 +454,10 @@ impl<T> Runnable for Memory<T>
 where
     T: SimObject + AccessMemory,
 {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Keep memory request dispatch and response lifecycle together"
+    )]
     async fn run(&self) -> SimResult {
         let mut rx = take_option!(self.rx);
         let mut response_tx = take_option!(self.response_tx);
@@ -509,10 +525,10 @@ where
                     } else {
                         Some(stats.bytes_read)
                     };
-                    let write = if kind != AccessType::ReadRequest {
-                        stats.bytes_written.checked_add(bytes)
-                    } else {
+                    let write = if kind == AccessType::ReadRequest {
                         Some(stats.bytes_written)
+                    } else {
+                        stats.bytes_written.checked_add(bytes)
                     };
                     (
                         read.ok_or_else(|| SimError("memory read counter overflows".into()))?,

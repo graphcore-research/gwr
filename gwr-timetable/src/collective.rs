@@ -17,6 +17,10 @@ use crate::timetable_file::{
 /// and a completion task waiting on every rank, including zero-count peers.
 /// Scratch is used only by reductions and must contain `ranks * input_elements`
 /// values followed by `input_elements` values at `scratch_addr`.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Collective variants share one checked rank topology and emit their ordered communication stages."
+)]
 pub fn lower(
     id: &str,
     kind: &CollectiveKind,

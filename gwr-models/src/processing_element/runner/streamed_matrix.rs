@@ -60,7 +60,7 @@ impl StreamedMatrixTaskConfig {
                 (1, 64, 512, 2) | (1 | 2 | 4, 7168, 2048, 4)
             )
             || self.participant >= self.split
-            || self.n_offset % 64 != 0
+            || !self.n_offset.is_multiple_of(64)
             || self.n_offset.checked_add(64).is_none_or(|end| end > self.n)
         {
             return Err(error("unsupported source Split-K geometry/participant"));
@@ -71,8 +71,8 @@ impl StreamedMatrixTaskConfig {
             || self.b.dtype() != &DataType::Bf16
             || self.a.shape().dims() != [self.m, self.k]
             || self.b.shape().dims() != [self.n, self.k]
-            || self.a.tensor().addr() % 16 != 0
-            || self.b.tensor().addr() % 16 != 0
+            || !self.a.tensor().addr().is_multiple_of(16)
+            || !self.b.tensor().addr().is_multiple_of(16)
         {
             return Err(error(
                 "source requires original full contiguous BF16 A[M,K], B[N,K] with 16B bases",
@@ -89,7 +89,7 @@ impl StreamedMatrixTaskConfig {
         if self.c.dtype() != &DataType::Bf16
             || !self.c.is_full_view()
             || self.c.shape().dims() != [self.m, self.n]
-            || self.c.tensor().addr() % 4 != 0
+            || !self.c.tensor().addr().is_multiple_of(4)
             || self.invocation == 0
             || self.generation == 0
         {
@@ -107,6 +107,7 @@ impl StreamedMatrixTaskConfig {
         }
         Ok(())
     }
+    #[must_use]
     pub fn chunk_count(&self) -> usize {
         self.k.checked_div(self.split).map_or(0, |k| k / 128)
     }
@@ -265,7 +266,7 @@ pub struct LocalOperandHandle {
 }
 impl ScratchLease {
     pub(super) fn pair(&self, pair_offset: usize) -> Result<LocalOperandHandle, SimError> {
-        if pair_offset % 4 != 0
+        if !pair_offset.is_multiple_of(4)
             || pair_offset
                 .checked_add(4)
                 .is_none_or(|end| end > SCRATCH_BYTES)
@@ -405,11 +406,12 @@ impl super::TaskRunner {
         group: &Rc<gwr_track::entity::EntityGroup>,
     ) -> SimResult {
         use crate::processing_element::activity::ActivityLanes;
-        let lease = storage.accumulator();
-        let reservation = self
-            .compute_scheduler
-            .acquire_with_retained_accumulator(&lease, batch)
-            .await?;
+        let acquire = {
+            let lease = storage.accumulator();
+            self.compute_scheduler
+                .acquire_with_retained_accumulator(&lease, batch)
+        };
+        let reservation = acquire.await?;
         let engine = reservation.engine();
         let ticks = batch
             .alternatives
@@ -428,6 +430,9 @@ impl super::TaskRunner {
         drop(activity);
         drop(reservation);
         let mut stats = self.stats.borrow_mut();
+        if let Some(counters) = &mut stats.compute_actions {
+            counters.record_batch(batch, engine)?;
+        }
         stats.machine_ops = stats
             .machine_ops
             .clone()
@@ -468,6 +473,9 @@ impl super::TaskRunner {
         drop(activity);
         drop(reservation);
         let mut stats = self.stats.borrow_mut();
+        if let Some(counters) = &mut stats.compute_actions {
+            counters.record_batch(&batch, engine)?;
+        }
         stats.machine_ops = stats.machine_ops.clone().checked_add(batch.machine_ops)?;
         Ok(())
     }
@@ -591,7 +599,7 @@ impl StreamedOutputSlot {
         };
         let row = offset / 128;
         let col = (offset % 128) / 2;
-        if offset % 4 != 0
+        if !offset.is_multiple_of(4)
             || row >= self.config.m
             || col + 2 > 64
             || participant as usize != self.config.participant
@@ -641,7 +649,7 @@ impl StreamedOutputSlot {
         }
         *self.published.borrow_mut() = Some(PublishedScratch {
             scratch,
-            taken: Default::default(),
+            taken: std::collections::BTreeSet::default(),
         });
         Ok(())
     }

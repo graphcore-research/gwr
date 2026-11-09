@@ -126,7 +126,7 @@ impl TaskRunner {
                 if let Some((ranges, bytes)) = indexed {
                     self.staged_access_ranges(
                         AccessType::ReadRequest,
-                        ranges.into_iter(),
+                        ranges,
                         bytes,
                         &self.activity_lanes.lsu_read,
                         &format!("{} {name} read", config.id),
@@ -285,6 +285,10 @@ pub(super) fn estimate_tile_sram(
     Ok(tile_storage(config, region, tile, usize::MAX)?.arena)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep allocation aliases and peak storage accounting in one tile plan"
+)]
 pub(super) fn tile_storage(
     config: &ProgramTaskConfig,
     region: &ValidatedRegion,

@@ -7,7 +7,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use gwr_engine::events::repeated::Repeated;
 use gwr_engine::types::{SimError, SimResult};
 
-use super::contract::*;
+use super::contract::{
+    AtomicOperation, AtomicServiceConfig, ControlEffect, ControlGroup, Effect, Request,
+};
 fn error(message: &str) -> SimError {
     SimError(message.into())
 }
@@ -238,17 +240,17 @@ impl AtomicService {
         *self.state.borrow_mut() = next;
         Ok(())
     }
-    fn group<'a>(
-        state: &'a DebugState,
-        invocation: u64,
-        generation: u64,
-    ) -> Result<&'a Group, SimError> {
+    fn group(state: &DebugState, invocation: u64, generation: u64) -> Result<&Group, SimError> {
         state
             .groups
             .get(&invocation)
             .filter(|g| g.spec.generation == generation)
             .ok_or_else(|| error("missing/foreign control generation"))
     }
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Keep the typed request validation and admission contract together"
+    )]
     fn validate_request(&self, state: &DebugState, request: &Request) -> SimResult {
         let end = request.end()?;
         if request.device != self.device || request.address < self.base || end > self.last {
@@ -257,7 +259,7 @@ impl AtomicService {
         if !matches!(
             request.effect,
             Effect::OrdinaryRead { .. } | Effect::OrdinaryWrite { .. }
-        ) && (request.address % 4 != 0 || end != add(request.address, 3)?)
+        ) && (!request.address.is_multiple_of(4) || end != add(request.address, 3)?)
         {
             return Err(error("typed effect requires exact aligned4B word"));
         }
@@ -284,12 +286,13 @@ impl AtomicService {
                         Phase::Queued | Phase::Serving | Phase::CanceledDebt
                     )
                 }) {
-                    if let Effect::Atomic { word: other, .. } = entry.request.effect {
-                        if other.address == word.address && other != *word {
-                            return Err(error(
-                                "live atomic word has incompatible generation/signature",
-                            ));
-                        }
+                    if let Effect::Atomic { word: other, .. } = entry.request.effect
+                        && other.address == word.address
+                        && other != *word
+                    {
+                        return Err(error(
+                            "live atomic word has incompatible generation/signature",
+                        ));
                     }
                 }
                 if word.device != request.device
@@ -419,16 +422,20 @@ impl AtomicService {
                         }
                 )
             {
-                if let Effect::Atomic { word, .. } = request.effect {
-                    if !state.groups.contains_key(&word.invocation) {
-                        continue;
-                    }
+                if let Effect::Atomic { word, .. } = request.effect
+                    && !state.groups.contains_key(&word.invocation)
+                {
+                    continue;
                 }
                 return Err(error("duplicate reserved effect"));
             }
         }
         Ok(())
     }
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Keep the typed request validation and admission contract together"
+    )]
     pub fn try_accept(&self, arrival: u64, request: Request) -> Result<Ticket, SimError> {
         let mut next = self.state.borrow().clone();
         self.validate_request(&next, &request)?;
@@ -482,7 +489,7 @@ impl AtomicService {
                     self.config.bf16_pair_per_tick.unwrap(),
                     arrival,
                     1,
-                )?)
+                )?);
             }
             Effect::Control {
                 effect: ControlEffect::FetchAddOne,
@@ -493,7 +500,7 @@ impl AtomicService {
                     self.config.i32_fetch_add_per_tick.unwrap(),
                     arrival,
                     1,
-                )?)
+                )?);
             }
             _ => {}
         }
@@ -828,12 +835,11 @@ fn apply_effect(state: &mut DebugState, request: &Request) -> Result<Option<u32>
             Ok(None)
         }
         Effect::Atomic { word, participant } => {
-            if let Some(g) = state.groups.get_mut(&word.invocation) {
-                if g.spec.generation == word.generation
-                    && g.spec.output_words.contains(&word.address)
-                {
-                    g.output_commits.insert((participant, word.address));
-                }
+            if let Some(g) = state.groups.get_mut(&word.invocation)
+                && g.spec.generation == word.generation
+                && g.spec.output_words.contains(&word.address)
+            {
+                g.output_commits.insert((participant, word.address));
             }
             Ok(None)
         }
@@ -878,12 +884,12 @@ fn apply_effect(state: &mut DebugState, request: &Request) -> Result<Option<u32>
     }
 }
 fn record_output_ack(state: &mut DebugState, request: &Request) {
-    if let Effect::Atomic { word, participant } = request.effect {
-        if let Some(g) = state.groups.get_mut(&word.invocation) {
-            if g.spec.generation == word.generation && g.spec.output_words.contains(&word.address) {
-                g.output_acks.insert((participant, word.address));
-            }
-        }
+    if let Effect::Atomic { word, participant } = request.effect
+        && let Some(g) = state.groups.get_mut(&word.invocation)
+        && g.spec.generation == word.generation
+        && g.spec.output_words.contains(&word.address)
+    {
+        g.output_acks.insert((participant, word.address));
     }
 }
 fn request_generation(request: &Request) -> Option<(u64, u64)> {
@@ -933,6 +939,7 @@ fn record_control_ack(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::memory::atomic::{AtomicOrdering, AtomicScope, AtomicWord};
     fn service() -> AtomicService {
         AtomicService::new(
             7,

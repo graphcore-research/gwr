@@ -275,3 +275,24 @@ fn none_preserves_legacy_work_config_bytes_and_service() {
     );
     assert_eq!(counts(&old), counts(&shaped));
 }
+
+#[test]
+fn physical_counters_keep_candidate_padding_separate_from_logical_macs() {
+    let model = model(vec![
+        ("a_macro16", cap(Some(tile(16, 16, 16)))),
+        ("b_macro1", cap(Some(tile(1, 1, 1)))),
+    ]);
+    let plan = model.lower(&work(1, 256, 16)).unwrap();
+    let batch = &plan.stages[0][0];
+    let padded = &batch.actions[&EngineId(0)][0];
+    let exact = &batch.actions[&EngineId(1)][0];
+    assert_eq!(padded.logical_operations, 4096);
+    assert_eq!(padded.service_operations, 65536);
+    assert_eq!(exact.service_operations, 4096);
+    let mut counters = gwr_models::processing_element::compute::ComputeCounters::default();
+    counters.record_batch(batch, EngineId(0)).unwrap();
+    let snapshot = counters.snapshot(model.engine_names());
+    assert_eq!(snapshot.len(), 1);
+    assert_eq!(snapshot[0].engine, "a_macro16");
+    assert_eq!(snapshot[0].service_operations, 65536);
+}

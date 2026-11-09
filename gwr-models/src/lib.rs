@@ -15,9 +15,11 @@ pub mod ethernet_link;
 pub mod fabric;
 pub mod fc_pipeline;
 pub mod memory;
+pub mod model;
 pub mod processing_element;
 pub mod registers;
 pub mod ring_node;
+pub mod roofline;
 pub mod test_helpers;
 pub mod transfer;
 

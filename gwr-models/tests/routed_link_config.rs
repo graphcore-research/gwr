@@ -28,40 +28,14 @@ fn config(columns: usize) -> FabricConfig {
 }
 
 #[test]
-fn positive_directional_policy_and_none() {
-    assert_eq!(config(2).internal_link_bits_per_tick(), None);
-    assert_eq!(
-        config(2)
-            .with_internal_link_bits_per_tick(Some(7))
-            .unwrap()
-            .internal_link_bits_per_tick(),
-        Some(7)
-    );
-    assert_eq!(
-        config(2)
-            .with_internal_link_bits_per_tick(None)
-            .unwrap()
-            .internal_link_bits_per_tick(),
-        None
-    );
-}
-
-#[test]
-fn zero_is_a_config_error() {
-    assert!(
-        config(2)
-            .with_internal_link_bits_per_tick(Some(0))
-            .unwrap_err()
-            .to_string()
-            .contains("rate must be positive")
-    );
-}
-
-#[test]
 fn functional_direct_constructor_rejects_opt_in() {
     let mut engine = Engine::default();
     let clock = engine.default_clock();
-    let config = Rc::new(config(2).with_internal_link_bits_per_tick(Some(8)).unwrap());
+    let config = Rc::new(
+        config(2)
+            .with_paths(gwr_models::fabric::paths::FabricPathConfig::default())
+            .unwrap(),
+    );
     let error =
         match FunctionalFabric::<i32>::new_and_register(&engine, &clock, engine.top(), "f", config)
         {

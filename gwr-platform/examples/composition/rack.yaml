@@ -1,0 +1,11 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+name: accelerator_rack
+level: rack
+instances:
+  - { name: board, file: board.yaml, count: 2, address_stride: 8KiB }
+repeat_connections:
+  - for: { i: [0, 1] }
+    connect: ["board[${i}]/right", "board[${i+1}]/left"]
+ports:
+  left: board[0]/left
+  right: board[1]/right

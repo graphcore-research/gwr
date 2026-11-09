@@ -1,0 +1,17 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+name: accelerator_board
+level: board
+instances:
+  - name: chip
+    file: package.yaml
+    count: 2
+    address_stride: 4KiB
+    memory_map_bindings: { remote_dma: board_memory }
+memory_maps:
+  - { name: board_memory, devices: ["chip[0]/hbm", "chip[1]/hbm"] }
+repeat_connections:
+  - for: { i: [0, 1] }
+    connect: ["chip[${i}]/right", "chip[${i+1}]/left"]
+ports:
+  left: chip[0]/left
+  right: chip[1]/right

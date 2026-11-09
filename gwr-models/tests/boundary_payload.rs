@@ -5,6 +5,10 @@
 mod boundary_payload;
 use boundary_payload::{BoundaryPayloadDirection as Direction, BoundaryPayloadService};
 #[test]
+#[expect(
+    clippy::many_single_char_names,
+    reason = "Use conventional matrix dimensions and operand names"
+)]
 fn exact_combined_payload_debt_has_fractional_bursts_and_no_idle_credit() {
     let mut engine = gwr_engine::engine::Engine::default();
     let clock = engine.default_clock();

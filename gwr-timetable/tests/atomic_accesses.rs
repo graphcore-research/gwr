@@ -1,4 +1,6 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+use std::fmt::Write as _;
+
 use gwr_models::memory::atomic::*;
 use gwr_timetable::atomic::*;
 use gwr_timetable::timetable_file::TimetableFile;
@@ -19,7 +21,7 @@ fn pair(node: &str) -> EffectClaim {
         device: 7,
         address: 4096,
         effect: Effect::Atomic {
-            participant: if node == "a" { 0 } else { 1 },
+            participant: u32::from(node != "a"),
             word: AtomicWord {
                 device: 7,
                 address: 4096,
@@ -100,6 +102,10 @@ fn unchanged_ordinary_graph_still_rejects_unordered_write_overlap_and_same_task_
         .unwrap_err();
     assert!(error.to_string().contains("overlapping range"));
 }
+#[expect(
+    clippy::too_many_lines,
+    reason = "This fixture declares the complete multi-participant control protocol in one place."
+)]
 fn control_fixture() -> (
     gwr_timetable::TimetableGraph,
     Vec<WordBinding>,
@@ -148,9 +154,11 @@ fn control_fixture() -> (
         "nodes:\n- {id: backing, kind: tensor, config: {addr: 4096, dtype: bf16, shape: [2]}}\n- {id: signal, kind: tensor, config: {addr: 4224, dtype: int32, shape: [1]}}\n- {id: semaphore, kind: tensor, config: {addr: 4228, dtype: int32, shape: [1]}}\n",
     );
     for id in task_ids {
-        source.push_str(&format!(
-            "- {{id: {id}, kind: compute, program: {{inputs: [], outputs: [], assignments: []}}}}\n"
-        ));
+        writeln!(
+            source,
+            "- {{id: {id}, kind: compute, program: {{inputs: [], outputs: [], assignments: []}}}}"
+        )
+        .unwrap();
     }
     source.push_str("edges:\n");
     for (a, b) in [
@@ -170,7 +178,7 @@ fn control_fixture() -> (
         ("out0", "join"),
         ("out1", "join"),
     ] {
-        source.push_str(&format!("- {{from: {a}, to: {b}, kind: dependency}}\n"));
+        writeln!(source, "- {{from: {a}, to: {b}, kind: dependency}}").unwrap();
     }
     let graph = TimetableFile::from_string(&source)
         .unwrap()

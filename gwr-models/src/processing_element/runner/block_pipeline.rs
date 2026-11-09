@@ -124,6 +124,10 @@ fn stopped() -> SimError {
     SimError("pipeline stopped after stage failure".into())
 }
 impl TaskRunner {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Keep ordered load compute store pipeline phases visible together"
+    )]
     pub(super) async fn run_block_pipeline(
         &self,
         config: &ProgramTaskConfig,
@@ -187,7 +191,7 @@ impl TaskRunner {
         let failed = Cell::new(false);
         if request.mode == PipelineMode::Serial {
             for tile in plan.output_tiles() {
-                let _context = r.compute.reserve(1).await?;
+                let context = r.compute.reserve(1).await?;
                 let engine = tile.input_chunks().next().unwrap().batch().alternatives[0].0;
                 let accumulator = self
                     .compute_scheduler
@@ -204,7 +208,7 @@ impl TaskRunner {
                     .finalise_block(config, tile, output_slots.acquire().await?, &failed)
                     .await?;
                 drop(accumulator);
-                drop(_context);
+                drop(context);
                 self.store_block(config, ready, &failed).await?;
             }
             return Ok(());
@@ -241,7 +245,7 @@ impl TaskRunner {
                     if failed.get() {
                         return Err(stopped());
                     }
-                    let _context = r.compute.reserve(1).await?;
+                    let context = r.compute.reserve(1).await?;
                     let engine = tile.input_chunks().next().unwrap().batch().alternatives[0].0;
                     let accumulator = self
                         .compute_scheduler
@@ -305,7 +309,7 @@ impl TaskRunner {
                     }
                     let ready = self.finalise_block(config, tile, slot, &failed).await?;
                     drop(accumulator);
-                    drop(_context);
+                    drop(context);
                     output_tx.send(ready).await.map_err(|_| stopped())?;
                 }
                 Ok(())
@@ -471,6 +475,9 @@ impl TaskRunner {
         }
         self.clock.wait_ticks(ticks)?.await;
         let mut stats = self.stats.borrow_mut();
+        if let Some(counters) = &mut stats.compute_actions {
+            counters.record_batch(batch, engine)?;
+        }
         stats.machine_ops = stats
             .machine_ops
             .clone()

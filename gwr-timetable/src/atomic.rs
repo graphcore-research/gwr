@@ -74,19 +74,27 @@ pub struct AdmittedEffects {
     streams: Vec<AdmittedStream>,
 }
 impl AdmittedEffects {
+    #[must_use]
     pub fn streams(&self) -> &[AdmittedStream] {
         &self.streams
     }
+    #[must_use]
     pub fn memories(&self) -> &[MemoryRegion] {
         &self.memories
     }
+    #[must_use]
     pub fn claims(&self) -> &[EffectClaim] {
         &self.claims
     }
+    #[must_use]
     pub fn groups(&self) -> &[ControlLinks] {
         &self.groups
     }
 }
+#[expect(
+    clippy::too_many_lines,
+    reason = "Admission checks form one ordered certificate transaction before effects become visible."
+)]
 pub fn admit(
     graph: &TimetableGraph,
     memories: &[MemoryRegion],
@@ -329,6 +337,10 @@ fn reaches(graph: &TimetableGraph, from: usize, to: usize) -> bool {
 fn ordered(graph: &TimetableGraph, a: usize, b: usize) -> bool {
     reaches(graph, a, b) || reaches(graph, b, a)
 }
+#[expect(
+    clippy::too_many_lines,
+    reason = "Validate the complete arrival/wait/epoch protocol together before certifying its coverage."
+)]
 fn validate_links<'a>(
     graph: &TimetableGraph,
     nodes: &BTreeMap<&str, usize>,
@@ -503,6 +515,10 @@ pub struct AdmittedStream {
     pub outputs: Vec<(String, usize)>,
 }
 impl AdmittedEffects {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Stream admission checks share one evolving set of validated resources and claims."
+    )]
     pub fn with_streams(
         mut self,
         graph: &TimetableGraph,

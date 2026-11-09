@@ -16,6 +16,10 @@ use gwr_timetable::timetable_file::{
 };
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep this generated graph fixture and all of its platform placement and output-view assertions together."
+)]
 fn generator_partitions_add_across_pes_with_disjoint_views() {
     let temp_dir = tempfile::TempDir::new().unwrap();
     let platform_path = temp_dir.path().join("platform.yaml");
@@ -283,6 +287,10 @@ fn generator_rejects_a_tile_that_cannot_fit_even_at_unit_size() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep this generated graph fixture and all of its platform placement and output-view assertions together."
+)]
 fn generator_places_only_supported_operations_on_heterogeneous_pes() {
     let platform_yaml = "
 memory_maps:
@@ -490,6 +498,10 @@ fn generator_rejects_templates_with_no_supported_pe_or_dtype() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep this generated graph fixture and all of its platform placement and output-view assertions together."
+)]
 fn generator_emits_multi_output_reduce_max() {
     let temp_dir = tempfile::TempDir::new().unwrap();
     let platform_path = temp_dir.path().join("platform.yaml");

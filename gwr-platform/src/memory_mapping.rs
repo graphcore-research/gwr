@@ -164,7 +164,9 @@ fn validate_fetch(map: &str, stripe: u64, bytes: usize, component: &str) -> SimR
 // External links are bidirectional, but requests only traverse caches dev→mem.
 // Collapse fabric ports to their fabric: routed destinations may use any
 // egress.
-fn request_graph(platform: &PlatformConfig) -> Result<HashMap<String, Vec<String>>, SimError> {
+pub(crate) fn request_graph(
+    platform: &PlatformConfig,
+) -> Result<HashMap<String, Vec<String>>, SimError> {
     let mut graph: HashMap<String, Vec<String>> = HashMap::new();
     for cache in platform.caches.iter().flatten() {
         graph
