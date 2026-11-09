@@ -20,6 +20,7 @@ use gwr_models::processing_element::compute::{
 use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_platform::Platform;
 use gwr_timetable::Timetable;
+use gwr_timetable::analysis::roofline::RooflineAnalyzer;
 use gwr_timetable::timetable_file::TimetableFile;
 use gwr_track::Track;
 use gwr_track::builder::{TrackerArgs, setup_trackers};
@@ -44,20 +45,33 @@ fn run() -> Result<()> {
 
     let tracker: Rc<dyn Track> = setup_trackers(&args.tracker.trackers_config())?;
     let mut engine = Engine::new(&tracker);
+    if args.roofline_analyze {
+        return run_roofline_analysis(&args.platform, &args.timetable, engine.top());
+    }
     let clock = engine.default_clock();
     let platform_yaml = gwr_platform::catalog::load_yaml_with_includes(
         &args.platform,
         gwr_platform::catalog::CatalogTarget::Platform,
     )?;
+    let platform_started = Instant::now();
     let platform = Rc::new(Platform::from_string(&engine, &clock, &platform_yaml)?);
+    if std::env::var_os("GWR_ROOFLINE_TIMINGS").is_some() {
+        eprintln!(
+            "roofline timing: platform_build={:.3}s",
+            platform_started.elapsed().as_secs_f64()
+        );
+    }
     if args.activity_out.is_some() {
         for name in platform.pe_names() {
             platform.pe(&name)?.enable_compute_action_counters()?;
         }
     }
 
-    println!("Loaded platform:\n{platform}");
+    if !args.roofline_analyze {
+        println!("Loaded platform:\n{platform}");
+    }
 
+    let timetable_started = Instant::now();
     let timetable_yaml = gwr_platform::catalog::load_yaml_with_includes(
         &args.timetable,
         gwr_platform::catalog::CatalogTarget::Timetable,
@@ -70,6 +84,12 @@ fn run() -> Result<()> {
     let timetable = Rc::new(Timetable::new(engine.top(), graph, &platform)?);
     let dispatcher: Rc<dyn Dispatch> = timetable.clone();
     platform.attach_dispatcher(&dispatcher);
+    if std::env::var_os("GWR_ROOFLINE_TIMINGS").is_some() {
+        eprintln!(
+            "roofline timing: timetable_build={:.3}s",
+            timetable_started.elapsed().as_secs_f64()
+        );
+    }
 
     println!("Loaded timetable with {num_nodes} nodes, {num_edges} edges.");
 
@@ -169,6 +189,45 @@ fn run() -> Result<()> {
     Ok(())
 }
 
+fn run_roofline_analysis(
+    platform_path: &Path,
+    timetable_path: &Path,
+    log_entity: &Rc<gwr_track::entity::Entity>,
+) -> Result<()> {
+    let timing = std::env::var_os("GWR_ROOFLINE_TIMINGS").is_some();
+    let started = Instant::now();
+    let platform_yaml = gwr_platform::catalog::load_yaml_with_includes(
+        platform_path,
+        gwr_platform::catalog::CatalogTarget::Platform,
+    )?;
+    let config: gwr_platform::types::PlatformConfig = yaml_serde::from_str(&platform_yaml)?;
+    if timing {
+        eprintln!(
+            "roofline timing: platform_yaml={:.3}s",
+            started.elapsed().as_secs_f64()
+        );
+    }
+    let timetable_started = Instant::now();
+    let timetable_yaml = gwr_platform::catalog::load_yaml_with_includes(
+        timetable_path,
+        gwr_platform::catalog::CatalogTarget::Timetable,
+    )?;
+    let timetable_file = TimetableFile::from_string(&timetable_yaml)?;
+    let graph = timetable_file.into_graph()?;
+    if timing {
+        eprintln!(
+            "roofline timing: timetable_graph={:.3}s",
+            timetable_started.elapsed().as_secs_f64()
+        );
+    }
+    let report = RooflineAnalyzer::analyze_graph(&config, &graph)?;
+    println!("Ran simulation. Time now {:.2}ns", report.estimated_ticks);
+    for line in report.summary_lines() {
+        gwr_track::info!(log_entity.as_ref(); "{line}");
+    }
+    Ok(())
+}
+
 fn log_progress(
     timetable: &Timetable,
     clock: &Clock,
@@ -222,6 +281,11 @@ struct Cli {
     /// Enable dumping of summary statistics
     #[arg(long, default_value = "false")]
     dump_stats: bool,
+
+    /// Run the aggregate engine-free roofline estimate and exit without
+    /// advancing the simulation clock.
+    #[arg(long)]
+    roofline_analyze: bool,
 
     /// Export aggregate typed compute actions without enabling trace recording
     #[arg(long)]
@@ -481,6 +545,16 @@ mod tests {
             .ensure_visiblity(args.dump_stats, "--dump-stats", log::Level::Info);
 
         assert!(args.tracker.level_enabled(log::Level::Info));
+    }
+
+    #[test]
+    fn roofline_analysis_does_not_enable_info_tracking() {
+        let mut args = Cli::try_parse_from(["gwr-timetable", "--roofline-analyze"]).unwrap();
+
+        args.tracker
+            .ensure_visiblity(args.dump_stats, "--dump-stats", log::Level::Info);
+
+        assert!(!args.tracker.level_enabled(log::Level::Info));
     }
 
     #[test]
