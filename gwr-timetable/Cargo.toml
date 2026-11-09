@@ -31,6 +31,9 @@ harness = false
 name = "one_shot_benchmarks"
 harness = false
 
+[features]
+functional = ["gwr-models/functional", "gwr-platform/functional"]
+
 [dependencies]
 async-trait.workspace = true
 byte-unit.workspace = true
@@ -43,7 +46,10 @@ gwr-track = { path = "../gwr-track", features = ["perfetto"], version = "0.13.0"
 indicatif.workspace = true
 log.workspace = true
 rand.workspace = true
+regex.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
 yaml_serde.workspace = true
 
 [build-dependencies]

@@ -26,6 +26,9 @@ harness = false
 name = "one_shot_benchmarks"
 harness = false
 
+[features]
+functional = []
+
 [dependencies]
 async-trait.workspace = true
 clap.workspace = true
