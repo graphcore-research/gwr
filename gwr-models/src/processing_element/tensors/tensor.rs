@@ -263,5 +263,6 @@ mod tests {
 
         let mut tensor = Tensor::new(&[2], &DataType::Int8, 0).unwrap();
         assert!(tensor.set_addr(u64::MAX).is_err());
+        assert_eq!(tensor.addr(), 0);
     }
 }
