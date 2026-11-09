@@ -125,6 +125,6 @@ Run the retained kernel, layout, memory and composition tests separately:
 cargo test -p gwr-models --features functional --lib functional_matmul
 cargo test -p gwr-models --features functional --test functional_memory
 cargo test -p gwr-timetable --features functional --test functional_execution --test functional_cli
-cargo test -p gwr-use-cases --features functional --test resnet50_functional
+cargo test -p gwr-timetable --features functional --test functional_execution
 cargo test --release -p gwr-models --features functional --lib bulk_payload_throughput -- --ignored --nocapture
 ```

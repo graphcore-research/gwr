@@ -14,7 +14,7 @@ pub(crate) use gwr_platform::types::{
 pub(crate) fn platform() -> PlatformConfig {
     PlatformConfig {
         coherency_managers: None,
-        compute_profiles: Default::default(),
+        compute_profiles: std::collections::BTreeMap::default(),
         operation_classes: basic_classes(),
         memory_maps: Vec::new(),
         defaults: None,

@@ -154,28 +154,9 @@ reduction inputs until each assignment finishes; its host memory usage can
 exceed the modeled tile SRAM allocation. Numerical execution does not add
 modeled traffic, alter packet geometry, or replace engine service timing.
 
-The [ResNet50 example](../gwr-use-cases/examples/resnet50/README.md) generates a
-standard batch-one NCHW 224×224 ResNet50 v1.5 graph with all 16 bottlenecks and
-1000 logits. Its inference batch normalization consumes folded channel scale and
-offset tensors; ReLU consumes a scalar zero; global averaging consumes the
-reciprocal spatial area. These are ordinary loaded tensors. The independent
-PyTorch fixture generator derives BN coefficients from varied gamma, beta, mean
-and variance with epsilon fixed at `1e-5`, provides nonzero deterministic
-weights and inputs, and checks intermediate activations and every logit. These
-synthetic weights test execution correctness; they do not establish pretrained
-image accuracy.
-
-Run the retained operator and projection-bottleneck gates before the full
-forward pass:
+Application workspaces can validate complete model graphs against an independent
+numerical reference. The reusable functional execution and CLI gates are:
 
 ```sh
-cargo test -p gwr-use-cases --features functional --test resnet50_functional
 cargo test -p gwr-timetable --features functional --test functional_execution --test functional_cli
 ```
-
-The full-size forward pass is an explicit slow validation command documented in
-the example. The default test suite does not allocate the full network fixture.
-
-See [GEMM performance](benchmarks/README.md) for measured
-functional/nonfunctional timings, the CPU/GPU comparison, raw samples and
-reproducible benchmark commands.

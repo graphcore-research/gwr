@@ -632,7 +632,7 @@ engines:
         )
     }
     #[test]
-    fn izi_fp32_window_and_work_are_exact() {
+    fn fp32_window_and_work_are_exact() {
         let (config, model, limits) = fixture(512, 512, 512, 2048);
         let plan = plan_block_pipeline(&config, &model, &limits).unwrap();
         assert_eq!(

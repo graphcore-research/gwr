@@ -54,18 +54,6 @@ cargo run --release --bin scrambler -- -s
 These examples show GWR being used to build larger systems that you might find
 in silicon devices.
 
-### Machine and workload use cases
-
-The
-[`gwr-use-cases` package](https://github.com/graphcore-research/gwr/tree/main/gwr-use-cases)
-contains GB200 topologies, pinned DeepSeek V4-Flash scenarios, generic GPT/ResNet
-workload generators, and ML/communication examples. It depends on the reusable
-platform and timetable libraries. Experiment generators run from
-`gwr-use-cases`; the `gwr-timetable` binary remains the simulation runner.
-Start with the package's reduced V4 workflow, inspect the generation report,
-then increase geometry or scenario size. Machine rates remain uncalibrated;
-the package records the assumptions and measurements needed to interpret results.
-
 <!-- prettier-ignore-start -->
 
 > [!Tip]
