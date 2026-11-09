@@ -395,3 +395,28 @@ fn empty_inner_loop_short_circuits_even_a_huge_outer_range() {
         .expect("empty loop must do bounded work")
         .unwrap();
 }
+
+#[test]
+fn serialized_noncoherent_cache_with_null_managers_materializes() {
+    let package = serde_json::json!({
+        "level": "package",
+        "memory_maps": [],
+        "caches": [{"name": "cache", "coherency_managers": null, "config": {}}],
+    });
+    let dir = files(&[
+        ("package.yaml", &yaml_serde::to_string(&package).unwrap()),
+        (
+            "board.yaml",
+            "level: board\ninstances: [{name: chip, file: package.yaml}]\n",
+        ),
+    ]);
+    let materialized = load_source(&dir.path().join("board.yaml"))
+        .unwrap()
+        .materialize(100)
+        .unwrap();
+    let resolved: gwr_platform::types::PlatformConfig =
+        yaml_serde::from_str(&materialized.resolved_yaml).unwrap();
+    let cache = &resolved.caches.unwrap()[0];
+    assert_eq!(cache.name, "chip[0]/cache");
+    assert!(cache.coherency_managers.is_none());
+}
