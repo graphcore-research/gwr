@@ -23,6 +23,9 @@ use gwr_track::{build_aka, debug};
 use crate::log_stats;
 use crate::memory::traits::{AccessMemory, ReadMemory};
 
+pub mod atomic;
+mod service;
+pub use service::payload_by_lane;
 pub mod memory_access;
 pub mod memory_access_gen;
 pub mod memory_map;
