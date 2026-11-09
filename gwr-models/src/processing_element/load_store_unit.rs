@@ -335,7 +335,7 @@ impl LoadStoreUnit {
                 let request_slot_idx = self.state.allocate_request_slot().await;
                 if activity_guard.is_none() {
                     // Reuse a lane released in this tick before allocating one.
-                    self.clock.wait_phase(phase::END).await;
+                    self.clock.wait_phase(phase::END)?.await;
                     activity_guard = Some(ActivityLanes::begin_in_group(
                         activity_lanes,
                         activity_name,

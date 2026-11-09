@@ -276,9 +276,11 @@ fn packet_bit_overflow_precedes_delivery_and_ack() {
     assert!(!acked.get());
 }
 
-// Private arithmetic boundary, not a physically reachable fabric workload
-// claim.
+// A size-only packet reaches the u64 service deadline boundary at tick 8.
+// A 32-bit usize cannot describe enough payload bits to overflow a u64
+// deadline within the supported clock horizon.
 #[test]
+#[cfg(target_pointer_width = "64")]
 fn service_deadline_overflow_precedes_delivery_and_ack() {
     let mut engine = Engine::default();
     let clock = engine.default_clock();
@@ -305,13 +307,14 @@ fn service_deadline_overflow_precedes_delivery_and_ack() {
     let sender_ack = acked.clone();
     let sender_clock = clock.clone();
     engine.spawn(async move {
-        sender_clock.wait_ticks(u64::MAX - 16)?.await;
-        source.put(Packet(4))?.await;
+        sender_clock.wait_ticks(8)?.await;
+        source.put(Packet(usize::MAX / 8))?.await;
         sender_ack.set(true);
         Ok(())
     });
     let error = engine.run().unwrap_err();
     assert!(error.to_string().contains("deadline overflows"));
+    assert_eq!(engine.time_now_ns(), 8.0);
     assert_eq!(delivered.get(), None);
     assert!(!acked.get());
 }
