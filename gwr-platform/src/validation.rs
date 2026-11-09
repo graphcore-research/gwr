@@ -727,7 +727,7 @@ impl PlatformConfig {
                                 .flatten()
                                 .find(|pe| pe.name == pe_name)
                                 .ok_or_else(|| SimError(format!("No PE '{name}'")))?;
-                            let map = if name.ends_with(".dma") {
+                            let map = if name.strip_suffix(".dma").is_some() {
                                 pe.dma_memory_map.as_deref().unwrap_or(&pe.memory_map)
                             } else {
                                 &pe.memory_map

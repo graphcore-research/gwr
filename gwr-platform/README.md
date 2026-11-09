@@ -119,8 +119,8 @@ copy of the platform configuration, so the source YAML stays unchanged.
 ```bash
 cargo run --release -p gwr-timetable --bin gwr-timetable -- \
   --roofline-analyze \
-  --platform traces/izi-platform.yaml \
-  --timetable traces/izi-gemm-batch512-12pe.yaml
+  --platform examples/platform_4x4.yaml \
+  --timetable ../gwr-timetable/examples/small.yaml
 ```
 
 The command always prints a completion line with estimated simulated time. Pass
@@ -479,15 +479,13 @@ compute classes, operand types, execution modes, engine rates, LSU request
 sizes, SRAM admission capacity, and memory/link rates and delays. State the
 clock period used to convert rates per tick to rates per second.
 
-For specific topologies, workload experiments, provenance, and calibration
-workflows, see the [`gwr-use-cases` package][gwr-use-cases]. It owns the
-analytic GB200 references and model generators built on this library.
+Keep application-specific topologies, workload generators, provenance and
+calibration evidence in the application workspace using this library.
 
 <!-- ANCHOR_END: compute_engines -->
 
 See [the matrix/vector example](examples/compute_engines.yaml).
 
-[gwr-use-cases]: ../gwr-use-cases/README.md
 
 ### Address-to-memory striping
 
@@ -572,10 +570,8 @@ Silicon mapping retains the separate DDR-versus-compute-package check. Legacy
 flat files remain valid logical-only platforms; they do not acquire invented
 package owners.
 
-Board/package/die dimensions and 3D placements remain in the `gwr-physical`
-assembly templates (`extent`, placement rules and transforms). Logical hierarchy
-expresses ownership, not fabricated physical sizes. Physical mappings refer to
-the resolved logical names, for example
+Logical hierarchy expresses ownership. Applications can attach physical
+dimensions and placements to the resolved logical names, for example
 `pe.rack[0]/board[0]/chip[0]/cpu.engine.alu`.
 
 ### Free ports and aliases

@@ -118,8 +118,8 @@ fn build_platform(args: &Args) -> Result<PlatformConfig, String> {
                 },
             }]
         }),
-        operation_classes: Default::default(),
-        compute_profiles: Default::default(),
+        operation_classes: std::collections::BTreeMap::default(),
+        compute_profiles: std::collections::BTreeMap::default(),
         memory_maps: vec![memory_map],
         defaults: None,
         processing_elements: Some(build_processing_elements(args, &pe_config)?),

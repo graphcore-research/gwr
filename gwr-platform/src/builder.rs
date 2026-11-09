@@ -973,7 +973,7 @@ mod tests {
         let clock = engine.default_clock();
         let cfg = PlatformConfig {
             coherency_managers: None,
-            compute_profiles: Default::default(),
+            compute_profiles: std::collections::BTreeMap::default(),
             operation_classes: std::collections::BTreeMap::new(),
             memory_maps: vec![MemoryMapSection {
                 address_mapping: None,
