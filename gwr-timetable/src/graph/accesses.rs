@@ -358,4 +358,29 @@ edges:
         assert!(dependencies.ancestors.reached.is_empty());
         assert!(dependencies.descendants.reached.contains(&5));
     }
+
+    #[test]
+    fn roofline_analysis_snapshot_keeps_transfer_views() {
+        let graph = TimetableFile::from_string(
+            r"
+nodes:
+  - { id: source, kind: tensor, config: { addr: 0, dtype: int8, shape: [64] } }
+  - { id: copy, kind: transfer, pe: pe0, buffer_bytes: 16 }
+  - { id: destination, kind: tensor, config: { addr: 64, dtype: int8, shape: [64] } }
+edges:
+  - { from: source, to: copy, kind: data }
+  - { from: copy, to: destination, kind: data }
+",
+        )
+        .unwrap()
+        .into_graph()
+        .unwrap();
+        let activities = graph.analysis_activities().unwrap();
+        assert_eq!(activities.len(), 1);
+        assert_eq!(activities[0].id, "copy");
+        assert!(activities[0].task.is_none());
+        let (source, destination) = activities[0].transfer_views.as_ref().unwrap();
+        assert_eq!(source.layout().num_access_bytes(), 64);
+        assert_eq!(destination.layout().num_access_bytes(), 64);
+    }
 }

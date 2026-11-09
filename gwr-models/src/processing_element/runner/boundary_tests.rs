@@ -36,17 +36,19 @@ impl crate::processing_element::dispatch::Dispatch for Completed {
         0
     }
 }
+type RunnerFixture = (
+    TaskRunner,
+    Rc<Memory<MemoryAccess>>,
+    Rc<Completed>,
+    Option<Rc<Cache<MemoryAccess>>>,
+);
+
 fn fixture(
     engine: &mut gwr_engine::engine::Engine,
     rate: Option<u64>,
     capacity: usize,
     cached: bool,
-) -> (
-    TaskRunner,
-    Rc<Memory<MemoryAccess>>,
-    Rc<Completed>,
-    Option<Rc<Cache<MemoryAccess>>>,
-) {
+) -> RunnerFixture {
     fixture_named(engine, rate, capacity, cached, "pe", "hbm")
 }
 fn fixture_named(
@@ -56,12 +58,7 @@ fn fixture_named(
     cached: bool,
     pe_name: &str,
     memory_name: &str,
-) -> (
-    TaskRunner,
-    Rc<Memory<MemoryAccess>>,
-    Rc<Completed>,
-    Option<Rc<Cache<MemoryAccess>>>,
-) {
+) -> RunnerFixture {
     let clock = engine.default_clock();
     let mut map = MemoryMap::new();
     map.insert(0, 4096, gwr_engine::types::DeviceId(0)).unwrap();
@@ -237,7 +234,7 @@ fn failed_external_input_admits_no_local_bytes_but_failed_output_keeps_completed
             runner
                 .staged_access_ranges(
                     access,
-                    [4096u128..4100u128],
+                    std::iter::once(4096u128..4100u128),
                     4,
                     &runner.activity_lanes.lsu_read,
                     "invalid",
@@ -287,7 +284,7 @@ fn canceling_actual_tile_during_boundary_wait_releases_capacity_and_retains_debt
         futures::pin_mut!(cancel);
         match select(work, cancel).await {
             Either::Left(_) => panic!("tile completed before selected slow stage"),
-            Either::Right((_, pending)) => drop(pending),
+            Either::Right((_, _pending)) => {}
         }
         // pin_mut retains the original future until scope exit; the runner
         // and its tile reservation are dropped when this actor returns.

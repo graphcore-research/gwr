@@ -1,371 +1,440 @@
-// Copyright (c) 2025 Graphcore Ltd. All rights reserved.
-
-//! A functional implementation of a fabric with very basic timing.
-//!
-//! Assumes that all traffic will move a Manhattan distance through the fabric
-//! to get from ingress to egress.
-//!
-//! The fabric is assumed to be rectangular with a configurable `num_columns`
-//! and `num_rows`. The grid has a configurable number of ports at each node
-//! within the fabric grid.
-//!
-//! # Ports
-//!
-//! Each point in the fabric grid (col, row) has N ingress and egress ports:
-//!  - N [ingress ports](gwr_engine::port::InPort): `ingress[col][row][0, N-1]`
-//!  - N [egress ports](gwr_engine::port::OutPort): `egress[col][row][0, N-1]`
-//!
-//! In order to connect to the fabric use the
-//! `col_row_port_to_fabric_port_index()` function in the configuration
-//! structure to get the index of the port you want to connect to.
-
-use std::collections::HashMap;
+// Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+//! Independent routed mesh planes with bounded directional service and address
+//! affinity.
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt;
 use std::rc::Rc;
 
 use async_trait::async_trait;
-use gwr_components::delay::Delay;
-use gwr_components::flow_controls::limiter::Limiter;
-use gwr_components::{connect_dummy_rx, connect_dummy_tx, connect_port, rc_limiter};
+use gwr_components::arbiter::Arbiter;
+use gwr_components::arbiter::policy::RoundRobin;
 use gwr_engine::engine::Engine;
-use gwr_engine::port::PortStateResult;
+use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::time::clock::Clock;
-use gwr_engine::traits::{Routable, SimObject};
+use gwr_engine::traits::{Routable, Runnable, SimObject, TotalBytes};
 use gwr_engine::types::{SimError, SimResult};
-use gwr_model_builder::{EntityDisplay, EntityGet, Runnable};
-use gwr_track::entity::{Entity, GetEntity};
-use gwr_track::tracker::aka::{Aka, populate_aka_from_string};
+use gwr_model_builder::{EntityDisplay, EntityGet};
+use gwr_track::Id;
+use gwr_track::entity::Entity;
+use gwr_track::id::Unique;
 
-use crate::fabric::node::{FabricNode, FabricRoutingAlgorithm};
-use crate::fabric::{Fabric, FabricConfig, FabricPortSelection};
+use super::node::FabricRoutingAlgorithm;
+use super::paths::{FabricAddressKey, FabricPathConfig, FabricPathSelector};
+use super::service::{ForwardingTiming, RouteService, RouteServiceSnapshot};
+use super::{Fabric, FabricConfig, FabricPortSelection};
 
-#[derive(EntityGet, EntityDisplay, Runnable)]
-pub struct RoutedFabric<T>
-where
-    T: SimObject + Routable,
-{
+/// Extract the canonical final-memory identity and offset from a protocol
+/// packet.
+pub type FabricAddressProvider<T> = Rc<dyn Fn(&T) -> Result<FabricAddressKey, SimError>>;
+
+#[derive(Clone, Debug)]
+struct Transit<T> {
+    payload: T,
+    route: Rc<Vec<usize>>,
+    cursor: usize,
+    timing: ForwardingTiming,
+}
+impl<T: SimObject> Unique for Transit<T> {
+    fn id(&self) -> Id {
+        self.payload.id()
+    }
+}
+impl<T: SimObject> TotalBytes for Transit<T> {
+    fn payload_bytes(&self) -> Option<usize> {
+        self.payload.payload_bytes()
+    }
+
+    fn total_bytes(&self) -> usize {
+        self.payload.total_bytes()
+    }
+}
+impl<T: SimObject> fmt::Display for Transit<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.payload, f)
+    }
+}
+impl<T: SimObject> SimObject for Transit<T> {}
+struct Relay<T: SimObject> {
+    rx: InPort<Transit<T>>,
+    output: Option<OutPort<T>>,
+}
+
+/// Independently queued mesh planes. External ports add no bandwidth limit.
+#[derive(EntityGet, EntityDisplay)]
+pub struct RoutedFabric<T: SimObject + Routable> {
     entity: Rc<Entity>,
-    nodes: Vec<Vec<Rc<FabricNode<T>>>>,
+    clock: Clock,
     config: Rc<FabricConfig>,
+    paths: FabricPathConfig,
+    algorithm: FabricRoutingAlgorithm,
+    key: FabricAddressProvider<T>,
+    selector: Rc<dyn FabricPathSelector>,
+    ingress: HashMap<usize, Rc<RouteService<T>>>,
+    egress: HashMap<usize, Rc<RouteService<T>>>,
+    inputs: RefCell<Vec<(usize, InPort<T>)>>,
+    relays: RefCell<Vec<Relay<T>>>,
+    services: Rc<Vec<Rc<RouteService<Transit<T>>>>>,
+    edges: Rc<BTreeMap<(usize, usize, usize), usize>>,
+    deliveries: Rc<HashMap<(usize, usize), usize>>,
 }
-
-fn build_node_aka(
-    entity: &Rc<Entity>,
-    aka: Option<&Aka>,
-    new_aka: &mut Aka,
-    col: usize,
-    row: usize,
-    config: &Rc<FabricConfig>,
-) {
-    let mut renames = Vec::new();
-    for port in 0..config.num_ports_per_node() {
-        let fabric_port_index = config.col_row_port_to_fabric_port_index(col, row, port);
-        renames.push((
-            format!("ingress_{fabric_port_index}"),
-            format!("ingress_{port}"),
-        ));
-        renames.push((
-            format!("egress_{fabric_port_index}"),
-            format!("egress_{port}"),
-        ));
-    }
-    populate_aka_from_string(aka, Some(new_aka), entity, &renames);
-}
-
-type FabricNodesResult<T> = Result<Vec<Vec<Rc<FabricNode<T>>>>, SimError>;
-
-fn create_nodes<T>(
-    engine: &Engine,
-    clock: &Clock,
-    entity: &Rc<Entity>,
-    aka: Option<&Aka>,
-    config: &Rc<FabricConfig>,
-    fabric_algorithm: FabricRoutingAlgorithm,
-) -> FabricNodesResult<T>
-where
-    T: SimObject + Routable,
-{
-    let num_columns = config.num_columns();
-    let num_rows = config.num_rows();
-    let mut nodes = Vec::with_capacity(num_columns);
-
-    for c in 0..num_columns {
-        let mut col_nodes = Vec::with_capacity(num_rows);
-        for r in 0..num_rows {
-            let mut new_aka = Aka::default();
-            build_node_aka(entity, aka, &mut new_aka, c, r, config);
-            let node = FabricNode::new_and_register_with_renames(
-                engine,
-                clock,
-                entity,
-                &format!("node_{c}_{r}"),
-                Some(&new_aka),
-                c,
-                r,
-                config,
-                fabric_algorithm,
-            )?;
-            col_nodes.push(node);
-        }
-        nodes.push(col_nodes);
-    }
-    Ok(nodes)
-}
-
-/// Create connections between columns
-fn connect_columns<T>(
-    engine: &Engine,
-    clock: &Clock,
-    entity: &Rc<Entity>,
-    config: &Rc<FabricConfig>,
-    nodes: &[Vec<Rc<FabricNode<T>>>],
-    delay_ticks: usize,
-) where
-    T: SimObject + Routable,
-{
-    for c in 1..config.num_columns {
-        let c_m1 = c - 1;
-        // Clippy suggestion to avoid needless_range_loop results in an unused
-        // variable from the iterator and therefore a larger refactor is likely
-        // required here. There may be hazards to be aware of when attempting
-        // to resolve this, such as highlighted in
-        // https://github.com/rust-lang/rust-clippy/issues/16344.
-        #[expect(clippy::needless_range_loop)]
-        for r in 0..config.num_rows {
-            let delay = Delay::new_and_register(
-                engine,
-                clock,
-                entity,
-                &format!("{c_m1}_{r}_to_{c}_{r}"),
-                delay_ticks,
-            );
-            nodes[c_m1][r]
-                .connect_port_col_plus(internal_link_ingress(engine, clock, entity, config, &delay))
-                .expect("Internal ports should connect without error");
-            connect_port!(delay, tx => nodes[c][r], col_minus)
-                .expect("Internal ports should connect without error");
-
-            let delay = Delay::new_and_register(
-                engine,
-                clock,
-                entity,
-                &format!("{c}_{r}_to_{c_m1}_{r}"),
-                delay_ticks,
-            );
-            nodes[c][r]
-                .connect_port_col_minus(internal_link_ingress(
-                    engine, clock, entity, config, &delay,
-                ))
-                .expect("Internal ports should connect without error");
-            connect_port!(delay, tx => nodes[c_m1][r], col_plus)
-                .expect("Internal ports should connect without error");
-        }
-    }
-}
-
-/// Create connections between rows
-fn connect_rows<T>(
-    engine: &Engine,
-    clock: &Clock,
-    entity: &Rc<Entity>,
-    config: &Rc<FabricConfig>,
-    nodes: &[Vec<Rc<FabricNode<T>>>],
-    delay_ticks: usize,
-) where
-    T: SimObject + Routable,
-{
-    for (c, col) in nodes.iter().enumerate() {
-        for r in 1..config.num_rows {
-            let r_m1 = r - 1;
-            let delay = Delay::new_and_register(
-                engine,
-                clock,
-                entity,
-                &format!("{c}_{r_m1}_to_{c}_{r}"),
-                delay_ticks,
-            );
-            col[r_m1]
-                .connect_port_row_plus(internal_link_ingress(engine, clock, entity, config, &delay))
-                .expect("Internal ports should connect without error");
-            connect_port!(delay, tx => col[r], row_minus)
-                .expect("Internal ports should connect without error");
-
-            let delay = Delay::new_and_register(
-                engine,
-                clock,
-                entity,
-                &format!("{c}_{r}_to_{c}_{r_m1}"),
-                delay_ticks,
-            );
-            col[r]
-                .connect_port_row_minus(internal_link_ingress(
-                    engine, clock, entity, config, &delay,
-                ))
-                .expect("Internal ports should connect without error");
-            connect_port!(delay, tx => col[r_m1], row_plus)
-                .expect("Internal ports should connect without error");
-        }
-    }
-}
-
-/// Keep the existing hop delay, optionally admitting packets through a
-/// separate bandwidth limiter for this directed edge.
-fn internal_link_ingress<T>(
-    engine: &Engine,
-    clock: &Clock,
-    entity: &Rc<Entity>,
-    config: &FabricConfig,
-    delay: &Delay<T>,
-) -> PortStateResult<T>
-where
-    T: SimObject,
-{
-    let Some(rate) = config.internal_link_bits_per_tick() else {
-        return delay.port_rx();
-    };
-    let limiter = Limiter::new_and_register(
-        engine,
-        clock,
-        entity,
-        &format!("{}_rate_limit", delay.entity().name),
-        rc_limiter!(clock, rate)?,
-    );
-    limiter.connect_port_tx(delay.port_rx())?;
-    limiter.port_rx()
-}
-
-/// Connect up the edge ports that will otherwise be left dangling
-fn create_dummy_ports<T>(
-    engine: &Engine,
-    clock: &Clock,
-    entity: &Rc<Entity>,
-    config: &Rc<FabricConfig>,
-    nodes: &[Vec<Rc<FabricNode<T>>>],
-) where
-    T: SimObject + Routable,
-{
-    // Connect dummy ports left/right
-    let right = config.num_columns - 1;
-    // Clippy suggestion to avoid needless_range_loop doesn't account for the
-    // way nodes is accessed, i.e. nodes[0][r] and nodes[right][r] and therefore
-    // a larger refactor is likely required here.
-    #[expect(clippy::needless_range_loop)]
-    for r in 0..config.num_rows {
-        connect_dummy_tx!(entity => nodes[0][r], col_minus)
-            .expect("Internal ports should connect without error");
-        connect_dummy_rx!(nodes[0][r], col_minus => engine, clock, entity)
-            .expect("Internal ports should connect without error");
-        connect_dummy_tx!(entity => nodes[right][r], col_plus)
-            .expect("Internal ports should connect without error");
-        connect_dummy_rx!(nodes[right][r], col_plus => engine, clock, entity)
-            .expect("Internal ports should connect without error");
-    }
-
-    // Connect dummy ports top/bottom
-    let bottom = config.num_rows - 1;
-    for col in nodes {
-        connect_dummy_tx!(entity => col[0], row_minus)
-            .expect("Internal ports should connect without error");
-        connect_dummy_rx!(col[0], row_minus => engine, clock, entity)
-            .expect("Internal ports should connect without error");
-        connect_dummy_tx!(entity => col[bottom], row_plus)
-            .expect("Internal ports should connect without error");
-        connect_dummy_rx!(col[bottom], row_plus => engine, clock, entity)
-            .expect("Internal ports should connect without error");
-    }
-}
-
-impl<T> RoutedFabric<T>
-where
-    T: SimObject + Routable,
-{
-    pub fn new_and_register_with_renames(
+impl<T: SimObject + Routable> RoutedFabric<T> {
+    /// Construct with explicit path service and a caller-supplied address-only
+    /// hash.
+    #[expect(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Register all route directions atomically before publishing the fabric"
+    )]
+    pub fn new_and_register_with_paths(
         engine: &Engine,
         clock: &Clock,
         parent: &Rc<Entity>,
         name: &str,
-        aka: Option<&Aka>,
         config: Rc<FabricConfig>,
-        fabric_algorithm: FabricRoutingAlgorithm,
+        algorithm: FabricRoutingAlgorithm,
+        paths: FabricPathConfig,
+        key: FabricAddressProvider<T>,
+        selector: Rc<dyn FabricPathSelector>,
     ) -> Result<Rc<Self>, SimError> {
+        paths.validate()?;
+        if config.port_selection() == FabricPortSelection::SourceIdModulo {
+            return Err(SimError(
+                "source-dependent gateway selection cannot preserve routed address affinity".into(),
+            ));
+        }
+        config
+            .max_num_ports()
+            .checked_mul(paths.count)
+            .ok_or_else(|| SimError("fabric plane geometry overflows".into()))?;
         let entity = Rc::new(Entity::new(parent, name));
-        let nodes = create_nodes(engine, clock, &entity, aka, &config, fabric_algorithm)?;
-        connect_columns(
-            engine,
-            clock,
-            &entity,
-            &config,
-            &nodes,
-            config.ticks_per_hop,
-        );
-        connect_rows(
-            engine,
-            clock,
-            &entity,
-            &config,
-            &nodes,
-            config.ticks_per_hop,
-        );
-        create_dummy_ports(engine, clock, &entity, &config, &nodes);
-
-        let rc_self = Rc::new(Self {
+        let mut services = Vec::new();
+        let mut relays = Vec::new();
+        let mut edges = BTreeMap::new();
+        let mut deliveries = HashMap::new();
+        let mut ingress = HashMap::new();
+        let mut egress = HashMap::new();
+        let mut inputs = Vec::new();
+        let mut mergers = HashMap::new();
+        for &port in config.port_indices() {
+            let rx_queue = RouteService::new_queue_and_register(
+                engine,
+                clock,
+                &entity,
+                &format!("ingress_{port}"),
+                config.rx_buffer_bytes,
+                paths.queue_packets,
+            )?;
+            let input = InPort::new(engine, clock, &entity, &format!("classify_{port}"));
+            rx_queue.connect_port_tx(input.state())?;
+            ingress.insert(port, rx_queue);
+            inputs.push((port, input));
+            let merge = Arbiter::new_and_register(
+                engine,
+                clock,
+                &entity,
+                &format!("merge_{port}"),
+                paths.count,
+                Box::new(RoundRobin::new()),
+            );
+            let tx_queue = RouteService::new_queue_and_register(
+                engine,
+                clock,
+                &entity,
+                &format!("egress_{port}"),
+                config.tx_buffer_bytes,
+                paths.queue_packets,
+            )?;
+            merge.connect_port_tx(tx_queue.port_rx())?;
+            egress.insert(port, tx_queue);
+            mergers.insert(port, merge);
+        }
+        for plane in 0..paths.count {
+            let plane_entity = Rc::new(Entity::new(&entity, &format!("plane_{plane}")));
+            let mut add = |name: String,
+                           delay: usize,
+                           output: Option<OutPort<T>>|
+             -> Result<usize, SimError> {
+                let service = RouteService::new_forwarding_and_register(
+                    engine,
+                    clock,
+                    &plane_entity,
+                    &name,
+                    paths.bw_bits_per_tick,
+                    delay,
+                    paths.queue_bytes,
+                    paths.queue_packets,
+                    |packet: &mut Transit<T>| &mut packet.timing,
+                )?;
+                gwr_components::connect_dummy_tx!(&plane_entity => service, rx)?;
+                let rx = InPort::new(engine, clock, &plane_entity, &format!("forward_{name}"));
+                service.connect_port_tx(rx.state())?;
+                let id = services.len();
+                services.push(service);
+                relays.push(Relay { rx, output });
+                Ok(id)
+            };
+            for x in 0..config.num_columns() {
+                for y in 0..config.num_rows() {
+                    let from = x * config.num_rows() + y;
+                    for (nx, ny) in [
+                        (x.checked_sub(1), Some(y)),
+                        (
+                            x.checked_add(1).filter(|v| *v < config.num_columns()),
+                            Some(y),
+                        ),
+                        (Some(x), y.checked_sub(1)),
+                        (Some(x), y.checked_add(1).filter(|v| *v < config.num_rows())),
+                    ] {
+                        if let (Some(nx), Some(ny)) = (nx, ny) {
+                            let to = nx * config.num_rows() + ny;
+                            let id =
+                                add(format!("{x}_{y}_to_{nx}_{ny}"), config.ticks_per_hop, None)?;
+                            edges.insert((plane, from, to), id);
+                        }
+                    }
+                }
+            }
+            for &port in config.port_indices() {
+                let mut output = OutPort::new(&plane_entity, &format!("deliver_{port}"));
+                output.connect(mergers[&port].port_rx_i(plane))?;
+                let id = add(format!("local_{port}"), config.ticks_overhead, Some(output))?;
+                deliveries.insert((plane, port), id);
+            }
+        }
+        let fabric = Rc::new(Self {
             entity,
-            nodes,
+            clock: clock.clone(),
             config,
+            paths,
+            algorithm,
+            key,
+            selector,
+            ingress,
+            egress,
+            inputs: RefCell::new(inputs),
+            relays: RefCell::new(relays),
+            services: Rc::new(services),
+            edges: Rc::new(edges),
+            deliveries: Rc::new(deliveries),
         });
-
-        engine.register(rc_self.clone());
-        Ok(rc_self)
+        engine.register(fabric.clone());
+        Ok(fabric)
     }
-
+    /// Construct a single-plane fabric using the supplied common configuration.
+    /// Multi-plane protocol clients should supply a canonical address provider.
     pub fn new_and_register(
         engine: &Engine,
         clock: &Clock,
         parent: &Rc<Entity>,
         name: &str,
         config: Rc<FabricConfig>,
-        fabric_algorithm: FabricRoutingAlgorithm,
+        algorithm: FabricRoutingAlgorithm,
     ) -> Result<Rc<Self>, SimError> {
-        Self::new_and_register_with_renames(
+        let paths = config.paths.clone().unwrap_or_default();
+        if paths.count != 1 {
+            return Err(SimError(
+                "multiple fabric paths require an explicit canonical address provider".into(),
+            ));
+        }
+        let selector = Rc::new(paths.selection);
+        Self::new_and_register_with_paths(
             engine,
             clock,
             parent,
             name,
-            None,
             config,
-            fabric_algorithm,
+            algorithm,
+            paths,
+            Rc::new(|p: &T| {
+                Ok(FabricAddressKey {
+                    memory_index: p.dst_device().0,
+                    offset_in_memory: p.dst_addr(),
+                })
+            }),
+            selector,
         )
+    }
+    /// Observe every directed route, ordered by plane, edge, and local
+    /// delivery.
+    pub fn route_snapshots(&self) -> Vec<RouteServiceSnapshot> {
+        let mut snapshots: Vec<_> = self.services.iter().map(|s| s.snapshot()).collect();
+        for port in self.config.port_indices() {
+            snapshots.push(self.ingress[port].snapshot());
+            snapshots.push(self.egress[port].snapshot());
+        }
+        snapshots
     }
 }
 
-impl<T> Fabric<T> for RoutedFabric<T>
-where
-    T: SimObject + Routable,
-{
-    fn connect_port_egress_i(&self, i: usize, port_state: PortStateResult<T>) -> SimResult {
-        let (c, r, p) = self.config.fabric_port_index_to_col_row_port(i);
-        self.nodes[c][r].connect_port_egress_i(p, port_state)
+fn route(
+    config: &FabricConfig,
+    algorithm: FabricRoutingAlgorithm,
+    edges: &BTreeMap<(usize, usize, usize), usize>,
+    deliveries: &HashMap<(usize, usize), usize>,
+    plane: usize,
+    source: usize,
+    destination: usize,
+) -> Result<Vec<usize>, SimError> {
+    let (mut x, mut y, _) = config.fabric_port_index_to_col_row_port(source);
+    let (dx, dy, _) = config.fabric_port_index_to_col_row_port(destination);
+    let mut hops = Vec::new();
+    while x != dx || y != dy {
+        let from = x * config.num_rows() + y;
+        if x != dx && (y == dy || algorithm == FabricRoutingAlgorithm::ColumnFirst) {
+            if x < dx { x += 1 } else { x -= 1 }
+        } else if y < dy {
+            y += 1;
+        } else {
+            y -= 1;
+        }
+        let to = x * config.num_rows() + y;
+        hops.push(
+            *edges
+                .get(&(plane, from, to))
+                .ok_or_else(|| SimError("missing directed fabric route".into()))?,
+        );
     }
-
+    hops.push(
+        *deliveries
+            .get(&(plane, destination))
+            .ok_or_else(|| SimError("unpopulated fabric destination".into()))?,
+    );
+    Ok(hops)
+}
+#[async_trait(?Send)]
+impl<T: SimObject + Routable> Runnable for RoutedFabric<T> {
+    async fn run(&self) -> SimResult {
+        let forwards = self
+            .relays
+            .borrow_mut()
+            .drain(..)
+            .map(|mut relay| {
+                let services = self.services.clone();
+                let clock = self.clock.clone();
+                let rate = self.paths.bw_bits_per_tick;
+                async move {
+                    loop {
+                        let mut packet = relay.rx.start_get()?.await;
+                        packet.cursor += 1;
+                        if packet.cursor < packet.route.len() {
+                            services[packet.route[packet.cursor]]
+                                .enqueue(packet)
+                                .await?;
+                        } else {
+                            // Protocol clients receive whole packets, never a
+                            // head whose payload is still in flight.
+                            let tail = packet.timing.tail_tick(rate)?;
+                            clock
+                                .wait_ticks(tail.saturating_sub(clock.tick_now().tick()))?
+                                .await;
+                            relay
+                                .output
+                                .as_mut()
+                                .expect("local route has recipient")
+                                .put(packet.payload)?
+                                .await;
+                        }
+                        relay.rx.finish_get();
+                    }
+                    #[allow(unreachable_code)]
+                    Ok::<(), SimError>(())
+                }
+            })
+            .collect::<Vec<_>>();
+        let inputs = self
+            .inputs
+            .borrow_mut()
+            .drain(..)
+            .map(|(source, mut input)| {
+                let config = self.config.clone();
+                let key = self.key.clone();
+                let selector = self.selector.clone();
+                let count = self.paths.count;
+                let rate = self.paths.bw_bits_per_tick;
+                let clock = self.clock.clone();
+                let shift = self.paths.selection.address_shift();
+                let edges = self.edges.clone();
+                let deliveries = self.deliveries.clone();
+                let algorithm = self.algorithm;
+                let services = self.services.clone();
+                async move {
+                    loop {
+                        let payload = input.start_get()?.await;
+                        let address = key(&payload)?;
+                        let plane = selector.select(address, count)?;
+                        if plane >= count {
+                            return Err(SimError(
+                                "fabric selector returned an invalid path index".into(),
+                            ));
+                        }
+                        let destination = config.resolve_canonical_destination_port(
+                            payload.dst_device().0,
+                            address,
+                            shift,
+                        )?;
+                        let hops = Rc::new(route(
+                            &config,
+                            algorithm,
+                            &edges,
+                            &deliveries,
+                            plane,
+                            source,
+                            destination,
+                        )?);
+                        let first = hops[0];
+                        let arrival = u128::from(clock.tick_now().tick()) * rate as u128;
+                        services[first]
+                            .enqueue(Transit {
+                                payload,
+                                route: hops,
+                                cursor: 0,
+                                timing: ForwardingTiming {
+                                    head: arrival,
+                                    tail: arrival,
+                                },
+                            })
+                            .await?;
+                        input.finish_get();
+                    }
+                    #[allow(unreachable_code)]
+                    Ok::<(), SimError>(())
+                }
+            })
+            .collect::<Vec<_>>();
+        futures::try_join!(
+            futures::future::try_join_all(forwards),
+            futures::future::try_join_all(inputs)
+        )?;
+        Ok(())
+    }
+}
+impl<T: SimObject + Routable> Fabric<T> for RoutedFabric<T> {
+    fn connect_port_egress_i(&self, i: usize, port: PortStateResult<T>) -> SimResult {
+        self.egress
+            .get(&i)
+            .ok_or_else(|| SimError(format!("unpopulated fabric egress {i}")))?
+            .connect_port_tx(port)
+    }
     fn port_ingress_i(&self, i: usize) -> PortStateResult<T> {
-        let (c, r, p) = self.config.fabric_port_index_to_col_row_port(i);
-        self.nodes[c][r].port_ingress_i(p)
+        self.ingress
+            .get(&i)
+            .ok_or_else(|| SimError(format!("unpopulated fabric ingress {i}")))?
+            .port_rx()
     }
-
-    fn col_row_port_to_fabric_port_index(&self, col: usize, row: usize, port: usize) -> usize {
-        self.config
-            .col_row_port_to_fabric_port_index(col, row, port)
+    fn col_row_port_to_fabric_port_index(&self, c: usize, r: usize, p: usize) -> usize {
+        self.config.col_row_port_to_fabric_port_index(c, r, p)
     }
-
-    fn fabric_port_index_to_col_row_port(&self, fabric_port_index: usize) -> (usize, usize, usize) {
-        self.config
-            .fabric_port_index_to_col_row_port(fabric_port_index)
+    fn fabric_port_index_to_col_row_port(&self, i: usize) -> (usize, usize, usize) {
+        self.config.fabric_port_index_to_col_row_port(i)
     }
-
     fn destination_port_map(&self) -> &HashMap<u64, Vec<usize>> {
         self.config.destination_port_map()
     }
-
     fn port_selection(&self) -> FabricPortSelection {
         self.config.port_selection()
+    }
+    fn route_snapshots(&self) -> Vec<RouteServiceSnapshot> {
+        self.route_snapshots()
     }
 }

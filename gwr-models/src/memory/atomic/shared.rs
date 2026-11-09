@@ -42,7 +42,7 @@ impl TargetDescription {
     fn validate(&self, device: u64, address: u64, effect: Effect) -> SimResult {
         if device != self.device
             || address < self.base
-            || address % 4 != 0
+            || !address.is_multiple_of(4)
             || address.checked_add(3).is_none_or(|a| a > self.last)
         {
             return Err(error("typed target device/aligned word/range mismatch"));
@@ -58,13 +58,12 @@ impl TargetDescription {
                 {
                     return Err(error("typed pair signature/capability mismatch"));
                 }
-                if let Some(g) = groups.get(&word.invocation) {
-                    if g.generation != word.generation
+                if let Some(g) = groups.get(&word.invocation)
+                    && (g.generation != word.generation
                         || participant >= g.participants
-                        || !g.output_words.contains(&address)
-                    {
-                        return Err(error("typed output group/participant/generation mismatch"));
-                    }
+                        || !g.output_words.contains(&address))
+                {
+                    return Err(error("typed output group/participant/generation mismatch"));
                 }
             }
             Effect::Control {
@@ -222,6 +221,7 @@ pub struct AtomicReceipt {
     _credit: ProducerCredit,
 }
 impl AtomicReceipt {
+    #[must_use]
     pub fn completion(&self) -> Completion {
         self.completion
     }
@@ -381,6 +381,7 @@ impl SharedAtomicControl {
     pub(crate) fn matches_target(&self, target: &Rc<AtomicTargetSender>) -> bool {
         Rc::ptr_eq(&self.0.target(), target)
     }
+    #[must_use]
     pub fn snapshot(&self) -> AtomicSnapshot {
         self.0.snapshot()
     }
@@ -453,7 +454,7 @@ impl<T: SimObject + AccessMemory> SharedMemoryAuthority<T> {
         device: u64,
         base: u64,
         bytes: u64,
-        config: AtomicServiceConfig,
+        config: &AtomicServiceConfig,
     ) -> Result<Rc<Self>, SimError> {
         config.validate()?;
         if usize::BITS < 64 {
@@ -543,10 +544,10 @@ impl<T: SimObject + AccessMemory> SharedMemoryAuthority<T> {
             .map(|w| w.owners.values().cloned().collect())
     }
     fn window(&self, id: u64, f: impl FnOnce(&mut AtomicOwnerWindow)) {
-        if let Some(w) = self.witness.borrow_mut().as_mut() {
-            if let Some(owner) = w.owners.get_mut(&id) {
-                f(owner);
-            }
+        if let Some(w) = self.witness.borrow_mut().as_mut()
+            && let Some(owner) = w.owners.get_mut(&id)
+        {
+            f(owner);
         }
     }
 
@@ -561,19 +562,18 @@ impl<T: SimObject + AccessMemory> SharedMemoryAuthority<T> {
     pub(crate) fn cancel(&self, identity: u64) -> SimResult {
         self.service.cancel(identity)?;
         self.window(identity, |w| {
-            w.canceled_tick = Some(self.clock.tick_now().tick())
+            w.canceled_tick = Some(self.clock.tick_now().tick());
         });
-        if self.service.canceled_or_retired(identity) {
-            if let Some(Envelope::Typed {
+        if self.service.canceled_or_retired(identity)
+            && let Some(Envelope::Typed {
                 source, finished, ..
             }) = self.envelopes.borrow_mut().remove(&identity)
-            {
-                self.fail_typed(source, finished, "typed request canceled before commit");
-            }
+        {
+            self.fail_typed(source, &finished, "typed request canceled before commit");
         }
         Ok(())
     }
-    fn fail_typed(&self, source: u64, finished: Finished, message: &str) {
+    fn fail_typed(&self, source: u64, finished: &Finished, message: &str) {
         if let Some(waiter) = self.sender.waiters.borrow_mut().remove(&source) {
             let _ = waiter.notify.send(Err(error(message)));
         }
@@ -598,7 +598,7 @@ impl<T: SimObject + AccessMemory> SharedMemoryAuthority<T> {
         request.identity = id;
         let source = match &envelope {
             Envelope::Typed { source, .. } => Some(*source),
-            _ => None,
+            Envelope::Ordinary(_) => None,
         };
         if source.is_some()
             && self
@@ -613,29 +613,29 @@ impl<T: SimObject + AccessMemory> SharedMemoryAuthority<T> {
         }
         let observed = request.clone();
         let ticket = self.service.try_accept(now, request)?;
-        if let Some(source) = source {
-            if let Some(w) = self.witness.borrow_mut().as_mut() {
-                w.owners.insert(
-                    id,
-                    AtomicOwnerWindow {
-                        owner: id,
-                        source,
-                        device: observed.device,
-                        address: observed.address,
-                        effect: observed.effect,
-                        accepted_tick: now,
-                        deadline_tick: ticket.deadline,
-                        committed_tick: None,
-                        publication_tick: None,
-                        ack_tick: None,
-                        canceled_tick: None,
-                        retired_tick: None,
-                        committed_read_bytes: 0,
-                        committed_write_bytes: 0,
-                        control_value: None,
-                    },
-                );
-            }
+        if let Some(source) = source
+            && let Some(w) = self.witness.borrow_mut().as_mut()
+        {
+            w.owners.insert(
+                id,
+                AtomicOwnerWindow {
+                    owner: id,
+                    source,
+                    device: observed.device,
+                    address: observed.address,
+                    effect: observed.effect,
+                    accepted_tick: now,
+                    deadline_tick: ticket.deadline,
+                    committed_tick: None,
+                    publication_tick: None,
+                    ack_tick: None,
+                    canceled_tick: None,
+                    retired_tick: None,
+                    committed_read_bytes: 0,
+                    committed_write_bytes: 0,
+                    control_value: None,
+                },
+            );
         }
 
         self.envelopes.borrow_mut().insert(id, envelope);
@@ -953,14 +953,14 @@ impl<T: SimObject + AccessMemory> SharedMemoryAuthority<T> {
                 self.window(id, |w| w.retired_tick = Some(self.clock.tick_now().tick()));
                 self.fail_typed(
                     reply.reply.completion.identity,
-                    finished,
+                    &finished,
                     "typed response canceled before publication",
                 );
                 continue;
             }
             self.service.begin_publication(id)?;
             self.window(id, |w| {
-                w.publication_tick = Some(self.clock.tick_now().tick())
+                w.publication_tick = Some(self.clock.tick_now().tick());
             });
             tx.put(reply)?.await;
             let canceled = self.service.canceled_publication(id);
@@ -1086,7 +1086,7 @@ mod tests {
             7,
             4096,
             256,
-            cfg(),
+            &cfg(),
         )
         .unwrap();
         let ordinary = InPort::<MemoryAccess>::new(&engine, &clock, engine.top(), "ordinary");
@@ -1134,7 +1134,7 @@ mod tests {
             let stop = Box::pin(c.wait_ticks(3)?);
             match select(receive, stop).await {
                 Either::Right(((), pending)) => drop(pending),
-                _ => panic!("actual receiver has not started"),
+                Either::Left(_) => panic!("actual receiver has not started"),
             }
             let before = a.snapshot();
             assert_eq!(
@@ -1162,6 +1162,10 @@ mod tests {
         let _ = DeviceId(7);
     }
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Keep complete setup execution and assertions of this scenario together"
+    )]
     fn actual_delivered_receipt_drop_never_authorizes_fetch_continuation() {
         for explicit_cancel in [false, true] {
             let mut engine = Engine::default();
@@ -1294,7 +1298,7 @@ mod tests {
             let pending = Box::pin(credits.acquire());
             match select(pending, Box::pin(futures::future::ready(()))).await {
                 Either::Right(((), pending)) => drop(pending),
-                _ => panic!("capacity is genuinely held by the first producer"),
+                Either::Left(_) => panic!("capacity is genuinely held by the first producer"),
             }
             assert_eq!(credits.current.get(), 1);
             drop(live);

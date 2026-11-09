@@ -10,7 +10,12 @@ use serde::{Deserialize, Serialize};
 
 use super::tensors::dtype::DataType;
 
+mod counters;
 mod lower;
+pub use counters::{
+    ComputeAction, ComputeCounterSnapshot, ComputeCounters, NativeActivityReport,
+    NativeMemoryPayload, NativePeActivity,
+};
 mod scheduler;
 mod work;
 pub use scheduler::{
@@ -32,6 +37,10 @@ pub struct ComputeModel {
 impl ComputeModel {
     /// Validate and expand hardware declarations once, with stable name
     /// ordering.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Validate every engine before exposing the compute model"
+    )]
     pub fn new(
         config: &ComputeConfig,
         classes: &BTreeMap<String, OperationClass>,
@@ -216,6 +225,7 @@ pub struct ComputeConfig {
 }
 
 impl ComputeConfig {
+    #[must_use]
     pub fn classes_used(&self) -> BTreeSet<&str> {
         self.engines
             .values()
@@ -312,7 +322,7 @@ impl MatrixServiceTile {
         self.volume()?;
         let rounded = |size: usize, tile: usize| -> Result<usize, SimError> {
             let groups = (size / tile)
-                .checked_add(usize::from(size % tile != 0))
+                .checked_add(usize::from(!size.is_multiple_of(tile)))
                 .ok_or_else(|| SimError("matrix service shape overflows".into()))?;
             groups
                 .checked_mul(tile)

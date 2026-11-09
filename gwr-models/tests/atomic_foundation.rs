@@ -47,6 +47,10 @@ fn existing_atomic_foundation_api() {
 }
 
 #[test]
+#[expect(
+    clippy::many_single_char_names,
+    reason = "Use conventional matrix dimensions and operand names"
+)]
 fn shared_budget_same_word_commit_order_and_disjoint_words_release_before_ack() {
     let service = server();
     let a = service.try_accept(0, request(1, 0x1000)).unwrap();

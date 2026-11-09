@@ -516,3 +516,20 @@ transfers, completion dependencies, and software reduction work. Reduction
 collectives require caller-supplied scratch addresses; allocate storage for
 `ranks * input_elements + input_elements` values. This coordinator algorithm
 does not model switch reduction offload or choose an optimal collective.
+See the [communication examples](../gwr-use-cases/examples/communication).
+
+## Machine and workload experiments
+
+The [`gwr-use-cases` package](../gwr-use-cases/README.md) owns GB200 topologies,
+pinned DeepSeek scenarios, GPT/ResNet generators, and ML/communication examples.
+Its guides explain generation, provenance, calibration limits, and installed
+commands. Run their generated graphs with the `gwr-timetable` simulation runner.
+
+
+Generic pipeline snapshots report working bytes separately from native matrix
+accumulator bytes, stage completions/cancellations, buffer occupancy, local copy
+bytes and actual load/compute and store/compute intersections. Compute counters
+track actual engine batches within the single admitted tile context. LSU snapshots
+report read/write packets, arbitration/credit waits and outstanding credits.
+Packet turns are FIFO between ready producers: ordinary transfers and pipelines
+share the same bounded request slots and real downstream service.

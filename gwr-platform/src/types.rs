@@ -80,7 +80,7 @@ where
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct PlatformConfig {
     #[serde(default)]
@@ -97,7 +97,7 @@ pub struct PlatformConfig {
     pub connections: Option<Vec<ConnectSection>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct DefaultsSection {
     pub pe_config: Option<ProcessingElementConfigSection>,
     pub cache_config: Option<CacheConfigSection>,
@@ -239,14 +239,14 @@ pub struct FabricSection {
 #[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct FabricConfigSection {
+    /// Independent routed paths; functional fabrics reject this setting.
+    pub paths: Option<gwr_models::fabric::paths::FabricPathConfig>,
     pub fabric_ports_per_node: Option<usize>,
     pub ticks_per_hop: Option<usize>,
     pub ticks_overhead: Option<usize>,
     pub rx_buffer_bytes: Option<usize>,
     pub tx_buffer_bytes: Option<usize>,
     pub port_bits_per_tick: Option<usize>,
-    /// Optional independent directional interior service; Routed fabrics only.
-    pub internal_link_bits_per_tick: Option<usize>,
     pub routing: Option<FabricRoutingAlgorithm>,
     pub port_selection: Option<FabricPortSelection>,
 }

@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
-//! Canonical unbatched role derivation shared by preflight and actual chunks.
+//! Matrix role derivation shared by preflight and actual chunks. Shared batch
+//! axes are supported when each resolved chunk selects one batch coordinate.
 use std::collections::BTreeMap;
 use std::ops::Range;
 
@@ -13,6 +14,7 @@ struct MatrixRoles {
     m: String,
     n: String,
     k: String,
+    batch: Vec<String>,
 }
 impl MatrixRoles {
     fn shape(
@@ -32,6 +34,13 @@ impl MatrixRoles {
             }
             Ok(range.len())
         };
+        for axis in &self.batch {
+            if length(axis)? != 1 {
+                return Err(SimError(
+                    "matrix service requires singleton resolved batch intervals".into(),
+                ));
+            }
+        }
         Ok(MatrixWorkShape {
             m: length(&self.m)?,
             n: length(&self.n)?,
@@ -39,6 +48,10 @@ impl MatrixRoles {
         })
     }
 }
+#[expect(
+    clippy::too_many_lines,
+    reason = "Derive the matrix signature from one validated assignment"
+)]
 pub(super) fn work(
     model: &ComputeModel,
     assignment: &AssignmentSpec,
@@ -73,20 +86,24 @@ pub(super) fn work(
     }
     let error = || {
         SimError(
-            "matrix service requires in-range unbatched two-free-axis/one-contraction geometry"
+            "matrix service requires in-range two-free-axis/one-contraction geometry with singleton shared batch intervals"
                 .into(),
         )
     };
     if args.len() != 2
         || over.len() != 1
-        || assignment.axes.len() != 2
-        || assignment.axes[0] == assignment.axes[1]
+        || assignment.axes.len() < 2
+        || assignment
+            .axes
+            .iter()
+            .enumerate()
+            .any(|(i, axis)| assignment.axes[..i].contains(axis))
         || assignment.axes.contains(&over[0])
     {
         return Err(error());
     }
     let contraction = &over[0];
-    let mut free = Vec::new();
+    let mut operands = Vec::new();
     for arg in args {
         let ExprSpec::Read {
             tensor,
@@ -97,7 +114,8 @@ pub(super) fn work(
             return Err(error());
         };
         let shape = &region.value(tensor).ok_or_else(error)?.shape;
-        if *bounds != BoundsMode::RequireInRange || indices.len() != 2 || shape.len() != 2 {
+        if *bounds != BoundsMode::RequireInRange || indices.len() != shape.len() || shape.len() < 2
+        {
             return Err(error());
         }
         let mut axes = Vec::new();
@@ -113,23 +131,37 @@ pub(super) fn work(
         if !axes.contains(contraction) {
             return Err(error());
         }
-        let role = axes
-            .iter()
-            .find(|axis| *axis != contraction)
-            .ok_or_else(error)?;
-        if !assignment.axes.contains(role) {
-            return Err(error());
-        }
-        free.push(role.clone());
+        operands.push(axes);
     }
-    if free[0] == free[1] {
+    let batch: Vec<_> = operands[0]
+        .iter()
+        .filter(|axis| *axis != contraction && operands[1].contains(axis))
+        .cloned()
+        .collect();
+    let free: Vec<Vec<_>> = operands
+        .iter()
+        .enumerate()
+        .map(|(index, axes)| {
+            axes.iter()
+                .filter(|axis| *axis != contraction && !operands[1 - index].contains(axis))
+                .cloned()
+                .collect()
+        })
+        .collect();
+    if free.iter().any(|axes| axes.len() != 1)
+        || assignment.axes.len() != batch.len() + 2
+        || batch
+            .iter()
+            .chain(free.iter().flatten())
+            .any(|axis| !assignment.axes.contains(axis))
+    {
         return Err(error());
     }
     let output = &region
         .value(&assignment.primary_result())
         .ok_or_else(error)?
         .shape;
-    if output.len() != 2
+    if output.len() != assignment.axes.len()
         || output
             .iter()
             .zip(&assignment.axes)
@@ -138,9 +170,10 @@ pub(super) fn work(
         return Err(error());
     }
     let roles = MatrixRoles {
-        m: free[0].clone(),
-        n: free[1].clone(),
+        m: free[0][0].clone(),
+        n: free[1][0].clone(),
         k: contraction.clone(),
+        batch,
     };
     Ok(Some(
         ComputeWork::matrix_mac(inputs, roles.shape(region, intervals)?)?

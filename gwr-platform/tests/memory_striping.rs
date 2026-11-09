@@ -4,7 +4,7 @@ use gwr_platform::yaml::platform_to_yaml_str;
 
 fn source(mode: &str) -> String {
     format!(
-        r#"
+        r"
 memory_maps:
  - name: local
    devices: [m0, m1]
@@ -15,7 +15,7 @@ memory_maps:
 memories:
  - {{name: m0, kind: hbm, base_address: 4096, config: {{capacity_bytes: 256}}}}
  - {{name: m1, kind: hbm, base_address: 4352, config: {{capacity_bytes: 256}}}}
-"#
+"
     )
 }
 
@@ -73,7 +73,7 @@ fn unknown_policy_and_fields_fail() {
 
 #[test]
 fn nested_caches_and_dma_validate_the_selected_map() {
-    let extra = r#"
+    let extra = r"
 operation_classes:
  add: {operations: [add], arity: 2}
 processing_elements:
@@ -89,7 +89,7 @@ connections:
  - {connect: [cache.c1.mem, 'null']}
  - {connect: [pe.p.dma, cache.c2.dev]}
  - {connect: [cache.c2.mem, 'null']}
-"#;
+";
     for mode in ["contiguous", "striped"] {
         let config: PlatformConfig = yaml_serde::from_str(&(source(mode) + extra)).unwrap();
         let error = config.validate().unwrap_err().to_string();

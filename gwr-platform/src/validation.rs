@@ -31,6 +31,7 @@ impl PlatformConfig {
         self.validate_coherence(&effective)?;
         self.validate_connections(&lookup, &effective)?;
         crate::memory_mapping::validate(self, &effective)?;
+        crate::fabric_paths::validate_geometry(self, &effective)?;
         Ok(effective)
     }
 
@@ -425,7 +426,7 @@ fn endpoint_port(
     }
 }
 
-fn cache_connection_port(
+pub(crate) fn cache_connection_port(
     port: Option<&CachePortId>,
     other: &ConnectionEndpointId,
     is_from: bool,
@@ -444,7 +445,7 @@ fn cache_connection_port(
     }
 }
 
-fn validate_port_endpoint_pair(
+pub(crate) fn validate_port_endpoint_pair(
     from: &ConnectionEndpointId,
     to: &ConnectionEndpointId,
 ) -> SimResult {

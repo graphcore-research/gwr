@@ -18,7 +18,7 @@ fn config(
         id: "source".into(),
         a: view(&[m, k], 0),
         b: view(&[n, k], 65536),
-        c: view(&[m, n], 40000000),
+        c: view(&[m, n], 40_000_000),
         invocation: 9,
         generation: 1,
         m,
@@ -163,7 +163,7 @@ impl crate::processing_element::dispatch::Dispatch for Completed {
         Ok((true, vec![]))
     }
     async fn wait_for_change(&self) {
-        futures::future::pending::<()>().await
+        futures::future::pending::<()>().await;
     }
     fn total_tasks_for_pe(&self, _: &str) -> usize {
         0
@@ -185,7 +185,7 @@ fn fixture_with_map(
     let clock = engine.default_clock();
     let map = custom_map.unwrap_or_else(|| {
         let mut map = MemoryMap::new();
-        map.insert(0, 67108864, gwr_engine::types::DeviceId(0))
+        map.insert(0, 67_108_864, gwr_engine::types::DeviceId(0))
             .unwrap();
         map
     });
@@ -231,7 +231,7 @@ fn fixture_with_map(
         &clock,
         engine.top(),
         "memory",
-        MemoryConfig::new(0, 67108864, 65536, 0)
+        MemoryConfig::new(0, 67_108_864, 65536, 0)
             .with_arrival_aware_service(16)
             .with_service_lanes(4, vec![65536])
             .with_atomic_service(
@@ -290,6 +290,10 @@ fn fixture(
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep complete setup execution and assertions of this scenario together"
+)]
 fn actual_source_stream_dispatch_scratch_survives_last_real_atomic_ack_and_cancel_drain() {
     for abandon_last in [false, true] {
         let mut engine = gwr_engine::engine::Engine::default();
@@ -381,7 +385,7 @@ fn actual_source_stream_dispatch_scratch_survives_last_real_atomic_ack_and_cance
         assert_eq!(after.stats.borrow().peak_sram_bytes, 49152);
         assert_eq!(
             after.stats.borrow().machine_ops.by_operation["matrix_mac"],
-            524288
+            524_288
         );
         assert_eq!(
             after.stats.borrow().machine_ops.by_operation["convert"],
@@ -426,7 +430,7 @@ fn happy_first_preflight_rejects_one_byte_below_lds_accumulator_and_unmapped_tai
         );
     }
     let mut wrong = c;
-    wrong.a = TensorView::new_full(Tensor::new(&[1, 512], &DataType::Bf16, 67108864).unwrap());
+    wrong.a = TensorView::new_full(Tensor::new(&[1, 512], &DataType::Bf16, 67_108_864).unwrap());
     assert!(runner.preflight_stream(&wrong).is_err());
     assert_eq!(memory.bytes_read(), 0);
 }
@@ -447,7 +451,9 @@ fn actual_partial_source_cancellation_drains_and_accounts_each_completed_reply_b
         let stop = Box::pin(clock.wait_ticks(3)?);
         match futures::future::select(pending, stop).await {
             futures::future::Either::Right(((), pending)) => drop(pending),
-            _ => panic!("full original source chunk cannot complete by cancellation point"),
+            futures::future::Either::Left(_) => {
+                panic!("full original source chunk cannot complete by cancellation point")
+            }
         }
         assert!(physical.bytes_read() > 0 && physical.bytes_read() < 49152); // reached real partial load, not setup
         // Existing issued source requests remain actor-owned and their LDS
@@ -483,7 +489,7 @@ fn actual_partial_source_cancellation_drains_and_accounts_each_completed_reply_b
     assert!(after.lsu.source_slots_for_test().iter().all(|busy| !*busy));
     assert_eq!(
         after.stats.borrow().machine_ops.by_operation["matrix_mac"],
-        524288
+        524_288
     );
     assert_eq!(
         after.stats.borrow().machine_ops.by_operation["convert"],
@@ -574,7 +580,7 @@ fn happy_nonzero_column_block_checks_every_selected_c_word_before_effects() {
             let mut map = MemoryMap::new();
             map.insert(0, end, gwr_engine::types::DeviceId(0)).unwrap();
             if wrong_device {
-                map.insert(end, 67108864 - end, gwr_engine::types::DeviceId(2))
+                map.insert(end, 67_108_864 - end, gwr_engine::types::DeviceId(2))
                     .unwrap();
             }
             let mut engine = gwr_engine::engine::Engine::default();

@@ -5,7 +5,7 @@ use gwr_platform::yaml::platform_to_yaml_str;
 
 #[test]
 fn platform_catalog_round_trips_and_validates_referenced_class() {
-    let yaml = r#"
+    let yaml = r"
 operation_classes:
   trig: { operations: [sin, cos, tan], arity: 1 }
 memory_maps:
@@ -23,7 +23,7 @@ memories:
   - { name: mem, kind: hbm, base_address: 0, config: { capacity_bytes: 1MiB } }
 connections:
   - { connect: [pe.pe0, mem.mem] }
-"#;
+";
     let platform: PlatformConfig = yaml_serde::from_str(yaml).unwrap();
     platform.validate().unwrap();
     let emitted = platform_to_yaml_str(&platform).unwrap();

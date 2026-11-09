@@ -44,12 +44,13 @@ impl ComputeWork {
     /// Select explicit instruction semantics for this work's operations.
     #[must_use]
     pub fn with_execution(mut self, execution: Option<super::ExecutionMode>) -> Self {
-        for operation in self
+        for (operation, execution) in self
             .stages
             .iter_mut()
             .flat_map(|stage| &mut stage.operations)
+            .zip(std::iter::repeat(execution))
         {
-            operation.signature.execution = execution.clone();
+            operation.signature.execution = execution;
         }
         self
     }
@@ -191,6 +192,8 @@ impl ExecutionPlan {
 /// Nonpreemptive work occupying one engine.
 #[derive(Clone, Debug)]
 pub struct EngineBatch {
+    /// Typed logical and charged service operations for each eligible engine.
+    pub actions: BTreeMap<EngineId, Vec<super::ComputeAction>>,
     /// Checked logical accumulator demand, independent of charged service
     /// work and program SRAM. Zero when no matching capacity is enabled.
     pub matrix_accumulator_bytes: u64,

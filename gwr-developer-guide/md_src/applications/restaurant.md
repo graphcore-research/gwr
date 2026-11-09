@@ -15,7 +15,7 @@ combination results in the most profitable restaurant.
 ## Run The Simulation
 
 ```bash
-cargo run --bin sim-restaurant -- --min-till-staff 1 --max-till-staff 2 --min-kitchen-staff 1 --max-kitchen-staff 4 --top-results 4
+cargo run --release --bin sim-restaurant -- --min-till-staff 1 --max-till-staff 2 --min-kitchen-staff 1 --max-kitchen-staff 4 --top-results 4
 ```
 
 The above command should produce output that looks like:
@@ -38,7 +38,7 @@ that allows you to inspect the details of what happens during a simulation of a
 given staffing configuration:
 
 ```bash
-cargo run --bin sim-restaurant-tui -- --till-staff 2 --kitchen-staff 5
+cargo run --release --bin sim-restaurant-tui -- --till-staff 2 --kitchen-staff 5
 ```
 
 ## Mapping Restaurant Ideas To GWR

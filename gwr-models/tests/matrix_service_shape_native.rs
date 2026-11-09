@@ -42,7 +42,7 @@ impl Dispatch for OneTask {
         ))
     }
     async fn wait_for_change(&self) {
-        futures::future::pending::<()>().await
+        futures::future::pending::<()>().await;
     }
     fn total_tasks_for_pe(&self, _: &str) -> usize {
         1
@@ -59,7 +59,7 @@ assignments:
  - output: Y
    axes: [m, n]
    expr: {matrix_mac: {over: [k], execution: {instruction: tensor, accumulator: fp32, sparsity: dense}, args: [{read: {tensor: A, indices: [m, k]}}, {read: {tensor: B, indices: [k, n]}}]}}
-").unwrap(), inputs:vec![view(&[m,k],DataType::Bf16,0),view(&[k,n],DataType::Bf16,65536)],outputs:vec![view(&[m,n],DataType::Fp32,131072)] }
+").unwrap(), inputs:vec![view(&[m,k],DataType::Bf16,0),view(&[k,n],DataType::Bf16,65536)],outputs:vec![view(&[m,n],DataType::Fp32,131_072)] }
 }
 struct Observed {
     result: Result<(), SimError>,
@@ -73,7 +73,7 @@ fn execute(task: ProgramTaskConfig, enabled: bool) -> Observed {
     let mut engine = Engine::default();
     let clock = engine.default_clock();
     let mut map = MemoryMap::new();
-    map.insert(0, 262144, DeviceId(0)).unwrap();
+    map.insert(0, 262_144, DeviceId(0)).unwrap();
     let map = Rc::new(map);
     let policy = if enabled {
         ", matrix_service_tile: {m: 16, n: 16, k: 16}"
@@ -96,7 +96,7 @@ fn execute(task: ProgramTaskConfig, enabled: bool) -> Observed {
         &clock,
         engine.top(),
         "hbm",
-        MemoryConfig::new(0, 262144, 65536, 0),
+        MemoryConfig::new(0, 262_144, 65536, 0),
     )
     .unwrap();
     pe.connect_port_tx(memory.port_rx()).unwrap();
@@ -126,7 +126,7 @@ fn run(m: usize, n: usize, k: usize, enabled: bool) -> (u64, usize, usize) {
     assert_eq!(observed.ops, m * n * k);
     let traffic = (2 * (m * k + k * n), 4 * m * n);
     assert_eq!(observed.traffic, traffic);
-    assert_eq!(observed.backing, (131072, 65536));
+    assert_eq!(observed.backing, (131_072, 65536));
     println!(
         "matrix m={m} n={n} k={k} enabled={enabled} ticks={} MAC={} read={} write={}",
         observed.ticks,
@@ -220,7 +220,7 @@ fn actual_reduction_chunks_round_independently_without_extra_payload_or_macs() {
     assert_eq!(selected.ticks, baseline.ticks + 16);
     assert_eq!(selected.ops, 8192);
     assert_eq!(selected.traffic, (2048, 1024));
-    assert_eq!(selected.backing, (2228224, 65536));
+    assert_eq!(selected.backing, (2_228_224, 65536));
     assert_eq!(run(16, 16, 32, true).0, run(16, 16, 32, false).0);
     println!(
         "chunked K17+15 logical8192 service12288 baseline_ticks={} selected_ticks={}",
@@ -244,7 +244,7 @@ fn transposed_direct_operands_and_tails_use_symbolic_roles() {
     shaped.result.unwrap();
     assert_eq!(shaped.ops, 30);
     assert_eq!(shaped.traffic, (50, 24));
-    assert_eq!(shaped.backing, (131072, 65536));
+    assert_eq!(shaped.backing, (131_072, 65536));
     assert_eq!(shaped.ticks, plain.ticks + 15);
 }
 
@@ -262,7 +262,7 @@ fn batched_legacy_task_is_rejected_before_effects_only_when_policy_enabled() {
     task.inputs[1] =
         TensorView::new_full(Tensor::new(&[2, 16, 16], &DataType::Bf16, 65536).unwrap());
     task.outputs[0] =
-        TensorView::new_full(Tensor::new(&[2, 16, 16], &DataType::Fp32, 131072).unwrap());
+        TensorView::new_full(Tensor::new(&[2, 16, 16], &DataType::Fp32, 131_072).unwrap());
     let plain = execute(task.clone(), false);
     plain.result.unwrap();
     assert_eq!(plain.ops, 8192);

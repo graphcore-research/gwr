@@ -1,0 +1,18 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+# Explicitly stage from the neighbouring chip; the compute LSU stays local.
+nodes:
+  - {
+      id: remote,
+      kind: tensor,
+      config: { addr: 4096, dtype: int8, shape: [64] },
+    }
+  - { id: local, kind: tensor, config: { addr: 0, dtype: int8, shape: [64] } }
+  - {
+      id: stage,
+      kind: transfer,
+      pe: "rack[0]/board[0]/chip[0]/cpu",
+      buffer_bytes: 32,
+    }
+edges:
+  - { from: remote, to: stage, kind: data }
+  - { from: stage, to: local, kind: data }

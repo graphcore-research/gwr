@@ -167,10 +167,10 @@ impl ScheduledTimetable {
                 .cloned()
                 .unwrap_or_default();
             for index in ready {
-                if let Ok(Some(due)) = self.due(index) {
-                    if due > now {
-                        earliest = Some(earliest.map_or(due, |old: u64| old.min(due)));
-                    }
+                if let Ok(Some(due)) = self.due(index)
+                    && due > now
+                {
+                    earliest = Some(earliest.map_or(due, |old: u64| old.min(due)));
                 }
             }
         }
@@ -187,11 +187,11 @@ impl Dispatch for ScheduledTimetable {
         let now = self.clock.tick_now().tick();
         let mut released = vec![];
         for index in ready {
-            if let Some(due) = self.due(index)? {
-                if due <= now {
-                    released.push(index);
-                    self.timings.borrow_mut()[index].eligible_tick = Some(due);
-                }
+            if let Some(due) = self.due(index)?
+                && due <= now
+            {
+                released.push(index);
+                self.timings.borrow_mut()[index].eligible_tick = Some(due);
             }
         }
         Ok((done, released))

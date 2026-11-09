@@ -5,14 +5,14 @@
 //!
 //! For latest usage run:
 //! ```bash
-//! cargo run --bin flaky-component -- --help
+//! cargo run --release --bin flaky-component -- --help
 //! ```
 //!
 //! # Example
 //!
 //! Send 10000 packets and drop 50% of them:
 //! ```bash
-//! $ cargo run --bin flaky-component -- --seed 1 --drop 0.5 --num-packets 10000
+//! $ cargo run --release --bin flaky-component -- --seed 1 --drop 0.5 --num-packets 10000
 //! Sink received 4934/10000
 //! ```
 

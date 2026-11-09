@@ -5,7 +5,7 @@ use gwr_engine::types::SimError;
 
 use super::{MemoryRegion, ResolvedAddress};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct Striping {
     members: Vec<MemoryRegion>,
     stripe: u64,
@@ -51,6 +51,12 @@ impl Striping {
             start,
             end,
         })
+    }
+    pub(super) fn members(&self) -> &[MemoryRegion] {
+        &self.members
+    }
+    pub(super) fn stripe_bytes(&self) -> u64 {
+        self.stripe
     }
     pub(super) fn logical_region(&self) -> MemoryRegion {
         MemoryRegion {

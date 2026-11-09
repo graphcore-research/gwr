@@ -233,8 +233,14 @@ fn build_fabrics(args: &Args) -> Vec<FabricSection> {
             ticks_overhead: Some(DEFAULT_FABRIC_TICKS_OVERHEAD),
             rx_buffer_bytes: Some(DEFAULT_FABRIC_RX_BUFFER_BYTES),
             tx_buffer_bytes: Some(DEFAULT_FABRIC_TX_BUFFER_BYTES),
-            port_bits_per_tick: Some(DEFAULT_FABRIC_PORT_BITS_PER_TICK),
-            internal_link_bits_per_tick: None,
+            port_bits_per_tick: matches!(args.fabric_model, FabricKind::Functional)
+                .then_some(DEFAULT_FABRIC_PORT_BITS_PER_TICK),
+            paths: matches!(args.fabric_model, FabricKind::Routed).then(|| {
+                gwr_models::fabric::paths::FabricPathConfig {
+                    bw_bits_per_tick: DEFAULT_FABRIC_PORT_BITS_PER_TICK,
+                    ..Default::default()
+                }
+            }),
             routing: Some(args.fabric_routing),
             port_selection: None,
         },

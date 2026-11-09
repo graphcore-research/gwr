@@ -8,6 +8,7 @@ use gwr_engine::types::{SimError, SimResult};
 use gwr_models::processing_element::program::syntax::{ProgramSpec, TileSpec};
 use gwr_models::processing_element::program::tile::plan_tiles;
 use gwr_models::processing_element::program::validate::{RegionBindings, validate_program};
+use gwr_models::processing_element::task::ProgramTaskConfig;
 use gwr_models::processing_element::tensors::{Tensor, TensorView};
 
 use crate::program_compose::ProgramCatalog;
@@ -29,6 +30,10 @@ pub struct TimetableGraph {
 }
 
 impl TimetableGraph {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Construct and validate graph indices in one ordered initialization pass."
+    )]
     pub(crate) fn build(file: TimetableFile) -> Result<Self, SimError> {
         use ComputeTensorDirection::{Input, Output};
         let atomic_spec = file.atomic_effects.clone();
@@ -161,6 +166,7 @@ impl TimetableGraph {
         self.atomic_effects.as_ref()
     }
 
+    #[must_use]
     pub fn nodes(&self) -> &[TimetableNode] {
         &self.nodes
     }
@@ -266,6 +272,94 @@ impl TimetableGraph {
                 .collect(),
         })
     }
+
+    /// Build immutable compute-task inputs for engine-free analytical models.
+    /// The graph has already validated task programs, tensor bindings and
+    /// dependency structure; platform-specific address/capability checks are
+    /// performed by the analyzer consuming this snapshot.
+    pub fn analysis_activities(&self) -> Result<Vec<AnalysisActivity>, SimError> {
+        let mut activities = Vec::new();
+        for (node_index, node) in self.nodes.iter().enumerate() {
+            if !node.is_compute() && !node.is_transfer() {
+                continue;
+            }
+            let pe_name = node
+                .pe()
+                .ok_or_else(|| SimError(format!("Task node '{}' has no PE", node.id())))?;
+            let views = self.compute_views(node_index).ok_or_else(|| {
+                SimError(format!("Task node '{}' has no tensor views", node.id()))
+            })?;
+            let (task, transfer_views) = if node.is_transfer() {
+                let source = views.inputs.first().and_then(Clone::clone).ok_or_else(|| {
+                    SimError(format!("transfer {} has unbound source", node.id()))
+                })?;
+                let destination =
+                    views
+                        .outputs
+                        .first()
+                        .and_then(Clone::clone)
+                        .ok_or_else(|| {
+                            SimError(format!("transfer {} has unbound destination", node.id()))
+                        })?;
+                (None, Some((source, destination)))
+            } else {
+                let task = ProgramTaskConfig {
+                    id: node.id().to_owned(),
+                    program: node.program().unwrap().clone(),
+                    tiling: node.tiling().cloned(),
+                    pipeline: node.pipeline().cloned(),
+                    inputs: views
+                        .inputs
+                        .into_iter()
+                        .collect::<Option<Vec<_>>>()
+                        .ok_or_else(|| {
+                            SimError(format!("program {} has unbound input", node.id()))
+                        })?,
+                    outputs: views
+                        .outputs
+                        .into_iter()
+                        .collect::<Option<Vec<_>>>()
+                        .ok_or_else(|| {
+                            SimError(format!("program {} has unbound output", node.id()))
+                        })?,
+                };
+                (Some(task), None)
+            };
+            let mut predecessors = std::collections::BTreeSet::new();
+            for &predecessor in node.predecessors() {
+                let predecessor_node = &self.nodes[predecessor];
+                if predecessor_node.is_compute() || predecessor_node.is_transfer() {
+                    predecessors.insert(predecessor);
+                } else if predecessor_node.tensor().is_some() {
+                    for &producer in predecessor_node.predecessors() {
+                        if self.nodes[producer].is_compute() || self.nodes[producer].is_transfer() {
+                            predecessors.insert(producer);
+                        }
+                    }
+                }
+            }
+            activities.push(AnalysisActivity {
+                node_index,
+                id: node.id().to_owned(),
+                pe_name: pe_name.to_owned(),
+                task,
+                transfer_views,
+                predecessors: predecessors.into_iter().collect(),
+            });
+        }
+        Ok(activities)
+    }
+}
+
+/// A validated compute or transfer node and its incoming task dependencies.
+#[derive(Clone, Debug)]
+pub struct AnalysisActivity {
+    pub node_index: usize,
+    pub id: String,
+    pub pe_name: String,
+    pub task: Option<ProgramTaskConfig>,
+    pub transfer_views: Option<(TensorView, TensorView)>,
+    pub predecessors: Vec<usize>,
 }
 
 #[derive(Debug)]
@@ -707,6 +801,7 @@ impl TimetableNode {
         }
     }
 
+    #[must_use]
     pub fn tiling(&self) -> Option<&TileSpec> {
         match &self.kind {
             TimetableNodeKind::Compute { tiling, .. } => tiling.as_ref(),

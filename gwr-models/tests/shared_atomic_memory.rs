@@ -378,7 +378,7 @@ fn abandoned_receive_cannot_reuse_the_internal_pending_put_or_panic_port_state()
         let one_poll = Box::pin(async {});
         match select(future, one_poll).await {
             Either::Right(((), pending)) => drop(pending),
-            _ => panic!("reply cannot exist before real service"),
+            Either::Left(_) => panic!("reply cannot exist before real service"),
         }
         let result = target.execute(7, 4100, pair(4100)).await?;
         assert_eq!(result.control_value, None);

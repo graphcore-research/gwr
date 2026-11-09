@@ -28,19 +28,55 @@ pub struct ResolvedAddress {
     pub contiguous_bytes: u128,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Window {
     region: MemoryRegion,
     striping: Option<Striping>,
 }
 
 /// Compact address map with optional round-robin physical-memory striping.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct MemoryMap {
     windows: BTreeMap<u64, Window>,
 }
 
 impl MemoryMap {
+    /// Every real physical member region, in logical-window and member order.
+    /// Striped groups expose their members, never their synthetic logical
+    /// region.
+    pub fn physical_regions(&self) -> impl Iterator<Item = &MemoryRegion> {
+        self.windows.values().flat_map(|window| {
+            window
+                .striping
+                .as_ref()
+                .map_or_else(
+                    || std::slice::from_ref(&window.region),
+                    |striping| striping.members(),
+                )
+                .iter()
+        })
+    }
+
+    pub(crate) fn logical_windows(
+        &self,
+    ) -> impl Iterator<Item = (&MemoryRegion, Option<(&[MemoryRegion], u64)>)> {
+        self.windows.values().map(|window| {
+            (
+                &window.region,
+                window
+                    .striping
+                    .as_ref()
+                    .map(|striping| (striping.members(), striping.stripe_bytes())),
+            )
+        })
+    }
+
+    /// Whether this map contains a striped window.
+    #[must_use]
+    pub fn has_striping(&self) -> bool {
+        self.windows.values().any(|w| w.striping.is_some())
+    }
+
     #[must_use]
     pub fn new() -> Self {
         Self::default()

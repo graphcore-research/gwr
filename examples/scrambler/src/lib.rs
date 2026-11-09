@@ -4,20 +4,20 @@
 //!
 //! For latest usage run:
 //! ```bash
-//! cargo run --bin scrambler -- --help
+//! cargo run --release --bin scrambler -- --help
 //! ```
 //!
 //! # Examples
 //!
 //! Get the two inputs in the same order:
 //! ```bash
-//! $ cargo run --bin scrambler
+//! $ cargo run --release --bin scrambler
 //! Input order: 1, 2
 //! ```
 //!
 //! Switch the two inputs:
 //! ```bash
-//! $ cargo run --bin scrambler -- -s
+//! $ cargo run --release --bin scrambler -- -s
 //! Input order: 2, 1
 //! ```
 //!

@@ -280,6 +280,7 @@ pub enum PackedMatrixFormat {
 
 impl PackedMatrixFormat {
     /// Required values per block, independent of physical tail padding.
+    #[must_use]
     pub fn block_size(self) -> usize {
         match self {
             Self::Nvfp4 => 16,
@@ -287,6 +288,7 @@ impl PackedMatrixFormat {
         }
     }
     /// Exact matrix instruction tag for this operand pair.
+    #[must_use]
     pub fn instruction(self) -> &'static str {
         match self {
             Self::Nvfp4 => "nvfp4",

@@ -214,6 +214,10 @@ impl SplitKController {
     pub async fn execute(&self, address: u64, effect: Effect) -> Result<Completion, SimError> {
         self.execute_with_operand(address, effect, None).await
     }
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Keep the ordered fetch reset and publication protocol visible together"
+    )]
     pub(crate) async fn execute_with_operand(
         &self,
         address: u64,
@@ -296,10 +300,10 @@ impl SplitKController {
                     .get_mut(&participant)
                     .unwrap()
                     .fetched = Some(old);
-                if old == g.participants - 1 {
-                    if state.observation.last.replace(participant).is_some() {
-                        return Err(error("multiple actual last participants"));
-                    }
+                if old == g.participants - 1
+                    && state.observation.last.replace(participant).is_some()
+                {
+                    return Err(error("multiple actual last participants"));
                 }
                 drop(state);
                 self.changed.notify();
@@ -310,23 +314,25 @@ impl SplitKController {
                 effect: reset @ (ControlEffect::ResetSemaphore | ControlEffect::ResetSignal),
                 ..
             } => {
-                let state = self.state.borrow();
-                let last = state
-                    .observation
-                    .last
-                    .ok_or_else(|| error("dynamic reset lacks actual last fetch receipt"))?;
-                if state
-                    .observation
-                    .participants
-                    .values()
-                    .any(|p| p.fetched.is_none())
-                {
-                    return Err(error("reset must follow every actual fetch ACK"));
-                }
-                if reset == ControlEffect::ResetSignal && !state.observation.reset_semaphore {
-                    return Err(error("signal reset must follow semaphore reset ACK"));
-                }
-                drop(state);
+                let last = {
+                    let state = self.state.borrow();
+                    let last = state
+                        .observation
+                        .last
+                        .ok_or_else(|| error("dynamic reset lacks actual last fetch receipt"))?;
+                    if state
+                        .observation
+                        .participants
+                        .values()
+                        .any(|p| p.fetched.is_none())
+                    {
+                        return Err(error("reset must follow every actual fetch ACK"));
+                    }
+                    if reset == ControlEffect::ResetSignal && !state.observation.reset_semaphore {
+                        return Err(error("signal reset must follow semaphore reset ACK"));
+                    }
+                    last
+                };
                 let actual = Effect::Control {
                     invocation: g.invocation,
                     generation: g.generation,
@@ -362,10 +368,11 @@ impl SplitKController {
                 loop {
                     let changed = self.changed.listen();
                     self.live()?;
-                    let state = self.state.borrow();
-                    let waits = state.observation.last == Some(participant)
-                        && !state.observation.reset_signal;
-                    drop(state);
+                    let waits = {
+                        let state = self.state.borrow();
+                        state.observation.last == Some(participant)
+                            && !state.observation.reset_signal
+                    };
                     if !waits {
                         break;
                     }
@@ -422,6 +429,10 @@ mod tests {
     use crate::memory::memory_access::MemoryAccess;
     use crate::memory::{Memory, MemoryConfig};
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Keep the ordered fetch reset and publication protocol visible together"
+    )]
     fn actual_granted_fetch_cancel_drains_real_ack_without_output_reset_or_reusable_generation() {
         for cancel in [false, true] {
             let mut engine = Engine::default();
@@ -600,6 +611,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Keep the ordered fetch reset and publication protocol visible together"
+    )]
     fn actual_sibling_drop_during_fetch_ack_drains_without_continuation() {
         for abandon in [false, true] {
             let mut engine = Engine::default();

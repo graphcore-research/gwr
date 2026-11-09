@@ -15,6 +15,18 @@ pub struct CacheConfig {
 }
 
 impl CacheConfig {
+    /// Fixed cache response delay in clock ticks.
+    #[must_use]
+    pub fn delay_ticks(&self) -> usize {
+        self.delay_ticks
+    }
+
+    /// Rate used independently by request and memory-response handlers.
+    #[must_use]
+    pub fn bw_bytes_per_tick(&self) -> usize {
+        self.bw_bytes_per_tick
+    }
+
     #[must_use]
     pub fn new(
         line_size_bytes: usize,

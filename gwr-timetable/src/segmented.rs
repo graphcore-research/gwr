@@ -38,6 +38,7 @@ pub struct PublishedSegment {
 }
 impl PublishedSegment {
     /// Actual published task handles, prepared before the atomic commit.
+    #[must_use]
     pub fn handles(&self) -> &BTreeMap<String, PublishedTaskHandle> {
         &self.handles
     }
@@ -71,20 +72,24 @@ pub struct CompletedTaskFact {
 }
 impl CompletedTaskFact {
     /// Original monotone native task identity.
+    #[must_use]
     pub fn id(&self) -> usize {
         self.handle.id()
     }
     /// Tick written by the actual native completion callback.
+    #[must_use]
     pub fn completed_tick(&self) -> u64 {
         self.completed_tick
     }
     /// Durable branded prerequisite, valid after graph retirement.
+    #[must_use]
     pub fn handle(&self) -> &PublishedTaskHandle {
         &self.handle
     }
 }
 impl PublishedTaskHandle {
     /// Numeric dispatch index, interpreted only within the owning dispatcher.
+    #[must_use]
     pub fn id(&self) -> usize {
         self.fact.id
     }
@@ -155,6 +160,7 @@ pub struct SegmentDispatcher {
 }
 impl SegmentDispatcher {
     /// Construct an initially empty, open dispatcher on an existing platform.
+    #[must_use]
     pub fn new(platform: Rc<Platform>, clock: Clock, max_resident_nodes: usize) -> Self {
         Self {
             platform,
@@ -204,6 +210,10 @@ impl SegmentDispatcher {
     }
     /// Publish with owner-branded actual prerequisites. Completed facts remain
     /// usable after retirement. Raw numeric prerequisites are resident-only.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "All publication validation and handle preparation must precede the single atomic state commit."
+    )]
     pub fn publish_boundaries_after(
         &self,
         timetable: Rc<Timetable>,
@@ -212,7 +222,7 @@ impl SegmentDispatcher {
         prerequisites: &[PublishedTaskHandle],
     ) -> Result<(PublishedSegment, Vec<PublishedTaskHandle>), SimError> {
         let s = self.state.borrow();
-        self.check_error(&s)?;
+        Self::check_error(&s)?;
         if s.closed {
             return Err(SimError("segment admissions closed".into()));
         }
@@ -236,10 +246,10 @@ impl SegmentDispatcher {
         }
         let mut parent_handles = release
             .after
-            .iter()
+            .into_iter()
             .map(|id| PublishedTaskHandle {
                 owner: self.owner.clone(),
-                fact: s.times[id].clone(),
+                fact: s.times[&id].clone(),
             })
             .collect::<Vec<_>>();
         for handle in prerequisites {
@@ -435,7 +445,7 @@ impl SegmentDispatcher {
     /// Prohibit publication and wake PE runners; outstanding tasks still drain.
     pub fn close(&self) -> SimResult {
         let mut s = self.state.borrow_mut();
-        self.check_error(&s)?;
+        Self::check_error(&s)?;
         s.closed = true;
         drop(s);
         self.changed.notify();
@@ -490,7 +500,7 @@ impl SegmentDispatcher {
     /// unavailable; callers retain actual typed handles before retirement.
     pub fn task_handle(&self, id: usize) -> Result<PublishedTaskHandle, SimError> {
         let s = self.state.borrow();
-        self.check_error(&s)?;
+        Self::check_error(&s)?;
         Ok(PublishedTaskHandle {
             owner: self.owner.clone(),
             fact: s
@@ -508,7 +518,7 @@ impl SegmentDispatcher {
                 "published task belongs to another dispatcher".into(),
             ));
         }
-        self.check_error(&self.state.borrow())?;
+        Self::check_error(&self.state.borrow())?;
         Ok(handle.fact.timing.borrow().clone())
     }
     /// Certify only an actual completed task; no caller-provided clock value is
@@ -530,7 +540,8 @@ impl SegmentDispatcher {
     /// may remain active. Failure leaves all graph/fact/counter state
     /// unchanged.
     pub fn retire_segment(&self, published: &PublishedSegment) -> SimResult {
-        self.retire_keys(&[published.key.clone()]).map(|_| ())
+        self.retire_keys(std::slice::from_ref(&published.key))
+            .map(|_| ())
     }
     /// Retire all currently drained graphs, retaining pending physical hazards
     /// and durable facts held by callers/remaining releases. Storage is not
@@ -538,7 +549,7 @@ impl SegmentDispatcher {
     pub fn retire_drained(&self) -> Result<usize, SimError> {
         let keys = {
             let s = self.state.borrow();
-            self.check_error(&s)?;
+            Self::check_error(&s)?;
             s.segments
                 .iter()
                 .filter(|segment| Self::segment_drained(&s, segment))
@@ -554,7 +565,7 @@ impl SegmentDispatcher {
     }
     fn retire_keys(&self, keys: &[Rc<()>]) -> Result<usize, SimError> {
         let mut s = self.state.borrow_mut();
-        self.check_error(&s)?;
+        Self::check_error(&s)?;
         if keys
             .iter()
             .enumerate()
@@ -607,7 +618,7 @@ impl SegmentDispatcher {
     /// Inspect an actually published task's owner PE and native category.
     pub fn task_metadata(&self, id: usize) -> Result<PublishedTaskMetadata, SimError> {
         let s = self.state.borrow();
-        self.check_error(&s)?;
+        Self::check_error(&s)?;
         s.times
             .get(&id)
             .map(|f| f.metadata.clone())
@@ -616,7 +627,7 @@ impl SegmentDispatcher {
     /// Actual resident task timing. Retired numeric IDs are unavailable.
     pub fn timing(&self, id: usize) -> Result<TaskTiming, SimError> {
         let s = self.state.borrow();
-        self.check_error(&s)?;
+        Self::check_error(&s)?;
         s.times
             .get(&id)
             .map(|f| f.timing.borrow().clone())
@@ -631,7 +642,7 @@ impl SegmentDispatcher {
             .map(|(id, f)| (*id, f.timing.borrow().clone()))
             .collect()
     }
-    fn check_error(&self, s: &State) -> SimResult {
+    fn check_error(s: &State) -> SimResult {
         if let Some(e) = &s.failure {
             Err(SimError(e.clone()))
         } else {
@@ -667,14 +678,15 @@ impl SegmentDispatcher {
     }
     fn timer(&self, pe: &str) -> Result<Option<u64>, SimError> {
         let s = self.state.borrow();
-        self.check_error(&s)?;
+        Self::check_error(&s)?;
         let now = self.clock.tick_now().tick();
         let mut earliest = None;
         for segment in &s.segments {
-            if let Some(due) = Self::due(&segment.release)? {
-                if due > now && !segment.timetable.ready_task_indices(pe)?.1.is_empty() {
-                    earliest = Some(earliest.map_or(due, |x: u64| x.min(due)));
-                }
+            if let Some(due) = Self::due(&segment.release)?
+                && due > now
+                && !segment.timetable.ready_task_indices(pe)?.1.is_empty()
+            {
+                earliest = Some(earliest.map_or(due, |x: u64| x.min(due)));
             }
         }
         Ok(earliest)
@@ -684,13 +696,13 @@ impl SegmentDispatcher {
 impl Dispatch for SegmentDispatcher {
     fn task_by_id(&self, id: usize) -> Result<Task, SimError> {
         let s = self.state.borrow();
-        self.check_error(&s)?;
+        Self::check_error(&s)?;
         let (segment, local) = Self::route(&s, id)?;
         segment.timetable.task_by_id(local)
     }
     fn set_task_active(&self, id: usize) -> SimResult {
         let s = self.state.borrow();
-        self.check_error(&s)?;
+        Self::check_error(&s)?;
         let (segment, local) = Self::route(&s, id)?;
         let due = Self::due(&segment.release)?
             .ok_or_else(|| SimError("segment task unreleased".into()))?;
@@ -711,7 +723,7 @@ impl Dispatch for SegmentDispatcher {
     }
     fn set_task_completed(&self, id: usize) -> SimResult {
         let mut s = self.state.borrow_mut();
-        self.check_error(&s)?;
+        Self::check_error(&s)?;
         let (segment, local) = Self::route(&s, id)?;
         let time = s.times[&id].timing.borrow();
         if time.started_tick.is_none() || time.completed_tick.is_some() {
@@ -732,7 +744,7 @@ impl Dispatch for SegmentDispatcher {
     fn ready_task_indices(&self, pe: &str) -> Result<(bool, Vec<usize>), SimError> {
         self.platform.pe_idx_from_name(pe)?;
         let s = self.state.borrow();
-        self.check_error(&s)?;
+        Self::check_error(&s)?;
         let mut done = s.closed;
         let mut ready = vec![];
         let now = self.clock.tick_now().tick();
@@ -768,10 +780,10 @@ impl Dispatch for SegmentDispatcher {
                 if changed.as_mut().poll(cx).is_ready() {
                     return Poll::Ready(());
                 }
-                if let Some(t) = timer.as_mut() {
-                    if t.as_mut().poll(cx).is_ready() {
-                        return Poll::Ready(());
-                    }
+                if let Some(t) = timer.as_mut()
+                    && t.as_mut().poll(cx).is_ready()
+                {
+                    return Poll::Ready(());
                 }
                 Poll::Pending
             })

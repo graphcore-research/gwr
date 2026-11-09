@@ -257,6 +257,10 @@ fn unsupported_existing_cache_dma_or_routed_paths_reject_before_engine_registrat
     }
 }
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep complete setup execution and assertions of this scenario together"
+)]
 fn actual_ordinary_atomic_and_control_ports_share_one_byte_server_and_real_poll_values() {
     let mut engine = Engine::new(&gwr_track::tracker::dev_null_tracker());
     let clock = engine.default_clock();

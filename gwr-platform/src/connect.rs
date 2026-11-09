@@ -4,42 +4,73 @@ use std::rc::Rc;
 
 use gwr_engine::engine::Engine;
 use gwr_engine::port::{InPort, OutPort};
-use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::types::{SimError, SimResult};
 use gwr_models::cache::Cache;
-use gwr_models::cache::coherency_manager::CoherencyManager;
 use gwr_models::fabric::Fabric;
-use gwr_models::memory::Memory;
 use gwr_models::memory::memory_access::MemoryAccess;
-use gwr_models::processing_element::ProcessingElement;
+use gwr_models::model::MemoryEndpoint;
 use gwr_track::debug;
 use gwr_track::entity::GetEntity;
 
 use crate::Platform;
 use crate::connection_id::{CachePortId, ConnectionEndpointId, parse_connection_endpoint_id};
 use crate::types::PlatformConfig;
+use crate::validation::{cache_connection_port, validate_port_endpoint_pair};
 
-pub enum PortId<'a> {
-    Manager {
-        manager: &'a Rc<CoherencyManager>,
-    },
-    Null,
-    Pe {
-        pe: &'a Rc<ProcessingElement>,
-        dma: bool,
-    },
-    Cache {
-        cache: &'a Rc<Cache<MemoryAccess>>,
-        port: Option<CachePortId>,
-    },
-    Mem {
-        memory: &'a Rc<Memory<MemoryAccess>>,
-    },
-    FabricTile {
-        fabric: &'a Rc<dyn Fabric<MemoryAccess>>,
-        port_idx: usize,
-    },
+fn resolve_endpoint<'a>(
+    platform: &'a Platform,
+    endpoint: &ConnectionEndpointId,
+    other: &ConnectionEndpointId,
+    is_from: bool,
+) -> Result<MemoryEndpoint<'a>, SimError> {
+    Ok(match endpoint {
+        ConnectionEndpointId::Null => unreachable!("null connections handled separately"),
+        ConnectionEndpointId::CoherencyManager { name } => {
+            let manager = platform.coherency_manager(name)?;
+            MemoryEndpoint::detailed(|| manager.port_rx(), |p| manager.connect_port_tx(p))
+        }
+        ConnectionEndpointId::Pe { name } => {
+            if let Some(name) = name.strip_suffix(".dma") {
+                let pe = platform.pe(name)?;
+                MemoryEndpoint::detailed(|| pe.dma_rx(), |p| pe.connect_dma_tx(p))
+            } else {
+                platform.pe_model(name)?.endpoint()
+            }
+        }
+        ConnectionEndpointId::Mem { name } => platform.memory_model(name)?.endpoint(),
+        ConnectionEndpointId::Cache { name, port } => {
+            let cache = platform.cache_model(name)?;
+            match cache_connection_port(port.as_ref(), other, is_from) {
+                "dev" => cache.device_endpoint(),
+                "mem" => cache.memory_endpoint(),
+                _ => unreachable!("validated cache port"),
+            }
+        }
+        ConnectionEndpointId::FabricPort {
+            fabric,
+            column,
+            row,
+            port,
+        } => {
+            let fabric = platform.fabric_model(fabric)?;
+            let index = fabric.col_row_port_to_fabric_port_index(*column, *row, *port);
+            fabric.endpoint(index)
+        }
+    })
+}
+
+// Preserve the old detailed connector's direction order, including reversed
+// declarations. Cache-to-cache keeps declaration order for mem -> dev
+// inference.
+fn connection_rank(endpoint: &ConnectionEndpointId) -> u8 {
+    match endpoint {
+        ConnectionEndpointId::Null => 4,
+        ConnectionEndpointId::CoherencyManager { .. } | ConnectionEndpointId::Pe { .. } => 0,
+        ConnectionEndpointId::Cache { .. } => 1,
+        ConnectionEndpointId::Mem { .. } => 2,
+        ConnectionEndpointId::FabricPort { .. } => 3,
+    }
 }
 
 pub fn connect_ports(
@@ -48,98 +79,50 @@ pub fn connect_ports(
     platform: &Platform,
     cfg: &PlatformConfig,
 ) -> SimResult {
-    if let Some(connections) = &cfg.connections {
-        for c in connections {
-            if c.connect.len() != 2 {
-                return sim_error!(
-                    "Invalid 'connect' with {} entries (only 2 expected)",
-                    c.connect.len()
-                );
+    for connection in cfg.connections.iter().flatten() {
+        let [from, to] = connection.connect.as_slice() else {
+            return Err(SimError(format!(
+                "Invalid 'connect' with {} entries (only 2 expected)",
+                connection.connect.len()
+            )));
+        };
+        let mut a = parse_connection_endpoint_id(from)?;
+        let mut b = parse_connection_endpoint_id(to)?;
+        validate_port_endpoint_pair(&a, &b)?;
+        if matches!(a, ConnectionEndpointId::Null) || matches!(b, ConnectionEndpointId::Null) {
+            let endpoint = if matches!(a, ConnectionEndpointId::Null) {
+                &b
+            } else {
+                &a
+            };
+            match endpoint {
+                ConnectionEndpointId::Cache { name, port } => {
+                    connect_cache_to_null(engine, clock, platform.cache(name)?, port.as_ref())?;
+                }
+                ConnectionEndpointId::FabricPort {
+                    fabric,
+                    column,
+                    row,
+                    port,
+                } => {
+                    let fabric = platform.fabric(fabric)?;
+                    let index = fabric.col_row_port_to_fabric_port_index(*column, *row, *port);
+                    connect_fabric_to_null(engine, clock, fabric, index)?;
+                }
+                _ => unreachable!("validated null connection"),
             }
-
-            let from = parse_port_id(platform, &c.connect[0])?;
-            let to = parse_port_id(platform, &c.connect[1])?;
-            connect_port(engine, clock, platform, &from, &to)?;
+            continue;
         }
+        if connection_rank(&a) > connection_rank(&b) {
+            std::mem::swap(&mut a, &mut b);
+        }
+        let left = resolve_endpoint(platform, &a, &b, true)?;
+        let right = resolve_endpoint(platform, &b, &a, false)?;
+        debug!(platform.entity(); "Connect {from} to {to}");
+        left.connect_detailed(&right)
+            .map_err(|error| SimError(format!("Connection '{from}' -> '{to}': {error}")))?;
     }
     Ok(())
-}
-
-pub fn parse_port_id<'a>(platform: &'a Platform, s: &str) -> Result<PortId<'a>, SimError> {
-    let endpoint = parse_connection_endpoint_id(s)?;
-    resolve_port_id(platform, &endpoint)
-}
-
-fn resolve_port_id<'a>(
-    platform: &'a Platform,
-    endpoint: &ConnectionEndpointId,
-) -> Result<PortId<'a>, SimError> {
-    Ok(match endpoint {
-        ConnectionEndpointId::Null => PortId::Null,
-        ConnectionEndpointId::CoherencyManager { name } => PortId::Manager {
-            manager: platform.coherency_manager(name)?,
-        },
-        ConnectionEndpointId::Pe { name } => PortId::Pe {
-            pe: platform.pe(name.strip_suffix(".dma").unwrap_or(name))?,
-            dma: name.ends_with(".dma"),
-        },
-        ConnectionEndpointId::Cache { name, port } => PortId::Cache {
-            cache: platform.cache(name)?,
-            port: port.clone(),
-        },
-        ConnectionEndpointId::Mem { name } => PortId::Mem {
-            memory: platform.memory(name)?,
-        },
-        ConnectionEndpointId::FabricPort {
-            fabric,
-            column,
-            row,
-            port,
-        } => {
-            let fabric = platform.fabric(fabric)?;
-            let port_idx = fabric.col_row_port_to_fabric_port_index(*column, *row, *port);
-            PortId::FabricTile { fabric, port_idx }
-        }
-    })
-}
-
-fn connect_port(
-    engine: &Engine,
-    clock: &Clock,
-    platform: &Platform,
-    from: &PortId,
-    to: &PortId,
-) -> SimResult {
-    match (from, to) {
-        (PortId::Null, PortId::FabricTile { fabric, port_idx })
-        | (PortId::FabricTile { fabric, port_idx }, PortId::Null) => {
-            return connect_fabric_to_null(engine, clock, fabric, *port_idx);
-        }
-        (PortId::Null, PortId::Cache { cache, port })
-        | (PortId::Cache { cache, port }, PortId::Null) => {
-            return connect_cache_to_null(engine, clock, cache, port.as_ref());
-        }
-        (PortId::Null, _) | (_, PortId::Null) => {
-            return sim_error!("Null can only connect to a Fabric or Cache port");
-        }
-        _ => {}
-    }
-    match from {
-        PortId::Manager { manager } => match to {
-            PortId::FabricTile { fabric, port_idx } => {
-                manager.connect_port_tx(fabric.port_ingress_i(*port_idx))?;
-                fabric.connect_port_egress_i(*port_idx, manager.port_rx())
-            }
-            _ => sim_error!("Coherency Managers must connect to a Fabric"),
-        },
-        PortId::Null => unreachable!("null connections handled above"),
-        PortId::Pe { pe, dma } => connect_pe_to(platform, pe, *dma, to),
-        PortId::Cache { cache, port } => connect_cache_to(platform, cache, port.as_ref(), to),
-        PortId::FabricTile { fabric, port_idx } => {
-            connect_fabric_to(platform, fabric, *port_idx, to)
-        }
-        PortId::Mem { memory } => connect_memory_to(platform, memory, to),
-    }
 }
 
 fn connect_cache_to_null(
@@ -179,252 +162,4 @@ fn connect_fabric_to_null(
         &format!("null_rx_{port_idx}"),
     );
     fabric.connect_port_egress_i(port_idx, rx.state())
-}
-
-fn connect_pe_to(
-    platform: &Platform,
-    pe: &Rc<ProcessingElement>,
-    dma: bool,
-    to: &PortId,
-) -> SimResult {
-    if dma {
-        return match to {
-            PortId::Null => unreachable!("null connections handled above"),
-            PortId::FabricTile { fabric, port_idx } => {
-                pe.connect_dma_tx(fabric.port_ingress_i(*port_idx))?;
-                fabric.connect_port_egress_i(*port_idx, pe.dma_rx())
-            }
-            PortId::Mem { memory } => {
-                pe.connect_dma_tx(memory.port_rx())?;
-                memory.connect_port_tx(pe.dma_rx())
-            }
-            PortId::Cache { cache, port } if port.is_none() || *port == Some(CachePortId::Dev) => {
-                pe.connect_dma_tx(cache.port_dev_rx())?;
-                cache.connect_port_dev_tx(pe.dma_rx())
-            }
-            _ => sim_error!("Unsupported DMA interface connection"),
-        };
-    }
-    match to {
-        PortId::Manager { .. } => sim_error!("Coherency Managers must connect to a Fabric"),
-        PortId::Null => unreachable!("null connections handled above"),
-        PortId::Pe { .. } => {
-            sim_error!("Cannot connect a PE directly to a PE")
-        }
-        PortId::Cache { cache, port } => connect_pe_to_cache(platform, pe, cache, port.as_ref()),
-        PortId::FabricTile { fabric, port_idx } => {
-            connect_pe_to_fabric(platform, pe, fabric, *port_idx)
-        }
-        PortId::Mem { memory } => connect_pe_to_memory(platform, pe, memory),
-    }
-}
-
-fn connect_cache_to(
-    platform: &Platform,
-    cache: &Rc<Cache<MemoryAccess>>,
-    cache_port: Option<&CachePortId>,
-    to: &PortId,
-) -> SimResult {
-    match to {
-        PortId::Manager { .. } => sim_error!("Coherency Managers must connect to a Fabric"),
-        PortId::Null => unreachable!("null connections handled above"),
-        PortId::Pe { pe, dma } => connect_pe_to(
-            platform,
-            pe,
-            *dma,
-            &PortId::Cache {
-                cache,
-                port: cache_port.cloned(),
-            },
-        ),
-        PortId::Cache {
-            cache: to_cache,
-            port,
-        } => connect_cache_to_cache(platform, cache, cache_port, to_cache, port.as_ref()),
-        PortId::FabricTile { fabric, port_idx } => {
-            connect_cache_to_fabric(platform, cache, cache_port, fabric, *port_idx)
-        }
-        PortId::Mem { memory } => connect_cache_to_memory(platform, cache, cache_port, memory),
-    }
-}
-
-fn connect_fabric_to(
-    platform: &Platform,
-    fabric: &Rc<dyn Fabric<MemoryAccess>>,
-    fabric_port_idx: usize,
-    to: &PortId,
-) -> SimResult {
-    match to {
-        PortId::Manager { manager } => {
-            manager.connect_port_tx(fabric.port_ingress_i(fabric_port_idx))?;
-            fabric.connect_port_egress_i(fabric_port_idx, manager.port_rx())
-        }
-        PortId::Null => unreachable!("null connections handled above"),
-        PortId::Pe { pe, dma } => connect_pe_to(
-            platform,
-            pe,
-            *dma,
-            &PortId::FabricTile {
-                fabric,
-                port_idx: fabric_port_idx,
-            },
-        ),
-        PortId::Cache { cache, port } => {
-            connect_cache_to_fabric(platform, cache, port.as_ref(), fabric, fabric_port_idx)
-        }
-        PortId::FabricTile {
-            fabric: to_fabric,
-            port_idx: to_port_idx,
-        } => connect_fabric_to_fabric(platform, fabric, fabric_port_idx, to_fabric, *to_port_idx),
-        PortId::Mem { memory } => {
-            connect_memory_to_fabric(platform, memory, fabric, fabric_port_idx)
-        }
-    }
-}
-
-fn connect_memory_to(
-    platform: &Platform,
-    memory: &Rc<Memory<MemoryAccess>>,
-    to: &PortId,
-) -> SimResult {
-    match to {
-        PortId::Manager { .. } => sim_error!("Coherency Managers must connect to a Fabric"),
-        PortId::Null => unreachable!("null connections handled above"),
-        PortId::Pe { pe, dma } => connect_pe_to(platform, pe, *dma, &PortId::Mem { memory }),
-        PortId::Cache { cache, port } => {
-            connect_cache_to_memory(platform, cache, port.as_ref(), memory)
-        }
-        PortId::FabricTile { fabric, port_idx } => {
-            connect_memory_to_fabric(platform, memory, fabric, *port_idx)
-        }
-        PortId::Mem { .. } => {
-            sim_error!("Cannot connect a Memory directly to a Memory")
-        }
-    }
-}
-
-fn connect_pe_to_cache(
-    platform: &Platform,
-    pe: &Rc<ProcessingElement>,
-    cache: &Rc<Cache<MemoryAccess>>,
-    cache_port: Option<&CachePortId>,
-) -> SimResult {
-    if let Some(cache_port) = cache_port
-        && cache_port != &CachePortId::Dev
-    {
-        return sim_error!("PEs can only connect to the 'dev' port on the Cache");
-    }
-
-    debug!(platform.entity() ; "Connect {} to {}.dev", pe, cache);
-    pe.connect_port_tx(cache.port_dev_rx())?;
-    cache.connect_port_dev_tx(pe.port_rx())
-}
-
-fn connect_pe_to_fabric(
-    platform: &Platform,
-    pe: &Rc<ProcessingElement>,
-    fabric: &Rc<dyn Fabric<MemoryAccess>>,
-    fabric_port_idx: usize,
-) -> SimResult {
-    debug!(platform.entity() ; "Connect {} to {}.{}", pe, fabric, fabric_port_idx);
-    pe.connect_port_tx(fabric.port_ingress_i(fabric_port_idx))?;
-    fabric.connect_port_egress_i(fabric_port_idx, pe.port_rx())
-}
-
-fn connect_pe_to_memory(
-    platform: &Platform,
-    pe: &Rc<ProcessingElement>,
-    mem: &Rc<Memory<MemoryAccess>>,
-) -> SimResult {
-    debug!(platform.entity() ; "Connect {} to {}.dev", pe, mem);
-    pe.connect_port_tx(mem.port_rx())?;
-    mem.connect_port_tx(pe.port_rx())
-}
-
-fn connect_cache_to_fabric(
-    platform: &Platform,
-    cache: &Rc<Cache<MemoryAccess>>,
-    cache_port: Option<&CachePortId>,
-    fabric: &Rc<dyn Fabric<MemoryAccess>>,
-    fabric_port_idx: usize,
-) -> SimResult {
-    // An explicit device port permits a shared upstream fabric. Omitting
-    // the port preserves the historical downstream memory-side connection.
-    if cache_port == Some(&CachePortId::Dev) {
-        debug!(platform.entity() ; "Connect {}.dev to {}.{}", cache, fabric, fabric_port_idx);
-        cache.connect_port_dev_tx(fabric.port_ingress_i(fabric_port_idx))?;
-        fabric.connect_port_egress_i(fabric_port_idx, cache.port_dev_rx())
-    } else {
-        debug!(platform.entity() ; "Connect {}.mem to {}.{}", cache, fabric, fabric_port_idx);
-        cache.connect_port_mem_tx(fabric.port_ingress_i(fabric_port_idx))?;
-        fabric.connect_port_egress_i(fabric_port_idx, cache.port_mem_rx())
-    }
-}
-
-fn connect_cache_to_memory(
-    platform: &Platform,
-    cache: &Rc<Cache<MemoryAccess>>,
-    cache_port: Option<&CachePortId>,
-    memory: &Rc<Memory<MemoryAccess>>,
-) -> SimResult {
-    if let Some(cache_port) = cache_port
-        && cache_port != &CachePortId::Mem
-    {
-        return sim_error!("Cache should connect the 'mem' port to a Memory");
-    }
-
-    debug!(platform.entity() ; "Connect {}.mem to {}", cache, memory);
-    cache.connect_port_mem_tx(memory.port_rx())?;
-    memory.connect_port_tx(cache.port_mem_rx())
-}
-
-fn connect_cache_to_cache(
-    platform: &Platform,
-    from_cache: &Rc<Cache<MemoryAccess>>,
-    from_port: Option<&CachePortId>,
-    to_cache: &Rc<Cache<MemoryAccess>>,
-    to_port: Option<&CachePortId>,
-) -> SimResult {
-    if let Some(from_port) = from_port
-        && from_port != &CachePortId::Mem
-    {
-        return sim_error!(
-            "When connecting Cache to Cache, connect 'mem' to 'dev' (or simply don't specify ports)"
-        );
-    }
-
-    if let Some(to_port) = to_port
-        && to_port != &CachePortId::Dev
-    {
-        return sim_error!(
-            "When connecting Cache to Cache, connect 'mem' to 'dev' (or simply don't specify ports)"
-        );
-    }
-
-    debug!(platform.entity() ; "Connect {}.mem to {}.dev", from_cache, to_cache);
-    from_cache.connect_port_mem_tx(to_cache.port_dev_rx())?;
-    to_cache.connect_port_dev_tx(from_cache.port_mem_rx())
-}
-
-fn connect_memory_to_fabric(
-    platform: &Platform,
-    memory: &Rc<Memory<MemoryAccess>>,
-    fabric: &Rc<dyn Fabric<MemoryAccess>>,
-    fabric_port_idx: usize,
-) -> SimResult {
-    debug!(platform.entity() ; "Connect {} to {}.{}", memory, fabric, fabric_port_idx);
-    memory.connect_port_tx(fabric.port_ingress_i(fabric_port_idx))?;
-    fabric.connect_port_egress_i(fabric_port_idx, memory.port_rx())
-}
-
-fn connect_fabric_to_fabric(
-    platform: &Platform,
-    from_fabric: &Rc<dyn Fabric<MemoryAccess>>,
-    from_port_idx: usize,
-    to_fabric: &Rc<dyn Fabric<MemoryAccess>>,
-    to_port_idx: usize,
-) -> SimResult {
-    debug!(platform.entity() ; "Connect {}.{} to {}.{}", from_fabric, from_port_idx, to_fabric, to_port_idx);
-    from_fabric.connect_port_egress_i(from_port_idx, to_fabric.port_ingress_i(to_port_idx))?;
-    to_fabric.connect_port_egress_i(to_port_idx, from_fabric.port_ingress_i(from_port_idx))
 }

@@ -1,0 +1,11 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+name: training_system
+level: system
+instances:
+  - { name: rack, file: rack.yaml, count: 2, address_stride: 16KiB }
+repeat_connections:
+  - for: { i: [0, 1] }
+    connect: ["rack[${i}]/right", "rack[${i+1}]/left"]
+connections:
+  - { connect: ["rack[0]/left", "null"] }
+  - { connect: ["rack[1]/right", "null"] }

@@ -45,6 +45,10 @@ impl Display for MemoryAccess {
 }
 
 impl TotalBytes for MemoryAccess {
+    fn payload_bytes(&self) -> Option<usize> {
+        Some(self.total_bytes() - self.overhead_size_bytes)
+    }
+
     fn total_bytes(&self) -> usize {
         match self.access_type {
             AccessType::Control

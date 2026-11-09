@@ -259,11 +259,11 @@ fn union(mut ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
     ranges.sort_by_key(|r| r.start);
     let mut result: Vec<Range<usize>> = vec![];
     for r in ranges {
-        if let Some(last) = result.last_mut() {
-            if r.start <= last.end {
-                last.end = last.end.max(r.end);
-                continue;
-            }
+        if let Some(last) = result.last_mut()
+            && r.start <= last.end
+        {
+            last.end = last.end.max(r.end);
+            continue;
         }
         result.push(r);
     }

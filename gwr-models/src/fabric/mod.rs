@@ -36,6 +36,10 @@ where
     fn fabric_port_index_to_col_row_port(&self, fabric_port_index: usize) -> (usize, usize, usize);
     fn destination_port_map(&self) -> &HashMap<u64, Vec<usize>>;
     fn port_selection(&self) -> FabricPortSelection;
+    /// Actual directed route ownership and transport counters, when supported.
+    fn route_snapshots(&self) -> Vec<service::RouteServiceSnapshot> {
+        Vec::new()
+    }
 }
 
 #[derive(ValueEnum, Clone, Copy, Default, Debug, Serialize, PartialEq, Deserialize)]
@@ -88,8 +92,8 @@ pub struct FabricConfig {
     /// Set the throughput limit on each port (in bits per tick)
     port_bits_per_tick: usize,
 
-    /// Optional bandwidth per directed routed neighbor link.
-    internal_link_bits_per_tick: Option<usize>,
+    /// Independent routed planes; functional fabrics reject this setting.
+    paths: Option<paths::FabricPathConfig>,
 
     /// Number of populated ingress/egress ports.
     num_ports: usize,
@@ -218,7 +222,7 @@ impl FabricConfig {
             rx_buffer_bytes,
             tx_buffer_bytes,
             port_bits_per_tick,
-            internal_link_bits_per_tick: None,
+            paths: None,
             num_ports,
             fabric_port_indices: OnceCell::new(),
             max_num_ports,
@@ -227,25 +231,11 @@ impl FabricConfig {
         })
     }
 
-    /// Configure an independent data rate for each routed neighbor
-    /// direction. `Some` requires a positive rate. Functional fabric
-    /// rejects this option when the fabric is constructed.
-    pub fn with_internal_link_bits_per_tick(
-        mut self,
-        rate: Option<usize>,
-    ) -> Result<Self, SimError> {
-        if rate == Some(0) {
-            return sim_error!("internal link rate must be positive");
-        }
-        self.internal_link_bits_per_tick = rate;
+    /// Configure the single bandwidth recipe for independent routed planes.
+    pub fn with_paths(mut self, paths: paths::FabricPathConfig) -> Result<Self, SimError> {
+        paths.validate()?;
+        self.paths = Some(paths);
         Ok(self)
-    }
-
-    /// Return the caller-configured bits per tick for each internal direction.
-    /// This is independent of external port bandwidth.
-    #[must_use]
-    pub fn internal_link_bits_per_tick(&self) -> Option<usize> {
-        self.internal_link_bits_per_tick
     }
 
     #[must_use]
@@ -360,6 +350,26 @@ impl FabricConfig {
     #[must_use]
     pub fn port_selection(&self) -> FabricPortSelection {
         self.port_selection
+    }
+
+    /// Pick one attachment for the entire canonical address-affinity region.
+    pub fn resolve_canonical_destination_port(
+        &self,
+        destination: u64,
+        key: paths::FabricAddressKey,
+        shift: u8,
+    ) -> Result<usize, SimError> {
+        let ports = self
+            .destination_port_map
+            .get(&destination)
+            .filter(|p| !p.is_empty())
+            .ok_or_else(|| {
+                SimError(format!(
+                    "No fabric egress port mapped for destination {destination}"
+                ))
+            })?;
+        let hash = splitmix64((key.offset_in_memory >> shift) ^ splitmix64(key.memory_index));
+        Ok(ports[(hash as usize) % ports.len()])
     }
 
     pub fn resolve_destination_port<T>(&self, object: &T) -> Result<usize, SimError>
@@ -513,7 +523,9 @@ fn col_row_port_to_fabric_port_index(
 
 pub mod functional;
 pub mod node;
+pub mod paths;
 pub mod routed;
+pub mod service;
 
 #[test]
 fn zero_hop_delay_is_rejected() {

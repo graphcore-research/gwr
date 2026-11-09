@@ -12,14 +12,14 @@ use gwr_models::memory::{Memory, MemoryConfig};
 use gwr_models::test_helpers::{
     create_default_memory_map, create_read, create_write, create_write_np,
 };
-fn run(
-    enabled: bool,
-) -> (
+type RecordedRun = (
     Vec<(u64, usize, String)>,
     usize,
     usize,
     Option<(u64, u64, usize)>,
-) {
+);
+
+fn run(enabled: bool) -> RecordedRun {
     let mut engine = Engine::new(&gwr_track::tracker::dev_null_tracker());
     let clock = engine.default_clock();
     let old = MemoryConfig::new(0x80000, 65536, 8, 3);

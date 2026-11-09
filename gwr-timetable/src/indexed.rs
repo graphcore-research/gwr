@@ -27,6 +27,10 @@ pub fn lower_scatter(selection: &RowSelection) -> Result<TimetableFile, SimError
     lower_rows(selection, true)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "Gather and scatter share the same ordered row-validation and lowering pass."
+)]
 fn lower_rows(selection: &RowSelection, scatter: bool) -> Result<TimetableFile, SimError> {
     let RowSelection {
         id,

@@ -88,10 +88,8 @@ where
         aka: Option<&Aka>,
         config: Rc<FabricConfig>,
     ) -> Result<Rc<Self>, SimError> {
-        if config.internal_link_bits_per_tick().is_some() {
-            return Err(SimError(
-                "internal link rate limit requires routed fabric".into(),
-            ));
+        if config.paths.is_some() {
+            return Err(SimError("path configuration requires routed fabric".into()));
         }
         let entity = Rc::new(Entity::new(parent, name));
         let spawner = engine.spawner();

@@ -36,7 +36,7 @@ fn emit_operation_classes(
 ) -> Result<Option<String>, Box<dyn std::error::Error>> {
     if platform.operation_classes.is_empty() {
         return Ok(None);
-    };
+    }
 
     let mut classes = start_section("operation_classes")?;
     for line in yaml_serde::to_string(&platform.operation_classes)?.lines() {
@@ -51,7 +51,7 @@ fn emit_compute_profiles(
 ) -> Result<Option<String>, Box<dyn std::error::Error>> {
     if platform.compute_profiles.is_empty() {
         return Ok(None);
-    };
+    }
 
     let mut profiles = start_section("compute_profiles")?;
     for line in yaml_serde::to_string(&platform.compute_profiles)?.lines() {
@@ -80,7 +80,7 @@ fn emit_memory_maps(
         }
         emit_line(&mut out, "devices:", 2)?;
         for range in &memory_map.devices {
-            emit_line(&mut out, format_args!("- {}", range), 3)?;
+            emit_line(&mut out, format_args!("- {range}"), 3)?;
         }
     }
     Ok(Some(out))
@@ -114,7 +114,7 @@ fn emit_processing_elements(
         emit_line(&mut out, format_args!("- name: {}", pe.name), 1)?;
         emit_line(&mut out, format_args!("memory_map: {}", pe.memory_map), 2)?;
         if let Some(map) = &pe.dma_memory_map {
-            emit_line(&mut out, format_args!("dma_memory_map: {}", map), 2)?;
+            emit_line(&mut out, format_args!("dma_memory_map: {map}"), 2)?;
         }
         if emitted_anchors[config_idx] {
             emit_line(&mut out, format_args!("config: *{anchor}"), 2)?;
@@ -201,13 +201,13 @@ fn emit_fabrics(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std
         emit_kv(&mut out, "columns", fabric.columns, 2)?;
         emit_kv(&mut out, "rows", fabric.rows, 2)?;
         let config = &fabric.config;
-        if config.fabric_ports_per_node.is_none()
+        if config.paths.is_none()
+            && config.fabric_ports_per_node.is_none()
             && config.ticks_per_hop.is_none()
             && config.ticks_overhead.is_none()
             && config.rx_buffer_bytes.is_none()
             && config.tx_buffer_bytes.is_none()
             && config.port_bits_per_tick.is_none()
-            && config.internal_link_bits_per_tick.is_none()
             && config.routing.is_none()
             && config.port_selection.is_none()
         {
@@ -215,6 +215,12 @@ fn emit_fabrics(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std
             continue;
         }
         emit_line(&mut out, "config:", 2)?;
+        if let Some(paths) = &config.paths {
+            emit_line(&mut out, "paths:", 3)?;
+            for line in yaml_serde::to_string(paths)?.lines() {
+                emit_line(&mut out, line, 4)?;
+            }
+        }
         emit_optional_kv(
             &mut out,
             "fabric_ports_per_node",
@@ -226,12 +232,6 @@ fn emit_fabrics(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn std
         emit_optional_kv(&mut out, "rx_buffer_bytes", config.rx_buffer_bytes, 3)?;
         emit_optional_kv(&mut out, "tx_buffer_bytes", config.tx_buffer_bytes, 3)?;
         emit_optional_kv(&mut out, "port_bits_per_tick", config.port_bits_per_tick, 3)?;
-        emit_optional_kv(
-            &mut out,
-            "internal_link_bits_per_tick",
-            config.internal_link_bits_per_tick,
-            3,
-        )?;
         if let Some(routing) = config.routing {
             emit_line(
                 &mut out,
@@ -730,7 +730,7 @@ mod tests {
             rx_buffer_bytes: Some(5),
             tx_buffer_bytes: Some(6),
             port_bits_per_tick: Some(7),
-            internal_link_bits_per_tick: None,
+            paths: None,
             routing: Some(gwr_models::fabric::node::FabricRoutingAlgorithm::RowFirst),
             port_selection: None,
         };
@@ -787,7 +787,7 @@ mod tests {
             rx_buffer_bytes: None,
             tx_buffer_bytes: None,
             port_bits_per_tick: None,
-            internal_link_bits_per_tick: None,
+            paths: None,
             routing: None,
             port_selection: Some(FabricPortSelection::SourceIdModulo),
         };

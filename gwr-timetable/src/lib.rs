@@ -30,8 +30,8 @@ pub mod scheduled;
 pub mod segmented;
 pub mod timetable_file;
 pub use graph::{
-    ComputeTensorDirection, ComputeTensorViews, EdgeEndpoint, TensorConnection, TimetableEdge,
-    TimetableGraph, TimetableNode,
+    AnalysisActivity, ComputeTensorDirection, ComputeTensorViews, EdgeEndpoint, TensorConnection,
+    TimetableEdge, TimetableGraph, TimetableNode,
 };
 
 use crate::mermaid::{MermaidNodeStatus, render_mermaid};
@@ -73,6 +73,10 @@ impl fmt::Debug for Timetable {
 
 impl Timetable {
     /// Create a runnable timetable from a validated graph.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Timetable construction checks all graph and platform contracts before creating executable tasks."
+    )]
     pub fn new(
         parent: &Rc<Entity>,
         graph: TimetableGraph,
@@ -301,20 +305,21 @@ impl Timetable {
             let pe_name = node
                 .pe()
                 .ok_or_else(|| SimError(format!("Task '{}' has no PE placement", node.id())))?;
-            let pe = self.platform.pe(pe_name)?;
-            match self.task_by_id(index)? {
-                Task::StreamedMatrix { config } => config.validate_for_pe(pe),
-                Task::ProgramTask { config } => pe.preflight_program_task(&config),
-                Task::TransferTask { config } => pe.preflight_transfer_task(&config),
-                Task::AtomicEffect { config } => pe.preflight_atomic_task(&config),
-                Task::AtomicControlJoin { config } => config.validate_for_pe(pe),
-                Task::SyncTask { .. } => Ok(()),
-            }
-            .map_err(|error| {
-                SimError(format!("Node '{}' on PE '{pe_name}': {error}", node.id()))
-            })?;
+            self.platform
+                .pe_model(pe_name)?
+                .preflight_task(&self.task_by_id(index)?)
+                .map_err(|error| {
+                    SimError(format!("Node '{}' on PE '{pe_name}': {error}", node.id()))
+                })?;
         }
         Ok(())
+    }
+
+    /// Return immutable compute-task inputs for engine-free analytical models.
+    /// The returned predecessors include direct task dependencies and compute
+    /// producers connected through tensor nodes. Tensor-only nodes are omitted.
+    pub fn analysis_activities(&self) -> Result<Vec<AnalysisActivity>, SimError> {
+        self.graph.analysis_activities()
     }
 
     /// Iterate across all active tensors and move those that are now complete
@@ -502,7 +507,7 @@ impl Timetable {
         pe_names.into_iter().try_fold(0usize, |total, name| {
             let ops = self
                 .platform
-                .pe(name)?
+                .pe_model(name)?
                 .machine_ops()
                 .checked_operation_total()?;
             total
@@ -603,7 +608,7 @@ impl Timetable {
             }
         }
         for pe in pe_names {
-            let element = self.platform.pe(pe)?;
+            let element = self.platform.pe_model(pe)?;
             machine_ops = machine_ops.checked_add(element.machine_ops())?;
             let (read, written) = element.memory_traffic_bytes();
             add_to_byte_total(&mut total_load_bytes, read, "load")?;

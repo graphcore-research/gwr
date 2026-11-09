@@ -28,7 +28,7 @@ impl crate::processing_element::dispatch::Dispatch for Completed {
         Ok((true, vec![]))
     }
     async fn wait_for_change(&self) {
-        futures::future::pending::<()>().await
+        futures::future::pending::<()>().await;
     }
     fn total_tasks_for_pe(&self, _: &str) -> usize {
         0
@@ -38,7 +38,7 @@ fn program() -> ProgramTaskConfig {
     let view = |shape: &[usize], dtype, base| {
         TensorView::new_full(Tensor::new(shape, &dtype, base).unwrap())
     };
-    ProgramTaskConfig{pipeline: None,id:"skinny".into(),tiling:None,program:yaml_serde::from_str("inputs: [A,B]\noutputs: [Y]\nassignments:\n - output: Y\n   axes: [m,n]\n   expr: {matrix_mac: {over: [k], execution: {instruction: tensor, accumulator: fp32, sparsity: dense}, args: [{read: {tensor: A, indices: [m,k]}}, {read: {tensor: B, indices: [k,n]}}]}}\n").unwrap(),inputs:vec![view(&[8,16],DataType::Bf16,0),view(&[16,8],DataType::Bf16,65536)],outputs:vec![view(&[8,8],DataType::Fp32,131072)]}
+    ProgramTaskConfig{pipeline: None,id:"skinny".into(),tiling:None,program:yaml_serde::from_str("inputs: [A,B]\noutputs: [Y]\nassignments:\n - output: Y\n   axes: [m,n]\n   expr: {matrix_mac: {over: [k], execution: {instruction: tensor, accumulator: fp32, sparsity: dense}, args: [{read: {tensor: A, indices: [m,k]}}, {read: {tensor: B, indices: [k,n]}}]}}\n").unwrap(),inputs:vec![view(&[8,16],DataType::Bf16,0),view(&[16,8],DataType::Bf16,65536)],outputs:vec![view(&[8,8],DataType::Fp32,131_072)]}
 }
 fn fixture(
     engine: &mut gwr_engine::engine::Engine,
@@ -48,7 +48,7 @@ fn fixture(
 ) -> (TaskRunner, Rc<Memory<MemoryAccess>>, Rc<Completed>) {
     let clock = engine.default_clock();
     let mut map = MemoryMap::new();
-    map.insert(0, 262144, gwr_engine::types::DeviceId(0))
+    map.insert(0, 262_144, gwr_engine::types::DeviceId(0))
         .unwrap();
     let map = Rc::new(map);
     let policy = "";
@@ -90,7 +90,7 @@ fn fixture(
         &clock,
         engine.top(),
         "memory",
-        MemoryConfig::new(0, 262144, 65536, 0),
+        MemoryConfig::new(0, 262_144, 65536, 0),
     )
     .unwrap();
     pe.connect_port_tx(memory.port_rx()).unwrap();
@@ -177,7 +177,7 @@ fn actual_compute_wait_holds_logical_demand_and_existing_sram_until_completion()
         assert_eq!(done.0.get(), 1);
         assert_eq!(
             (memory.bytes_read(), memory.bytes_written()),
-            (131072, 65536)
+            (131_072, 65536)
         );
         let (_, peak, _, _) = final_inspect.compute_scheduler.accumulator_state_for_test();
         assert_eq!(peak, vec![if capacity.is_some() { 256 } else { 0 }]);
@@ -223,7 +223,7 @@ fn cancel_polled_runner_service_releases_accumulator_sram_and_activity() {
     assert_eq!(done.0.get(), 1);
     assert_eq!(
         (memory.bytes_read(), memory.bytes_written()),
-        (262144, 65536)
+        (262_144, 65536)
     );
     assert_eq!(
         (

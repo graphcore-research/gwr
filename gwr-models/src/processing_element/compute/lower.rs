@@ -29,17 +29,23 @@ impl ComputeModel {
         Ok(plan)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Lower each supported instruction family through one exhaustive dispatch"
+    )]
     fn lower_stage(&self, stage: &WorkStage) -> Result<Vec<EngineBatch>, SimError> {
-        let mut batches: BTreeMap<EngineId, (f64, MachineOpCounts, u64)> = BTreeMap::new();
+        let mut batches: BTreeMap<
+            EngineId,
+            (f64, MachineOpCounts, u64, Vec<super::ComputeAction>),
+        > = BTreeMap::new();
         let mut flexible = Vec::new();
         for work in &stage.operations {
-            if let Some(shape) = work.matrix_shape {
-                if work.signature.op != "matrix_mac"
+            if let Some(shape) = work.matrix_shape
+                && (work.signature.op != "matrix_mac"
                     || work.signature.inputs.len() != 2
-                    || shape.logical_macs()? != work.count
-                {
-                    return sim_error!("matrix shape does not match logical work");
-                }
+                    || shape.logical_macs()? != work.count)
+            {
+                return sim_error!("matrix shape does not match logical work");
             }
             let mut candidates = self.select(&work.signature);
             if candidates
@@ -99,21 +105,22 @@ impl ComputeModel {
                                 / candidate.rate,
                             work.machine_ops(flops_per_op)?,
                             matrix_accumulator_bytes,
+                            vec![action(work, candidate.matrix_service_tile)?],
                         )
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 options.sort_by_key(|batch| (batch.ticks, batch.engine));
                 let mut batch = options.remove(0);
-                batch.alternatives.extend(
-                    options
-                        .into_iter()
-                        .map(|option| (option.engine, option.ticks)),
-                );
+                for option in options {
+                    batch.alternatives.push((option.engine, option.ticks));
+                    batch.actions.extend(option.actions);
+                }
                 flexible.push(batch);
                 continue;
             }
             let candidate = candidates[0];
-            let (time, counts, bytes) = batches.entry(candidate.engine).or_default();
+            let (time, counts, bytes, actions) = batches.entry(candidate.engine).or_default();
+            actions.push(action(work, candidate.matrix_service_tile)?);
             *bytes = (*bytes).max(matrix_accumulator_bytes);
             *time += service_count(work, candidate.matrix_service_tile)? as f64 / candidate.rate;
             *counts = counts
@@ -122,7 +129,9 @@ impl ComputeModel {
         }
         let mut fixed = batches
             .into_iter()
-            .map(|(engine, (time, counts, bytes))| timed_batch(engine, time, counts, bytes))
+            .map(|(engine, (time, counts, bytes, actions))| {
+                timed_batch(engine, time, counts, bytes, actions)
+            })
             .collect::<Result<Vec<_>, _>>()?;
         fixed.extend(flexible);
         Ok(fixed)
@@ -134,6 +143,7 @@ fn timed_batch(
     time: f64,
     machine_ops: MachineOpCounts,
     matrix_accumulator_bytes: u64,
+    actions: Vec<super::ComputeAction>,
 ) -> Result<EngineBatch, SimError> {
     let ticks = time.ceil();
     // u64::MAX rounds to 2^64 in f64: equality is out of range too.
@@ -141,6 +151,7 @@ fn timed_batch(
         return sim_error!("compute duration cannot be represented in ticks");
     }
     Ok(EngineBatch {
+        actions: BTreeMap::from([(engine, actions)]),
         matrix_accumulator_bytes,
         engine,
         alternatives: vec![(engine, ticks as u64)],
@@ -175,4 +186,17 @@ fn accumulator_bytes(work: &super::TypedWork) -> Result<u64, SimError> {
         .ok_or_else(|| SimError("matrix accumulator byte demand overflows".into()))?
         .div_ceil(8);
     u64::try_from(bytes).map_err(|_| SimError("matrix accumulator byte demand exceeds u64".into()))
+}
+
+fn action(
+    work: &super::TypedWork,
+    tile: Option<super::MatrixServiceTile>,
+) -> Result<super::ComputeAction, SimError> {
+    Ok(super::ComputeAction {
+        signature: work.signature.clone(),
+        logical_operations: u64::try_from(work.count)
+            .map_err(|_| SimError("logical work exceeds u64".into()))?,
+        service_operations: u64::try_from(service_count(work, tile)?)
+            .map_err(|_| SimError("service work exceeds u64".into()))?,
+    })
 }

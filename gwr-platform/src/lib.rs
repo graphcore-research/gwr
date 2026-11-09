@@ -19,26 +19,30 @@ use gwr_models::fabric::Fabric;
 use gwr_models::log_stats;
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::{Memory, MemoryStatsDisplay};
+use gwr_models::model::{CacheModel, FabricModel, MemoryModel};
 use gwr_models::processing_element::dispatch::Dispatch;
+use gwr_models::processing_element::model::ProcessingElementModel;
 use gwr_models::processing_element::{
     MachineOpCounts, ProcessingElement, ProcessingElementStatsDisplay,
 };
-use gwr_track::entity::{Entity, GetEntity};
+use gwr_track::entity::Entity;
 
-use crate::builder::{
-    build_caches_from_configs, build_fabric_destination_port_maps, build_memories_from_configs,
-    build_memory_maps, build_pes_from_configs,
-};
-use crate::connect::connect_ports;
 use crate::connection_id::fabric_port_endpoint_id;
+use crate::instances::{CacheInstance, FabricInstance, MemoryInstance, ProcessingElementInstance};
 use crate::types::PlatformConfig;
 
 pub mod builder;
 pub mod catalog;
+pub mod composition;
 mod connect;
 pub mod connection_id;
+pub mod instances;
 mod memory_mapping;
+mod prepared;
 pub mod rates;
+pub use prepared::PreparedPlatform;
+pub mod roofline_resources;
+pub mod roofline_routes;
 pub mod types;
 mod validation;
 pub mod yaml;
@@ -52,14 +56,14 @@ pub mod yaml;
 /// execution ordering belong in `gwr-timetable`.
 pub struct Platform {
     entity: Rc<Entity>,
-    processing_elements: ProcessingElements,
+    processing_elements: Vec<ProcessingElementInstance>,
     pes_idx_by_id: NameToIdxMap,
-    caches: Caches,
+    caches: Vec<CacheInstance>,
     caches_idx_by_id: NameToIdxMap,
     coherency_managers: HashMap<String, Rc<CoherencyManager>>,
-    fabrics: Fabrics,
+    fabrics: Vec<FabricInstance>,
     fabrics_idx_by_id: NameToIdxMap,
-    memories: Memories,
+    memories: Vec<MemoryInstance>,
     memories_idx_by_id: NameToIdxMap,
     device_names_by_id: HashMap<u64, String>,
     atomic_connections: Vec<Vec<connection_id::ConnectionEndpointId>>,
@@ -95,75 +99,7 @@ impl Platform {
     }
 
     fn build(engine: &Engine, clock: &Clock, cfg: &PlatformConfig) -> Result<Self, SimError> {
-        let effective = cfg.validated()?;
-        let device_ids = assign_device_ids(cfg)?;
-
-        let top = engine.top();
-        let (memories, memories_idx_by_id) =
-            build_memories_from_configs(engine, clock, top, cfg, &effective.memories)?;
-        let memory_maps = build_memory_maps(cfg, &memories, &memories_idx_by_id, &device_ids)?;
-        let (processing_elements, pes_idx_by_id) = build_pes_from_configs(
-            engine,
-            clock,
-            top,
-            cfg,
-            &effective.processing_elements,
-            &memory_maps,
-            &device_ids,
-        )?;
-        let (caches, caches_idx_by_id) = build_caches_from_configs(
-            engine,
-            clock,
-            top,
-            cfg,
-            &effective.caches,
-            &memory_maps,
-            &device_ids,
-        )?;
-        let coherency_managers =
-            builder::build_coherency_managers(engine, clock, top, cfg, &memory_maps, &device_ids)?;
-        let fabric_destination_port_maps = build_fabric_destination_port_maps(cfg, &device_ids)?;
-        let (fabrics, fabrics_idx_by_id) =
-            crate::builder::build_fabrics(engine, clock, top, cfg, &fabric_destination_port_maps)?;
-        let device_names_by_id = device_ids
-            .iter()
-            .map(|(name, device_id)| (device_id.0, name.clone()))
-            .collect();
-
-        let parent = engine.top();
-        let entity = Rc::new(Entity::new(parent, "platform"));
-        let atomic_connections = cfg
-            .connections
-            .as_ref()
-            .map(|connections| {
-                connections
-                    .iter()
-                    .map(|c| {
-                        c.connect
-                            .iter()
-                            .map(|id| connection_id::parse_connection_endpoint_id(id))
-                            .collect::<Result<Vec<_>, _>>()
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-            })
-            .transpose()?
-            .unwrap_or_default();
-        let platform = Platform {
-            entity,
-            processing_elements,
-            pes_idx_by_id,
-            caches,
-            caches_idx_by_id,
-            coherency_managers,
-            fabrics,
-            fabrics_idx_by_id,
-            memories,
-            memories_idx_by_id,
-            device_names_by_id,
-            atomic_connections,
-        };
-        connect_ports(engine, clock, &platform, cfg)?;
-        Ok(platform)
+        PreparedPlatform::new(cfg)?.build(engine, clock)
     }
 
     pub fn coherency_manager(&self, name: &str) -> Result<&Rc<CoherencyManager>, SimError> {
@@ -217,7 +153,7 @@ impl Platform {
 
     pub fn cache(&self, cache_name: &str) -> Result<&Rc<Cache<MemoryAccess>>, SimError> {
         let idx = self.cache_idx_from_name(cache_name)?;
-        Ok(&self.caches[idx])
+        self.caches[idx].detailed()
     }
 
     pub fn cache_idx_from_name(&self, cache_name: &str) -> Result<usize, SimError> {
@@ -229,7 +165,7 @@ impl Platform {
 
     pub fn fabric(&self, fabric_name: &str) -> Result<&Rc<dyn Fabric<MemoryAccess>>, SimError> {
         let idx = self.fabric_idx_from_name(fabric_name)?;
-        Ok(&self.fabrics[idx])
+        self.fabrics[idx].detailed()
     }
 
     pub fn fabric_idx_from_name(&self, fabric_name: &str) -> Result<usize, SimError> {
@@ -333,7 +269,7 @@ impl Platform {
 
     pub fn memory(&self, memory_name: &str) -> Result<&Rc<Memory<MemoryAccess>>, SimError> {
         let idx = self.memory_idx_from_name(memory_name)?;
-        Ok(&self.memories[idx])
+        self.memories[idx].detailed()
     }
 
     pub fn memory_idx_from_name(&self, memory_name: &str) -> Result<usize, SimError> {
@@ -345,7 +281,7 @@ impl Platform {
 
     pub fn pe(&self, pe_name: &str) -> Result<&Rc<ProcessingElement>, SimError> {
         let idx = self.pe_idx_from_name(pe_name)?;
-        Ok(&self.processing_elements[idx])
+        self.processing_elements[idx].detailed()
     }
 
     pub fn pe_idx_from_name(&self, pe_name: &str) -> Result<usize, SimError> {
@@ -359,6 +295,22 @@ impl Platform {
         for pe in &self.processing_elements {
             pe.set_dispatcher(dispatcher);
         }
+    }
+
+    /// Workload-facing PE interface, independent of memory transport fidelity.
+    /// The concrete `pe` accessor remains available for detailed model callers.
+    pub fn pe_model(&self, pe_name: &str) -> Result<&dyn ProcessingElementModel, SimError> {
+        Ok(&*self.processing_elements[self.pe_idx_from_name(pe_name)?])
+    }
+
+    pub fn memory_model(&self, name: &str) -> Result<&dyn MemoryModel, SimError> {
+        Ok(&*self.memories[self.memory_idx_from_name(name)?])
+    }
+    pub fn cache_model(&self, name: &str) -> Result<&dyn CacheModel, SimError> {
+        Ok(&*self.caches[self.cache_idx_from_name(name)?])
+    }
+    pub fn fabric_model(&self, name: &str) -> Result<&dyn FabricModel, SimError> {
+        Ok(&*self.fabrics[self.fabric_idx_from_name(name)?])
     }
 
     pub fn try_dump_stats(&self, time_now_ns: f64) -> SimResult {
@@ -434,11 +386,19 @@ impl Platform {
         );
     }
 
+    fn total_cache_stat<F>(&self, stat_fn: F) -> usize
+    where
+        F: Fn(&dyn CacheModel) -> usize,
+    {
+        self.caches.iter().map(|cache| stat_fn(&**cache)).sum()
+    }
+
     fn dump_cache_totals(&self, time_now_ns: f64) {
-        let total_payload_bytes_read = self.total_cache_stat(Cache::payload_bytes_read);
-        let total_payload_bytes_written = self.total_cache_stat(Cache::payload_bytes_written);
-        let total_hits = self.total_cache_stat(Cache::num_hits);
-        let total_misses = self.total_cache_stat(Cache::num_misses);
+        let total_payload_bytes_read = self.total_cache_stat(|cache| cache.payload_bytes_read());
+        let total_payload_bytes_written =
+            self.total_cache_stat(|cache| cache.payload_bytes_written());
+        let total_hits = self.total_cache_stat(|cache| cache.num_hits());
+        let total_misses = self.total_cache_stat(|cache| cache.num_misses());
         log_stats(
             &self.entity,
             CacheStatsDisplay::new(
@@ -450,13 +410,6 @@ impl Platform {
                 total_misses,
             ),
         );
-    }
-
-    fn total_cache_stat<F>(&self, stat_fn: F) -> usize
-    where
-        F: Fn(&Cache<MemoryAccess>) -> usize,
-    {
-        self.caches.iter().map(|cache| stat_fn(cache)).sum()
     }
 
     fn processing_element_totals(&self) -> Result<(MachineOpCounts, usize, usize), SimError> {
@@ -531,10 +484,6 @@ impl Display for Platform {
     }
 }
 
-type ProcessingElements = Vec<Rc<ProcessingElement>>;
-type Caches = Vec<Rc<Cache<MemoryAccess>>>;
-type Fabrics = Vec<Rc<dyn Fabric<MemoryAccess>>>;
-type Memories = Vec<Rc<Memory<MemoryAccess>>>;
 type NameToIdxMap = HashMap<String, usize>;
 
 fn assign_device_ids(cfg: &PlatformConfig) -> Result<DeviceIds, SimError> {
@@ -588,7 +537,7 @@ fn assign_device_ids(cfg: &PlatformConfig) -> Result<DeviceIds, SimError> {
             for endpoint in &connection.connect {
                 if let connection_id::ConnectionEndpointId::Pe { name } =
                     connection_id::parse_connection_endpoint_id(endpoint)?
-                    && name.ends_with(".dma")
+                    && name.strip_suffix(".dma").is_some()
                     && !device_ids.contains_key(&name)
                 {
                     device_ids.insert(name, DeviceId(device_id));
@@ -600,3 +549,20 @@ fn assign_device_ids(cfg: &PlatformConfig) -> Result<DeviceIds, SimError> {
     Ok(device_ids)
 }
 type DeviceIds = HashMap<String, DeviceId>;
+
+mod fabric_paths;
+
+fn atomic_connections(
+    cfg: &PlatformConfig,
+) -> Result<Vec<Vec<connection_id::ConnectionEndpointId>>, SimError> {
+    cfg.connections
+        .iter()
+        .flatten()
+        .map(|c| {
+            c.connect
+                .iter()
+                .map(|id| connection_id::parse_connection_endpoint_id(id))
+                .collect()
+        })
+        .collect()
+}

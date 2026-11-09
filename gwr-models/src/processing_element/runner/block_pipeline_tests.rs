@@ -28,7 +28,7 @@ impl crate::processing_element::dispatch::Dispatch for Done {
         Ok((true, vec![]))
     }
     async fn wait_for_change(&self) {
-        futures::future::pending::<()>().await
+        futures::future::pending::<()>().await;
     }
     fn total_tasks_for_pe(&self, _: &str) -> usize {
         0

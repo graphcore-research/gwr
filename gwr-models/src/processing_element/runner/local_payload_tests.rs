@@ -37,17 +37,21 @@ impl crate::processing_element::dispatch::Dispatch for Completed {
         0
     }
 }
+type RequestGate = (Rc<Cell<bool>>, Rc<Cell<bool>>);
+
+type RunnerFixture = (
+    TaskRunner,
+    Rc<Memory<MemoryAccess>>,
+    Rc<Completed>,
+    Option<Rc<Cache<MemoryAccess>>>,
+);
+
 fn fixture(
     engine: &mut gwr_engine::engine::Engine,
     rate: Option<u64>,
     capacity: usize,
     cached: bool,
-) -> (
-    TaskRunner,
-    Rc<Memory<MemoryAccess>>,
-    Rc<Completed>,
-    Option<Rc<Cache<MemoryAccess>>>,
-) {
+) -> RunnerFixture {
     fixture_named(engine, rate, capacity, cached, "pe", "hbm")
 }
 fn fixture_named(
@@ -57,16 +61,14 @@ fn fixture_named(
     cached: bool,
     pe_name: &str,
     memory_name: &str,
-) -> (
-    TaskRunner,
-    Rc<Memory<MemoryAccess>>,
-    Rc<Completed>,
-    Option<Rc<Cache<MemoryAccess>>>,
-) {
+) -> RunnerFixture {
     fixture_with_request_gate(engine, rate, capacity, cached, pe_name, memory_name, None)
 }
 
-#[expect(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep complete setup execution and assertions of this scenario together"
+)]
 fn fixture_with_request_gate(
     engine: &mut gwr_engine::engine::Engine,
     rate: Option<u64>,
@@ -74,13 +76,8 @@ fn fixture_with_request_gate(
     cached: bool,
     pe_name: &str,
     memory_name: &str,
-    gate: Option<(Rc<Cell<bool>>, Rc<Cell<bool>>)>,
-) -> (
-    TaskRunner,
-    Rc<Memory<MemoryAccess>>,
-    Rc<Completed>,
-    Option<Rc<Cache<MemoryAccess>>>,
-) {
+    gate: Option<RequestGate>,
+) -> RunnerFixture {
     let clock = engine.default_clock();
     let mut map = MemoryMap::new();
     map.insert(0, 4096, gwr_engine::types::DeviceId(0)).unwrap();
@@ -311,10 +308,10 @@ fn execute(
     engine.run().unwrap();
     assert_eq!(done.0.get(), 1);
     assert_eq!(inspect.sram.used(), 0);
-    let snapshot = inspect
-        .local_payload
-        .as_ref()
-        .map_or(Default::default(), |s| s.snapshot().into());
+    let snapshot = inspect.local_payload.as_ref().map_or(
+        crate::processing_element::local_payload::LocalPayloadSnapshot::default(),
+        |s| s.snapshot().into(),
+    );
     let stats = inspect.stats.borrow();
     (
         engine.default_clock().tick_now().tick(),
@@ -487,9 +484,9 @@ fn canceled_local_read_retains_debt_without_completion_then_same_runner_retries(
             };
             futures::pin_mut!(chosen);
             match select(work, chosen).await {
-                Either::Right((_, pending)) => drop(pending),
+                Either::Right((_, _pending)) => {},
                 Either::Left(_) => panic!("selected local read must be pending"),
-            };
+            }
         }
         assert_eq!(
             retry.sram.used(),
@@ -636,7 +633,7 @@ fn happy_first_unsupported_frontier_rejects_before_any_runner_effects() {
         );
         assert_eq!(
             inspect.local_payload.as_ref().unwrap().snapshot(),
-            Default::default()
+            crate::processing_element::boundary_payload::BoundaryPayloadSnapshot::default()
         );
         assert_eq!(
             inspect
@@ -662,6 +659,10 @@ fn happy_first_unsupported_frontier_rejects_before_any_runner_effects() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep complete setup execution and assertions of this scenario together"
+)]
 fn returned_local_child_error_holds_arena_until_actual_sibling_request_drains() {
     // Establish the same real source/carrier/service baseline before fault
     // setup.

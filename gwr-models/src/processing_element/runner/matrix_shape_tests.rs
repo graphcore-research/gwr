@@ -28,7 +28,7 @@ impl crate::processing_element::dispatch::Dispatch for Completed {
         Ok((true, vec![]))
     }
     async fn wait_for_change(&self) {
-        futures::future::pending::<()>().await
+        futures::future::pending::<()>().await;
     }
     fn total_tasks_for_pe(&self, _: &str) -> usize {
         0
@@ -38,7 +38,7 @@ fn program() -> ProgramTaskConfig {
     let view = |shape: &[usize], dtype, base| {
         TensorView::new_full(Tensor::new(shape, &dtype, base).unwrap())
     };
-    ProgramTaskConfig{pipeline: None,id:"skinny".into(),tiling:None,program:yaml_serde::from_str("inputs: [A,B]\noutputs: [Y]\nassignments:\n - output: Y\n   axes: [m,n]\n   expr: {matrix_mac: {over: [k], execution: {instruction: tensor, accumulator: fp32, sparsity: dense}, args: [{read: {tensor: A, indices: [m,k]}}, {read: {tensor: B, indices: [k,n]}}]}}\n").unwrap(),inputs:vec![view(&[1,16],DataType::Bf16,0),view(&[16,256],DataType::Bf16,65536)],outputs:vec![view(&[1,256],DataType::Fp32,131072)]}
+    ProgramTaskConfig{pipeline: None,id:"skinny".into(),tiling:None,program:yaml_serde::from_str("inputs: [A,B]\noutputs: [Y]\nassignments:\n - output: Y\n   axes: [m,n]\n   expr: {matrix_mac: {over: [k], execution: {instruction: tensor, accumulator: fp32, sparsity: dense}, args: [{read: {tensor: A, indices: [m,k]}}, {read: {tensor: B, indices: [k,n]}}]}}\n").unwrap(),inputs:vec![view(&[1,16],DataType::Bf16,0),view(&[16,256],DataType::Bf16,65536)],outputs:vec![view(&[1,256],DataType::Fp32,131_072)]}
 }
 fn fixture(
     engine: &mut gwr_engine::engine::Engine,
@@ -48,7 +48,7 @@ fn fixture(
 ) -> (TaskRunner, Rc<Memory<MemoryAccess>>, Rc<Completed>) {
     let clock = engine.default_clock();
     let mut map = MemoryMap::new();
-    map.insert(0, 262144, gwr_engine::types::DeviceId(0))
+    map.insert(0, 262_144, gwr_engine::types::DeviceId(0))
         .unwrap();
     let map = Rc::new(map);
     let policy = if enabled {
@@ -91,7 +91,7 @@ fn fixture(
         &clock,
         engine.top(),
         "memory",
-        MemoryConfig::new(0, 262144, 65536, 0),
+        MemoryConfig::new(0, 262_144, 65536, 0),
     )
     .unwrap();
     pe.connect_port_tx(memory.port_rx()).unwrap();
@@ -154,7 +154,7 @@ fn service_wait_extends_residency_without_padding_capacity_or_payload() {
         assert_eq!(final_inspect.stats.borrow().peak_sram_bytes, 9248);
         assert_eq!(
             (memory.bytes_read(), memory.bytes_written()),
-            (131072, 65536)
+            (131_072, 65536)
         );
     }
     // Direct runner completion precedes the dispatcher engine shutdown tick.
@@ -231,7 +231,7 @@ fn actual_shared_engine_waits_while_independent_candidate_replicas_overlap() {
         );
         assert_eq!(
             (memory.bytes_read(), memory.bytes_written()),
-            (262144, 131072)
+            (262_144, 131_072)
         );
         assert_eq!(inspect.sram.used(), 0);
         elapsed.push(engine.default_clock().tick_now().tick());
@@ -331,7 +331,7 @@ fn asymmetric_macro_resolves_operand_roles_not_output_axis_order() {
         view(&[5, 2], DataType::Bf16, 0),
         view(&[3, 5], DataType::Bf16, 65536),
     ];
-    task.outputs = vec![view(&[3, 2], DataType::Fp32, 131072)];
+    task.outputs = vec![view(&[3, 2], DataType::Fp32, 131_072)];
     let region = validate_program(
         &task.program,
         &RegionBindings {
@@ -357,4 +357,115 @@ fn asymmetric_macro_resolves_operand_roles_not_output_axis_order() {
     );
     assert_eq!(model.lower(&work).unwrap().service_ticks().unwrap(), 40);
     assert_eq!(work.stages[0].operations[0].count, 30);
+}
+
+fn batched_program() -> ProgramTaskConfig {
+    let mut task = program();
+    task.program = yaml_serde::from_str("inputs: [A,B]\noutputs: [Y]\nassignments:\n - output: Y\n   axes: [b,n,m]\n   expr: {matrix_mac: {over: [k], execution: {instruction: tensor, accumulator: fp32, sparsity: dense}, args: [{read: {tensor: A, indices: [b,k,m]}}, {read: {tensor: B, indices: [n,b,k]}}]}}\n").unwrap();
+    let view = |shape: &[usize], dtype, base| {
+        TensorView::new_full(Tensor::new(shape, &dtype, base).unwrap())
+    };
+    task.inputs = vec![
+        view(&[2, 5, 2], DataType::Bf16, 0),
+        view(&[3, 2, 5], DataType::Bf16, 65536),
+    ];
+    task.outputs = vec![view(&[2, 3, 2], DataType::Fp32, 131_072)];
+    task.tiling = Some(yaml_serde::from_str("sizes: {b: 1}").unwrap());
+    task
+}
+
+fn batch_model(capacity: u64) -> ComputeModel {
+    let config = yaml_serde::from_str(&format!("engines: {{matrix: {{matrix_accumulator_capacity_bytes: {capacity}, capabilities: [{{class: matrix,input_dtypes: [[bf16,bf16]],ops_per_tick: 1,execution: {{instruction: tensor,accumulator: fp32,sparsity: dense}},matrix_service_tile: {{m: 2,n: 4,k: 1}}}}]}}}}")).unwrap();
+    let classes = yaml_serde::from_str("matrix: {operations: [matrix_mac],arity: 2}").unwrap();
+    ComputeModel::new(&config, &classes).unwrap()
+}
+
+#[test]
+fn singleton_batch_tiles_keep_matrix_roles_counts_and_accumulator_capacity() {
+    let task = batched_program();
+    let region = validate_program(
+        &task.program,
+        &RegionBindings {
+            inputs: task.inputs.clone(),
+            outputs: task.outputs.clone(),
+        },
+    )
+    .unwrap();
+    let model = batch_model(24);
+    let schedule = plan_tiles(&region, task.tiling.as_ref()).unwrap();
+    preflight_program(&model, &region, &schedule).unwrap();
+    let mut tiles = 0;
+    for tile in schedule.tiles() {
+        let work = matrix_shape::work(
+            &model,
+            &region.program.assignments[0],
+            &region,
+            &tile.output_intervals,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            work.stages[0].operations[0].matrix_shape,
+            Some(crate::processing_element::compute::MatrixWorkShape { m: 2, n: 3, k: 5 })
+        );
+        assert_eq!(work.stages[0].operations[0].count, 30);
+        assert_eq!(model.lower(&work).unwrap().service_ticks().unwrap(), 40);
+        assert!(
+            batch_model(23)
+                .lower(&work)
+                .unwrap_err()
+                .0
+                .contains("accumulator capacity")
+        );
+        tiles += 1;
+    }
+    assert_eq!(tiles, 2);
+}
+
+#[test]
+fn batch_intervals_larger_than_one_reject_before_service() {
+    let mut task = batched_program();
+    task.tiling = Some(yaml_serde::from_str("sizes: {b: 2}").unwrap());
+    let region = validate_program(
+        &task.program,
+        &RegionBindings {
+            inputs: task.inputs.clone(),
+            outputs: task.outputs.clone(),
+        },
+    )
+    .unwrap();
+    let model = batch_model(1024);
+    let schedule = plan_tiles(&region, task.tiling.as_ref()).unwrap();
+    let error = preflight_program(&model, &region, &schedule).unwrap_err();
+    assert!(
+        error.0.contains("singleton resolved batch intervals"),
+        "{error}"
+    );
+    assert!(
+        matrix_shape::work(
+            &model,
+            &region.program.assignments[0],
+            &region,
+            &std::collections::BTreeMap::new()
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn native_runner_executes_two_singleton_batch_tiles() {
+    let mut engine = gwr_engine::engine::Engine::default();
+    let (runner, _, done) = fixture(&mut engine, true, false, None);
+    let inspect = runner.clone();
+    engine
+        .spawner()
+        .spawn(async move { runner.run_program(0, &batched_program()).await });
+    engine.run().unwrap();
+    assert_eq!(done.0.get(), 1);
+    assert_eq!(
+        inspect.stats.borrow().machine_ops.by_operation["matrix_mac"],
+        60
+    );
+    assert_eq!(inspect.stats.borrow().written_bytes, 48);
+    assert_eq!(inspect.sram.used(), 0);
 }

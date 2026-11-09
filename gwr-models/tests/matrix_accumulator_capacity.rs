@@ -225,10 +225,10 @@ fn capacity_rejects_zero_unqualified_sparse_or_nonmatrix_declarations() {
                 2 => engine.capabilities[0].execution = None,
                 3 => {
                     engine.capabilities[0].execution.as_mut().unwrap().sparsity =
-                        Sparsity::Structured
+                        Sparsity::Structured;
                 }
                 _ => engine.capabilities.clear(),
-            };
+            }
             if kind == 4 {
                 "name and capabilities"
             } else {

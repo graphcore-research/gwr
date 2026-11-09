@@ -1,0 +1,31 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+# Reusable fragment: the board binds remote_dma; parents wire left/right.
+name: accelerator
+level: package
+operation_classes:
+  add: { operations: [add], arity: 2 }
+compute_profiles:
+  scalar:
+    engines:
+      alu: { capabilities: [{ class: add, ops_per_tick: 16 }] }
+defaults:
+  pe_config: { sram_bytes: 4KiB, compute: scalar }
+memory_maps:
+  - { name: local, devices: [hbm] }
+processing_elements:
+  - { name: cpu, memory_map: local, dma_memory_map: remote_dma, config: {} }
+memories:
+  - { name: hbm, kind: hbm, base_address: 0, config: { capacity_bytes: 1KiB } }
+fabrics:
+  - name: noc
+    kind: functional
+    columns: 1
+    rows: 1
+    config: { fabric_ports_per_node: 5 }
+connections:
+  - { connect: [pe.cpu, "fabric.noc@(0,0)"] }
+  - { connect: [mem.hbm, "fabric.noc@(0,0).1"] }
+  - { connect: [pe.cpu.dma, "fabric.noc@(0,0).2"] }
+ports:
+  left: fabric.noc@(0,0).3
+  right: fabric.noc@(0,0).4

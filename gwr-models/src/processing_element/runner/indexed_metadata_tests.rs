@@ -36,17 +36,19 @@ impl crate::processing_element::dispatch::Dispatch for Completed {
         0
     }
 }
+type RunnerFixture = (
+    TaskRunner,
+    Rc<Memory<MemoryAccess>>,
+    Rc<Completed>,
+    Option<Rc<Cache<MemoryAccess>>>,
+);
+
 fn fixture(
     engine: &mut gwr_engine::engine::Engine,
     rate: Option<u64>,
     capacity: usize,
     cached: bool,
-) -> (
-    TaskRunner,
-    Rc<Memory<MemoryAccess>>,
-    Rc<Completed>,
-    Option<Rc<Cache<MemoryAccess>>>,
-) {
+) -> RunnerFixture {
     fixture_named(engine, rate, capacity, cached, "pe", "hbm")
 }
 fn fixture_named(
@@ -56,12 +58,7 @@ fn fixture_named(
     cached: bool,
     pe_name: &str,
     memory_name: &str,
-) -> (
-    TaskRunner,
-    Rc<Memory<MemoryAccess>>,
-    Rc<Completed>,
-    Option<Rc<Cache<MemoryAccess>>>,
-) {
+) -> RunnerFixture {
     let clock = engine.default_clock();
     let mut map = MemoryMap::new();
     map.insert(0, 4096, gwr_engine::types::DeviceId(0)).unwrap();
@@ -279,6 +276,10 @@ fn cacheline_fill_is_separate_from_metadata_union_and_reload_payload() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep complete setup execution and assertions of this scenario together"
+)]
 fn invalid_policy_rejects_before_any_backing_boundary_sram_or_activity_effects() {
     execute(true, false, false); // A real valid native baseline must succeed first.
     for invalid in ["duplicate", "unknown", "constant_row", "native_scale_dtype"] {
@@ -323,7 +324,7 @@ fn invalid_policy_rejects_before_any_backing_boundary_sram_or_activity_effects()
                 // scalar planes. Validate the exact ordinary
                 // program first; no malformed MatrixMac oracle.
                 config.program = yaml_serde::from_str(
-                    r#"
+                    r"
 inputs: [A, B, SA, SB]
 metadata_inputs: [SA, SB]
 outputs: [Y]
@@ -340,7 +341,7 @@ assignments:
      quantization:
       - {format: mxfp4, block_size: 32, block_scales: SA, layout: logical}
       - {format: mxfp4, block_size: 32, block_scales: SB, layout: logical}
-"#,
+",
                 )
                 .unwrap();
                 let view = |shape: &[usize], dtype, addr| {

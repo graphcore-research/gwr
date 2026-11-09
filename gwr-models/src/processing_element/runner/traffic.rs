@@ -11,6 +11,10 @@ use crate::processing_element::task::ProgramTaskConfig;
 impl ProgramTaskConfig {
     /// Boundary traffic implied by this node's tile schedule, including
     /// deliberate reloads across output and reduction tiles.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Mirror execution variants while computing the traffic contract"
+    )]
     pub fn planned_traffic_bytes(&self) -> Result<(usize, usize), SimError> {
         let region = validate_program(
             &self.program,

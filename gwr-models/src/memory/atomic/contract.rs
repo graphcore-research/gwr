@@ -32,7 +32,10 @@ pub struct AtomicWord {
 }
 impl AtomicWord {
     pub fn validate(&self) -> SimResult {
-        if self.address % 4 != 0 || self.address.checked_add(3).is_none() || self.generation == 0 {
+        if !self.address.is_multiple_of(4)
+            || self.address.checked_add(3).is_none()
+            || self.generation == 0
+        {
             return Err(SimError(
                 "atomic target must be a complete aligned4B word in a positive generation".into(),
             ));
@@ -128,6 +131,7 @@ pub struct Request {
     pub effect: Effect,
 }
 impl Request {
+    #[must_use]
     pub fn demand(&self) -> (u64, u64, u64) {
         match self.effect {
             Effect::Atomic { .. }

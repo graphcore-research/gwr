@@ -61,10 +61,11 @@ mod load_store_unit;
 pub mod local_payload;
 mod packet_arbiter;
 pub mod program;
-mod runner;
+pub(crate) mod runner;
 use runner::TaskRunner;
 pub use runner::estimate_peak_tile_sram;
 pub(crate) use runner::streamed_matrix::LocalOperandHandle;
+pub mod model;
 pub mod task;
 pub mod tensors;
 
@@ -351,6 +352,30 @@ impl ProcessingElement {
         self.stats.borrow().machine_ops.flop_equivalents()
     }
 
+    /// Enable aggregate compute counters before executing any work.
+    pub fn enable_compute_action_counters(&self) -> SimResult {
+        let mut stats = self.stats.borrow_mut();
+        if !stats.machine_ops.by_operation.is_empty() {
+            return sim_error!("compute counters must be enabled before work starts");
+        }
+        stats.compute_actions.get_or_insert_with(Default::default);
+        Ok(())
+    }
+    /// Declared engine names, including engines with zero completed work.
+    pub fn compute_engine_names(&self) -> &[String] {
+        self.compute_model.engine_names()
+    }
+
+    /// Completed typed compute service counters, available without tracing.
+    pub fn compute_action_snapshot(&self) -> Vec<compute::ComputeCounterSnapshot> {
+        self.stats
+            .borrow()
+            .compute_actions
+            .as_ref()
+            .map(|c| c.snapshot(self.compute_model.engine_names()))
+            .unwrap_or_default()
+    }
+
     #[must_use]
     pub fn machine_ops(&self) -> MachineOpCounts {
         self.stats.borrow().machine_ops.clone()
@@ -482,6 +507,10 @@ impl ProcessingElement {
 
 #[async_trait(?Send)]
 impl Runnable for ProcessingElement {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Keep task admission and completion ownership in the runnable scope"
+    )]
     async fn run(&self) -> SimResult {
         let dispatcher = self
             .dispatcher
@@ -505,14 +534,14 @@ impl Runnable for ProcessingElement {
                 for task_idx in ready_node_indices.drain(..) {
                     match dispatcher.task_by_id(task_idx)? {
                         task::Task::ProgramTask { config } => {
-                            self.preflight_program_task(&config)?
+                            self.preflight_program_task(&config)?;
                         }
                         task::Task::TransferTask { config } => {
-                            self.preflight_transfer_task(&config)?
+                            self.preflight_transfer_task(&config)?;
                         }
                         task::Task::StreamedMatrix { config } => config.validate_for_pe(self)?,
                         task::Task::AtomicEffect { config } => {
-                            self.preflight_atomic_task(&config)?
+                            self.preflight_atomic_task(&config)?;
                         }
                         task::Task::AtomicControlJoin { config } => config.validate_for_pe(self)?,
                         task::Task::SyncTask { .. } => (),
@@ -583,7 +612,7 @@ impl Runnable for ProcessingElement {
                         flop_monitor: self.flop_monitor.clone(),
                     };
                     self.spawner
-                        .spawn(async move { runner.run(task_idx).await });
+                        .spawn(async move { Box::pin(runner.run(task_idx)).await });
                 }
             }
 
@@ -649,6 +678,7 @@ impl Display for ProcessingElementStatsDisplay {
 
 type Dispatcher = Rc<dyn Dispatch>;
 
+#[derive(Clone)]
 pub struct ProcessingElementConfig {
     /// The number of outstanding requests can the LSU handle at once
     pub num_active_requests: usize,
@@ -707,6 +737,7 @@ impl ProcessingElementConfig {
 
 #[derive(Default)]
 struct ProcessingElementStats {
+    compute_actions: Option<compute::ComputeCounters>,
     machine_ops: MachineOpCounts,
     read_bytes: usize,
     written_bytes: usize,

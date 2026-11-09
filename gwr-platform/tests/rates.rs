@@ -7,7 +7,7 @@ fn published_units_convert_to_logical_operations_and_directional_bandwidth() {
     let tick = TickScale::from_picoseconds(1000).unwrap();
     assert_eq!(
         tick.flops_per_tick(1_307_400_000_000_000.0, 2).unwrap(),
-        653700.0
+        653_700.0
     );
     assert_eq!(tick.bytes_per_tick(5_300_000_000_000).unwrap(), 5300);
     assert_eq!(tick.bits_per_tick(800_000_000_000).unwrap(), 800);

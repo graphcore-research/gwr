@@ -10,7 +10,7 @@ use gwr_timetable::timetable_file::TimetableFile;
 
 #[test]
 fn named_unary_operation_uses_declared_class_rate() {
-    let platform_yaml = r#"
+    let platform_yaml = r"
 operation_classes:
   trig: { operations: [sin, cos, tan], arity: 1 }
 memory_maps:
@@ -29,8 +29,8 @@ memories:
   - { name: mem, kind: hbm, base_address: 0, config: { capacity_bytes: 1MiB, delay_ticks: 2 } }
 connections:
   - { connect: [pe.pe0, mem.mem] }
-"#;
-    let timetable_yaml = r#"
+";
+    let timetable_yaml = r"
 nodes:
   - { id: A, kind: tensor, config: { addr: 0x1000, dtype: fp32, shape: [4] } }
   - id: sin_node
@@ -47,7 +47,7 @@ nodes:
 edges:
   - { from: A, to: sin_node.0, kind: data }
   - { from: sin_node.0, to: Y, kind: data }
-"#;
+";
     let graph = TimetableFile::from_string(timetable_yaml)
         .unwrap()
         .into_graph()

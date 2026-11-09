@@ -186,11 +186,11 @@ pub(crate) fn ranges(
     all.sort_by_key(|range| range.start);
     let mut union: Vec<Range<u128>> = Vec::new();
     for range in all {
-        if let Some(last) = union.last_mut() {
-            if range.start <= last.end {
-                last.end = last.end.max(range.end);
-                continue;
-            }
+        if let Some(last) = union.last_mut()
+            && range.start <= last.end
+        {
+            last.end = last.end.max(range.end);
+            continue;
         }
         union.push(range);
     }

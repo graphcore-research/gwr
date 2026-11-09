@@ -6,7 +6,7 @@ use gwr_platform::yaml::platform_to_yaml_str;
 
 fn source(field: &str) -> String {
     format!(
-        r#"
+        r"
 memory_maps: [{{name: map, devices: [hbm]}}]
 operation_classes:
  add: {{operations: [add], arity: 2}}
@@ -23,7 +23,7 @@ fabrics:
 connections:
  - {{connect: [pe.pe, 'fabric.f@(0,0)']}}
  - {{connect: [mem.hbm, 'fabric.f@(1,0)']}}
-"#
+"
     )
 }
 #[test]

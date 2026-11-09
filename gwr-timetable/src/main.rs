@@ -14,6 +14,9 @@ use gwr_engine::engine::Engine;
 use gwr_engine::executor::ExecutorStats;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::types::SimResult;
+use gwr_models::processing_element::compute::{
+    NativeActivityReport, NativeMemoryPayload, NativePeActivity,
+};
 use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_platform::Platform;
 use gwr_timetable::Timetable;
@@ -21,6 +24,7 @@ use gwr_timetable::timetable_file::TimetableFile;
 use gwr_track::Track;
 use gwr_track::builder::{TrackerArgs, setup_trackers};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
+use sha2::{Digest, Sha256};
 
 fn main() {
     if let Err(error) = run() {
@@ -29,6 +33,10 @@ fn main() {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "Top-level CLI initialization and independent command paths remain visible together."
+)]
 fn run() -> Result<()> {
     let mut args = Cli::parse();
     args.tracker
@@ -37,15 +45,24 @@ fn run() -> Result<()> {
     let tracker: Rc<dyn Track> = setup_trackers(&args.tracker.trackers_config())?;
     let mut engine = Engine::new(&tracker);
     let clock = engine.default_clock();
-    let platform = Rc::new(Platform::from_file(
-        &engine,
-        &clock,
-        Path::new(&args.platform),
-    )?);
+    let platform_yaml = gwr_platform::catalog::load_yaml_with_includes(
+        &args.platform,
+        gwr_platform::catalog::CatalogTarget::Platform,
+    )?;
+    let platform = Rc::new(Platform::from_string(&engine, &clock, &platform_yaml)?);
+    if args.activity_out.is_some() {
+        for name in platform.pe_names() {
+            platform.pe(&name)?.enable_compute_action_counters()?;
+        }
+    }
 
     println!("Loaded platform:\n{platform}");
 
-    let timetable_file = TimetableFile::from_file(&args.timetable)?;
+    let timetable_yaml = gwr_platform::catalog::load_yaml_with_includes(
+        &args.timetable,
+        gwr_platform::catalog::CatalogTarget::Timetable,
+    )?;
+    let timetable_file = TimetableFile::from_string(&timetable_yaml)?;
     let num_nodes = timetable_file.nodes.len();
     let num_edges = timetable_file.edges.len();
     let graph = timetable_file.into_graph()?;
@@ -121,6 +138,34 @@ fn run() -> Result<()> {
         platform.try_dump_stats(clock.time_now_ns())?;
     }
 
+    if let Some(path) = &args.activity_out {
+        let mut names = platform.pe_names();
+        names.sort();
+        let mut pes = Vec::new();
+        for name in names {
+            let pe = platform.pe(&name)?;
+            pes.push(NativePeActivity {
+                name,
+                engines: pe.compute_engine_names().to_vec(),
+                compute: pe.compute_action_snapshot(),
+            });
+        }
+        let mut memory_payloads = Vec::new();
+        for name in platform.memory_names() {
+            let m = platform.memory(&name)?;
+            memory_payloads.push(NativeMemoryPayload {
+                name,
+                read_bytes: u64::try_from(m.bytes_read())?,
+                written_bytes: u64::try_from(m.bytes_written())?,
+            });
+        }
+        let report=NativeActivityReport{schema_version:1,kind:"gwr_native_activity".into(),platform_digest:format!("{:x}",Sha256::digest(platform_yaml.as_bytes())),workload_id:format!("{:x}",Sha256::digest(timetable_yaml.as_bytes())),duration_s:clock.time_now_ns()*1e-9,pes,memory_payloads,coverage:vec!["Physical cache/bank/register/NoC action counters are not observed; boundary payload is reported separately.".into()]};
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, serde_json::to_vec_pretty(&report)?)?;
+    }
+
     Ok(())
 }
 
@@ -177,6 +222,10 @@ struct Cli {
     /// Enable dumping of summary statistics
     #[arg(long, default_value = "false")]
     dump_stats: bool,
+
+    /// Export aggregate typed compute actions without enabling trace recording
+    #[arg(long)]
+    activity_out: Option<PathBuf>,
 
     /// Write a Mermaid diagram of the timetable state to this file if execution
     /// fails.

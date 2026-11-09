@@ -340,6 +340,14 @@ impl LoadStoreUnit {
         .await
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Keep storage ownership and completion guards in the same access scope"
+    )]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Access metadata and storage lifetimes are independent parts of one request"
+    )]
     async fn access_ranges_with_storage(
         &self,
         access_type: AccessType,
@@ -452,18 +460,16 @@ impl LoadStoreUnit {
                             drop(packet_turn);
                             response_ready_event.listen().await;
                             let result = state.handle_response_in_slot(request_slot_idx);
-                            if result.is_ok() {
-                                if let Some(stats) = source_stats {
-                                    let mut stats = stats.borrow_mut();
-                                    stats.read_bytes = stats
-                                        .read_bytes
-                                        .checked_add(access_size_bytes)
-                                        .ok_or_else(|| {
-                                            SimError(
-                                                "completed source PE read counter overflow".into(),
-                                            )
-                                        })?;
-                                }
+                            if result.is_ok()
+                                && let Some(stats) = source_stats
+                            {
+                                let mut stats = stats.borrow_mut();
+                                stats.read_bytes = stats
+                                    .read_bytes
+                                    .checked_add(access_size_bytes)
+                                    .ok_or_else(|| {
+                                        SimError("completed source PE read counter overflow".into())
+                                    })?;
                             }
                             completion.request_completed()?;
                             result

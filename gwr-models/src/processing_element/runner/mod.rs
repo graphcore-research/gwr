@@ -140,7 +140,7 @@ impl TaskRunner {
                 config.publish(scratch)?;
                 self.dispatcher.set_task_completed(task_idx)
             }
-            Task::ProgramTask { config } => self.run_program(task_idx, &config).await,
+            Task::ProgramTask { config } => Box::pin(self.run_program(task_idx, &config)).await,
             Task::AtomicControlJoin { config } => {
                 config.execute()?;
                 self.dispatcher.set_task_completed(task_idx)
@@ -175,10 +175,10 @@ impl TaskRunner {
             }
             match plan {
                 program_pipeline::PipelinePlan::Matrix(plan) => {
-                    self.run_block_pipeline(config, plan).await?
+                    self.run_block_pipeline(config, plan).await?;
                 }
                 program_pipeline::PipelinePlan::Program(plan) => {
-                    self.run_program_pipeline(config, *plan).await?
+                    Box::pin(self.run_program_pipeline(config, *plan)).await?;
                 }
             }
             return self.dispatcher.set_task_completed(task_idx);
@@ -298,6 +298,10 @@ pub fn estimate_peak_tile_sram(
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "Validate all scheduled operations before starting execution"
+)]
 pub(super) fn preflight_program(
     compute_model: &ComputeModel,
     region: &ValidatedRegion,
@@ -424,7 +428,7 @@ fn uses_leading_padding(expr: &ExprSpec) -> bool {
             indices.iter().any(|index| matches!(index, crate::processing_element::program::syntax::IndexSpec::Affine { affine } if affine.offset < 0)),
         ExprSpec::Call { args, .. } | ExprSpec::MatrixMac { args, .. } => args.iter().any(uses_leading_padding),
         ExprSpec::Reduce { value, .. } => uses_leading_padding(value),
-        _ => false,
+        ExprSpec::Read { .. } => false,
     }
 }
 
@@ -436,7 +440,7 @@ fn uses_reduction_window(expr: &ExprSpec) -> bool {
         } => true,
         ExprSpec::Reduce { value, .. } => uses_affine_indices(value),
         ExprSpec::Call { args, .. } => args.iter().any(uses_reduction_window),
-        _ => false,
+        ExprSpec::Read { .. } | ExprSpec::MatrixMac { .. } => false,
     }
 }
 

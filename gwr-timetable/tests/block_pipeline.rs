@@ -10,7 +10,7 @@ use gwr_timetable::timetable_file::TimetableFile;
 
 fn platform(workspace: usize) -> String {
     format!(
-        r#"
+        r"
 operation_classes:
  matrix: {{operations: [matrix_mac], arity: 2, flops_per_op: 2}}
  cast: {{operations: [convert], arity: 1, flops_per_op: 0}}
@@ -40,13 +40,13 @@ memories:
  - {{name: hbm, kind: hbm, base_address: 0, config: {{capacity_bytes: 65536, bw_bytes_per_tick: 16, delay_ticks: 5}}}}
 connections:
  - {{connect: [pe.pe, mem.hbm]}}
-"#
+"
     )
 }
 
 fn workload(mode: &str, inputs: usize, outputs: usize, distance: usize) -> String {
     format!(
-        r#"
+        r"
 nodes:
  - {{id: A, kind: tensor, config: {{addr: 0, dtype: fp8, shape: [2,8,16]}}}}
  - {{id: B, kind: tensor, config: {{addr: 4096, dtype: fp8, shape: [2,16,8]}}}}
@@ -71,7 +71,7 @@ edges:
  - {{from: A, to: gemm.0, kind: data}}
  - {{from: B, to: gemm.1, kind: data}}
  - {{from: gemm.0, to: C, kind: data}}
-"#
+"
     )
 }
 
