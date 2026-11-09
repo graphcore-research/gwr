@@ -52,7 +52,7 @@ fn assert_has_file_line_column(message: &str) {
 
 mod delay_errors {
     use gwr_components::test_helpers::expect_value;
-    use gwr_engine::types::SimResult;
+    use gwr_std::error::SimResult;
 
     use super::*;
 
@@ -261,7 +261,7 @@ mod delay_errors {
         assert_panic_contains(
             || {
                 let mut engine = start_test(file!());
-                engine.spawn(async { gwr_engine::sim_error!("unexpected failure") });
+                engine.spawn(async { gwr_std::sim_error!("unexpected failure") });
                 let clock = engine.default_clock();
                 let delay = Delay::new_and_register(&engine, &clock, engine.top(), "delay", 1);
                 let mut harness = DelayHarness::<i32>::new(engine, delay);
@@ -273,7 +273,7 @@ mod delay_errors {
     }
 
     async fn fail_script() -> SimResult {
-        gwr_engine::sim_error!("script failed")
+        gwr_std::sim_error!("script failed")
     }
 }
 

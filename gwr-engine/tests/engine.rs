@@ -11,7 +11,7 @@ use gwr_components::source::Source;
 use gwr_engine::engine::Engine;
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
-use gwr_engine::types::SimResult;
+use gwr_std::error::SimResult;
 use gwr_track::tracker::dev_null_tracker;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -71,7 +71,7 @@ fn task_error_ends_the_current_run() {
 
     engine.spawn(async move {
         clock.wait_ticks(3)?.await;
-        gwr_engine::sim_error!("simulation stopped")
+        gwr_std::sim_error!("simulation stopped")
     });
 
     let clock = engine.default_clock();

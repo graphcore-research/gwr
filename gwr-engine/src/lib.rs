@@ -50,11 +50,11 @@ mod tests {
     use std::rc::Rc;
 
     use async_trait::async_trait;
+    use gwr_std::error::SimResult;
     use gwr_track::tracker::dev_null_tracker;
 
     use crate::engine::Engine;
     use crate::traits::Runnable;
-    use crate::types::SimResult;
 
     struct TestComponent {
         ran: Rc<Cell<bool>>,

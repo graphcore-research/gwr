@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use gwr_engine::traits::{Routable, TotalBytes};
-use gwr_engine::types::SimError;
+use gwr_std::error::SimError;
 
 use crate::memory::CacheHintType;
 

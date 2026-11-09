@@ -7,7 +7,7 @@ use gwr_engine::engine::Engine;
 use gwr_engine::port::PortStateResult;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::{Routable, SimObject};
-use gwr_engine::types::{AccessType, DeviceId, SimResult};
+use gwr_engine::types::{AccessType, DeviceId};
 use gwr_models::build_model_harness;
 use gwr_models::cache::coherency_manager::{CoherenceOp, CoherencyManager, CoherencyManagerConfig};
 use gwr_models::cache::traits::CoherentAccess;
@@ -19,6 +19,7 @@ use gwr_models::memory::memory_map::MemoryMap;
 use gwr_models::memory::traits::AccessMemory;
 use gwr_models::memory::{CacheHintType, Memory, MemoryConfig};
 use gwr_models::test_helpers::MemoryTxn;
+use gwr_std::error::SimResult;
 use gwr_track::entity::Entity;
 
 const BASE_ADDRESS: u64 = 0x80000;

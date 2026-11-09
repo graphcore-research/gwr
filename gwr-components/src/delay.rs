@@ -21,10 +21,10 @@
 //! # use std::rc::Rc;
 //! # use async_trait::async_trait;
 //! # use gwr_engine::port::{InPort, OutPort};
-//! # use gwr_engine::sim_error;
+//! # use gwr_std::sim_error;
 //! # use gwr_engine::time::clock::Clock;
 //! # use gwr_engine::traits::SimObject;
-//! # use gwr_engine::types::SimResult;
+//! # use gwr_std::error::SimResult;
 //! # use gwr_track::entity::Entity;
 //! #
 //! # async fn run_tx<T>(
@@ -60,10 +60,10 @@
 //! # use async_trait::async_trait;
 //! # use gwr_engine::events::repeated::Repeated;
 //! # use gwr_engine::port::{InPort, OutPort};
-//! # use gwr_engine::sim_error;
+//! # use gwr_std::sim_error;
 //! # use gwr_engine::time::clock::{Clock, ClockTick};
 //! # use gwr_engine::traits::SimObject;
-//! # use gwr_engine::types::SimResult;
+//! # use gwr_std::error::SimResult;
 //! # use gwr_track::entity::Entity;
 //! #
 //! # async fn run_rx<T>(
@@ -106,10 +106,10 @@
 //! # use async_trait::async_trait;
 //! # use gwr_engine::events::repeated::Repeated;
 //! # use gwr_engine::port::{InPort, OutPort};
-//! # use gwr_engine::sim_error;
+//! # use gwr_std::sim_error;
 //! # use gwr_engine::time::clock::{Clock, ClockTick};
 //! # use gwr_engine::traits::{Event, SimObject};
-//! # use gwr_engine::types::SimResult;
+//! # use gwr_std::error::SimResult;
 //! # use gwr_track::entity::Entity;
 //! #
 //! # async fn run_tx<T>(
@@ -159,7 +159,7 @@
 //! # use gwr_engine::test_helpers::start_test;
 //! # use gwr_engine::time::clock::Clock;
 //! # use gwr_engine::traits::SimObject;
-//! # use gwr_engine::types::SimResult;
+//! # use gwr_std::error::SimResult;
 //! #
 //! # fn source_sink() -> SimResult {
 //! #     let mut engine = start_test(file!());
@@ -196,11 +196,11 @@ use gwr_engine::engine::Engine;
 use gwr_engine::events::repeated::Repeated;
 use gwr_engine::executor::Spawner;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
-use gwr_engine::sim_error;
 use gwr_engine::time::clock::{Clock, ClockTick};
 use gwr_engine::traits::{Event, Runnable, SimObject};
-use gwr_engine::types::SimResult;
 use gwr_model_builder::{EntityDisplay, EntityGet};
+use gwr_std::error::SimResult;
+use gwr_std::sim_error;
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
 

@@ -85,7 +85,7 @@ use std::marker::PhantomData;
 
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::TotalBytes;
-use gwr_engine::types::SimError;
+use gwr_std::error::SimError;
 
 /// Create a [RateLimiter] wrapped in an [Rc](std::rc::Rc), returning a
 /// [`SimError`] if the rate is zero.

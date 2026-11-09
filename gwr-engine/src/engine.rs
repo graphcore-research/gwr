@@ -5,13 +5,14 @@ use std::future::Future;
 use std::rc::Rc;
 use std::time::Duration;
 
+use gwr_std::error::SimResult;
 use gwr_track::entity::{Entity, toplevel};
 use gwr_track::tracker::stdout_tracker;
 use gwr_track::{Tracker, trace};
 
 use crate::executor::{self, Executor, ExecutorSnapshot, ExecutorStats, Spawner};
 use crate::time::clock::Clock;
-use crate::types::{Component, SimResult};
+use crate::types::Component;
 
 /// Use a default clock frequency of 1GHz.
 const DEFAULT_CLOCK_MHZ: f64 = 1000.0;

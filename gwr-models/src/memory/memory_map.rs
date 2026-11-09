@@ -2,8 +2,9 @@
 
 use std::collections::BTreeMap;
 
-use gwr_engine::sim_error;
-use gwr_engine::types::{DeviceId, SimError};
+use gwr_engine::types::DeviceId;
+use gwr_std::error::SimError;
+use gwr_std::sim_error;
 
 use crate::memory::checked_last_address;
 

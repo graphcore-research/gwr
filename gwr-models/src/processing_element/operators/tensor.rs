@@ -2,8 +2,8 @@
 
 use std::fmt::{self, Display};
 
-use gwr_engine::sim_error;
-use gwr_engine::types::{SimError, SimResult};
+use gwr_std::error::{SimError, SimResult};
+use gwr_std::sim_error;
 
 use super::dtype::DataType;
 use crate::memory::checked_last_address;

@@ -5,8 +5,8 @@
 //! See `lib.rs` for details.
 
 use clap::{CommandFactory, Parser};
-use gwr_engine::sim_error;
-use gwr_engine::types::SimError;
+use gwr_std::error::SimError;
+use gwr_std::sim_error;
 use gwr_track::builder::{TrackerArgs, setup_trackers};
 use gwr_track::tracker::dev_null_tracker;
 use sim_restaurant::config::{RestaurantArgs, RestaurantConfig, long_arg_name};

@@ -5,9 +5,9 @@ use std::collections::{BTreeSet, BinaryHeap, HashSet};
 use std::fmt;
 use std::ops::Range;
 
-use gwr_engine::sim_error;
-use gwr_engine::types::SimResult;
 use gwr_models::processing_element::operators::TensorView;
+use gwr_std::error::SimResult;
+use gwr_std::sim_error;
 
 use super::{ComputeTensorDirection, TimetableEdge, TimetableGraph};
 

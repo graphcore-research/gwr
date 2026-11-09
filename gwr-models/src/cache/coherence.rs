@@ -2,7 +2,8 @@
 //! Coherent packet operations, isolated from the ordinary CacheAccess contract.
 use std::rc::Rc;
 
-use gwr_engine::types::{AccessType, DeviceId, SimError, SimResult};
+use gwr_engine::types::{AccessType, DeviceId};
+use gwr_std::error::{SimError, SimResult};
 
 use crate::cache::coherency_manager::CoherenceOp;
 use crate::cache::traits::CoherentAccess;

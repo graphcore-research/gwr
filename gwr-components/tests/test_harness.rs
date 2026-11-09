@@ -276,7 +276,7 @@ mod delay_harness {
         input: &mut gwr_engine::port::OutPort<i32>,
         output: &mut gwr_engine::port::InPort<i32>,
         value: i32,
-    ) -> Result<i32, gwr_engine::types::SimError> {
+    ) -> Result<i32, gwr_std::error::SimError> {
         input.put(value)?.await;
         Ok(output.get()?.await)
     }
@@ -545,7 +545,7 @@ mod credit_issuer_harness {
 mod indexed_delay_harness {
     use gwr_engine::port::PortStateResult;
     use gwr_engine::traits::SimObject;
-    use gwr_engine::types::SimResult;
+    use gwr_std::error::SimResult;
 
     use super::*;
 

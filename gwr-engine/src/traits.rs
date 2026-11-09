@@ -9,9 +9,10 @@ use std::pin::Pin;
 use std::rc::Rc;
 
 use async_trait::async_trait;
+use gwr_std::error::SimResult;
 use gwr_track::id::Unique;
 
-use crate::types::{AccessType, DeviceId, SimResult};
+use crate::types::{AccessType, DeviceId};
 
 /// The `TotalBytes` trait is used to determine how many bytes an object
 /// represents
@@ -174,7 +175,7 @@ pub type BoxFuture<'a, T> = Pin<std::boxed::Box<dyn Future<Output = T> + 'a>>;
 /// executor. A basic implementation of the trait looks like:
 ///
 /// ```rust
-/// # use gwr_engine::types::SimResult;
+/// # use gwr_std::error::SimResult;
 /// # use async_trait::async_trait;
 /// #[async_trait(?Send)]
 /// pub trait Runnable {

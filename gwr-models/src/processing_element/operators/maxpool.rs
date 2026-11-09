@@ -6,8 +6,8 @@
 
 use std::rc::Rc;
 
-use gwr_engine::sim_error;
-use gwr_engine::types::{SimError, SimResult};
+use gwr_std::error::{SimError, SimResult};
+use gwr_std::sim_error;
 use rand::RngExt;
 use serde::{Deserialize, Deserializer, Serialize};
 

@@ -4,7 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use gwr_engine::traits::SimObject;
-use gwr_engine::types::{AccessType, SimError, SimResult};
+use gwr_engine::types::AccessType;
+use gwr_std::error::{SimError, SimResult};
 use gwr_track::entity::Entity;
 
 use super::coherence::CoherenceProtocol;

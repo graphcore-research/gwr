@@ -28,6 +28,7 @@ members = [
   "gwr-protocols",
   "gwr-resources",
   "gwr-spotter",
+  "gwr-std",
   "gwr-terminus",
   "gwr-timetable",
   "gwr-track",

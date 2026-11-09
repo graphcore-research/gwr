@@ -31,8 +31,8 @@ use gwr_engine::engine::Engine;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::{Runnable, SimObject};
-use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::{EntityDisplay, EntityGet};
+use gwr_std::error::{SimError, SimResult};
 /// The gwr_track library provides tracing/logging features.
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;

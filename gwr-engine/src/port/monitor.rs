@@ -10,12 +10,12 @@ use std::rc::Rc;
 
 use async_trait::async_trait;
 use byte_unit::{Byte, Unit};
+use gwr_std::error::SimResult;
 use gwr_track::entity::{Entity, EntityMonitor};
 
 use crate::engine::Engine;
 use crate::time::clock::Clock;
 use crate::traits::{Runnable, SimObject};
-use crate::types::SimResult;
 
 pub struct Monitor {
     entity: EntityMonitor,

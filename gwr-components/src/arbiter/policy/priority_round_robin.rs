@@ -5,9 +5,9 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use gwr_engine::sim_error;
 use gwr_engine::traits::SimObject;
-use gwr_engine::types::SimError;
+use gwr_std::error::SimError;
+use gwr_std::sim_error;
 use gwr_track::entity::Entity;
 
 use crate::arbiter::Arbitrate;

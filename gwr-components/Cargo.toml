@@ -30,10 +30,11 @@ harness = false
 async-trait.workspace = true
 byte-unit.workspace = true
 futures.workspace = true
-gwr-engine = { path = "../gwr-engine", version = "0.16.0" }
+gwr-engine = { path = "../gwr-engine", version = "0.17.0" }
 gwr-model-builder = { path = "../gwr-model-builder", version = "0.2.0" }
 gwr-resources = { path = "../gwr-resources", version = "0.1.0" }
-gwr-track = { path = "../gwr-track", version = "0.13.0" }
+gwr-std = { path = "../gwr-std", version = "0.1.0" }
+gwr-track = { path = "../gwr-track", version = "0.14.0" }
 log.workspace = true
 paste.workspace = true
 

@@ -6,7 +6,7 @@ use std::rc::Rc;
 use gwr_engine::engine::Engine;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::SimObject;
-use gwr_engine::types::{DeviceId, SimError};
+use gwr_engine::types::DeviceId;
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::memory_map::MemoryMap;
 use gwr_models::memory::traits::AccessMemory;
@@ -14,6 +14,7 @@ use gwr_models::memory::{Memory, MemoryConfig};
 use gwr_models::test_helpers::{
     create_default_memory_map, create_read, create_write, create_write_np,
 };
+use gwr_std::error::SimError;
 
 const DST_ADDR: u64 = 0x80000;
 const SRC_ADDR: u64 = DST_ADDR + 0x1000;

@@ -3,9 +3,10 @@
 use std::fmt::Display;
 use std::rc::Rc;
 
-use gwr_engine::sim_error;
 use gwr_engine::traits::{Routable, SimObject, TotalBytes};
-use gwr_engine::types::{AccessType, DeviceId, SimError};
+use gwr_engine::types::{AccessType, DeviceId};
+use gwr_std::error::SimError;
+use gwr_std::sim_error;
 use gwr_track::entity::Entity;
 use gwr_track::id::Unique;
 use gwr_track::{Id, create_id, track_create_object};

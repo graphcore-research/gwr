@@ -13,10 +13,10 @@ use gwr_components::source::Source;
 use gwr_engine::engine::Engine;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::traits::Routable;
-use gwr_engine::types::SimError;
 use gwr_models::ethernet_frame::{EthernetFrame, u64_to_mac};
 use gwr_models::fc_pipeline::{FcPipeline, FcPipelineConfig};
 use gwr_models::ring_node::{IO_INDEX, RING_INDEX, RingConfig, RingNode};
+use gwr_std::error::SimError;
 
 use crate::frame_gen::FrameGen;
 

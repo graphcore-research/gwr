@@ -6,8 +6,8 @@
 
 use std::rc::Rc;
 
-use gwr_engine::sim_error;
-use gwr_engine::types::{SimError, SimResult};
+use gwr_std::error::{SimError, SimResult};
+use gwr_std::sim_error;
 use rand::RngExt;
 
 use super::{Operator, Tensor, TensorPartition, TensorPartitions};
@@ -315,7 +315,7 @@ impl OperatorGemm {
         inputs: &[Option<Tensor>],
         _expand_ratio: f64,
         _rng: &mut impl RngExt,
-    ) -> Result<Vec<Option<Tensor>>, gwr_engine::types::SimError> {
+    ) -> Result<Vec<Option<Tensor>>, gwr_std::error::SimError> {
         Ok(vec![Some(output_tensor_from_inputs(inputs)?)])
     }
 
@@ -323,7 +323,7 @@ impl OperatorGemm {
         outputs: &[Option<Tensor>],
         expand_ratio: f64,
         rng: &mut impl RngExt,
-    ) -> Result<Vec<Option<Tensor>>, gwr_engine::types::SimError> {
+    ) -> Result<Vec<Option<Tensor>>, gwr_std::error::SimError> {
         let output = validate_outputs(outputs)?;
 
         let mut input_a_dims = output.shape().dims().to_vec();

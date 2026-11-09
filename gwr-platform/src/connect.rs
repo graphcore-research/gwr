@@ -4,15 +4,15 @@ use std::rc::Rc;
 
 use gwr_engine::engine::Engine;
 use gwr_engine::port::{InPort, OutPort};
-use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
-use gwr_engine::types::{SimError, SimResult};
 use gwr_models::cache::Cache;
 use gwr_models::cache::coherency_manager::CoherencyManager;
 use gwr_models::fabric::Fabric;
 use gwr_models::memory::Memory;
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::processing_element::ProcessingElement;
+use gwr_std::error::{SimError, SimResult};
+use gwr_std::sim_error;
 use gwr_track::debug;
 use gwr_track::entity::GetEntity;
 

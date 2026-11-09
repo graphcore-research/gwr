@@ -15,7 +15,7 @@
 use std::fmt;
 use std::sync::LazyLock;
 
-use gwr_engine::types::SimError;
+use gwr_std::error::SimError;
 use regex::Regex;
 
 /// Identifies one of the cache's external connection ports.

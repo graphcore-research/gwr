@@ -2,7 +2,6 @@
 
 //! Shared types.
 
-use std::error::Error;
 use std::fmt;
 use std::rc::Rc;
 
@@ -16,40 +15,6 @@ pub type Eventable<T> = Box<dyn Event<T> + 'static>;
 /// The type of a component that can be registered with the `Engine` so that it
 /// will automatically be spawned.
 pub type Component = Rc<dyn Runnable + 'static>;
-
-// Simulation errors
-
-/// Build a [SimError] from a message that supports `to_string`
-#[macro_export]
-macro_rules! sim_error {
-    ($($arg:tt)+) => {
-        Err($crate::types::SimError(format!($($arg)+).to_string()))
-    };
-}
-
-/// Error returned while parsing, constructing, connecting, or running a
-/// simulation.
-///
-/// Prefer catching static mistakes early. Use parse-time validation when
-/// reading files, and construction-time and connect-time validation where
-/// possible.
-///
-/// Include enough detail to identify the entity, config item, port, node, or
-/// edge that caused the failure clearly enough to fix the model topology or
-/// input.
-#[derive(Debug)]
-pub struct SimError(pub String);
-
-impl fmt::Display for SimError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl Error for SimError {}
-
-/// The SimResult is the return type for most simulation functions
-pub type SimResult = Result<(), SimError>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DeviceId(pub u64);

@@ -7,7 +7,7 @@
 use std::mem::size_of;
 
 use gwr_engine::traits::{SimObject, TotalBytes};
-use gwr_engine::types::SimError;
+use gwr_std::error::SimError;
 use gwr_track::id::Unique;
 
 /// The `DataGenerator` is what a [source](crate::source) uses

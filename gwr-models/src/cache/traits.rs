@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 use std::rc::Rc;
 
-use gwr_engine::types::{AccessType, DeviceId, SimError};
+use gwr_engine::types::{AccessType, DeviceId};
+use gwr_std::error::SimError;
 
 use crate::cache::coherency_manager::CoherenceOp;
 use crate::memory::traits::{CacheAccess, CacheFillToken};

@@ -2,8 +2,8 @@
 
 use std::ops::Range;
 
-use gwr_engine::sim_error;
-use gwr_engine::types::SimError;
+use gwr_std::error::SimError;
+use gwr_std::sim_error;
 
 use super::dtype::DataType;
 use super::floor_sum::checked_floor_sum;

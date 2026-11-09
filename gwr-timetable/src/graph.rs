@@ -3,10 +3,10 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 
-use gwr_engine::sim_error;
-use gwr_engine::types::{SimError, SimResult};
 use gwr_models::processing_element::operators::{Tensor, TensorView};
 use gwr_models::processing_element::task::ComputeOp;
+use gwr_std::error::{SimError, SimResult};
+use gwr_std::sim_error;
 
 use crate::timetable_file::{
     EdgeKind, NodeSection, TensorViewSection, TimetableFile, parse_edge_end,

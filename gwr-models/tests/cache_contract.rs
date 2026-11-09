@@ -4,11 +4,12 @@ use std::fmt;
 
 use gwr_engine::engine::Engine;
 use gwr_engine::traits::{Routable, SimObject, TotalBytes};
-use gwr_engine::types::{AccessType, DeviceId, SimError};
+use gwr_engine::types::{AccessType, DeviceId};
 use gwr_models::cache::{Cache, CacheConfig};
 use gwr_models::memory::CacheHintType;
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::traits::{AccessMemory, CacheAccess, CacheFillToken, ReadMemory};
+use gwr_std::error::SimError;
 use gwr_track::Id;
 use gwr_track::id::Unique;
 
@@ -67,7 +68,7 @@ impl AccessMemory for PlainPacket {
         self.0.to_response(mem).map(Self)
     }
 
-    fn to_ack(&self) -> Result<Self, gwr_engine::types::SimError> {
+    fn to_ack(&self) -> Result<Self, gwr_std::error::SimError> {
         self.0.to_ack().map(Self)
     }
 }

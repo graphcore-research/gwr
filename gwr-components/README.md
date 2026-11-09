@@ -194,7 +194,7 @@ A component with a single output port called `tx` will have:
 # use std::marker::PhantomData;
 # use gwr_engine::port::PortStateResult;
 # use gwr_engine::traits::SimObject;
-# use gwr_engine::types::SimResult;
+# use gwr_std::error::SimResult;
 # struct TestBlock<T> { phantom: PhantomData<T> }
 # impl<T: SimObject> TestBlock<T> {
 pub fn connect_port_tx(&self, port_state: PortStateResult<T>) -> SimResult
@@ -209,7 +209,7 @@ A component with an array of output ports called `out` will have:
 # use std::marker::PhantomData;
 # use gwr_engine::port::PortStateResult;
 # use gwr_engine::traits::SimObject;
-# use gwr_engine::types::SimResult;
+# use gwr_std::error::SimResult;
 # struct TestBlock<T> { phantom: PhantomData<T> }
 # impl<T: SimObject> TestBlock<T> {
 pub fn connect_port_out_i(&self, i: usize, port_state: PortStateResult<T>) -> SimResult
@@ -293,7 +293,7 @@ required.
 # use async_trait::async_trait;
 # use std::marker::PhantomData;
 # use gwr_engine::traits::{Runnable, SimObject};
-# use gwr_engine::types::SimResult;
+# use gwr_std::error::SimResult;
 #
 # struct MyComponent<T>
 # where
@@ -327,7 +327,7 @@ default `Runnable` provided by the library with a `derive` statement.
 # use std::marker::PhantomData;
 # use gwr_engine::traits::SimObject;
 # use gwr_model_builder::Runnable;
-# use gwr_engine::types::SimResult;
+# use gwr_std::error::SimResult;
 #
 #[derive(Runnable)]
 struct MyComponent<T>
