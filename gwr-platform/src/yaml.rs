@@ -520,7 +520,7 @@ mod tests {
     fn emitted_null_endpoint_is_a_yaml_string_and_round_trips() {
         let platform = PlatformConfig {
             coherency_managers: None,
-            compute_profiles: Default::default(),
+            compute_profiles: std::collections::BTreeMap::default(),
             operation_classes: BTreeMap::new(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
@@ -568,7 +568,7 @@ mod tests {
         };
         let platform = PlatformConfig {
             coherency_managers: None,
-            compute_profiles: Default::default(),
+            compute_profiles: std::collections::BTreeMap::default(),
             operation_classes: BTreeMap::new(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
@@ -673,7 +673,7 @@ mod tests {
         };
         let platform = PlatformConfig {
             coherency_managers: None,
-            compute_profiles: Default::default(),
+            compute_profiles: std::collections::BTreeMap::default(),
             operation_classes: BTreeMap::new(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
@@ -743,7 +743,7 @@ mod tests {
         };
         let platform = PlatformConfig {
             coherency_managers: None,
-            compute_profiles: Default::default(),
+            compute_profiles: std::collections::BTreeMap::default(),
             operation_classes: BTreeMap::new(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
@@ -797,7 +797,7 @@ mod tests {
         };
         let platform = PlatformConfig {
             coherency_managers: None,
-            compute_profiles: Default::default(),
+            compute_profiles: std::collections::BTreeMap::default(),
             operation_classes: BTreeMap::new(),
             memory_maps: vec![test_memory_map()],
             defaults: None,

@@ -27,6 +27,7 @@ externs = [
   "gwr_platform",
   "gwr_resources",
   "gwr_track",
+  "yaml_serde",
 ]
 
 [output.html]

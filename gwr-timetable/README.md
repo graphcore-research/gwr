@@ -23,23 +23,8 @@ than one path; duplicate program names from different files or the timetable
 itself are errors. `TimetableFile::from_file` resolves includes, while
 `from_string` accepts only self-contained YAML. A shared catalog can contain
 `operation_classes`, `compute_profiles`, and `programs` together: a platform
-imports the compute definitions and a timetable imports the programs. The
-[ONNX catalog](examples/onnx/catalog.yaml) is one example; its runnable
-programs are referenced by files under `examples/onnx/implemented/`.
-
-Regenerate the pinned ONNX inventory, shared catalog, platform fixture, and
-fixed-shape cases natively from the repository root:
-
-```sh
-cargo run --release --bin gen-onnx-examples -- --out-dir gwr-timetable
-```
-
-The generator embeds the pinned 200-operator inventory and declarative
-program/gap catalog, then builds and validates 78 runnable graphs in Rust.
-It records the remaining 122 operators as gaps. This is coverage of selected
-fixed-shape cases at the pinned schema revisions, not a numerical ONNX runtime
-or complete support for every attribute and shape. Use another `--out-dir` to
-export a standalone directory containing `examples/onnx` and `tests/fixtures`.
+imports the compute definitions and a timetable imports the programs. Applications can share these catalogs between platform definitions and
+workload examples.
 
 Tensor nodes declare an external memory `addr`, storage `dtype`, and `shape`.
 They can be inputs, outputs, or intermediates. Compute nodes name a `pe` in the
@@ -390,7 +375,7 @@ can read a boundary input or a local temporary. Every explicitly
 tiled output axis that is not also reduced must occur in each assignment's
 output axes. When an axis is both an output and reduction axis, local row
 statistics can be streamed and recomputed for output chunks. This can reread
-inputs and repeat arithmetic; see the [ML catalog](../gwr-use-cases/examples/ml/README.md).
+inputs and repeat arithmetic; use application-specific workload generators.
 Reducing a materialized local value across a tiled local axis requires a
 full-row plan or an inline scalar expression instead.
 
@@ -474,9 +459,8 @@ outstanding requests, including when the requesting task is cancelled.
 Use `mode: serial` for a matched baseline with identical geometry, full
 buffer reservation, arithmetic and logical boundary accesses. Cache misses and
 physical memory traffic may change with scheduling. Timing may differ
-because `overlap` permits independent stages to run together. See the
-[Izanagi experiment](../gwr-use-cases/examples/izanagi/pipeline/README.md)
-for qualified compute assumptions and reproducible comparisons.
+because `overlap` permits independent stages to run together. Record compute
+assumptions when comparing application-specific experiments.
 
 ## Transfers and communication
 
@@ -516,15 +500,11 @@ transfers, completion dependencies, and software reduction work. Reduction
 collectives require caller-supplied scratch addresses; allocate storage for
 `ranks * input_elements + input_elements` values. This coordinator algorithm
 does not model switch reduction offload or choose an optimal collective.
-See the [communication examples](../gwr-use-cases/examples/communication).
+Application workspaces can supply communication workload generators.
 
 ## Machine and workload experiments
 
-The [`gwr-use-cases` package](../gwr-use-cases/README.md) owns GB200 topologies,
-pinned DeepSeek scenarios, GPT/ResNet generators, and ML/communication examples.
-Its guides explain generation, provenance, calibration limits, and installed
-commands. Run their generated graphs with the `gwr-timetable` simulation runner.
-
+Application-specific topologies and workload generators belong in the application workspace.
 
 Generic pipeline snapshots report working bytes separately from native matrix
 accumulator bytes, stage completions/cancellations, buffer occupancy, local copy
