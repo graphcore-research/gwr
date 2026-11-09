@@ -13,50 +13,106 @@
 //! positive layer indices. The `--depth` limits the total span of generated
 //! layers around the initial tensor.
 //!
-//! Compute node operators are selected using the user-defined weights.
-//! Once an operator is chosen, the generator builds input and output tensor
-//! definitions and partitions the compute across processing elements.
-//! The new input/output tensors are added as possible expansion points.
-//! The generator iterates until enough compute nodes have been created.
+//! Program templates are selected using the user-defined weights.
+//! Once a template is chosen, the generator builds input and output tensor
+//! definitions and partitions each operation over an outer output axis. Each
+//! partition has input and output views and is assigned to a processing
+//! element. The new tensors are added as possible expansion points. The
+//! generator iterates until the compute-node budget is exhausted.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::Display;
 use std::path::PathBuf;
 use std::{fs, io};
 
 use byte_unit::{Byte, UnitType};
 use clap::Parser;
-use gwr_models::processing_element::operators::dtype::DataType;
-use gwr_models::processing_element::operators::{
-    ExpansionDirection, HasShape, OperatorMaxPool, Shape, Tensor, TensorPartition, TensorView,
-};
-use gwr_models::processing_element::task::ComputeOp;
+use gwr_models::processing_element::compute::{ComputeModel, ComputeWork};
+use gwr_models::processing_element::estimate_peak_tile_sram;
+use gwr_models::processing_element::program::syntax::{ProgramSpec, TileSpec};
+use gwr_models::processing_element::program::validate::{RegionBindings, validate_program};
+use gwr_models::processing_element::tensors::dtype::DataType;
+use gwr_models::processing_element::tensors::{HasShape, Shape, Tensor, TensorView};
 use gwr_platform::types::PlatformConfig;
 use gwr_timetable::timetable_file::{
-    EdgeKind, EdgeSection, NodeSection, TensorConfigSection, TensorViewSection, TimetableFile,
+    EdgeKind, EdgeSection, NodeSection, ProgramDefinition, ProgramSection, TensorConfigSection,
+    TensorViewSection, TimetableFile,
 };
-use log::{Level, LevelFilter, Metadata, Record, debug, info};
-use rand::prelude::*;
+use log::{LevelFilter, Metadata, Record, debug, info};
+use rand::prelude::{RngExt, SeedableRng};
 use rand::rngs::StdRng;
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+#[path = "gen-timetable/programs.rs"]
+mod programs;
+#[path = "gen-timetable/templates.rs"]
+mod templates;
+use templates::{ExpansionDirection, ProgramTemplate};
 
-struct SimpleLogger;
+fn main() -> Result<()> {
+    let args = Cli::parse();
+    init_logging(args.debug);
 
-static LOGGER: SimpleLogger = SimpleLogger;
+    let platform_yaml = gwr_platform::catalog::load_yaml_with_includes(
+        &args.platform,
+        gwr_platform::catalog::CatalogTarget::Platform,
+    )
+    .map_err(boxed_error)?;
+    let platform: PlatformConfig = yaml_serde::from_str(&platform_yaml).map_err(|e| {
+        error_from_str(format!(
+            "failed to parse platform YAML using gwr_platform::types::PlatformConfig: {e}"
+        ))
+    })?;
 
-impl log::Log for SimpleLogger {
-    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
-        metadata.level() <= log::max_level()
+    let out_path = args.out.clone();
+    let generator = Generator::new(args, &platform)?;
+    let timetable = generate(generator)?;
+    let yaml = yaml_serde::to_string(&timetable)
+        .map_err(|e| error_from_str(format!("failed to serialise timetable YAML: {e}")))?;
+    fs::write(&out_path, yaml)
+        .map_err(|e| error_from_str(format!("failed to write {}: {e}", out_path.display())))?;
+    info!("Wrote graph to {}", out_path.display());
+    Ok(())
+}
+
+fn generate(mut generator: Generator) -> Result<TimetableFile> {
+    let shape = generator.random_shape()?;
+    let init_dtype = generator.args.init_dtype;
+    let seed_tensor = generator.make_tensor_with_dtype("initial", &shape, &init_dtype)?;
+    generator.expansion_points.try_to_add_expansion_point(
+        seed_tensor.clone(),
+        0,
+        ExpansionDirection::Backward,
+    );
+    generator.expansion_points.try_to_add_expansion_point(
+        seed_tensor,
+        0,
+        ExpansionDirection::Forward,
+    );
+
+    while generator.remaining_compute_nodes > 0 {
+        let Some((idx, template)) = generator.choose_expansion()? else {
+            break;
+        };
+        let point = generator.expansion_points.swap_remove(idx);
+        generator.expand_point(&point, &template)?;
     }
 
-    fn log(&self, record: &Record<'_>) {
-        if self.enabled(record.metadata()) {
-            eprintln!("{}", record.args());
-        }
+    if generator.template_counts.iter().all(|count| *count == 0) {
+        return Err(error_from_str(
+            "no supported compute templates for the platform and initial tensor dtype",
+        ));
     }
 
-    fn flush(&self) {}
+    generator.print_summary()?;
+
+    let timetable = TimetableFile {
+        atomic_effects: None,
+        programs: generator.programs,
+        nodes: generator.nodes,
+        edges: generator.edges,
+    };
+    timetable.validate().map_err(boxed_error)?;
+    Ok(timetable)
 }
 
 fn init_logging(debug_enabled: bool) {
@@ -70,55 +126,780 @@ fn init_logging(debug_enabled: bool) {
     log::set_max_level(level);
 }
 
-const NUM_OPS: usize = 3;
+static LOGGER: SimpleLogger = SimpleLogger;
 
-fn op_templates() -> [ComputeOp; NUM_OPS] {
+struct SimpleLogger;
+
+impl log::Log for SimpleLogger {
+    fn log(&self, record: &Record<'_>) {
+        if self.enabled(record.metadata()) {
+            eprintln!("{}", record.args());
+        }
+    }
+    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+        metadata.level() <= log::max_level()
+    }
+
+    fn flush(&self) {}
+}
+
+struct Generator {
+    args: Cli,
+    rng: StdRng,
+    pe_names: Vec<String>,
+    pe_models: Vec<ComputeModel>,
+    pe_sram_bytes: Vec<usize>,
+    allocator: AddrAllocator,
+    tensors: Vec<Tensor>,
+    nodes: Vec<NodeSection>,
+    programs: BTreeMap<String, ProgramDefinition>,
+    edges: Vec<EdgeSection>,
+    next_node_idx: usize,
+    template_counts: [usize; NUM_TEMPLATES],
+    expansion_points: Frontier,
+    remaining_compute_nodes: usize,
+    last_pe_idx: usize,
+}
+
+impl Generator {
+    fn new(args: Cli, platform: &PlatformConfig) -> Result<Self> {
+        validate_args(&args)?;
+
+        let pe_names = platform
+            .processing_elements
+            .as_ref()
+            .ok_or_else(|| error_from_str("platform contains no processing_elements"))?
+            .iter()
+            .map(|pe| pe.name.clone())
+            .collect::<Vec<_>>();
+        if pe_names.is_empty() {
+            return Err(error_from_str("platform contains zero processing elements"));
+        }
+        let pe_resources = platform
+            .processing_elements
+            .as_ref()
+            .expect("checked processing elements")
+            .iter()
+            .map(|pe| {
+                let config =
+                    pe.effective_config(&platform.operation_classes, &platform.compute_profiles)?;
+                Ok::<_, gwr_engine::types::SimError>((
+                    ComputeModel::new(&config.compute, &platform.operation_classes)?,
+                    config.sram_bytes,
+                ))
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(boxed_error)?;
+        let (pe_models, pe_sram_bytes) = pe_resources.into_iter().unzip();
+
+        let base_addr = platform
+            .memories
+            .as_ref()
+            .and_then(|mems| mems.first())
+            .map(|m| m.base_address)
+            .ok_or_else(|| error_from_str("platform contains no memories"))?;
+
+        let seed = args.seed;
+        let target_depth = args.depth;
+        let remaining_compute_nodes = args.max_compute_nodes;
+        let tensor_align_bytes = args.tensor_align_bytes;
+        Ok(Self {
+            args,
+            rng: StdRng::seed_from_u64(seed),
+            pe_names,
+            pe_models,
+            pe_sram_bytes,
+            allocator: AddrAllocator::new(base_addr, tensor_align_bytes),
+            tensors: Vec::new(),
+            nodes: Vec::new(),
+            programs: BTreeMap::new(),
+            edges: Vec::new(),
+            next_node_idx: 0,
+            template_counts: [0; NUM_TEMPLATES],
+            expansion_points: Frontier::new(target_depth),
+            remaining_compute_nodes,
+            last_pe_idx: 0,
+        })
+    }
+
+    fn print_summary(&self) -> Result<()> {
+        info!(
+            "Created {} tensors / {} nodes / {} edges",
+            self.tensors.len(),
+            self.nodes.len(),
+            self.edges.len()
+        );
+        let [add_template, gemm_template, reduce_template] = program_templates();
+        info!(
+            "Program templates: add={} gemm={} reduce_max={}",
+            self.template_counts[template_index(&add_template)],
+            self.template_counts[template_index(&gemm_template)],
+            self.template_counts[template_index(&reduce_template)]
+        );
+        let total_bytes = self.tensors.iter().try_fold(0u64, |total, tensor| {
+            let num_bytes = u64::try_from(tensor.num_bytes())?;
+            total
+                .checked_add(num_bytes)
+                .ok_or_else(|| error_from_str("total tensor storage size overflows"))
+        })?;
+        info!(
+            "Tensors use {total_bytes} bytes ({:.2})",
+            Byte::from_u64(total_bytes).get_appropriate_unit(UnitType::Binary)
+        );
+        Ok(())
+    }
+
+    fn expand_point(&mut self, point: &ExpansionPoint, template: &ProgramTemplate) -> Result<()> {
+        let next_layer = point.next_layer();
+
+        let compute_id = self.next_id(next_layer, template_name(template));
+
+        debug!("\nExpand {point}: {}", point.tensor.shape());
+        debug!("  Compute: {compute_id} (layer {next_layer}):");
+
+        let (input_tensors, output_tensors) = match point.direction {
+            ExpansionDirection::Backward => {
+                self.create_backward_io(&compute_id, template, point)?
+            }
+            ExpansionDirection::Forward => self.create_forward_io(&compute_id, template, point)?,
+        };
+
+        for (idx, input_tensor) in input_tensors.iter().enumerate() {
+            if let Some(input_tensor) = input_tensor {
+                debug!("  Input{idx}: {}", input_tensor.shape());
+            } else {
+                debug!("  Input{idx}: None");
+            }
+        }
+
+        for (idx, output_tensor) in output_tensors.iter().enumerate() {
+            if let Some(output_tensor) = output_tensor {
+                debug!("  Output{idx}: {}", output_tensor.shape());
+            } else {
+                debug!("  Output{idx}: None");
+            }
+        }
+
+        let boundary = full_boundary(&input_tensors, &output_tensors);
+
+        validate_generated_node(template, &input_tensors, &output_tensors)?;
+        let created = self.create_partitioned_compute(
+            &compute_id,
+            template,
+            &boundary,
+            &input_tensors,
+            &output_tensors,
+        )?;
+
+        self.remaining_compute_nodes -= created;
+        self.template_counts[template_index(template)] += created;
+        self.expansion_points.record_expanded_point(point);
+        self.enqueue_followups(point, &input_tensors, &output_tensors);
+
+        Ok(())
+    }
+
+    fn create_backward_io(
+        &mut self,
+        compute_id: &str,
+        template: &ProgramTemplate,
+        point: &ExpansionPoint,
+    ) -> Result<TemplateIo> {
+        let mut output_tensors = vec![Some(point.tensor.clone())];
+        if matches!(template, ProgramTemplate::ReduceMax) {
+            template
+                .add_optional_outputs(&mut output_tensors, self.args.expand_ratio, &mut self.rng)
+                .map_err(boxed_error)?;
+        }
+        self.add_ids_and_register(&format!("{compute_id}_output"), &mut output_tensors)?;
+
+        let mut input_tensors = self.create_inputs_for_template(template, &output_tensors)?;
+        self.add_ids_and_register(&format!("{compute_id}_input"), &mut input_tensors)?;
+
+        Ok((input_tensors, output_tensors))
+    }
+
+    fn create_forward_io(
+        &mut self,
+        compute_id: &str,
+        template: &ProgramTemplate,
+        point: &ExpansionPoint,
+    ) -> Result<TemplateIo> {
+        let mut input_tensors = self.create_forward_inputs(template, &point.tensor)?;
+        self.add_ids_and_register(&format!("{compute_id}_input"), &mut input_tensors)?;
+        let mut output_tensors = self.create_outputs_for_template(template, &input_tensors)?;
+        self.add_ids_and_register(&format!("{compute_id}_output"), &mut output_tensors)?;
+
+        Ok((input_tensors, output_tensors))
+    }
+
+    fn create_forward_inputs(
+        &mut self,
+        template: &ProgramTemplate,
+        input_tensor: &Tensor,
+    ) -> Result<Vec<Option<Tensor>>> {
+        match template {
+            ProgramTemplate::Add => {
+                let other = Tensor::new(input_tensor.shape().dims(), input_tensor.dtype(), 0)
+                    .map_err(boxed_error)?;
+                let inputs = vec![Some(input_tensor.clone()), Some(other)];
+                Ok(inputs)
+            }
+            ProgramTemplate::Gemm => {
+                let other_shape =
+                    ProgramTemplate::gemm_rhs_shape(input_tensor).map_err(boxed_error)?;
+                let other = Tensor::from_shape(other_shape, input_tensor.dtype(), 0)
+                    .map_err(boxed_error)?;
+                let mut inputs = vec![Some(input_tensor.clone()), Some(other)];
+                let ratio = self.optional_input_ratio(template, *input_tensor.dtype());
+                template
+                    .add_optional_inputs(&mut inputs, ratio, &mut self.rng)
+                    .map_err(boxed_error)?;
+                Ok(inputs)
+            }
+            ProgramTemplate::ReduceMax => Ok(vec![Some(input_tensor.clone())]),
+        }
+    }
+
+    fn enqueue_followups(
+        &mut self,
+        point: &ExpansionPoint,
+        input_tensors: &[Option<Tensor>],
+        output_tensors: &[Option<Tensor>],
+    ) {
+        let next_layer = point.next_layer();
+        let input_tensor_layer = match point.direction {
+            ExpansionDirection::Backward => next_layer,
+            ExpansionDirection::Forward => point.tensor_layer,
+        };
+        let output_tensor_layer = match point.direction {
+            ExpansionDirection::Backward => point.tensor_layer,
+            ExpansionDirection::Forward => next_layer,
+        };
+
+        for input_tensor in input_tensors.iter().flatten() {
+            self.expansion_points.record_consumer(input_tensor);
+            if tensor_id(input_tensor) == tensor_id(&point.tensor) {
+                continue;
+            }
+            self.expansion_points.try_to_add_expansion_point(
+                input_tensor.clone(),
+                input_tensor_layer,
+                ExpansionDirection::Backward,
+            );
+        }
+
+        for output_tensor in output_tensors.iter().flatten() {
+            self.expansion_points.record_producer(output_tensor);
+            if tensor_id(output_tensor) == tensor_id(&point.tensor) {
+                continue;
+            }
+            self.expansion_points.try_to_add_expansion_point(
+                output_tensor.clone(),
+                output_tensor_layer,
+                ExpansionDirection::Forward,
+            );
+        }
+    }
+
+    fn create_partitioned_compute(
+        &mut self,
+        compute_id: &str,
+        template: &ProgramTemplate,
+        boundary: &GenerationBoundary,
+        input_tensors: &[Option<Tensor>],
+        output_tensors: &[Option<Tensor>],
+    ) -> Result<usize> {
+        // Each template exposes an outer output axis that can be divided into
+        // independent regions. GEMM uses m so the right operand remains shared.
+        let output = boundary.outputs[0].as_ref().expect("generated output");
+        let (axis, output_dim, input_dims): (&str, usize, &[Option<usize>]) = match template {
+            ProgramTemplate::Add => ("d0", 0, &[Some(0), Some(0)]),
+            ProgramTemplate::Gemm => {
+                let m = output.num_dims() - 2;
+                ("m", m, &[Some(m), None, None])
+            }
+            ProgramTemplate::ReduceMax => ("d0", 0, &[Some(0)]),
+        };
+        let extent = output.shape().dims()[output_dim];
+        let eligible = self.eligible_pe_indices(
+            template,
+            *input_tensors[0].as_ref().expect("generated input").dtype(),
+            matches!(template, ProgramTemplate::Gemm) && input_tensors.len() == 3,
+        );
+        if eligible.is_empty() {
+            return Err(error_from_str(format!(
+                "no PE supports the generated {} program",
+                template_name(template)
+            )));
+        }
+        let requested_size = self
+            .args
+            .partition_size
+            .unwrap_or_else(|| extent.div_ceil(eligible.len()));
+        let count = extent
+            .div_ceil(requested_size)
+            .min(self.remaining_compute_nodes);
+        let program = program_for_boundary(template, boundary)?;
+        let program_section = if count == 1 {
+            ProgramSection::from(program.clone())
+        } else {
+            let name = format!("{compute_id}_program");
+            self.programs.insert(name.clone(), program.clone().into());
+            ProgramSection::Named(name)
+        };
+        let base = extent / count;
+        let extra = extent % count;
+        let mut offset = 0;
+        let mut tilings = BTreeMap::<(usize, usize, usize), TileSpec>::new();
+        for part in 0..count {
+            let length = base + usize::from(part < extra);
+            let mut inputs = boundary.inputs.clone();
+            for (view, dim) in inputs.iter_mut().zip(input_dims) {
+                if let (Some(view), Some(dim)) = (view, dim) {
+                    *view = slice_view(view, *dim, offset, length)?;
+                }
+            }
+            let mut outputs = boundary.outputs.clone();
+            for view in outputs.iter_mut().flatten() {
+                *view = slice_view(view, output_dim, offset, length)?;
+            }
+            let part_boundary = GenerationBoundary { inputs, outputs };
+            template
+                .validate(&part_boundary.inputs, &part_boundary.outputs)
+                .map_err(boxed_error)?;
+            let part_id = if count == 1 {
+                compute_id.to_string()
+            } else {
+                format!("{compute_id}_part{part}")
+            };
+            let pe_idx = self.next_pe_idx(&eligible);
+            let sram_bytes = self.pe_sram_bytes[pe_idx];
+            // Packed views may occupy different physical bytes when the
+            // partition starts at a different element alignment.
+            let packed = part_boundary
+                .inputs
+                .iter()
+                .chain(&part_boundary.outputs)
+                .flatten()
+                .any(|view| view.dtype().num_bits() < 8);
+            let cache_key = (sram_bytes, length, if packed { offset } else { 0 });
+            let tiling = if let Some(cached) = tilings.get(&cache_key) {
+                cached.clone()
+            } else {
+                let planned =
+                    tiling_that_fits(&part_id, &program, &part_boundary, axis, sram_bytes)?;
+                tilings.insert(cache_key, planned.clone());
+                planned
+            };
+            self.create_compute(
+                &part_id,
+                &part_boundary,
+                input_tensors,
+                output_tensors,
+                ComputeMapping {
+                    pe_idx,
+                    program: program_section.clone(),
+                    tiling,
+                },
+            )?;
+            offset += length;
+        }
+        Ok(count)
+    }
+
+    fn next_pe_idx(&mut self, eligible: &[usize]) -> usize {
+        let pe_idx = eligible
+            .iter()
+            .copied()
+            .find(|index| *index >= self.last_pe_idx)
+            .unwrap_or(eligible[0]);
+        self.last_pe_idx = (pe_idx + 1) % self.pe_names.len();
+        pe_idx
+    }
+
+    fn create_compute(
+        &mut self,
+        compute_id: &str,
+        boundary: &GenerationBoundary,
+        input_tensors: &[Option<Tensor>],
+        output_tensors: &[Option<Tensor>],
+        mapping: ComputeMapping,
+    ) -> Result<()> {
+        let pe = self.pe_names[mapping.pe_idx].clone();
+        debug!("  Mapping compute node {compute_id} to {pe}");
+        let input_views = boundary
+            .inputs
+            .iter()
+            .enumerate()
+            .map(|(index, maybe_view)| {
+                maybe_view.as_ref().map(|view| {
+                    let tensor = input_tensors[index]
+                        .as_ref()
+                        .expect("boundary input has a tensor");
+                    self.register_edge(
+                        tensor_id(tensor),
+                        &format!("{compute_id}.{index}"),
+                        EdgeKind::Data,
+                    );
+                    TensorViewSection {
+                        offsets: view.offsets().to_vec(),
+                        shape: view.shape().dims().to_vec(),
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        let output_views = boundary
+            .outputs
+            .iter()
+            .enumerate()
+            .map(|(index, maybe_view)| {
+                maybe_view.as_ref().map(|view| {
+                    let tensor = output_tensors[index]
+                        .as_ref()
+                        .expect("boundary output has a tensor");
+                    let from = if boundary.outputs.len() == 1 {
+                        compute_id.to_string()
+                    } else {
+                        format!("{compute_id}.{index}")
+                    };
+                    self.register_edge(&from, tensor_id(tensor), EdgeKind::Data);
+                    TensorViewSection {
+                        offsets: view.offsets().to_vec(),
+                        shape: view.shape().dims().to_vec(),
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        self.nodes.push(NodeSection::Compute {
+            pipeline: None,
+            id: compute_id.to_string(),
+            program: mapping.program,
+            tiling: Some(mapping.tiling),
+            pe: Some(pe),
+            input_views: Some(input_views),
+            output_views: Some(output_views),
+        });
+        Ok(())
+    }
+
+    fn create_inputs_for_template(
+        &mut self,
+        template: &ProgramTemplate,
+        outputs: &[Option<Tensor>],
+    ) -> Result<Vec<Option<Tensor>>> {
+        let dtype = *outputs[0].as_ref().expect("generated output").dtype();
+        let optional_ratio = self.optional_input_ratio(template, dtype);
+        template
+            .create_inputs(
+                outputs,
+                self.args.expand_ratio,
+                optional_ratio,
+                &mut self.rng,
+            )
+            .map_err(boxed_error)
+    }
+
+    fn optional_input_ratio(&self, template: &ProgramTemplate, dtype: DataType) -> f64 {
+        if matches!(template, ProgramTemplate::Gemm)
+            && self.eligible_pe_indices(template, dtype, true).is_empty()
+        {
+            0.0
+        } else {
+            self.args.expand_ratio
+        }
+    }
+
+    fn create_outputs_for_template(
+        &mut self,
+        template: &ProgramTemplate,
+        inputs: &[Option<Tensor>],
+    ) -> Result<Vec<Option<Tensor>>> {
+        template
+            .create_outputs(inputs, self.args.expand_ratio, &mut self.rng)
+            .map_err(boxed_error)
+    }
+
+    fn add_ids_and_register(
+        &mut self,
+        base_name: &str,
+        tensors: &mut [Option<Tensor>],
+    ) -> Result<()> {
+        for (idx, tensor) in tensors.iter_mut().enumerate() {
+            let Some(tensor) = tensor else {
+                continue;
+            };
+            if tensor.id().is_none() {
+                tensor.set_id(format!("tensor_{base_name}_{idx}"));
+            }
+        }
+
+        for tensor in tensors.iter_mut().flatten() {
+            self.register_tensor(tensor)?;
+        }
+        Ok(())
+    }
+
+    fn make_tensor_with_dtype(
+        &mut self,
+        base_name: &str,
+        shape: &Shape,
+        dtype: &DataType,
+    ) -> Result<Tensor> {
+        let id = format!("tensor_{base_name}");
+        let mut tensor = Tensor::from_shape(shape.clone(), dtype, 0)
+            .map_err(boxed_error)?
+            .with_id(id);
+        self.register_tensor(&mut tensor)?;
+        Ok(tensor)
+    }
+
+    fn register_tensor(&mut self, tensor: &mut Tensor) -> Result<()> {
+        let id = tensor_id(tensor).to_string();
+        if self
+            .tensors
+            .iter()
+            .any(|registered| registered.id() == Some(id.as_str()))
+        {
+            return Ok(());
+        }
+
+        let num_bytes = u64::try_from(tensor.num_bytes()).map_err(boxed_error)?;
+        let addr = self.allocator.alloc(num_bytes)?;
+        tensor.set_addr(addr).map_err(boxed_error)?;
+        self.nodes.push(NodeSection::Tensor {
+            id,
+            config: TensorConfigSection {
+                addr,
+                dtype: *tensor.dtype(),
+                shape: tensor.shape().dims().to_vec(),
+            },
+        });
+        self.tensors.push(tensor.clone());
+        Ok(())
+    }
+
+    fn register_edge(&mut self, from: &str, to: &str, kind: EdgeKind) {
+        self.edges.push(EdgeSection {
+            from: from.to_string(),
+            to: to.to_string(),
+            kind,
+        });
+    }
+
+    fn next_id(&mut self, layer: isize, prefix: &str) -> String {
+        let layer_prefix = if layer < 0 { "b" } else { "f" };
+        let layer = layer.abs();
+        let id = format!(
+            "layer_{layer_prefix}{layer}_{prefix}_{}",
+            self.next_node_idx
+        );
+        self.next_node_idx += 1;
+        id
+    }
+
+    fn choose_expansion(&mut self) -> Result<Option<(usize, ProgramTemplate)>> {
+        let eligible_templates = program_templates()
+            .into_iter()
+            .filter(|template| {
+                self.template_weight(template) > 0.0
+                    && self
+                        .expansion_points
+                        .iter()
+                        .any(|point| self.point_allows_template(point, template))
+            })
+            .collect::<Vec<_>>();
+        if eligible_templates.is_empty() {
+            return Ok(None);
+        }
+
+        let template = self.choose_weighted_template(&eligible_templates);
+        let candidate_indices = self
+            .expansion_points
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, point)| self.point_allows_template(point, &template).then_some(idx))
+            .collect::<Vec<_>>();
+        let idx = candidate_indices[self.rng.random_range(0..candidate_indices.len())];
+        Ok(Some((idx, template)))
+    }
+
+    fn point_allows_template(&self, point: &ExpansionPoint, template: &ProgramTemplate) -> bool {
+        if !self.expansion_points.can_expand(point) {
+            return false;
+        }
+        if self
+            .eligible_pe_indices(template, *point.tensor.dtype(), false)
+            .is_empty()
+        {
+            return false;
+        }
+
+        match template {
+            ProgramTemplate::Add => true,
+            ProgramTemplate::Gemm => point.tensor.shape().num_dims() >= 2,
+            ProgramTemplate::ReduceMax => {
+                point.direction == ExpansionDirection::Forward
+                    && point.tensor.shape().num_dims() >= 2
+            }
+        }
+    }
+
+    fn eligible_pe_indices(
+        &self,
+        template: &ProgramTemplate,
+        dtype: DataType,
+        with_bias: bool,
+    ) -> Vec<usize> {
+        let operations: &[&str] = match template {
+            ProgramTemplate::Add => &["add"],
+            ProgramTemplate::Gemm if with_bias => &["matrix_mac", "add"],
+            ProgramTemplate::Gemm => &["matrix_mac"],
+            ProgramTemplate::ReduceMax => &["compare"],
+        };
+        self.pe_models
+            .iter()
+            .enumerate()
+            .filter_map(|(index, model)| {
+                operations
+                    .iter()
+                    .all(|op| {
+                        model
+                            .lower(&ComputeWork::operation(*op, vec![dtype, dtype], 1))
+                            .is_ok()
+                    })
+                    .then_some(index)
+            })
+            .collect()
+    }
+
+    fn choose_weighted_template(&mut self, templates: &[ProgramTemplate]) -> ProgramTemplate {
+        let total = templates
+            .iter()
+            .map(|template| self.template_weight(template))
+            .sum::<f64>();
+        let mut choice = self.rng.random_range(0.0..total);
+        for template in templates {
+            choice -= self.template_weight(template);
+            if choice <= 0.0 {
+                return template.clone();
+            }
+        }
+        templates.last().unwrap().clone()
+    }
+
+    fn template_weight(&self, template: &ProgramTemplate) -> f64 {
+        match template {
+            ProgramTemplate::Add => self.args.weight_add,
+            ProgramTemplate::Gemm => self.args.weight_gemm,
+            ProgramTemplate::ReduceMax => self.args.weight_reduce_max,
+        }
+    }
+
+    fn random_shape(&mut self) -> Result<Shape> {
+        let mut rank_min = self.args.init_rank_min;
+        if self.args.weight_gemm > 0.0 {
+            rank_min = rank_min.max(2);
+        }
+        if self.args.weight_reduce_max > 0.0 {
+            rank_min = rank_min.max(2);
+        }
+
+        let rank = self.rng.random_range(rank_min..=self.args.init_rank_max);
+        let dims: Vec<usize> = (0..rank)
+            .map(|_| {
+                self.rng
+                    .random_range(self.args.init_dim_min..=self.args.init_dim_max)
+            })
+            .collect();
+        Shape::new(&dims).map_err(boxed_error)
+    }
+}
+
+fn program_templates() -> [ProgramTemplate; NUM_TEMPLATES] {
     [
-        ComputeOp::Add,
-        ComputeOp::Gemm,
-        ComputeOp::MaxPool(OperatorMaxPool::new(&[1])),
+        ProgramTemplate::Add,
+        ProgramTemplate::Gemm,
+        ProgramTemplate::ReduceMax,
     ]
 }
 
-fn op_index(compute_op: &ComputeOp) -> usize {
-    match compute_op {
-        ComputeOp::Add => 0,
-        ComputeOp::Gemm => 1,
-        ComputeOp::MaxPool(_) => 2,
-        ComputeOp::Custom(_) => unreachable!("custom ops are not generated"),
+const NUM_TEMPLATES: usize = 3;
+
+fn template_index(template: &ProgramTemplate) -> usize {
+    match template {
+        ProgramTemplate::Add => 0,
+        ProgramTemplate::Gemm => 1,
+        ProgramTemplate::ReduceMax => 2,
     }
 }
 
-fn op_name(compute_op: &ComputeOp) -> &'static str {
-    match compute_op {
-        ComputeOp::Add => "add",
-        ComputeOp::Gemm => "gemm",
-        ComputeOp::MaxPool(_) => "maxpool",
-        ComputeOp::Custom(_) => "custom",
+fn template_name(template: &ProgramTemplate) -> &'static str {
+    match template {
+        ProgramTemplate::Add => "add",
+        ProgramTemplate::Gemm => "gemm",
+        ProgramTemplate::ReduceMax => "reduce_max",
     }
 }
 
-fn tensor_id(tensor: &Tensor) -> &str {
-    tensor.id().expect("generated tensors must have ids")
-}
-
-fn create_op(
-    compute_op: &ComputeOp,
-    tensor: &Tensor,
-    direction: ExpansionDirection,
-    expand_ratio: f64,
-) -> Result<ComputeOp> {
-    compute_op
-        .configured_for_tensor(tensor, direction, expand_ratio)
+fn program_for_boundary(
+    op: &ProgramTemplate,
+    boundary: &GenerationBoundary,
+) -> Result<ProgramSpec> {
+    op.program(&boundary.inputs, &boundary.outputs)
         .map_err(boxed_error)
 }
 
-fn boxed_error(error: impl std::error::Error + 'static) -> Box<dyn std::error::Error> {
-    Box::new(error)
-}
+fn validate_args(args: &Cli) -> Result<()> {
+    validate_weight("--weight-add", args.weight_add)?;
+    validate_weight("--weight-gemm", args.weight_gemm)?;
+    validate_weight("--weight-reduce-max", args.weight_reduce_max)?;
 
-fn error_from_str(message: impl Into<String>) -> Box<dyn std::error::Error> {
-    boxed_error(io::Error::other(message.into()))
+    if args.weight_add == 0.0 && args.weight_gemm == 0.0 && args.weight_reduce_max == 0.0 {
+        return Err(error_from_str(
+            "at least one template weight must be non-zero",
+        ));
+    }
+
+    if args.depth == 0 {
+        return Err(error_from_str("--depth must be greater than zero"));
+    }
+    if args.max_compute_nodes == 0 {
+        return Err(error_from_str(
+            "--max-compute-nodes must be greater than zero",
+        ));
+    }
+    if args.partition_size == Some(0) {
+        return Err(error_from_str("--partition-size must be greater than zero"));
+    }
+    if !args.expand_ratio.is_finite() || args.expand_ratio <= 0.0 {
+        return Err(error_from_str(
+            "--expand-ratio must be finite and greater than zero",
+        ));
+    }
+    if args.init_rank_min == 0 || args.init_rank_max < args.init_rank_min {
+        return Err(error_from_str("invalid initial rank range"));
+    }
+    if args.init_dim_min == 0 || args.init_dim_max < args.init_dim_min {
+        return Err(error_from_str("invalid initial dimension range"));
+    }
+    if args.tensor_align_bytes == 0 {
+        return Err(error_from_str(
+            "--tensor-align-bytes must be greater than zero",
+        ));
+    }
+    if args.weight_gemm > 0.0 && args.init_rank_max < 2 {
+        return Err(error_from_str(
+            "--weight-gemm is positive but init_rank_max is less than 2",
+        ));
+    }
+    if args.weight_reduce_max > 0.0 && args.init_rank_max < 2 {
+        return Err(error_from_str(
+            "--weight-reduce-max is positive but init_rank_max is less than 2",
+        ));
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -140,9 +921,14 @@ struct Cli {
     #[arg(long, default_value_t = 4)]
     depth: usize,
 
-    /// Maximum number of generated compute nodes (ignoring partitions)
+    /// Maximum number of generated compute nodes
     #[arg(long, default_value_t = 10)]
     max_compute_nodes: usize,
+
+    /// Maximum extent of one partition along its outer output axis. By
+    /// default the generator makes roughly one partition per PE.
+    #[arg(long)]
+    partition_size: Option<usize>,
 
     /// Tensor scale as the graph grows away from the initial tensor.
     /// Values greater than 1 grow tensors, while values below 1 shrink them.
@@ -157,9 +943,9 @@ struct Cli {
     #[arg(long, default_value_t = 1.0)]
     weight_gemm: f64,
 
-    /// Weight of the MaxPool compute node being created
+    /// Weight of the max-reduction compute node being created
     #[arg(long, default_value_t = 1.0)]
-    weight_maxpool: f64,
+    weight_reduce_max: f64,
 
     /// Seed for the random number generator
     #[arg(long, default_value_t = 0x5eed_1234)]
@@ -188,12 +974,6 @@ struct Cli {
     /// Tensor alignment in memory layout
     #[arg(long, default_value_t = 256)]
     tensor_align_bytes: u64,
-
-    /// If set will allocate compute to all PEs in round robin fashion.
-    /// Otherwise, compute partitions will be distributed starting at the
-    /// first PE.
-    #[arg(long)]
-    round_robin_pes: bool,
 }
 
 fn validate_weight(name: &str, weight: f64) -> Result<()> {
@@ -203,83 +983,6 @@ fn validate_weight(name: &str, weight: f64) -> Result<()> {
         )));
     }
     Ok(())
-}
-
-fn validate_args(args: &Cli) -> Result<()> {
-    validate_weight("--weight-add", args.weight_add)?;
-    validate_weight("--weight-gemm", args.weight_gemm)?;
-    validate_weight("--weight-maxpool", args.weight_maxpool)?;
-
-    if args.weight_add == 0.0 && args.weight_gemm == 0.0 && args.weight_maxpool == 0.0 {
-        return Err(error_from_str(
-            "at least one operator weight must be non-zero",
-        ));
-    }
-
-    if args.depth == 0 {
-        return Err(error_from_str("--depth must be greater than zero"));
-    }
-    if args.max_compute_nodes == 0 {
-        return Err(error_from_str(
-            "--max-compute-nodes must be greater than zero",
-        ));
-    }
-    if !args.expand_ratio.is_finite() || args.expand_ratio <= 0.0 {
-        return Err(error_from_str(
-            "--expand-ratio must be finite and greater than zero",
-        ));
-    }
-    if args.init_rank_min == 0 || args.init_rank_max < args.init_rank_min {
-        return Err(error_from_str("invalid initial rank range"));
-    }
-    if args.init_dim_min == 0 || args.init_dim_max < args.init_dim_min {
-        return Err(error_from_str("invalid initial dimension range"));
-    }
-    if args.tensor_align_bytes == 0 {
-        return Err(error_from_str(
-            "--tensor-align-bytes must be greater than zero",
-        ));
-    }
-    if args.weight_gemm > 0.0 && args.init_rank_max < 2 {
-        return Err(error_from_str(
-            "--weight-gemm is positive but init_rank_max is less than 2",
-        ));
-    }
-    if args.weight_maxpool > 0.0 && args.init_rank_max < 3 {
-        return Err(error_from_str(
-            "--weight-maxpool is positive but init_rank_max is less than 3",
-        ));
-    }
-
-    Ok(())
-}
-
-#[derive(Debug, Clone)]
-struct ExpansionPoint {
-    tensor: Tensor,
-    tensor_layer: isize,
-    direction: ExpansionDirection,
-}
-
-impl ExpansionPoint {
-    fn next_layer(&self) -> isize {
-        match self.direction {
-            ExpansionDirection::Backward => self.tensor_layer - 1,
-            ExpansionDirection::Forward => self.tensor_layer + 1,
-        }
-    }
-}
-
-impl Display for ExpansionPoint {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}: layer {}, direction: {:?}",
-            tensor_id(&self.tensor),
-            self.tensor_layer,
-            self.direction
-        )
-    }
 }
 
 /// The Frontier manages all the possible ExpansionPoints
@@ -384,6 +1087,38 @@ impl Frontier {
     }
 }
 
+fn tensor_id(tensor: &Tensor) -> &str {
+    tensor.id().expect("generated tensors must have ids")
+}
+
+#[derive(Debug, Clone)]
+struct ExpansionPoint {
+    tensor: Tensor,
+    tensor_layer: isize,
+    direction: ExpansionDirection,
+}
+
+impl ExpansionPoint {
+    fn next_layer(&self) -> isize {
+        match self.direction {
+            ExpansionDirection::Backward => self.tensor_layer - 1,
+            ExpansionDirection::Forward => self.tensor_layer + 1,
+        }
+    }
+}
+
+impl Display for ExpansionPoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}: layer {}, direction: {:?}",
+            tensor_id(&self.tensor),
+            self.tensor_layer,
+            self.direction
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct LayerBounds {
     min: isize,
@@ -449,7 +1184,7 @@ impl AddrAllocator {
 }
 
 fn validate_generated_node(
-    compute_op: &ComputeOp,
+    template: &ProgramTemplate,
     inputs: &[Option<Tensor>],
     outputs: &[Option<Tensor>],
 ) -> Result<()> {
@@ -463,683 +1198,133 @@ fn validate_generated_node(
         .cloned()
         .map(|tensor| tensor.map(TensorView::new_full))
         .collect::<Vec<_>>();
-    compute_op.validate(&inputs, &outputs).map_err(boxed_error)
+    template.validate(&inputs, &outputs).map_err(boxed_error)
 }
 
-fn create_partitions_for_op(
-    compute_op: &ComputeOp,
+struct ComputeMapping {
+    pe_idx: usize,
+    program: ProgramSection,
+    tiling: TileSpec,
+}
+
+fn full_boundary(
     input_tensors: &[Option<Tensor>],
     output_tensors: &[Option<Tensor>],
-    num_partitions: usize,
-) -> Result<Vec<TensorPartition>> {
-    compute_op
-        .create_tensor_partitions(input_tensors, output_tensors, num_partitions)
-        .map_err(boxed_error)
-}
-
-type OperatorIo = (Vec<Option<Tensor>>, Vec<Option<Tensor>>);
-
-struct Generator {
-    args: Cli,
-    rng: StdRng,
-    pe_names: Vec<String>,
-    allocator: AddrAllocator,
-    tensors: Vec<Tensor>,
-    nodes: Vec<NodeSection>,
-    edges: Vec<EdgeSection>,
-    next_node_idx: usize,
-    op_counts: [usize; NUM_OPS],
-    expansion_points: Frontier,
-    remaining_compute_nodes: usize,
-    last_pe_idx: usize,
-}
-
-impl Generator {
-    fn new(args: Cli, platform: &PlatformConfig) -> Result<Self> {
-        validate_args(&args)?;
-
-        let pe_names = platform
-            .processing_elements
-            .as_ref()
-            .ok_or_else(|| error_from_str("platform contains no processing_elements"))?
+) -> GenerationBoundary {
+    GenerationBoundary {
+        inputs: input_tensors
             .iter()
-            .map(|pe| pe.name.clone())
-            .collect::<Vec<_>>();
-        if pe_names.is_empty() {
-            return Err(error_from_str("platform contains zero processing elements"));
-        }
-
-        let base_addr = platform
-            .memories
-            .as_ref()
-            .and_then(|mems| mems.first())
-            .map(|m| m.base_address)
-            .ok_or_else(|| error_from_str("platform contains no memories"))?;
-
-        let seed = args.seed;
-        let target_depth = args.depth;
-        let remaining_compute_nodes = args.max_compute_nodes;
-        let tensor_align_bytes = args.tensor_align_bytes;
-        Ok(Self {
-            args,
-            rng: StdRng::seed_from_u64(seed),
-            pe_names,
-            allocator: AddrAllocator::new(base_addr, tensor_align_bytes),
-            tensors: Vec::new(),
-            nodes: Vec::new(),
-            edges: Vec::new(),
-            next_node_idx: 0,
-            op_counts: [0; NUM_OPS],
-            expansion_points: Frontier::new(target_depth),
-            remaining_compute_nodes,
-            last_pe_idx: 0,
-        })
-    }
-
-    fn print_summary(&self) -> Result<()> {
-        info!(
-            "Created {} tensors / {} nodes / {} edges",
-            self.tensors.len(),
-            self.nodes.len(),
-            self.edges.len()
-        );
-        let [add_op, gemm_op, maxpool_op] = op_templates();
-        info!(
-            "Compute ops: add={} gemm={} maxpool={}",
-            self.op_counts[op_index(&add_op)],
-            self.op_counts[op_index(&gemm_op)],
-            self.op_counts[op_index(&maxpool_op)]
-        );
-        let total_bytes = self.tensors.iter().try_fold(0u64, |total, tensor| {
-            let num_bytes = u64::try_from(tensor.num_bytes())?;
-            total
-                .checked_add(num_bytes)
-                .ok_or_else(|| error_from_str("total tensor storage size overflows"))
-        })?;
-        info!(
-            "Tensors use {total_bytes} bytes ({:.2})",
-            Byte::from_u64(total_bytes).get_appropriate_unit(UnitType::Binary)
-        );
-        Ok(())
-    }
-
-    fn expand_point(&mut self, point: &ExpansionPoint, compute_op: &ComputeOp) -> Result<()> {
-        let next_layer = point.next_layer();
-
-        let compute_id = self.next_id(next_layer, op_name(compute_op));
-
-        debug!("\nExpand {point}: {}", point.tensor.shape());
-        debug!("  Compute: {compute_id} (layer {next_layer}):");
-
-        let (input_tensors, output_tensors) = match point.direction {
-            ExpansionDirection::Backward => {
-                self.create_backward_io(&compute_id, compute_op, point)?
-            }
-            ExpansionDirection::Forward => {
-                self.create_forward_io(&compute_id, compute_op, point)?
-            }
-        };
-
-        for (idx, input_tensor) in input_tensors.iter().enumerate() {
-            if let Some(input_tensor) = input_tensor {
-                debug!("  Input{idx}: {}", input_tensor.shape());
-            } else {
-                debug!("  Input{idx}: None");
-            }
-        }
-
-        for (idx, output_tensor) in output_tensors.iter().enumerate() {
-            if let Some(output_tensor) = output_tensor {
-                debug!("  Output{idx}: {}", output_tensor.shape());
-            } else {
-                debug!("  Output{idx}: None");
-            }
-        }
-
-        // Choose a random number of PEs over which to partition this compute
-        let requested_partitions = self.rng.random_range(1..=self.pe_names.len());
-        let partitions = create_partitions_for_op(
-            compute_op,
-            &input_tensors,
-            &output_tensors,
-            requested_partitions,
-        )?;
-
-        debug!(
-            "  Attempt to split into {requested_partitions} partitions resulted in {} partitions.",
-            partitions.len()
-        );
-
-        if partitions.is_empty() {
-            return Err(error_from_str("operator produced zero partitions"));
-        }
-
-        validate_generated_node(compute_op, &input_tensors, &output_tensors)?;
-        self.create_partitioned_compute(
-            &compute_id,
-            compute_op,
-            &partitions,
-            &input_tensors,
-            &output_tensors,
-        )?;
-
-        self.remaining_compute_nodes -= 1;
-        self.op_counts[op_index(compute_op)] += 1;
-        self.expansion_points.record_expanded_point(point);
-        self.enqueue_followups(point, &input_tensors, &output_tensors);
-
-        Ok(())
-    }
-
-    fn create_backward_io(
-        &mut self,
-        compute_id: &str,
-        compute_op: &ComputeOp,
-        point: &ExpansionPoint,
-    ) -> Result<OperatorIo> {
-        let mut output_tensors = vec![Some(point.tensor.clone())];
-        if matches!(compute_op, ComputeOp::MaxPool(_)) {
-            compute_op
-                .add_optional_outputs(&mut output_tensors, self.args.expand_ratio, &mut self.rng)
-                .map_err(boxed_error)?;
-        }
-        self.add_ids_and_register(&format!("{compute_id}_output"), &mut output_tensors)?;
-
-        let mut input_tensors = self.create_inputs_for_op(compute_op, &output_tensors)?;
-        self.add_ids_and_register(&format!("{compute_id}_input"), &mut input_tensors)?;
-
-        Ok((input_tensors, output_tensors))
-    }
-
-    fn create_forward_io(
-        &mut self,
-        compute_id: &str,
-        compute_op: &ComputeOp,
-        point: &ExpansionPoint,
-    ) -> Result<OperatorIo> {
-        let mut input_tensors = self.create_forward_inputs(compute_op, &point.tensor)?;
-        self.add_ids_and_register(&format!("{compute_id}_input"), &mut input_tensors)?;
-        let mut output_tensors = self.create_outputs_for_op(compute_op, &input_tensors)?;
-        self.add_ids_and_register(&format!("{compute_id}_output"), &mut output_tensors)?;
-
-        Ok((input_tensors, output_tensors))
-    }
-
-    fn create_forward_inputs(
-        &mut self,
-        compute_op: &ComputeOp,
-        input_tensor: &Tensor,
-    ) -> Result<Vec<Option<Tensor>>> {
-        match compute_op {
-            ComputeOp::Add => {
-                let other = Tensor::new(input_tensor.shape().dims(), input_tensor.dtype(), 0)
-                    .map_err(boxed_error)?;
-                let inputs = vec![Some(input_tensor.clone()), Some(other)];
-                Ok(inputs)
-            }
-            ComputeOp::Gemm => {
-                let other_shape = ComputeOp::gemm_rhs_shape(input_tensor).map_err(boxed_error)?;
-                let other = Tensor::from_shape(other_shape, input_tensor.dtype(), 0)
-                    .map_err(boxed_error)?;
-                let mut inputs = vec![Some(input_tensor.clone()), Some(other)];
-                compute_op
-                    .add_optional_inputs(&mut inputs, self.args.expand_ratio, &mut self.rng)
-                    .map_err(boxed_error)?;
-                Ok(inputs)
-            }
-            ComputeOp::MaxPool(_) => Ok(vec![Some(input_tensor.clone())]),
-            ComputeOp::Custom(_) => Err(error_from_str("custom ops are not generated")),
-        }
-    }
-
-    fn enqueue_followups(
-        &mut self,
-        point: &ExpansionPoint,
-        input_tensors: &[Option<Tensor>],
-        output_tensors: &[Option<Tensor>],
-    ) {
-        let next_layer = point.next_layer();
-        let input_tensor_layer = match point.direction {
-            ExpansionDirection::Backward => next_layer,
-            ExpansionDirection::Forward => point.tensor_layer,
-        };
-        let output_tensor_layer = match point.direction {
-            ExpansionDirection::Backward => point.tensor_layer,
-            ExpansionDirection::Forward => next_layer,
-        };
-
-        for input_tensor in input_tensors.iter().flatten() {
-            self.expansion_points.record_consumer(input_tensor);
-            if tensor_id(input_tensor) == tensor_id(&point.tensor) {
-                continue;
-            }
-            self.expansion_points.try_to_add_expansion_point(
-                input_tensor.clone(),
-                input_tensor_layer,
-                ExpansionDirection::Backward,
-            );
-        }
-
-        for output_tensor in output_tensors.iter().flatten() {
-            self.expansion_points.record_producer(output_tensor);
-            if tensor_id(output_tensor) == tensor_id(&point.tensor) {
-                continue;
-            }
-            self.expansion_points.try_to_add_expansion_point(
-                output_tensor.clone(),
-                output_tensor_layer,
-                ExpansionDirection::Forward,
-            );
-        }
-    }
-
-    fn next_pe_idx(&mut self, partition_idx: usize) -> usize {
-        if self.args.round_robin_pes {
-            let pe_idx = self.last_pe_idx;
-            self.last_pe_idx = (self.last_pe_idx + 1) % self.pe_names.len();
-            pe_idx
-        } else {
-            partition_idx % self.pe_names.len()
-        }
-    }
-
-    fn create_partitioned_compute(
-        &mut self,
-        compute_id: &str,
-        compute_op: &ComputeOp,
-        partitions: &[TensorPartition],
-        input_tensors: &[Option<Tensor>],
-        output_tensors: &[Option<Tensor>],
-    ) -> Result<()> {
-        let mut total_input_num_bytes = 0usize;
-        for (partition_idx, partition) in partitions.iter().enumerate() {
-            let pe_idx = self.next_pe_idx(partition_idx);
-            let pe = self.pe_names[pe_idx].clone();
-            let partition_compute_id = if partitions.len() == 1 {
-                compute_id.to_string()
-            } else {
-                format!("{compute_id}_part_{partition_idx}")
-            };
-
-            debug!("  Mapping partition {partition_idx} to {pe}");
-
-            let mut input_views = vec![None; partition.inputs.len()];
-
-            let mut partition_input_num_bytes = 0usize;
-            for (input_idx, input_view) in partition.inputs.iter().enumerate() {
-                let Some(view) = input_view else {
-                    continue;
-                };
-                input_views[input_idx] = Some(TensorViewSection {
-                    offsets: view.offsets().to_vec(),
-                    shape: view.shape().dims().to_vec(),
-                });
-
-                if log::log_enabled!(Level::Debug) {
-                    let shape = view.shape();
-                    let num_bytes = view.num_packed_bytes();
-                    partition_input_num_bytes = partition_input_num_bytes
-                        .checked_add(num_bytes)
-                        .ok_or_else(|| error_from_str("partition input byte total overflows"))?;
-                    debug!("  Partitioned input {input_idx}: shape: {shape}, bytes: {num_bytes}");
-                }
-
-                let input_tensor = input_tensors
-                    .get(input_idx)
-                    .and_then(Option::as_ref)
-                    .ok_or_else(|| {
-                        error_from_str(format!(
-                            "partition for {partition_compute_id} has input {input_idx} but no input tensor"
-                        ))
-                    })?;
-                self.register_edge(
-                    tensor_id(input_tensor),
-                    &format!("{partition_compute_id}.{input_idx}"),
-                    EdgeKind::Data,
-                );
-            }
-
-            if log::log_enabled!(Level::Debug) {
-                total_input_num_bytes = total_input_num_bytes
-                    .checked_add(partition_input_num_bytes)
-                    .ok_or_else(|| error_from_str("total partition input bytes overflows"))?;
-                debug!("  Partition input bytes: {partition_input_num_bytes}");
-            }
-
-            let mut output_views = vec![None; partition.outputs.len()];
-            for (output_idx, output_view) in partition.outputs.iter().enumerate() {
-                let Some(view) = output_view else {
-                    continue;
-                };
-                output_views[output_idx] = Some(TensorViewSection {
-                    offsets: view.offsets().to_vec(),
-                    shape: view.shape().dims().to_vec(),
-                });
-
-                let output_tensor = output_tensors
-                    .get(output_idx)
-                    .and_then(Option::as_ref)
-                    .ok_or_else(|| {
-                        error_from_str(format!(
-                            "partition for {partition_compute_id} has output {output_idx} but no output tensor"
-                        ))
-                    })?;
-                let from = if partition.outputs.len() == 1 {
-                    partition_compute_id.clone()
-                } else {
-                    format!("{partition_compute_id}.{output_idx}")
-                };
-                self.register_edge(&from, tensor_id(output_tensor), EdgeKind::Data);
-            }
-
-            self.nodes.push(NodeSection::Compute {
-                id: partition_compute_id,
-                op: compute_op.clone(),
-                pe: Some(pe),
-                input_views,
-                output_views,
-            });
-        }
-
-        debug!("  Total inputs bytes: {total_input_num_bytes}");
-
-        Ok(())
-    }
-
-    fn create_inputs_for_op(
-        &mut self,
-        compute_op: &ComputeOp,
-        outputs: &[Option<Tensor>],
-    ) -> Result<Vec<Option<Tensor>>> {
-        compute_op
-            .create_inputs(outputs, self.args.expand_ratio, &mut self.rng)
-            .map_err(boxed_error)
-    }
-
-    fn create_outputs_for_op(
-        &mut self,
-        compute_op: &ComputeOp,
-        inputs: &[Option<Tensor>],
-    ) -> Result<Vec<Option<Tensor>>> {
-        compute_op
-            .create_outputs(inputs, self.args.expand_ratio, &mut self.rng)
-            .map_err(boxed_error)
-    }
-
-    fn add_ids_and_register(
-        &mut self,
-        base_name: &str,
-        tensors: &mut [Option<Tensor>],
-    ) -> Result<()> {
-        for (idx, tensor) in tensors.iter_mut().enumerate() {
-            let Some(tensor) = tensor else {
-                continue;
-            };
-            if tensor.id().is_none() {
-                tensor.set_id(format!("tensor_{base_name}_{idx}"));
-            }
-        }
-
-        for tensor in tensors.iter_mut().flatten() {
-            self.register_tensor(tensor)?;
-        }
-        Ok(())
-    }
-
-    fn register_tensor(&mut self, tensor: &mut Tensor) -> Result<()> {
-        let id = tensor_id(tensor).to_string();
-        if self
-            .tensors
+            .cloned()
+            .map(|tensor| tensor.map(TensorView::new_full))
+            .collect(),
+        outputs: output_tensors
             .iter()
-            .any(|registered| registered.id() == Some(id.as_str()))
-        {
-            return Ok(());
-        }
-
-        let num_bytes = u64::try_from(tensor.num_bytes()).map_err(boxed_error)?;
-        let addr = self.allocator.alloc(num_bytes)?;
-        tensor.set_addr(addr).map_err(boxed_error)?;
-        self.nodes.push(NodeSection::Tensor {
-            id,
-            config: TensorConfigSection {
-                addr,
-                dtype: *tensor.dtype(),
-                shape: tensor.shape().dims().to_vec(),
-            },
-        });
-        self.tensors.push(tensor.clone());
-        Ok(())
-    }
-
-    fn make_tensor_with_dtype(
-        &mut self,
-        base_name: &str,
-        shape: &Shape,
-        dtype: &DataType,
-    ) -> Result<Tensor> {
-        let id = format!("tensor_{base_name}");
-        let mut tensor = Tensor::from_shape(shape.clone(), dtype, 0)
-            .map_err(boxed_error)?
-            .with_id(id);
-        self.register_tensor(&mut tensor)?;
-        Ok(tensor)
-    }
-
-    fn register_edge(&mut self, from: &str, to: &str, kind: EdgeKind) {
-        self.edges.push(EdgeSection {
-            from: from.to_string(),
-            to: to.to_string(),
-            kind,
-        });
-    }
-
-    fn next_id(&mut self, layer: isize, prefix: &str) -> String {
-        let layer_prefix = if layer < 0 { "b" } else { "f" };
-        let layer = layer.abs();
-        let id = format!(
-            "layer_{layer_prefix}{layer}_{prefix}_{}",
-            self.next_node_idx
-        );
-        self.next_node_idx += 1;
-        id
-    }
-
-    fn choose_expansion(&mut self) -> Result<Option<(usize, ComputeOp)>> {
-        let eligible_ops = op_templates()
-            .into_iter()
-            .filter(|compute_op| {
-                self.op_weight(compute_op) > 0.0
-                    && self
-                        .expansion_points
-                        .iter()
-                        .any(|point| self.point_allows_op(point, compute_op))
-            })
-            .collect::<Vec<_>>();
-        if eligible_ops.is_empty() {
-            return Ok(None);
-        }
-
-        let op_template = self.choose_weighted_op(&eligible_ops);
-        let candidate_indices = self
-            .expansion_points
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, point)| self.point_allows_op(point, &op_template).then_some(idx))
-            .collect::<Vec<_>>();
-        let idx = candidate_indices[self.rng.random_range(0..candidate_indices.len())];
-        let point = self
-            .expansion_points
-            .iter()
-            .nth(idx)
-            .expect("candidate index should refer to an expansion point");
-        let compute_op = create_op(
-            &op_template,
-            &point.tensor,
-            point.direction,
-            self.args.expand_ratio,
-        )?;
-        Ok(Some((idx, compute_op)))
-    }
-
-    fn point_allows_op(&self, point: &ExpansionPoint, compute_op: &ComputeOp) -> bool {
-        if !self.expansion_points.can_expand(point) {
-            return false;
-        }
-
-        match compute_op {
-            ComputeOp::Add => true,
-            ComputeOp::Gemm => point.tensor.shape().num_dims() >= 2,
-            ComputeOp::MaxPool(_) => point.tensor.shape().num_dims() >= 3,
-            ComputeOp::Custom(_) => false,
-        }
-    }
-
-    fn choose_weighted_op(&mut self, compute_ops: &[ComputeOp]) -> ComputeOp {
-        let total = compute_ops
-            .iter()
-            .map(|compute_op| self.op_weight(compute_op))
-            .sum::<f64>();
-        let mut choice = self.rng.random_range(0.0..total);
-        for compute_op in compute_ops {
-            choice -= self.op_weight(compute_op);
-            if choice <= 0.0 {
-                return compute_op.clone();
-            }
-        }
-        compute_ops.last().unwrap().clone()
-    }
-
-    fn op_weight(&self, compute_op: &ComputeOp) -> f64 {
-        match compute_op {
-            ComputeOp::Add => self.args.weight_add,
-            ComputeOp::Gemm => self.args.weight_gemm,
-            ComputeOp::MaxPool(_) => self.args.weight_maxpool,
-            ComputeOp::Custom(_) => 0.0,
-        }
-    }
-
-    fn random_shape(&mut self) -> Result<Shape> {
-        let mut rank_min = self.args.init_rank_min;
-        if self.args.weight_gemm > 0.0 {
-            rank_min = rank_min.max(2);
-        }
-        if self.args.weight_maxpool > 0.0 {
-            rank_min = rank_min.max(3);
-        }
-
-        let rank = self.rng.random_range(rank_min..=self.args.init_rank_max);
-        let dims: Vec<usize> = (0..rank)
-            .map(|_| {
-                self.rng
-                    .random_range(self.args.init_dim_min..=self.args.init_dim_max)
-            })
-            .collect();
-        Shape::new(&dims).map_err(boxed_error)
+            .cloned()
+            .map(|tensor| tensor.map(TensorView::new_full))
+            .collect(),
     }
 }
 
-fn generate(mut generator: Generator) -> Result<TimetableFile> {
-    let shape = generator.random_shape()?;
-    let init_dtype = generator.args.init_dtype;
-    let seed_tensor = generator.make_tensor_with_dtype("initial", &shape, &init_dtype)?;
-    generator.expansion_points.try_to_add_expansion_point(
-        seed_tensor.clone(),
-        0,
-        ExpansionDirection::Backward,
-    );
-    generator.expansion_points.try_to_add_expansion_point(
-        seed_tensor,
-        0,
-        ExpansionDirection::Forward,
-    );
+fn slice_view(view: &TensorView, dim: usize, offset: usize, length: usize) -> Result<TensorView> {
+    let mut shape = view.shape().dims().to_vec();
+    let mut offsets = view.offsets().to_vec();
+    shape[dim] = length;
+    offsets[dim] += offset;
+    TensorView::new(view.tensor().clone(), &shape, &offsets).map_err(boxed_error)
+}
 
-    while generator.remaining_compute_nodes > 0 {
-        let Some((idx, compute_op)) = generator.choose_expansion()? else {
-            break;
-        };
-        let point = generator.expansion_points.swap_remove(idx);
-        generator.expand_point(&point, &compute_op)?;
-    }
-
-    generator.print_summary()?;
-
-    let timetable = TimetableFile {
-        nodes: generator.nodes,
-        edges: generator.edges,
+fn tiling_that_fits(
+    compute_id: &str,
+    program: &ProgramSpec,
+    boundary: &GenerationBoundary,
+    outer_axis: &str,
+    sram_bytes: usize,
+) -> Result<TileSpec> {
+    let inputs = boundary
+        .inputs
+        .iter()
+        .cloned()
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| error_from_str("generated program has an unbound input"))?;
+    let outputs = boundary
+        .outputs
+        .iter()
+        .cloned()
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| error_from_str("generated program has an unbound output"))?;
+    let region = validate_program(
+        program,
+        &RegionBindings {
+            inputs: inputs.clone(),
+            outputs: outputs.clone(),
+        },
+    )
+    .map_err(boxed_error)?;
+    let mut tiling = TileSpec {
+        sizes: BTreeMap::from([(
+            outer_axis.to_string(),
+            region.extent(outer_axis).expect("generated outer axis"),
+        )]),
     };
-    timetable.validate().map_err(boxed_error)?;
-    Ok(timetable)
+    loop {
+        let required =
+            estimate_peak_tile_sram(program, &inputs, &outputs, &tiling).map_err(boxed_error)?;
+        if required <= sram_bytes {
+            return Ok(tiling);
+        }
+        let mut best: Option<(usize, TileSpec)> = None;
+        for (axis, extent) in &region.extents {
+            let current = tiling.sizes.get(axis).copied().unwrap_or(*extent);
+            if current <= 1 {
+                continue;
+            }
+            let mut candidate = tiling.clone();
+            candidate.sizes.insert(axis.clone(), current.div_ceil(2));
+            let bytes = estimate_peak_tile_sram(program, &inputs, &outputs, &candidate)
+                .map_err(boxed_error)?;
+            if best
+                .as_ref()
+                .is_none_or(|(best_bytes, _)| bytes < *best_bytes)
+            {
+                best = Some((bytes, candidate));
+            }
+        }
+        let Some((_, smaller)) = best else {
+            return Err(error_from_str(format!(
+                "{compute_id} minimum tile requires {required} SRAM bytes, available {sram_bytes}"
+            )));
+        };
+        tiling = smaller;
+    }
 }
 
-fn main() -> Result<()> {
-    let args = Cli::parse();
-    init_logging(args.debug);
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-    let platform_yaml = fs::read_to_string(&args.platform)
-        .map_err(|e| error_from_str(format!("failed to read {}: {e}", args.platform.display())))?;
-    let platform: PlatformConfig = yaml_serde::from_str(&platform_yaml).map_err(|e| {
-        error_from_str(format!(
-            "failed to parse platform YAML using gwr_platform::types::PlatformConfig: {e}"
-        ))
-    })?;
-
-    let out_path = args.out.clone();
-    let generator = Generator::new(args, &platform)?;
-    let timetable = generate(generator)?;
-    let yaml = yaml_serde::to_string(&timetable)
-        .map_err(|e| error_from_str(format!("failed to serialise timetable YAML: {e}")))?;
-    fs::write(&out_path, yaml)
-        .map_err(|e| error_from_str(format!("failed to write {}: {e}", out_path.display())))?;
-    info!("Wrote graph to {}", out_path.display());
-    Ok(())
+fn error_from_str(message: impl Into<String>) -> Box<dyn std::error::Error> {
+    boxed_error(io::Error::other(message.into()))
 }
+
+fn boxed_error(error: impl std::error::Error + 'static) -> Box<dyn std::error::Error> {
+    Box::new(error)
+}
+
+struct GenerationBoundary {
+    inputs: Vec<Option<TensorView>>,
+    outputs: Vec<Option<TensorView>>,
+}
+
+type TemplateIo = (Vec<Option<Tensor>>, Vec<Option<Tensor>>);
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::path::PathBuf;
 
-    fn valid_args() -> Cli {
-        Cli {
-            platform: PathBuf::from("platform.yaml"),
-            out: PathBuf::from("timetable.yaml"),
-            debug: false,
-            depth: 1,
-            max_compute_nodes: 1,
-            expand_ratio: 0.6,
-            weight_add: 1.0,
-            weight_gemm: 1.0,
-            weight_maxpool: 1.0,
-            init_dtype: DataType::Fp32,
-            seed: 0,
-            init_rank_min: 3,
-            init_rank_max: 4,
-            init_dim_min: 2,
-            init_dim_max: 4,
-            tensor_align_bytes: 256,
-            round_robin_pes: false,
-        }
-    }
+    use gwr_models::processing_element::tensors::Tensor;
+    use gwr_models::processing_element::tensors::dtype::DataType;
+    use gwr_platform::types::PlatformConfig;
 
-    fn generator_platform() -> PlatformConfig {
-        yaml_serde::from_str(
-            r"
-memory_maps:
-  - name: default
-    devices: [hbm0]
-processing_elements:
-  - name: pe0
-    memory_map: default
-    config: {}
-memories:
-  - name: hbm0
-    kind: hbm
-    base_address: 0
-    config:
-      capacity_bytes: 16GiB
-",
-        )
-        .unwrap()
-    }
+    use super::templates::ExpansionDirection;
+    use super::{Cli, ExpansionPoint, Frontier, Generator, generate, validate_args};
 
     #[test]
     fn validate_args_rejects_zero_depth() {
@@ -1159,6 +1344,16 @@ memories:
         let err = validate_args(&args).unwrap_err();
 
         assert!(format!("{err}").contains("--max-compute-nodes"));
+    }
+
+    #[test]
+    fn validate_args_rejects_zero_partition_size() {
+        let mut args = valid_args();
+        args.partition_size = Some(0);
+
+        let err = validate_args(&args).unwrap_err();
+
+        assert!(format!("{err}").contains("--partition-size"));
     }
 
     #[test]
@@ -1219,5 +1414,59 @@ memories:
             let timetable = generate(Generator::new(args, &platform).unwrap()).unwrap();
             timetable.validate().unwrap();
         }
+    }
+    fn valid_args() -> Cli {
+        Cli {
+            platform: PathBuf::from("platform.yaml"),
+            out: PathBuf::from("timetable.yaml"),
+            debug: false,
+            depth: 1,
+            max_compute_nodes: 1,
+            partition_size: None,
+            expand_ratio: 0.6,
+            weight_add: 1.0,
+            weight_gemm: 1.0,
+            weight_reduce_max: 1.0,
+            init_dtype: DataType::Fp32,
+            seed: 0,
+            init_rank_min: 3,
+            init_rank_max: 4,
+            init_dim_min: 2,
+            init_dim_max: 4,
+            tensor_align_bytes: 256,
+        }
+    }
+
+    fn generator_platform() -> PlatformConfig {
+        yaml_serde::from_str(
+            r"
+memory_maps:
+  - name: default
+    devices: [hbm0]
+operation_classes:
+  add: { operations: [add], arity: 2 }
+  compare: { operations: [compare], arity: 2 }
+  matrix: { operations: [matrix_mac], arity: 2, flops_per_op: 2 }
+processing_elements:
+  - name: pe0
+    memory_map: default
+    config:
+      compute:
+        engines:
+          vector:
+            capabilities:
+              - { class: add, ops_per_tick: 16 }
+              - { class: compare, ops_per_tick: 16 }
+          matrix:
+            capabilities: [{ class: matrix, ops_per_tick: 256 }]
+memories:
+  - name: hbm0
+    kind: hbm
+    base_address: 0
+    config:
+      capacity_bytes: 16GiB
+",
+        )
+        .unwrap()
     }
 }

@@ -33,6 +33,7 @@ use crate::memory::traits::AccessMemory;
 
 pub mod random;
 pub mod strided;
+mod validation;
 
 #[derive(EntityGet, EntityDisplay)]
 pub struct MemoryAccessGen<T>

@@ -1,5 +1,7 @@
 # Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+includes: [default_compute.yaml]
+
 memory_maps:
   # The default memory map for Processing Elements
   - name: pe_memory_map
@@ -22,6 +24,7 @@ defaults:
   pe_config: &default_pe_config
     num_active_requests: 8
     lsu_access_bytes: 32
+    compute: basic_alu
 
 processing_elements:
   - name: pe_0_0

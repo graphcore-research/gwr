@@ -30,6 +30,7 @@ impl PlatformConfig {
         self.validate_memory_fetch_alignment(&effective)?;
         self.validate_coherence(&effective)?;
         self.validate_connections(&lookup, &effective)?;
+        crate::memory_mapping::validate(self, &effective)?;
         Ok(effective)
     }
 
@@ -113,6 +114,24 @@ impl PlatformConfig {
         }
 
         for pe in self.processing_elements.iter().flatten() {
+            if let Some(map) = &pe.dma_memory_map {
+                if !lookup.memory_maps.contains_key(map.as_str()) {
+                    return sim_error!(
+                        "Unknown DMA memory map '{map}' for processing element '{}'",
+                        pe.name
+                    );
+                }
+                let endpoint = format!("{}.dma", pe.name);
+                let connected = self.connections.iter().flatten().flat_map(|c| &c.connect).any(|source| {
+                    matches!(parse_connection_endpoint_id(source), Ok(ConnectionEndpointId::Pe { name }) if name == endpoint)
+                });
+                if !connected {
+                    return sim_error!(
+                        "DMA memory map for '{}' requires a connected independent DMA issuer",
+                        pe.name
+                    );
+                }
+            }
             if !lookup.memory_maps.contains_key(pe.memory_map.as_str()) {
                 return sim_error!(
                     "Unknown memory map '{}' for processing element '{}'",
@@ -304,6 +323,7 @@ impl PlatformValidationLookup<'_> {
     }
 
     fn processing_element_exists(&self, name: &str) -> bool {
+        let name = name.strip_suffix(".dma").unwrap_or(name);
         matches!(
             self.devices.get(name),
             Some(PlatformDevice::ProcessingElement)
@@ -460,10 +480,9 @@ fn validate_port_endpoint_pair(
         }
         (ConnectionEndpointId::Cache { port, .. }, ConnectionEndpointId::FabricPort { .. })
         | (ConnectionEndpointId::FabricPort { .. }, ConnectionEndpointId::Cache { port, .. }) => {
-            validate_cache_mem_port(
-                port.as_ref(),
-                "Cache should connect the 'mem' port to a Fabric",
-            )
+            // Explicit dev supports shared upstream fabrics; omitted stays mem.
+            let _ = port;
+            Ok(())
         }
         (ConnectionEndpointId::Cache { port, .. }, ConnectionEndpointId::Mem { .. })
         | (ConnectionEndpointId::Mem { .. }, ConnectionEndpointId::Cache { port, .. }) => {
@@ -584,6 +603,17 @@ impl PlatformConfig {
                     manager.memory_map, manager.name
                 ))
             })?;
+            if map
+                .address_mapping
+                .as_ref()
+                .is_some_and(|mapping| mapping.mode == crate::types::AddressMappingMode::Striped)
+            {
+                return sim_error!(
+                    "Coherency Manager '{}': striped backing memory map '{}' is unsupported",
+                    manager.name,
+                    map.name
+                );
+            }
             if map.devices.is_empty() {
                 return sim_error!(
                     "Coherency Manager '{}' has an empty memory map",
@@ -689,13 +719,19 @@ impl PlatformConfig {
                             );
                         }
                         ConnectionEndpointId::Pe { name } => {
+                            let pe_name = name.strip_suffix(".dma").unwrap_or(name);
                             let pe = self
                                 .processing_elements
                                 .iter()
                                 .flatten()
-                                .find(|pe| &pe.name == name)
+                                .find(|pe| pe.name == pe_name)
                                 .ok_or_else(|| SimError(format!("No PE '{name}'")))?;
-                            for memory in &maps[pe.memory_map.as_str()].devices {
+                            let map = if name.ends_with(".dma") {
+                                pe.dma_memory_map.as_deref().unwrap_or(&pe.memory_map)
+                            } else {
+                                &pe.memory_map
+                            };
+                            for memory in &maps[map].devices {
                                 if !covered.contains(memory.as_str()) {
                                     return sim_error!(
                                         "Cache '{}' has no coherency manager for Memory '{}' used by PE '{}'",
@@ -712,5 +748,48 @@ impl PlatformConfig {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::types::PlatformConfig;
+
+    #[test]
+    fn coherency_managers_require_contiguous_backing_maps() {
+        let source = "
+memory_maps:
+  - name: backing
+    devices: [memory0, memory1]
+    address_mapping:
+      mode: striped
+      stripe_bytes: 32
+      groups:
+        - name: pair
+          devices: [memory0, memory1]
+memories:
+  - name: memory0
+    kind: hbm
+    base_address: 0
+    config: {capacity_bytes: 128}
+  - name: memory1
+    kind: hbm
+    base_address: 128
+    config: {capacity_bytes: 128}
+coherency_managers:
+  - name: directory
+    memory_map: backing
+    config: {line_size_bytes: 32}
+";
+        let mut striped: PlatformConfig = yaml_serde::from_str(source).unwrap();
+        let error = striped.validate().unwrap_err().to_string();
+        assert!(error.contains("Coherency Manager 'directory'"));
+        assert!(error.contains("striped backing memory map 'backing' is unsupported"));
+
+        striped.coherency_managers = None;
+        striped.validate().unwrap();
+        let contiguous: PlatformConfig =
+            yaml_serde::from_str(&source.replace("mode: striped", "mode: contiguous")).unwrap();
+        contiguous.validate().unwrap();
     }
 }

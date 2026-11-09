@@ -133,12 +133,17 @@ fn upstream_pe_memory_map_must_be_covered_by_selected_managers() {
     // Expose both memories through the processing element memory map.
     cfg.memory_maps.push(gwr_platform::types::MemoryMapSection {
         name: "pe_map".into(),
+        address_mapping: None,
         devices: vec!["memory".into(), "other".into()],
     });
     cfg.processing_elements = Some(vec![gwr_platform::types::ProcessingElementSection {
         name: "pe".into(),
         memory_map: "pe_map".into(),
-        config: yaml_serde::from_str("{}").unwrap(),
+        dma_memory_map: None,
+        config: yaml_serde::from_str(
+            "compute: {engines: {vector: {capabilities: [{class: add, ops_per_tick: 256}]}}}",
+        )
+        .unwrap(),
     }]);
 
     // Route that processing element through the coherent cache.
@@ -161,6 +166,8 @@ fn create_coherent_platform_config(
 ) -> PlatformConfig {
     yaml_serde::from_str(&format!(
         r"
+operation_classes:
+  add: {{ operations: [add], arity: 2 }}
 memory_maps:
   - name: backing
     devices: [memory]

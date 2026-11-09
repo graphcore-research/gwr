@@ -1,17 +1,15 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::types::SimError;
-use gwr_models::processing_element::MachineOpCounts;
-pub(crate) use gwr_models::processing_element::dispatch::Dispatch;
-pub(crate) use gwr_models::processing_element::operators::dtype::DataType;
-pub(crate) use gwr_models::processing_element::operators::{OperatorCustom, OperatorMaxPool};
-pub(crate) use gwr_models::processing_element::task::ComputeOp;
+use gwr_models::processing_element::program::syntax::ProgramSpec;
+use gwr_models::processing_element::tensors::dtype::DataType;
 use gwr_platform::Platform;
-pub(crate) use gwr_timetable::Timetable;
-pub(crate) use gwr_timetable::timetable_file::{
+use gwr_timetable::Timetable;
+use gwr_timetable::timetable_file::{
     EdgeKind, EdgeSection, NodeSection, TensorConfigSection, TensorViewSection, TimetableFile,
 };
 use gwr_track::entity::Entity;
@@ -31,10 +29,17 @@ memory_maps:
     devices:
       - hbm0
 
+operation_classes:
+  add: { operations: [add], arity: 2 }
+
 processing_elements:
   - name: pe0
     memory_map: default
     config:
+      compute:
+        engines:
+          vector:
+            capabilities: [{ class: add, ops_per_tick: 256 }]
 
 memories:
   - name: hbm0
@@ -65,13 +70,21 @@ nodes:
 
   - id: add0
     kind: compute
-    op: add
     pe: pe0
-    input_views:
-      -
-      -
-    output_views:
-      -
+    program:
+      inputs: [A, B]
+      outputs: [Y]
+      assignments:
+        - output: Y
+          axes: [d0, d1, d2]
+          expr:
+            add:
+              - read:
+                  tensor: A
+                  indices: [d0, d1, d2]
+              - read:
+                  tensor: B
+                  indices: [d0, d1, d2]
 
   - id: tensor2
     kind: tensor
@@ -107,7 +120,12 @@ pub(crate) fn build_timetable(
 }
 
 pub(crate) fn timetable(nodes: Vec<NodeSection>, edges: Vec<EdgeSection>) -> TimetableFile {
-    TimetableFile { nodes, edges }
+    TimetableFile {
+        atomic_effects: None,
+        programs: BTreeMap::default(),
+        nodes,
+        edges,
+    }
 }
 
 pub(crate) fn tensor(id: &str, addr: u64, dtype: DataType, shape: &[usize]) -> NodeSection {
@@ -126,15 +144,41 @@ pub(crate) fn compute(
     input_views: Vec<Option<TensorViewSection>>,
     output_views: Vec<Option<TensorViewSection>>,
 ) -> NodeSection {
-    NodeSection::Compute {
-        id: id.to_string(),
-        op: ComputeOp::Custom(OperatorCustom {
-            name: None,
-            machine_ops: MachineOpCounts::default(),
-        }),
-        pe: None,
+    compute_with_program(
+        id,
+        ProgramSpec {
+            metadata_inputs: vec![],
+            indexed_metadata_inputs: vec![],
+            local_round_policy: None,
+            inputs: (0..input_views.len())
+                .map(|index| format!("input{index}"))
+                .collect(),
+            outputs: (0..output_views.len())
+                .map(|index| format!("output{index}"))
+                .collect(),
+            temporaries: std::collections::BTreeMap::default(),
+            assignments: vec![],
+            extents: std::collections::BTreeMap::default(),
+        },
         input_views,
         output_views,
+    )
+}
+
+pub(crate) fn compute_with_program(
+    id: &str,
+    program: ProgramSpec,
+    input_views: Vec<Option<TensorViewSection>>,
+    output_views: Vec<Option<TensorViewSection>>,
+) -> NodeSection {
+    NodeSection::Compute {
+        pipeline: None,
+        id: id.to_string(),
+        program: program.into(),
+        tiling: None,
+        pe: None,
+        input_views: Some(input_views),
+        output_views: Some(output_views),
     }
 }
 

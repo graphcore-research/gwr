@@ -4,7 +4,8 @@
 //!
 //! Endpoint IDs use the same textual forms accepted in platform YAML
 //! `connections` entries:
-//! - `pe.<name>`
+//! - `coherency_manager.<name>`
+//! - `pe.<name>[.compute|.dma]`
 //! - `cache.<name>[.dev|.mem]`
 //! - `mem.<name>`
 //! - `fabric.<name>@(<column>,<row>)[.<port>]`
@@ -15,121 +16,16 @@
 use std::fmt;
 use std::sync::LazyLock;
 
+use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
 use regex::Regex;
 
-/// Identifies one of the cache's external connection ports.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum CachePortId {
-    /// Device-facing cache port.
-    Dev,
-
-    /// Memory-facing cache port.
-    Mem,
-}
-
-impl CachePortId {
-    /// Returns the endpoint suffix used for this cache port.
-    #[must_use]
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Dev => "dev",
-            Self::Mem => "mem",
-        }
-    }
-}
-
-impl fmt::Display for CachePortId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-/// Parsed platform connection endpoint.
-///
-/// The display form round-trips through [`parse_connection_endpoint_id`].
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ConnectionEndpointId {
-    /// Directory endpoint, formatted as `coherency_manager.<name>`.
-    CoherencyManager { name: String },
-    /// Processing element endpoint, formatted as `pe.<name>`.
-    Pe {
-        /// Processing element name.
-        name: String,
-    },
-
-    /// Cache endpoint, formatted as `cache.<name>[.dev|.mem]`.
-    Cache {
-        /// Cache name.
-        name: String,
-
-        /// Optional explicit cache port. When omitted, connection builders
-        /// infer the side from the other endpoint.
-        port: Option<CachePortId>,
-    },
-
-    /// Memory endpoint, formatted as `mem.<name>`.
-    Mem {
-        /// Memory name.
-        name: String,
-    },
-
-    /// Fabric tile port endpoint, formatted as
-    /// `fabric.<name>@(<column>,<row>)[.<port>]`.
-    FabricPort {
-        /// Fabric name.
-        fabric: String,
-
-        /// Fabric column coordinate.
-        column: usize,
-
-        /// Fabric row coordinate.
-        row: usize,
-
-        /// Ingress/egress port number on the tile. Port 0 is omitted when
-        /// formatted.
-        port: usize,
-    },
-
-    /// A deliberately unused fabric or cache port.
-    Null,
-}
-
-impl fmt::Display for ConnectionEndpointId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Null => f.write_str("null"),
-            Self::CoherencyManager { name } => write!(f, "coherency_manager.{name}"),
-            Self::Pe { name } => write!(f, "pe.{name}"),
-            Self::Cache { name, port } => {
-                write!(f, "cache.{name}")?;
-                if let Some(port) = port {
-                    write!(f, ".{port}")?;
-                }
-                Ok(())
-            }
-            Self::Mem { name } => write!(f, "mem.{name}"),
-            Self::FabricPort {
-                fabric,
-                column,
-                row,
-                port,
-            } => {
-                write!(f, "fabric.{fabric}@({column},{row})")?;
-                if *port != 0 {
-                    write!(f, ".{port}")?;
-                }
-                Ok(())
-            }
-        }
-    }
-}
-
 /// Parses a platform connection endpoint ID.
 ///
-/// Supported forms are `pe.<name>`, `cache.<name>[.dev|.mem]`,
-/// `mem.<name>`, `fabric.<name>@(<column>,<row>)[.<port>]`, and `null`. Fabric
-/// ports default to port 0 when the suffix is omitted.
+/// Supported forms are `pe.<name>[.compute|.dma]`, `cache.<name>[.dev|.mem]`,
+/// `mem.<name>`, `coherency_manager.<name>`,
+/// `fabric.<name>@(<column>,<row>)[.<port>]`, and `null`. Fabric ports default
+/// to port 0 when the suffix is omitted.
 pub fn parse_connection_endpoint_id(s: &str) -> Result<ConnectionEndpointId, SimError> {
     if s == "null" {
         return Ok(ConnectionEndpointId::Null);
@@ -147,7 +43,7 @@ pub fn parse_connection_endpoint_id(s: &str) -> Result<ConnectionEndpointId, Sim
         .ok_or_else(|| SimError(format!("Failed to parse name in '{s}'")))?;
     let port = parts.next();
     if parts.next().is_some() {
-        return Err(SimError(format!("Failed to parse '{s}' - extra tokens")));
+        return sim_error!("Failed to parse '{s}' - extra tokens");
     }
 
     match kind {
@@ -162,12 +58,12 @@ pub fn parse_connection_endpoint_id(s: &str) -> Result<ConnectionEndpointId, Sim
             })
         }
         "pe" => {
-            if port.is_some() {
-                return Err(SimError("Cannot specify a port for PE".to_string()));
-            }
-            Ok(ConnectionEndpointId::Pe {
-                name: name.to_string(),
-            })
+            let name = match port {
+                None | Some("compute") => name.to_string(),
+                Some("dma") => format!("{name}.dma"),
+                Some(other) => return sim_error!("Unsupported PE interface '{other}'"),
+            };
+            Ok(ConnectionEndpointId::Pe { name })
         }
         "cache" => Ok(ConnectionEndpointId::Cache {
             name: name.to_string(),
@@ -175,15 +71,13 @@ pub fn parse_connection_endpoint_id(s: &str) -> Result<ConnectionEndpointId, Sim
         }),
         "mem" => {
             if port.is_some() {
-                return Err(SimError("Cannot specify a port for Memory".to_string()));
+                return sim_error!("Cannot specify a port for Memory");
             }
             Ok(ConnectionEndpointId::Mem {
                 name: name.to_string(),
             })
         }
-        _ => Err(SimError(format!(
-            "Failed to parse '{s}' - unsupported kind"
-        ))),
+        _ => sim_error!("Failed to parse '{s}' - unsupported kind"),
     }
 }
 
@@ -191,7 +85,7 @@ fn parse_cache_port_id(s: &str) -> Result<CachePortId, SimError> {
     match s {
         "dev" => Ok(CachePortId::Dev),
         "mem" => Ok(CachePortId::Mem),
-        other => Err(SimError(format!("Unsupported Cache port '{other}'"))),
+        other => sim_error!("Unsupported Cache port '{other}'"),
     }
 }
 
@@ -260,11 +154,149 @@ pub fn fabric_port_endpoint_id(
     .to_string()
 }
 
+/// Parsed platform connection endpoint.
+///
+/// The display form round-trips through [`parse_connection_endpoint_id`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ConnectionEndpointId {
+    /// Directory endpoint, formatted as `coherency_manager.<name>`.
+    CoherencyManager {
+        /// Coherency manager name.
+        name: String,
+    },
+    /// A deliberately unused fabric or cache port.
+    Null,
+    /// Processing element endpoint, formatted as `pe.<name>`.
+    /// A DMA interface uses the canonical endpoint name `<name>.dma`.
+    Pe {
+        /// Processing element name.
+        name: String,
+    },
+
+    /// Cache endpoint, formatted as `cache.<name>[.dev|.mem]`.
+    Cache {
+        /// Cache name.
+        name: String,
+
+        /// Optional explicit cache port. When omitted, connection builders
+        /// infer the side from the other endpoint.
+        port: Option<CachePortId>,
+    },
+
+    /// Memory endpoint, formatted as `mem.<name>`.
+    Mem {
+        /// Memory name.
+        name: String,
+    },
+
+    /// Fabric tile port endpoint, formatted as
+    /// `fabric.<name>@(<column>,<row>)[.<port>]`.
+    FabricPort {
+        /// Fabric name.
+        fabric: String,
+
+        /// Fabric column coordinate.
+        column: usize,
+
+        /// Fabric row coordinate.
+        row: usize,
+
+        /// Ingress/egress port number on the tile. Port 0 is omitted when
+        /// formatted.
+        port: usize,
+    },
+}
+
+impl fmt::Display for ConnectionEndpointId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Null => f.write_str("null"),
+            Self::CoherencyManager { name } => write!(f, "coherency_manager.{name}"),
+            Self::Pe { name } => write!(f, "pe.{name}"),
+            Self::Cache { name, port } => {
+                write!(f, "cache.{name}")?;
+                if let Some(port) = port {
+                    write!(f, ".{port}")?;
+                }
+                Ok(())
+            }
+            Self::Mem { name } => write!(f, "mem.{name}"),
+            Self::FabricPort {
+                fabric,
+                column,
+                row,
+                port,
+            } => {
+                write!(f, "fabric.{fabric}@({column},{row})")?;
+                if *port != 0 {
+                    write!(f, ".{port}")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Identifies one of the cache's external connection ports.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CachePortId {
+    /// Device-facing cache port.
+    Dev,
+
+    /// Memory-facing cache port.
+    Mem,
+}
+
+impl CachePortId {
+    /// Returns the endpoint suffix used for this cache port.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Dev => "dev",
+            Self::Mem => "mem",
+        }
+    }
+}
+
+impl fmt::Display for CachePortId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         CachePortId, ConnectionEndpointId, fabric_port_endpoint_id, parse_connection_endpoint_id,
     };
+
+    #[test]
+    fn coherency_manager_endpoint_round_trips() {
+        let endpoint = parse_connection_endpoint_id("coherency_manager.cm0").unwrap();
+        assert_eq!(
+            endpoint,
+            ConnectionEndpointId::CoherencyManager { name: "cm0".into() }
+        );
+        assert_eq!(endpoint.to_string(), "coherency_manager.cm0");
+        assert!(parse_connection_endpoint_id("coherency_manager.cm0.mem").is_err());
+    }
+
+    #[test]
+    fn named_processing_element_interfaces_round_trip() {
+        assert_eq!(
+            parse_connection_endpoint_id("pe.gpu0.dma")
+                .unwrap()
+                .to_string(),
+            "pe.gpu0.dma"
+        );
+        assert_eq!(
+            parse_connection_endpoint_id("pe.gpu0.compute")
+                .unwrap()
+                .to_string(),
+            "pe.gpu0"
+        );
+        assert!(parse_connection_endpoint_id("pe.gpu0.unknown").is_err());
+    }
 
     #[test]
     fn parses_and_formats_fabric_port_ids() {

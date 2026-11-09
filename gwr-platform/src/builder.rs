@@ -5,6 +5,7 @@ use std::hash::BuildHasher;
 use std::rc::Rc;
 
 use gwr_engine::engine::Engine;
+use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::types::SimError;
 use gwr_models::cache::coherency_manager::{CoherencyManager, CoherencyManagerConfig};
@@ -23,8 +24,8 @@ use gwr_track::entity::{Entity, GetEntity};
 
 use crate::connection_id::{CachePortId, ConnectionEndpointId, parse_connection_endpoint_id};
 use crate::types::{
-    CacheConfigSection, CacheSection, FabricConfigSection, FabricKind, FabricSection,
-    MemoryConfigSection, MemoryMapSection, MemorySection, PlatformConfig,
+    CacheConfigSection, CacheSection, ComputeSelection, FabricConfigSection, FabricKind,
+    FabricSection, MemoryConfigSection, MemoryMapSection, MemorySection, PlatformConfig,
     ProcessingElementConfigSection, ProcessingElementSection,
 };
 use crate::{Caches, DeviceIds, Fabrics, Memories, NameToIdxMap, ProcessingElements};
@@ -50,22 +51,29 @@ pub fn build_memory_map(
     memories_idx_by_id: &NameToIdxMap,
     device_ids: &DeviceIds,
 ) -> Result<MemoryMap, SimError> {
-    let mut memory_map = MemoryMap::new();
+    let mut members = Vec::new();
     for device in &cfg.devices {
-        let memory_idx = memories_idx_by_id
+        let index = memories_idx_by_id
             .get(device.as_str())
             .ok_or_else(|| SimError(format!("Unknown memory '{device}'")))?;
-        let memory = &memories[*memory_idx];
-        let device_id = *device_ids
+        let memory = &memories[*index];
+        let id = *device_ids
             .get(device)
             .ok_or_else(|| SimError(format!("Unknown device '{device}'")))?;
-        memory_map.insert(
+        let end = crate::memory_mapping::physical_end(
             memory.base_address(),
             memory.capacity_bytes() as u64,
-            device_id,
         )?;
+        members.push((
+            device.clone(),
+            gwr_models::memory::memory_map::MemoryRegion {
+                start: memory.base_address(),
+                end,
+                device: id,
+            },
+        ));
     }
-    Ok(memory_map)
+    crate::memory_mapping::build_map(cfg, members)
 }
 
 pub(crate) struct EffectiveConfigs {
@@ -89,52 +97,7 @@ impl EffectiveConfigs {
 pub const DEFAULT_PE_NUM_ACTIVE_REQUESTS: usize = 8;
 pub const DEFAULT_PE_LSU_ACCESS_BYTES: usize = 32;
 pub const DEFAULT_PE_SRAM_BYTES: u64 = 1024 * 1024;
-pub const DEFAULT_PE_ADDS_PER_TICK: f64 = 16.0;
-pub const DEFAULT_PE_MULS_PER_TICK: f64 = 4.0;
-pub const DEFAULT_PE_COMPARES_PER_TICK: f64 = DEFAULT_PE_ADDS_PER_TICK;
 pub const DEFAULT_PE_OVERHEAD_SIZE_BYTES: usize = 8;
-
-impl ProcessingElementConfigSection {
-    pub(crate) fn model_config(&self) -> Result<ProcessingElementConfig, SimError> {
-        let num_active_requests = self
-            .num_active_requests
-            .unwrap_or(DEFAULT_PE_NUM_ACTIVE_REQUESTS);
-        let sram_bytes = usize::try_from(self.sram_bytes.unwrap_or(DEFAULT_PE_SRAM_BYTES))
-            .map_err(|error| {
-                SimError(format!("SRAM size cannot be represented as usize: {error}"))
-            })?;
-        let config = ProcessingElementConfig {
-            num_active_requests,
-            lsu_access_bytes: self.lsu_access_bytes.unwrap_or(DEFAULT_PE_LSU_ACCESS_BYTES),
-            overhead_size_bytes: self
-                .overhead_size_bytes
-                .unwrap_or(DEFAULT_PE_OVERHEAD_SIZE_BYTES),
-            sram_bytes,
-            adds_per_tick: self.adds_per_tick.unwrap_or(DEFAULT_PE_ADDS_PER_TICK),
-            muls_per_tick: self.muls_per_tick.unwrap_or(DEFAULT_PE_MULS_PER_TICK),
-            compares_per_tick: self
-                .compares_per_tick
-                .unwrap_or(DEFAULT_PE_COMPARES_PER_TICK),
-        };
-        config.validate()?;
-        Ok(config)
-    }
-}
-
-impl ProcessingElementSection {
-    /// Return the model configuration after applying platform defaults.
-    pub fn effective_config(&self) -> Result<ProcessingElementConfig, SimError> {
-        self.config
-            .model_config()
-            .map_err(|error| SimError(format!("Processing element '{}': {error}", self.name)))
-    }
-}
-
-fn fabric_configs(
-    platform: &PlatformConfig,
-) -> Result<Vec<(Rc<FabricConfig>, FabricRoutingAlgorithm)>, SimError> {
-    fabric_configs_with_destination_port_maps(platform, &FabricDestinationPortMaps::new())
-}
 
 pub fn build_pes<S: BuildHasher>(
     engine: &Engine,
@@ -163,8 +126,80 @@ fn processing_element_configs(
         .processing_elements
         .iter()
         .flatten()
-        .map(ProcessingElementSection::effective_config)
+        .map(|pe| pe.effective_config(&platform.operation_classes, &platform.compute_profiles))
         .collect()
+}
+
+impl ProcessingElementSection {
+    /// Return the model configuration after applying platform defaults.
+    pub fn effective_config(
+        &self,
+        operation_classes: &std::collections::BTreeMap<
+            String,
+            gwr_models::processing_element::compute::OperationClass,
+        >,
+        compute_profiles: &std::collections::BTreeMap<
+            String,
+            gwr_models::processing_element::compute::ComputeConfig,
+        >,
+    ) -> Result<ProcessingElementConfig, SimError> {
+        self.config
+            .model_config(operation_classes, compute_profiles)
+            .map_err(|error| SimError(format!("Processing element '{}': {error}", self.name)))
+    }
+}
+
+impl ProcessingElementConfigSection {
+    pub(crate) fn model_config(
+        &self,
+        operation_classes: &std::collections::BTreeMap<
+            String,
+            gwr_models::processing_element::compute::OperationClass,
+        >,
+        compute_profiles: &std::collections::BTreeMap<
+            String,
+            gwr_models::processing_element::compute::ComputeConfig,
+        >,
+    ) -> Result<ProcessingElementConfig, SimError> {
+        let num_active_requests = self
+            .num_active_requests
+            .unwrap_or(DEFAULT_PE_NUM_ACTIVE_REQUESTS);
+        let sram_bytes = usize::try_from(self.sram_bytes.unwrap_or(DEFAULT_PE_SRAM_BYTES))
+            .map_err(|error| {
+                SimError(format!("SRAM size cannot be represented as usize: {error}"))
+            })?;
+        let config = ProcessingElementConfig {
+            num_active_requests,
+            lsu_access_bytes: self.lsu_access_bytes.unwrap_or(DEFAULT_PE_LSU_ACCESS_BYTES),
+            overhead_size_bytes: self
+                .overhead_size_bytes
+                .unwrap_or(DEFAULT_PE_OVERHEAD_SIZE_BYTES),
+            sram_bytes,
+            boundary_payload_service: self
+                .boundary_payload_service
+                .as_ref()
+                .map(|s| s.bytes_per_tick),
+            local_payload_service: self
+                .local_payload_service
+                .as_ref()
+                .map(|s| s.bytes_per_tick),
+            block_execution: self.block_execution.clone(),
+            compute: match self
+                .compute
+                .as_ref()
+                .ok_or_else(|| SimError("PE compute engines must be declared".into()))?
+            {
+                ComputeSelection::Inline(config) => config.clone(),
+                ComputeSelection::Named(name) => compute_profiles
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| SimError(format!("Unknown compute profile '{name}'")))?,
+            },
+            operation_classes: operation_classes.clone(),
+        };
+        config.validate()?;
+        Ok(config)
+    }
 }
 
 pub(crate) fn build_pes_from_configs<S: BuildHasher>(
@@ -187,7 +222,22 @@ pub(crate) fn build_pes_from_configs<S: BuildHasher>(
             let device_id = *device_ids
                 .get(&pe_section.name)
                 .ok_or_else(|| SimError(format!("Unknown device '{}'", pe_section.name)))?;
-            processing_elements.push(ProcessingElement::new_and_register(
+            let dma_id = device_ids.get(&format!("{}.dma", pe_section.name));
+            let dma_map = match &pe_section.dma_memory_map {
+                Some(name) => {
+                    if dma_id.is_none() {
+                        return Err(SimError(format!(
+                            "DMA memory map for '{}' requires a connected independent DMA issuer",
+                            pe_section.name
+                        )));
+                    }
+                    memory_maps
+                        .get(name)
+                        .ok_or_else(|| SimError(format!("Unknown DMA memory map '{name}'")))?
+                }
+                None => memory_map,
+            };
+            let pe = ProcessingElement::new_and_register(
                 engine,
                 clock,
                 parent,
@@ -195,7 +245,11 @@ pub(crate) fn build_pes_from_configs<S: BuildHasher>(
                 memory_map,
                 pe_config,
                 device_id,
-            )?);
+            )?;
+            if let Some(dma_id) = dma_id {
+                pe.configure_dma(engine, clock, dma_map, pe_config, *dma_id)?;
+            }
+            processing_elements.push(pe);
         }
     }
     let mut pes_idx_by_id = HashMap::new();
@@ -205,6 +259,16 @@ pub(crate) fn build_pes_from_configs<S: BuildHasher>(
     }
     Ok((processing_elements, pes_idx_by_id))
 }
+
+pub const DEFAULT_CACHE_LINE_SIZE_BYTES: usize = 32;
+pub const DEFAULT_CACHE_BW_BYTES_PER_TICK: usize = 32;
+pub const DEFAULT_CACHE_NUM_WAYS: usize = 4;
+pub const DEFAULT_CACHE_NUM_SETS: usize = 128;
+pub const DEFAULT_CACHE_LATENCY_TICKS: usize = 20;
+/// Default maximum number of tracked original read requests.
+pub const DEFAULT_CACHE_MAX_INFLIGHT_PARENTS: usize = 64;
+/// Default maximum number of downstream fills awaiting responses.
+pub const DEFAULT_CACHE_MAX_INFLIGHT_FILLS: usize = 64;
 
 pub fn build_caches<S: BuildHasher>(
     engine: &Engine,
@@ -233,6 +297,36 @@ fn cache_configs(platform: &PlatformConfig) -> Result<Vec<CacheConfig>, SimError
         .flatten()
         .map(CacheSection::effective_config)
         .collect()
+}
+
+impl CacheConfigSection {
+    pub(crate) fn model_config(&self) -> Result<CacheConfig, SimError> {
+        let config = CacheConfig::new(
+            self.line_size_bytes
+                .unwrap_or(DEFAULT_CACHE_LINE_SIZE_BYTES),
+            self.bw_bytes_per_tick
+                .unwrap_or(DEFAULT_CACHE_BW_BYTES_PER_TICK),
+            self.num_sets.unwrap_or(DEFAULT_CACHE_NUM_SETS),
+            self.num_ways.unwrap_or(DEFAULT_CACHE_NUM_WAYS),
+            self.delay_ticks.unwrap_or(DEFAULT_CACHE_LATENCY_TICKS),
+        )
+        .with_admission_limits(
+            self.max_inflight_parents
+                .unwrap_or(DEFAULT_CACHE_MAX_INFLIGHT_PARENTS),
+            self.max_inflight_fills
+                .unwrap_or(DEFAULT_CACHE_MAX_INFLIGHT_FILLS),
+        );
+        config.validate()?;
+        Ok(config)
+    }
+}
+
+impl CacheSection {
+    fn effective_config(&self) -> Result<CacheConfig, SimError> {
+        self.config
+            .model_config()
+            .map_err(|error| SimError(format!("Cache '{}': {error}", self.name)))
+    }
 }
 
 pub(crate) fn build_caches_from_configs<S: BuildHasher>(
@@ -291,46 +385,6 @@ pub(crate) fn build_caches_from_configs<S: BuildHasher>(
     Ok((caches, caches_idx_by_id))
 }
 
-pub const DEFAULT_CACHE_LINE_SIZE_BYTES: usize = 32;
-pub const DEFAULT_CACHE_BW_BYTES_PER_TICK: usize = 32;
-pub const DEFAULT_CACHE_NUM_WAYS: usize = 4;
-pub const DEFAULT_CACHE_NUM_SETS: usize = 128;
-pub const DEFAULT_CACHE_LATENCY_TICKS: usize = 20;
-/// Default maximum number of tracked original read requests.
-pub const DEFAULT_CACHE_MAX_INFLIGHT_PARENTS: usize = 64;
-/// Default maximum number of downstream fills awaiting responses.
-pub const DEFAULT_CACHE_MAX_INFLIGHT_FILLS: usize = 64;
-
-impl CacheConfigSection {
-    pub(crate) fn model_config(&self) -> Result<CacheConfig, SimError> {
-        let config = CacheConfig::new(
-            self.line_size_bytes
-                .unwrap_or(DEFAULT_CACHE_LINE_SIZE_BYTES),
-            self.bw_bytes_per_tick
-                .unwrap_or(DEFAULT_CACHE_BW_BYTES_PER_TICK),
-            self.num_sets.unwrap_or(DEFAULT_CACHE_NUM_SETS),
-            self.num_ways.unwrap_or(DEFAULT_CACHE_NUM_WAYS),
-            self.delay_ticks.unwrap_or(DEFAULT_CACHE_LATENCY_TICKS),
-        )
-        .with_admission_limits(
-            self.max_inflight_parents
-                .unwrap_or(DEFAULT_CACHE_MAX_INFLIGHT_PARENTS),
-            self.max_inflight_fills
-                .unwrap_or(DEFAULT_CACHE_MAX_INFLIGHT_FILLS),
-        );
-        config.validate()?;
-        Ok(config)
-    }
-}
-
-impl CacheSection {
-    fn effective_config(&self) -> Result<CacheConfig, SimError> {
-        self.config
-            .model_config()
-            .map_err(|error| SimError(format!("Cache '{}': {error}", self.name)))
-    }
-}
-
 pub fn build_fabric_destination_port_maps(
     cfg: &PlatformConfig,
     device_ids: &DeviceIds,
@@ -376,17 +430,6 @@ pub fn build_fabric_destination_port_maps(
     Ok(maps)
 }
 
-pub fn build_fabrics(
-    engine: &Engine,
-    clock: &Clock,
-    parent: &Rc<Entity>,
-    cfg: &PlatformConfig,
-    fabric_destination_port_maps: &FabricDestinationPortMaps,
-) -> Result<(Fabrics, NameToIdxMap), SimError> {
-    let configs = fabric_configs_with_destination_port_maps(cfg, fabric_destination_port_maps)?;
-    build_fabrics_from_configs(engine, clock, parent, cfg, &configs)
-}
-
 pub const DEFAULT_FABRIC_PORTS_PER_NODE: usize = 1;
 pub const DEFAULT_FABRIC_TICKS_PER_HOP: usize = 2;
 pub const DEFAULT_FABRIC_TICKS_OVERHEAD: usize = 10;
@@ -397,82 +440,15 @@ pub const DEFAULT_FABRIC_ROUTING: FabricRoutingAlgorithm = FabricRoutingAlgorith
 pub const DEFAULT_FABRIC_PORT_SELECTION: FabricPortSelection =
     FabricPortSelection::DestinationAddressHash;
 
-pub type FabricDestinationPortMap = HashMap<u64, Vec<usize>>;
-pub type FabricDestinationPortMaps = HashMap<String, FabricDestinationPortMap>;
-
-fn fabric_configs_with_destination_port_maps(
-    platform: &PlatformConfig,
-    destination_port_maps: &FabricDestinationPortMaps,
-) -> Result<Vec<(Rc<FabricConfig>, FabricRoutingAlgorithm)>, SimError> {
-    platform
-        .fabrics
-        .iter()
-        .flatten()
-        .map(|fabric| {
-            let destination_port_map = destination_port_maps
-                .get(&fabric.name)
-                .cloned()
-                .unwrap_or_default();
-            fabric.effective_config(destination_port_map)
-        })
-        .map(|result| result.map(|(config, routing)| (Rc::new(config), routing)))
-        .collect()
-}
-
-impl FabricConfigSection {
-    pub(crate) fn model_config(
-        &self,
-        num_columns: usize,
-        num_rows: usize,
-        destination_port_map: FabricDestinationPortMap,
-    ) -> Result<(FabricConfig, FabricRoutingAlgorithm), SimError> {
-        let config = FabricConfig::new(
-            FabricGeometry {
-                num_columns,
-                num_rows,
-                num_ports_per_node: self
-                    .fabric_ports_per_node
-                    .unwrap_or(DEFAULT_FABRIC_PORTS_PER_NODE),
-                ports_per_node_limit: None,
-            },
-            FabricPortConfig {
-                ticks_per_hop: self.ticks_per_hop.unwrap_or(DEFAULT_FABRIC_TICKS_PER_HOP),
-                ticks_overhead: self.ticks_overhead.unwrap_or(DEFAULT_FABRIC_TICKS_OVERHEAD),
-                rx_buffer_bytes: self
-                    .rx_buffer_bytes
-                    .unwrap_or(DEFAULT_FABRIC_RX_BUFFER_BYTES),
-                tx_buffer_bytes: self
-                    .tx_buffer_bytes
-                    .unwrap_or(DEFAULT_FABRIC_TX_BUFFER_BYTES),
-                port_bits_per_tick: self
-                    .port_bits_per_tick
-                    .unwrap_or(DEFAULT_FABRIC_PORT_BITS_PER_TICK),
-            },
-            destination_port_map,
-        )?
-        .with_port_selection(self.port_selection.unwrap_or(DEFAULT_FABRIC_PORT_SELECTION))
-        .with_internal_link_bits_per_tick(self.internal_link_bits_per_tick)?;
-        Ok((config, self.routing.unwrap_or(DEFAULT_FABRIC_ROUTING)))
-    }
-}
-
-impl FabricSection {
-    fn effective_config(
-        &self,
-        destination_port_map: FabricDestinationPortMap,
-    ) -> Result<(FabricConfig, FabricRoutingAlgorithm), SimError> {
-        if self.config.internal_link_bits_per_tick.is_some()
-            && matches!(&self.kind, FabricKind::Functional)
-        {
-            return Err(SimError(format!(
-                "Fabric '{}': internal link rate limit requires routed fabric",
-                self.name
-            )));
-        }
-        self.config
-            .model_config(self.columns, self.rows, destination_port_map)
-            .map_err(|error| SimError(format!("Fabric '{}': {error}", self.name)))
-    }
+pub fn build_fabrics(
+    engine: &Engine,
+    clock: &Clock,
+    parent: &Rc<Entity>,
+    cfg: &PlatformConfig,
+    fabric_destination_port_maps: &FabricDestinationPortMaps,
+) -> Result<(Fabrics, NameToIdxMap), SimError> {
+    let configs = fabric_configs_with_destination_port_maps(cfg, fabric_destination_port_maps)?;
+    build_fabrics_from_configs(engine, clock, parent, cfg, &configs)
 }
 
 pub(crate) fn build_fabrics_from_configs(
@@ -514,6 +490,10 @@ pub(crate) fn build_fabrics_from_configs(
 
     Ok((fabrics, fabrics_idx_by_id))
 }
+pub const DEFAULT_HBM_SIZE_BYTES: usize = 1024 * 1024 * 1024;
+
+pub const DEFAULT_HBM_DELAY_TICKS: usize = 10;
+pub const DEFAULT_HBM_BW_BYTES_PER_TICK: usize = 32;
 
 pub fn build_memories(
     engine: &Engine,
@@ -525,9 +505,22 @@ pub fn build_memories(
     build_memories_from_configs(engine, clock, parent, cfg, &configs)
 }
 
-pub const DEFAULT_HBM_DELAY_TICKS: usize = 10;
-pub const DEFAULT_HBM_BW_BYTES_PER_TICK: usize = 32;
-pub const DEFAULT_HBM_SIZE_BYTES: usize = 1024 * 1024 * 1024;
+fn memory_configs(platform: &PlatformConfig) -> Result<Vec<MemoryConfig>, SimError> {
+    platform
+        .memories
+        .iter()
+        .flatten()
+        .map(MemorySection::effective_config)
+        .collect()
+}
+
+impl MemorySection {
+    fn effective_config(&self) -> Result<MemoryConfig, SimError> {
+        self.config
+            .model_config(self.base_address)
+            .map_err(|error| SimError(format!("Memory '{}': {error}", self.name)))
+    }
+}
 
 impl MemoryConfigSection {
     pub(crate) fn model_config(&self, base_address: u64) -> Result<MemoryConfig, SimError> {
@@ -541,26 +534,24 @@ impl MemoryConfigSection {
                 .unwrap_or(DEFAULT_HBM_BW_BYTES_PER_TICK),
             self.delay_ticks.unwrap_or(DEFAULT_HBM_DELAY_TICKS),
         );
+        let config = if let Some(service) = &self.arrival_aware_service {
+            let config = config.with_arrival_aware_service(service.max_pending_requests);
+            if let Some(lanes) = &service.lanes {
+                config.with_service_lanes(lanes.interleave_bytes, lanes.bytes_per_tick.clone())
+            } else {
+                config
+            }
+        } else {
+            config
+        };
+        let config = if let Some(service) = &self.atomic_service {
+            config.with_atomic_service(0, service.clone())
+        } else {
+            config
+        };
         config.validate()?;
         Ok(config)
     }
-}
-
-impl MemorySection {
-    fn effective_config(&self) -> Result<MemoryConfig, SimError> {
-        self.config
-            .model_config(self.base_address)
-            .map_err(|error| SimError(format!("Memory '{}': {error}", self.name)))
-    }
-}
-
-fn memory_configs(platform: &PlatformConfig) -> Result<Vec<MemoryConfig>, SimError> {
-    platform
-        .memories
-        .iter()
-        .flatten()
-        .map(MemorySection::effective_config)
-        .collect()
 }
 
 pub(crate) fn build_memories_from_configs(
@@ -578,7 +569,17 @@ pub(crate) fn build_memories_from_configs(
                 clock,
                 parent,
                 memory_section.name.as_str(),
-                config.clone(),
+                if let Some(service) = &memory_section.config.atomic_service {
+                    let ids = crate::assign_device_ids(cfg)?;
+                    config.clone().with_atomic_service(
+                        ids.get(&memory_section.name)
+                            .ok_or_else(|| SimError("atomic memory lacks actual device ID".into()))?
+                            .0,
+                        service.clone(),
+                    )
+                } else {
+                    config.clone()
+                },
             )?);
         }
     }
@@ -590,16 +591,6 @@ pub(crate) fn build_memories_from_configs(
     }
 
     Ok((memories, memories_idx_by_id))
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-enum ResolvedEndpoint {
-    Pe(String),
-    CacheDev(String),
-    CacheMem(String),
-    Mem(String),
-    CoherencyManager(String),
-    FabricPort { fabric: String, port_idx: usize },
 }
 
 struct FabricTopology {
@@ -633,10 +624,10 @@ impl FabricTopology {
         if let Some(connections) = &cfg.connections {
             for c in connections {
                 if c.connect.len() != 2 {
-                    return Err(SimError(format!(
+                    return sim_error!(
                         "Invalid 'connect' with {} entries (only 2 expected)",
                         c.connect.len()
-                    )));
+                    );
                 }
                 if c.connect.iter().any(|endpoint| endpoint == "null") {
                     continue;
@@ -780,23 +771,27 @@ impl FabricTopology {
             .get(fabric)
             .ok_or_else(|| SimError(format!("Unknown fabric '{fabric}'")))?;
         if column >= config.num_columns() {
-            return Err(SimError(format!(
-                "Fabric '{fabric}' column {column} is out of range"
-            )));
+            return sim_error!("Fabric '{fabric}' column {column} is out of range");
         }
         if row >= config.num_rows() {
-            return Err(SimError(format!(
-                "Fabric '{fabric}' row {row} is out of range"
-            )));
+            return sim_error!("Fabric '{fabric}' row {row} is out of range");
         }
 
         if port >= config.node_num_ingress_egress_ports(column, row) {
-            return Err(SimError(format!(
-                "Fabric '{fabric}' port ({column},{row},{port}) is not populated"
-            )));
+            return sim_error!("Fabric '{fabric}' port ({column},{row},{port}) is not populated");
         }
         Ok(config.col_row_port_to_fabric_port_index(column, row, port))
     }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+enum ResolvedEndpoint {
+    Pe(String),
+    CacheDev(String),
+    CacheMem(String),
+    Mem(String),
+    CoherencyManager(String),
+    FabricPort { fabric: String, port_idx: usize },
 }
 
 fn build_empty_fabric_configs(
@@ -813,6 +808,91 @@ fn build_empty_fabric_configs(
     }
     Ok(fabric_configs)
 }
+
+fn fabric_configs(
+    platform: &PlatformConfig,
+) -> Result<Vec<(Rc<FabricConfig>, FabricRoutingAlgorithm)>, SimError> {
+    fabric_configs_with_destination_port_maps(platform, &FabricDestinationPortMaps::new())
+}
+
+fn fabric_configs_with_destination_port_maps(
+    platform: &PlatformConfig,
+    destination_port_maps: &FabricDestinationPortMaps,
+) -> Result<Vec<(Rc<FabricConfig>, FabricRoutingAlgorithm)>, SimError> {
+    platform
+        .fabrics
+        .iter()
+        .flatten()
+        .map(|fabric| {
+            let destination_port_map = destination_port_maps
+                .get(&fabric.name)
+                .cloned()
+                .unwrap_or_default();
+            fabric.effective_config(destination_port_map)
+        })
+        .map(|result| result.map(|(config, routing)| (Rc::new(config), routing)))
+        .collect()
+}
+
+impl FabricSection {
+    fn effective_config(
+        &self,
+        destination_port_map: FabricDestinationPortMap,
+    ) -> Result<(FabricConfig, FabricRoutingAlgorithm), SimError> {
+        if self.config.internal_link_bits_per_tick.is_some()
+            && matches!(&self.kind, FabricKind::Functional)
+        {
+            return Err(SimError(format!(
+                "Fabric '{}': internal link service requires routed fabric",
+                self.name
+            )));
+        }
+        self.config
+            .model_config(self.columns, self.rows, destination_port_map)
+            .map_err(|error| SimError(format!("Fabric '{}': {error}", self.name)))
+    }
+}
+
+impl FabricConfigSection {
+    pub(crate) fn model_config(
+        &self,
+        num_columns: usize,
+        num_rows: usize,
+        destination_port_map: FabricDestinationPortMap,
+    ) -> Result<(FabricConfig, FabricRoutingAlgorithm), SimError> {
+        let config = FabricConfig::new(
+            FabricGeometry {
+                num_columns,
+                num_rows,
+                num_ports_per_node: self
+                    .fabric_ports_per_node
+                    .unwrap_or(DEFAULT_FABRIC_PORTS_PER_NODE),
+                ports_per_node_limit: None,
+            },
+            FabricPortConfig {
+                ticks_per_hop: self.ticks_per_hop.unwrap_or(DEFAULT_FABRIC_TICKS_PER_HOP),
+                ticks_overhead: self.ticks_overhead.unwrap_or(DEFAULT_FABRIC_TICKS_OVERHEAD),
+                rx_buffer_bytes: self
+                    .rx_buffer_bytes
+                    .unwrap_or(DEFAULT_FABRIC_RX_BUFFER_BYTES),
+                tx_buffer_bytes: self
+                    .tx_buffer_bytes
+                    .unwrap_or(DEFAULT_FABRIC_TX_BUFFER_BYTES),
+                port_bits_per_tick: self
+                    .port_bits_per_tick
+                    .unwrap_or(DEFAULT_FABRIC_PORT_BITS_PER_TICK),
+            },
+            destination_port_map,
+        )?
+        .with_port_selection(self.port_selection.unwrap_or(DEFAULT_FABRIC_PORT_SELECTION))
+        .with_internal_link_bits_per_tick(self.internal_link_bits_per_tick)?;
+        Ok((config, self.routing.unwrap_or(DEFAULT_FABRIC_ROUTING)))
+    }
+}
+
+pub type FabricDestinationPortMaps = HashMap<String, FabricDestinationPortMap>;
+
+pub type FabricDestinationPortMap = HashMap<u64, Vec<usize>>;
 
 pub(crate) fn build_coherency_managers(
     engine: &Engine,
@@ -865,7 +945,10 @@ mod tests {
         let clock = engine.default_clock();
         let cfg = PlatformConfig {
             coherency_managers: None,
+            compute_profiles: Default::default(),
+            operation_classes: std::collections::BTreeMap::new(),
             memory_maps: vec![MemoryMapSection {
+                address_mapping: None,
                 name: "mm0".to_string(),
                 devices: vec!["hbm0".to_string()],
             }],
@@ -878,9 +961,11 @@ mod tests {
                 kind: MemoryKind::HBM,
                 base_address: 0x4000,
                 config: MemoryConfigSection {
+                    atomic_service: None,
                     capacity_bytes: 0x2000,
                     bw_bytes_per_tick: None,
                     delay_ticks: None,
+                    arrival_aware_service: None,
                 },
             }]),
             connections: None,

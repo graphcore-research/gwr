@@ -85,10 +85,11 @@ fn null_cannot_connect_to_a_processing_element() {
 memory_maps:
   - name: mm
     devices: []
+operation_classes: { add: { operations: [add], arity: 2 } }
 processing_elements:
   - name: pe0
     memory_map: mm
-    config: {}
+    config: { compute: { engines: { vector: { capabilities: [{class: add, ops_per_tick: 1}] } } } }
 connections:
   - connect: ['null', pe.pe0]
 ",

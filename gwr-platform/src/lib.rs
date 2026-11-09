@@ -34,18 +34,14 @@ use crate::connection_id::fabric_port_endpoint_id;
 use crate::types::PlatformConfig;
 
 pub mod builder;
+pub mod catalog;
 mod connect;
 pub mod connection_id;
+mod memory_mapping;
+pub mod rates;
 pub mod types;
 mod validation;
 pub mod yaml;
-
-type ProcessingElements = Vec<Rc<ProcessingElement>>;
-type Caches = Vec<Rc<Cache<MemoryAccess>>>;
-type Fabrics = Vec<Rc<dyn Fabric<MemoryAccess>>>;
-type Memories = Vec<Rc<Memory<MemoryAccess>>>;
-type DeviceIds = HashMap<String, DeviceId>;
-type NameToIdxMap = HashMap<String, usize>;
 
 #[derive(EntityGet)]
 /// A validated machine topology built from platform configuration.
@@ -66,6 +62,7 @@ pub struct Platform {
     memories: Memories,
     memories_idx_by_id: NameToIdxMap,
     device_names_by_id: HashMap<u64, String>,
+    atomic_connections: Vec<Vec<connection_id::ConnectionEndpointId>>,
 }
 
 impl fmt::Debug for Platform {
@@ -82,8 +79,7 @@ impl Platform {
         clock: &Clock,
         platform_path: &Path,
     ) -> Result<Self, SimError> {
-        let s = std::fs::read_to_string(platform_path)
-            .map_err(|e| SimError(format!("Unable to read {}: {e}", platform_path.display())))?;
+        let s = catalog::load_yaml_with_includes(platform_path, catalog::CatalogTarget::Platform)?;
         Platform::from_string(engine, clock, &s)
     }
 
@@ -92,6 +88,7 @@ impl Platform {
         clock: &Clock,
         platform_config: &str,
     ) -> Result<Self, SimError> {
+        catalog::reject_string_includes(platform_config)?;
         let cfg: PlatformConfig = yaml_serde::from_str(platform_config)
             .map_err(|e| SimError(format!("yaml_serde::from_str failed: {e}")))?;
         Platform::build(engine, clock, &cfg)
@@ -135,6 +132,22 @@ impl Platform {
 
         let parent = engine.top();
         let entity = Rc::new(Entity::new(parent, "platform"));
+        let atomic_connections = cfg
+            .connections
+            .as_ref()
+            .map(|connections| {
+                connections
+                    .iter()
+                    .map(|c| {
+                        c.connect
+                            .iter()
+                            .map(|id| connection_id::parse_connection_endpoint_id(id))
+                            .collect::<Result<Vec<_>, _>>()
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
         let platform = Platform {
             entity,
             processing_elements,
@@ -147,6 +160,7 @@ impl Platform {
             memories,
             memories_idx_by_id,
             device_names_by_id,
+            atomic_connections,
         };
         connect_ports(engine, clock, &platform, cfg)?;
         Ok(platform)
@@ -186,6 +200,21 @@ impl Platform {
             .collect()
     }
 
+    /// Stable names for per-device native activity snapshots.
+    #[must_use]
+    pub fn memory_names(&self) -> Vec<String> {
+        let mut names = self.memories_idx_by_id.keys().cloned().collect::<Vec<_>>();
+        names.sort();
+        names
+    }
+
+    #[must_use]
+    pub fn cache_names(&self) -> Vec<String> {
+        let mut names = self.caches_idx_by_id.keys().cloned().collect::<Vec<_>>();
+        names.sort();
+        names
+    }
+
     pub fn cache(&self, cache_name: &str) -> Result<&Rc<Cache<MemoryAccess>>, SimError> {
         let idx = self.cache_idx_from_name(cache_name)?;
         Ok(&self.caches[idx])
@@ -208,6 +237,98 @@ impl Platform {
             Some(idx) => Ok(*idx),
             None => sim_error!("No Fabric '{fabric_name}'"),
         }
+    }
+
+    pub fn validate_atomic_issuer(&self, pe_name: &str, device: u64, address: u64) -> SimResult {
+        self.pe(pe_name)?.validate_atomic_memory_binding(
+            &self
+                .atomic_memory_by_device(device)?
+                .atomic_target()
+                .unwrap(),
+            device,
+            address,
+        )?;
+        let memory = self
+            .device_names_by_id
+            .get(&device)
+            .ok_or_else(|| SimError("unknown atomic target device".into()))?;
+        let mut touching = 0usize;
+        let mut direct = false;
+        for endpoints in &self.atomic_connections {
+            if endpoints
+                .iter()
+                .any(|e| matches!(e,connection_id::ConnectionEndpointId::Pe{name} if name==pe_name))
+            {
+                touching += 1;
+                direct=endpoints.len()==2 && endpoints.iter().any(|e|matches!(e,connection_id::ConnectionEndpointId::Mem{name} if name==memory));
+            }
+        }
+        if touching != 1 || !direct {
+            return Err(SimError(
+                "atomic assigned PE requires an actual cache-free direct memory connection".into(),
+            ));
+        }
+        Ok(())
+    }
+    pub fn bind_atomic_task(
+        self: &Rc<Self>,
+        pe_name: &str,
+        id: String,
+        device: u64,
+        address: u64,
+        effect: gwr_models::memory::atomic::Effect,
+    ) -> Result<gwr_models::processing_element::task::AtomicTaskConfig, SimError> {
+        self.validate_atomic_issuer(pe_name, device, address)?;
+        let target = self
+            .atomic_memory_by_device(device)?
+            .atomic_target()
+            .unwrap();
+        let config = gwr_models::processing_element::task::AtomicTaskConfig::new(
+            id, target, device, address, effect,
+        )?
+        .with_physical_issuer(self.pe(pe_name)?);
+        self.pe(pe_name)?.preflight_atomic_task(&config)?;
+        Ok(config)
+    }
+    pub fn bind_atomic_controlled_task(
+        self: &Rc<Self>,
+        pe_name: &str,
+        id: String,
+        device: u64,
+        address: u64,
+        effect: gwr_models::memory::atomic::Effect,
+        controller: Rc<gwr_models::memory::atomic::SplitKController>,
+    ) -> Result<gwr_models::processing_element::task::AtomicTaskConfig, SimError> {
+        self.validate_atomic_issuer(pe_name, device, address)?;
+        let config = gwr_models::processing_element::task::AtomicTaskConfig::new_controlled(
+            id,
+            self.atomic_memory_by_device(device)?
+                .atomic_target()
+                .unwrap(),
+            device,
+            address,
+            effect,
+            controller,
+        )?
+        .with_physical_issuer(self.pe(pe_name)?);
+        self.pe(pe_name)?.preflight_atomic_task(&config)?;
+        Ok(config)
+    }
+    pub fn atomic_memory_by_device(
+        &self,
+        device: u64,
+    ) -> Result<&Rc<Memory<MemoryAccess>>, SimError> {
+        let name = self
+            .device_names_by_id
+            .get(&device)
+            .ok_or_else(|| SimError("unknown atomic target device".into()))?;
+        let memory = self.memory(name)?;
+        if memory.atomic_target().is_none() {
+            return Err(SimError(
+                "target has no explicit shared atomic service".into(),
+            ));
+        }
+        Ok(memory)
     }
 
     pub fn memory(&self, memory_name: &str) -> Result<&Rc<Memory<MemoryAccess>>, SimError> {
@@ -410,6 +531,12 @@ impl Display for Platform {
     }
 }
 
+type ProcessingElements = Vec<Rc<ProcessingElement>>;
+type Caches = Vec<Rc<Cache<MemoryAccess>>>;
+type Fabrics = Vec<Rc<dyn Fabric<MemoryAccess>>>;
+type Memories = Vec<Rc<Memory<MemoryAccess>>>;
+type NameToIdxMap = HashMap<String, usize>;
+
 fn assign_device_ids(cfg: &PlatformConfig) -> Result<DeviceIds, SimError> {
     let mut device_id = 0;
     let mut device_ids = DeviceIds::new();
@@ -456,5 +583,20 @@ fn assign_device_ids(cfg: &PlatformConfig) -> Result<DeviceIds, SimError> {
         }
         device_id += 1;
     }
+    if let Some(connections) = &cfg.connections {
+        for connection in connections {
+            for endpoint in &connection.connect {
+                if let connection_id::ConnectionEndpointId::Pe { name } =
+                    connection_id::parse_connection_endpoint_id(endpoint)?
+                    && name.ends_with(".dma")
+                    && !device_ids.contains_key(&name)
+                {
+                    device_ids.insert(name, DeviceId(device_id));
+                    device_id += 1;
+                }
+            }
+        }
+    }
     Ok(device_ids)
 }
+type DeviceIds = HashMap<String, DeviceId>;

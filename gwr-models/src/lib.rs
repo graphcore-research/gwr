@@ -19,6 +19,7 @@ pub mod processing_element;
 pub mod registers;
 pub mod ring_node;
 pub mod test_helpers;
+pub mod transfer;
 
 pub fn log_stats(entity: &Rc<Entity>, stats: impl Display) {
     for line in stats.to_string().lines() {

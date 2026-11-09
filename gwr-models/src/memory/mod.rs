@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use gwr_components::delay::Delay;
 use gwr_components::{port_rx, take_option};
 use gwr_engine::engine::Engine;
+use gwr_engine::executor::Spawner;
 use gwr_engine::port::{InPort, OutPort, PortStateResult};
 use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
@@ -24,12 +25,14 @@ use crate::log_stats;
 use crate::memory::traits::{AccessMemory, ReadMemory};
 
 pub mod atomic;
-mod service;
-pub use service::payload_by_lane;
 pub mod memory_access;
 pub mod memory_access_gen;
 pub mod memory_map;
+mod service;
 pub mod traits;
+pub use service::{
+    MAX_MEMORY_SERVICE_REQUESTS, MemoryServiceLaneSnapshot, MemoryServiceSnapshot, payload_by_lane,
+};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum CacheHintType {
@@ -43,6 +46,9 @@ pub struct MemoryConfig {
     capacity_bytes: usize,
     bw_bytes_per_tick: usize,
     delay_ticks: usize,
+    arrival_aware_service: Option<usize>,
+    service_lanes: Option<(u64, Vec<u64>)>,
+    atomic_service: Option<(u64, atomic::AtomicServiceConfig)>,
 }
 
 impl MemoryConfig {
@@ -58,13 +64,75 @@ impl MemoryConfig {
             capacity_bytes,
             bw_bytes_per_tick,
             delay_ticks,
+            arrival_aware_service: None,
+            service_lanes: None,
+            atomic_service: None,
         }
     }
 
+    /// Select the analytic payload server with a total live request budget.
+    /// The budget includes queued, active and completed unpublished requests.
+    /// Uses positive integer configured bytes/tick at the actual1ns clock;
+    /// separate fixed latency is pipelined through bounded publication.
+    /// Omission preserves legacy timing. No physical HBM controller is implied.
+    #[must_use]
+    pub fn with_arrival_aware_service(mut self, max_pending_requests: usize) -> Self {
+        self.arrival_aware_service = Some(max_pending_requests);
+        self
+    }
+
+    /// Declare caller-assumed lanes within the existing aggregate byte budget.
+    /// Requires arrival-aware service and actual1ns at registration. Rates are
+    /// supplied explicitly, never inferred by dividing a hardware peak.
+    #[must_use]
+    pub fn with_service_lanes(mut self, interleave_bytes: u64, bytes_per_tick: Vec<u64>) -> Self {
+        self.service_lanes = Some((interleave_bytes, bytes_per_tick));
+        self
+    }
+
+    /// Explicit cache-free atomic target. Rates/lanes/capacity must agree with
+    /// the ordinary declaration; no additional byte budget is introduced.
+    #[must_use]
+    pub fn with_atomic_service(
+        mut self,
+        device: u64,
+        service: atomic::AtomicServiceConfig,
+    ) -> Self {
+        self.atomic_service = Some((device, service));
+        self
+    }
     pub fn validate(&self) -> SimResult {
         self.address_range()?;
+        if let Some((_, service)) = &self.atomic_service {
+            service.validate()?;
+            let lanes = self.service_lanes.as_ref().ok_or_else(|| {
+                SimError("atomic target requires exact explicit ordinary lanes".into())
+            })?;
+            if self.arrival_aware_service != Some(service.capacity)
+                || u64::try_from(self.bw_bytes_per_tick).ok() != Some(service.bytes_per_tick)
+                || u64::try_from(self.delay_ticks).ok() != Some(service.delay_ticks)
+                || lanes.0 != service.lane_interleave_bytes
+                || lanes.1 != service.lane_bytes_per_tick
+            {
+                return Err(SimError(
+                    "atomic target conflicts with ordinary service declaration".into(),
+                ));
+            }
+        }
         if self.bw_bytes_per_tick == 0 {
             return sim_error!("bandwidth must be greater than zero");
+        }
+        if self
+            .arrival_aware_service
+            .is_some_and(|n| n == 0 || n > MAX_MEMORY_SERVICE_REQUESTS)
+        {
+            return sim_error!("memory service request budget must be within1..=4096");
+        }
+        if let Some((interleave, rates)) = &self.service_lanes {
+            if self.arrival_aware_service.is_none() {
+                return sim_error!("memory service lanes require arrival-aware service");
+            }
+            service::validate_lane_config(*interleave, rates, self.bw_bytes_per_tick)?;
         }
         Ok(())
     }
@@ -158,7 +226,10 @@ where
     last_address: u64,
     stats: RefCell<MemoryStats>,
 
-    response_delay: Rc<Delay<T>>,
+    response_delay: Option<Rc<Delay<T>>>,
+    service: Option<Rc<service::Service<T>>>,
+    atomic: Option<Rc<atomic::SharedMemoryAuthority<T>>>,
+    spawner: Spawner,
     response_tx: RefCell<Option<OutPort<T>>>,
     rx: RefCell<Option<InPort<T>>>,
 }
@@ -187,6 +258,11 @@ where
     ) -> Result<Rc<Self>, SimError> {
         let with_entity = |error| SimError(format!("{parent}::{name}: {error}"));
         config.validate().map_err(&with_entity)?;
+        if config.arrival_aware_service.is_some() && clock.freq_mhz() != 1000.0 {
+            return Err(with_entity(SimError(
+                "arrival-aware memory requires an actual1ns clock".into(),
+            )));
+        }
         let last_address = config
             .address_range()
             .map(|range| *range.end())
@@ -195,21 +271,46 @@ where
 
         let rx = InPort::new_with_renames(engine, clock, &entity, "rx", aka);
 
-        let response_delay_aka = build_aka!(aka, &entity, &[("tx", "tx")]);
-        let response_delay = Delay::new_and_register_with_renames(
-            engine,
-            clock,
-            &entity,
-            "delay",
-            Some(&response_delay_aka),
-            config.delay_ticks,
-        );
-
-        // Create a local port to drive into the response delay
-        let mut response_tx = OutPort::new(&entity, "response");
-        response_tx
-            .connect(response_delay.port_rx())
-            .expect("Internal ports should connect without error");
+        let atomic = match &config.atomic_service {
+            Some((device, service)) => Some(atomic::SharedMemoryAuthority::new(
+                engine,
+                clock,
+                &entity,
+                *device,
+                config.base_address,
+                u64::try_from(config.capacity_bytes).map_err(|e| SimError(e.to_string()))?,
+                service.clone(),
+            )?),
+            None => None,
+        };
+        let (response_delay, response_tx, service) = if atomic.is_some() {
+            (None, OutPort::new_with_renames(&entity, "tx", aka), None)
+        } else if let Some(capacity) = config.arrival_aware_service {
+            (
+                None,
+                OutPort::new_with_renames(&entity, "tx", aka),
+                Some(service::Service::new_with_lanes(
+                    capacity,
+                    config.bw_bytes_per_tick,
+                    config.delay_ticks,
+                    config.service_lanes.as_ref(),
+                )?),
+            )
+        } else {
+            let response_delay_aka = build_aka!(aka, &entity, &[("tx", "tx")]);
+            let delay = Delay::new_and_register_with_renames(
+                engine,
+                clock,
+                &entity,
+                "delay",
+                Some(&response_delay_aka),
+                config.delay_ticks,
+            );
+            let mut tx = OutPort::new(&entity, "response");
+            tx.connect(delay.port_rx())
+                .expect("Internal ports should connect without error");
+            (Some(delay), tx, None)
+        };
 
         let rc_self = Rc::new(Self {
             entity,
@@ -218,6 +319,9 @@ where
             last_address,
             stats: RefCell::new(MemoryStats::default()),
             response_delay,
+            service,
+            atomic,
+            spawner: engine.spawner(),
             rx: RefCell::new(Some(rx)),
             response_tx: RefCell::new(Some(response_tx)),
         });
@@ -226,20 +330,83 @@ where
     }
 
     pub fn connect_port_tx(&self, port_state: PortStateResult<T>) -> SimResult {
-        self.response_delay.connect_port_tx(port_state)
+        if let Some(delay) = &self.response_delay {
+            delay.connect_port_tx(port_state)
+        } else {
+            let state = port_state?;
+            let receiver = state.in_port_entity.clone();
+            self.response_tx
+                .borrow_mut()
+                .as_mut()
+                .ok_or_else(|| SimError("memory response port already running".into()))?
+                .connect(Ok(state))?;
+            if let Some(atomic) = &self.atomic {
+                atomic.bind_ordinary_output(receiver);
+            }
+            Ok(())
+        }
+    }
+
+    /// Live bounded ownership of the opt-in pipeline; legacy mode has no
+    /// ledger.
+    #[must_use]
+    pub fn service_snapshot(&self) -> Option<MemoryServiceSnapshot> {
+        self.service.as_ref().map(|service| service.snapshot())
+    }
+
+    /// Ordered cumulative admitted payload per caller lane, absent when lanes
+    /// are omitted. Not a completion or physical occupancy observation.
+    #[must_use]
+    pub fn service_lane_snapshot(&self) -> Option<Vec<MemoryServiceLaneSnapshot>> {
+        self.service
+            .as_ref()
+            .and_then(|service| service.lane_snapshot())
+    }
+
+    pub fn atomic_target(&self) -> Option<Rc<atomic::AtomicTargetSender>> {
+        self.atomic.as_ref().map(|a| a.sender())
+    }
+    pub fn atomic_control(&self) -> Option<atomic::SharedAtomicControl> {
+        self.atomic.as_ref().map(|a| a.control())
     }
 
     pub fn port_rx(&self) -> PortStateResult<T> {
-        port_rx!(self.rx, state)
+        let state = port_rx!(self.rx, state)?;
+        if let Some(atomic) = &self.atomic {
+            atomic.bind_ordinary_input(state.in_port_entity.clone());
+        }
+        Ok(state)
     }
 
     #[must_use]
     pub fn bytes_written(&self) -> usize {
+        if let Some(atomic) = &self.atomic {
+            return usize::try_from(atomic.snapshot().committed_write_bytes)
+                .expect("service validates usize committed counters");
+        }
         self.stats.borrow().bytes_written
+    }
+
+    /// Read-only separate witness; existing committed counters are unchanged.
+    pub fn atomic_snapshot(&self) -> Option<atomic::AtomicSnapshot> {
+        self.atomic.as_ref().map(|a| a.snapshot())
+    }
+    pub fn enable_atomic_witness(&self, limit: usize) -> SimResult {
+        self.atomic
+            .as_ref()
+            .ok_or_else(|| SimError("memory has no explicit atomic service".into()))?
+            .enable_witness(limit)
+    }
+    pub fn atomic_owner_windows(&self) -> Option<Vec<atomic::AtomicOwnerWindow>> {
+        self.atomic.as_ref().and_then(|a| a.owner_windows())
     }
 
     #[must_use]
     pub fn bytes_read(&self) -> usize {
+        if let Some(atomic) = &self.atomic {
+            return usize::try_from(atomic.snapshot().committed_read_bytes)
+                .expect("service validates usize committed counters");
+        }
         self.stats.borrow().bytes_read
     }
 
@@ -254,7 +421,10 @@ where
     }
 
     pub fn dump_stats(&self, time_now_ns: f64) {
-        let stats = self.stats.borrow();
+        let stats = MemoryStats {
+            bytes_read: self.bytes_read(),
+            bytes_written: self.bytes_written(),
+        };
         log_stats(
             &self.entity,
             MemoryStatsDisplay::new(
@@ -275,6 +445,93 @@ where
     async fn run(&self) -> SimResult {
         let mut rx = take_option!(self.rx);
         let mut response_tx = take_option!(self.response_tx);
+
+        if let Some(authority) = &self.atomic {
+            let worker = authority.clone();
+            let clock = self.clock.clone();
+            self.spawner
+                .spawn(async move { worker.run_service(clock).await });
+            let publisher = authority.clone();
+            self.spawner
+                .spawn(async move { publisher.run_ordinary_publisher(response_tx).await });
+            let publisher = authority.clone();
+            self.spawner
+                .spawn(async move { publisher.run_typed_publisher().await });
+            let issuer = authority.clone();
+            self.spawner
+                .spawn(async move { issuer.run_typed_issuer().await });
+            let receiver = authority.clone();
+            self.spawner
+                .spawn(async move { receiver.run_typed_reply_receiver().await });
+            return authority
+                .clone()
+                .run_intake(self.clock.clone(), rx, |access| access.to_response(self))
+                .await;
+        }
+        if let Some(service) = &self.service {
+            let worker = service.clone();
+            let worker_clock = self.clock.clone();
+            self.spawner
+                .spawn(async move { worker.run_service(worker_clock).await });
+            let publisher = service.clone();
+            let publisher_clock = self.clock.clone();
+            self.spawner
+                .spawn(async move { publisher.run_publisher(publisher_clock, response_tx).await });
+            loop {
+                service.wait_capacity().await;
+                let access = rx.start_get()?.await;
+                let bytes = access.access_size_bytes();
+                let size = u64::try_from(bytes).map_err(|e| SimError(e.to_string()))?;
+                let end = checked_last_address(access.dst_addr(), size)
+                    .ok_or_else(|| SimError("invalid memory payload range".into()))?;
+                if access.dst_addr() < self.config.base_address || end > self.last_address {
+                    return sim_error!("{}: out of bounds memory payload", self.entity);
+                }
+                let kind = access.access_type();
+                let address = access.dst_addr();
+                let read_payload = kind == AccessType::ReadRequest;
+                let response = match kind {
+                    AccessType::ReadRequest | AccessType::WriteNonPostedRequest => {
+                        Some(access.to_response(self)?)
+                    }
+                    AccessType::WriteRequest => None,
+                    other => {
+                        return sim_error!(
+                            "{}: unsupported memory service access {other}",
+                            self.entity
+                        );
+                    }
+                };
+                let (read, write) = {
+                    let stats = self.stats.borrow();
+                    let read = if kind == AccessType::ReadRequest {
+                        stats.bytes_read.checked_add(bytes)
+                    } else {
+                        Some(stats.bytes_read)
+                    };
+                    let write = if kind != AccessType::ReadRequest {
+                        stats.bytes_written.checked_add(bytes)
+                    } else {
+                        Some(stats.bytes_written)
+                    };
+                    (
+                        read.ok_or_else(|| SimError("memory read counter overflows".into()))?,
+                        write.ok_or_else(|| SimError("memory write counter overflows".into()))?,
+                    )
+                };
+                service.accept_payload(
+                    self.clock.tick_now().tick(),
+                    bytes,
+                    response,
+                    self.config.base_address,
+                    address,
+                    read_payload,
+                )?;
+                self.stats.borrow_mut().bytes_read = read;
+                self.stats.borrow_mut().bytes_written = write;
+                rx.finish_get();
+            }
+        }
 
         loop {
             let access = rx.get()?.await;

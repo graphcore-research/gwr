@@ -81,12 +81,22 @@ memory_maps:
     devices:
       - mem0
 
+operation_classes:
+  add:
+    operations: [add]
+    arity: 2
+
 processing_elements:
   - name: pe0
     memory_map: pe_memory_map
     config:
       lsu_access_bytes: 32
       sram_bytes: 64KiB
+      compute:
+        engines:
+          vector:
+            capabilities:
+              - { class: add, ops_per_tick: 256 }
 
 caches:
   - name: l1_0
@@ -219,3 +229,193 @@ payload, headers, hits, misses and coalescing. `inflight_fills_snapshot()`
 reports current and peak physical fill occupancy. The cache remains an analytic
 round-robin model without coherence or numerical data evaluation; these settings
 do not establish hardware calibration.
+
+<!-- ANCHOR: compute_engines -->
+
+## Operation classes and compute engines
+
+Capabilities can live in a catalog shared by multiple platform files. A
+catalog contains `operation_classes` and `compute_profiles`; each profile is
+the complete engine configuration for one PE. For example,
+`examples/default_compute.yaml` defines `basic_alu` with 16 adds, 4
+multiplies, and 16 compares per tick on its ALU, plus a separate engine for
+32 matrix MACs per tick. Its `wide_alu` profile has a separate matrix engine
+for 256 MACs per tick:
+
+```yaml
+includes: [default_compute.yaml]
+processing_elements:
+  - name: pe0
+    memory_map: mm
+    config: { compute: basic_alu }
+```
+
+This is a catalog/PE configuration fragment. A runnable platform also needs
+the `mm` memory map, memories, and connections, as in the example above.
+
+`includes` paths are relative to the file that declares them. Catalogs can
+include other catalogs. Re-importing the same file is harmless; duplicate
+definition names, include cycles, missing files, and unknown profile names are
+errors. A platform may also define its own classes and profiles alongside its
+topology, or put an inline `engines` map in a PE's `compute` field. Use
+`Platform::from_file` for includes; `from_string` accepts only self-contained
+YAML. `gen-fabric` writes the default catalog beside its output and selects
+`basic_alu` by default. It accepts
+`--compute-catalog` and `--compute-profile` to select another catalog/profile.
+
+The platform declares named operation classes. A class lists instruction names
+with a shared input arity and FLOP-equivalent weight.
+Instruction names are lowercase in both the class and program calls.
+Each PE then declares its engines and the rate at which each engine executes a
+class. No compute capability is assumed when it is absent from the platform.
+
+```yaml
+operation_classes:
+  arithmetic: { operations: [add, mul], arity: 2 }
+  matrix: { operations: [matrix_mac], arity: 2, flops_per_op: 2 }
+  trig: { operations: [sin, cos, tan], arity: 1 }
+processing_elements:
+  - name: pe0
+    memory_map: mm
+    config:
+      compute:
+        engines:
+          vector:
+            capabilities:
+              - { class: arithmetic, input_dtypes: [[fp16, fp16], [bf16, bf16]], ops_per_tick: 32 }
+              - { class: trig, ops_per_tick: 32 }
+          matrix:
+            capabilities:
+              - { class: matrix, ops_per_tick: 128 }
+```
+
+`input_dtypes` contains exact, ordered combinations of length `arity`.
+Omitting it matches combinations that have no explicit entry for that
+operation. An explicit entry wins over a fallback even when it is on another
+engine. If several engines match the selected declaration, a batch takes the
+first available engine; independent batches can use those engines concurrently.
+Output datatypes come from the timetable's tensor and temporary
+declarations; they do not affect engine selection. The simulator currently
+does not validate whether an operation's output datatype is appropriate for
+its input datatypes. `flops_per_op` defaults to one; matrix MACs commonly use two.
+
+A program can call any declared instruction using
+`{ sin: [{ read: { tensor: A, indices: [i] } }] }`.
+The program derives input datatypes from its tensors. The simulator tracks
+typed work and movement; it does not calculate output values. Named operation
+counts and weighted FLOP equivalents appear in statistics.
+
+An engine runs one batch at a time. Operations assigned to one engine share
+its throughput, while independent engines overlap. For an engine batch, the
+service time is `ceil(sum(count / ops_per_tick))`. A `matrix_mac` expression
+requires a matching capability, including its explicit execution mode when
+supplied. Fused temporaries stay in SRAM. A tensor edge between compute nodes
+requires the full producer node to complete before consumers proceed.
+
+### Execution modes and quantized storage
+
+Typed capabilities may additionally select an explicit execution mode. The
+following fragment describes BF16 matrix operands with a tensor instruction
+and an FP32 accumulator:
+
+```yaml
+- class: matrix
+  input_dtypes: [[bf16, bf16]]
+  ops_per_tick: 128
+  execution: { instruction: tensor, accumulator: fp32 }
+```
+
+Match that mode in the program's `matrix_mac` expression with
+`execution: { instruction: tensor, accumulator: fp32 }`. Conversion to an
+output's narrower datatype is accounted for separately and needs the
+corresponding `convert` capability. Storage dtype alone does not establish
+an executable quantized matrix mode: a workload must declare scale metadata
+and unpack/dequantize work where required by its chosen lowering. Program
+`metadata_inputs` are full-view boundary inputs loaded for each output tile
+even when arithmetic does not index them.
+
+### Block execution resources
+
+A PE that accepts timetable `pipeline` requests explicitly declares:
+
+```yaml
+block_execution:
+  max_compute_tiles: 1
+  max_load_chunks: 1
+  max_store_tiles: 1
+  transfer_port: lsu
+  accumulator_storage: shared_sram
+  # Optional shared combined-direction local staging bandwidth:
+  # local_memory_service: {bytes_per_tick: 256}
+```
+
+These are PE-wide admission limits shared by all pipeline nodes. The initial
+implementation requires all three limits to equal one and supports the LSU
+route and shared SRAM backing shown above. Timetable buffer counts are
+independent of these limits. Generic programs use a separate working arena
+for operand copies, temporaries, reduction state and current results, alongside
+all requested input/output slots. The native matrix accumulator occupies the SRAM window once
+and also requires retained capacity on its selected matrix engine; retaining
+capacity does not keep that engine busy between compute steps.
+
+Without `local_memory_service`, local storage capacity and lifetimes are
+modelled but local staging bandwidth is unmodelled. When selected, one byte
+service is shared across input staging writes, operand reads, accumulator
+readout, final output writes and output drains. Generic paths also charge the
+slot-to-working-arena and working-arena-to-output copies they actually perform. This does not add external
+traffic or charge per-MAC accumulator accesses. Its rate must be positive
+and qualified by the scenario. It cannot coexist with source-specific
+`local_payload_service` until their resource sharing is defined.
+
+## Modelling a machine
+
+Begin with physical ownership and address ranges: assign memories to PEs,
+declare the addressable devices in each memory map, and connect local and
+remote paths explicitly. A memory map makes storage addressable; the
+connections determine which links and service resources requests traverse.
+Then declare compute classes, operand types, execution modes, engine rates,
+LSU request sizes, SRAM admission capacity, and memory/link rates and delays.
+State the clock period used to convert rates per tick to rates per second.
+
+For specific topologies, workload experiments, provenance, and calibration
+workflows, see the [`gwr-use-cases` package][gwr-use-cases]. It owns
+the analytic GB200 references and model generators built on this library.
+
+<!-- ANCHOR_END: compute_engines -->
+
+See [the matrix/vector example](examples/compute_engines.yaml).
+
+[gwr-use-cases]: ../gwr-use-cases/README.md
+
+### Address-to-memory striping
+
+Memory maps default to contiguous physical placement. An optional policy spreads
+successive stripes across an explicitly ordered group of physical memories:
+
+```yaml
+memory_maps:
+  - name: local
+    devices: [hbm0, hbm1, ddr0]
+    address_mapping:
+      mode: striped # change only this to contiguous for a matched baseline
+      stripe_bytes: 64
+      groups:
+        - name: hbm
+          devices: [hbm0, hbm1]
+```
+
+Groups must contain at least two distinct equal-capacity memories whose physical
+windows form one adjacent span. Bases and capacities must align to the power-of-two
+stripe size, which must also be a multiple of every applicable LSU fetch and cache
+line size. Group settings remain present and validated in `contiguous` mode.
+Ungrouped memories keep contiguous placement. HBM and DDR can therefore use
+different policies without changing tensor addresses or capacity.
+
+For a logical offset `a` within a group of `N` memories and stripe size `S`, the
+destination is `(a / S) % N` and its local offset is `(a / (S*N))*S + a%S`.
+Requests carry the translated absolute physical address through the existing
+cache and fabric models. Cache indexing consequently uses physical addresses;
+changing placement may also change cache set conflicts. Clients sharing data
+must select equivalent mappings. Direct atomics in actively striped windows are
+currently rejected during preflight; contiguous and ungrouped atomics retain
+their existing behavior. Striping changes placement, not configured bandwidth.

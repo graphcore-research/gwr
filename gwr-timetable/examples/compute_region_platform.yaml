@@ -1,0 +1,27 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+memory_maps:
+  - name: mm
+    devices: [mem]
+operation_classes:
+  add: { operations: [add], arity: 2 }
+  mul: { operations: [mul], arity: 2 }
+  compare: { operations: [compare, maximum], arity: 2 }
+processing_elements:
+  - name: pe0
+    memory_map: mm
+    config:
+      sram_bytes: 256
+      compute:
+        engines:
+          vector_add:
+            capabilities: [{ class: add, input_dtypes: [[fp32, fp32]], ops_per_tick: 1 }]
+          vector_mul:
+            capabilities: [{ class: mul, input_dtypes: [[fp32, fp32]], ops_per_tick: 1 }]
+memories:
+  - name: mem
+    kind: hbm
+    base_address: 0
+    config: { capacity_bytes: 1MiB }
+connections:
+  - connect: [pe.pe0, mem.mem]

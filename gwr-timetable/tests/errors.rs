@@ -4,8 +4,8 @@
 mod access_conflicts;
 #[path = "validation/common.rs"]
 mod common;
-#[path = "validation/operators.rs"]
-mod operators;
+#[path = "validation/programs.rs"]
+mod programs;
 #[path = "validation/scheduling.rs"]
 mod scheduling;
 #[path = "validation/structure.rs"]

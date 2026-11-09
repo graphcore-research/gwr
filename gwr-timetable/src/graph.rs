@@ -5,9 +5,12 @@ use std::fmt;
 
 use gwr_engine::sim_error;
 use gwr_engine::types::{SimError, SimResult};
-use gwr_models::processing_element::operators::{Tensor, TensorView};
-use gwr_models::processing_element::task::ComputeOp;
+use gwr_models::processing_element::program::syntax::{ProgramSpec, TileSpec};
+use gwr_models::processing_element::program::tile::plan_tiles;
+use gwr_models::processing_element::program::validate::{RegionBindings, validate_program};
+use gwr_models::processing_element::tensors::{Tensor, TensorView};
 
+use crate::program_compose::ProgramCatalog;
 use crate::timetable_file::{
     EdgeKind, NodeSection, TensorViewSection, TimetableFile, parse_edge_end,
 };
@@ -18,6 +21,7 @@ mod accesses;
 /// validated.
 #[derive(Debug)]
 pub struct TimetableGraph {
+    atomic_effects: Option<crate::atomic::AdmittedEffects>,
     nodes: Vec<TimetableNode>,
     edges: Vec<TimetableEdge>,
     topological_order: Vec<usize>,
@@ -27,12 +31,14 @@ pub struct TimetableGraph {
 impl TimetableGraph {
     pub(crate) fn build(file: TimetableFile) -> Result<Self, SimError> {
         use ComputeTensorDirection::{Input, Output};
+        let atomic_spec = file.atomic_effects.clone();
 
         let node_indices = node_indices(&file.nodes)?;
+        let mut programs = ProgramCatalog::new(&file.programs);
         let mut nodes = Vec::with_capacity(file.nodes.len());
         let mut view_sections = Vec::with_capacity(file.nodes.len());
         for section in file.nodes {
-            let (node, views) = TimetableNode::new(section)?;
+            let (node, views) = TimetableNode::new(section, &mut programs)?;
             nodes.push(node);
             view_sections.push(views);
         }
@@ -54,7 +60,11 @@ impl TimetableGraph {
                 SimError(format!("Edge contains invalid to Node ID '{}'", section.to))
             })?;
 
-            if section.kind == EdgeKind::Control {
+            if section.kind != EdgeKind::Data {
+                if section.kind == EdgeKind::Dependency {
+                    nodes[from_node].successors.push(to_node);
+                    nodes[to_node].predecessors.push(from_node);
+                }
                 edges.push(TimetableEdge {
                     kind: section.kind,
                     from: EdgeEndpoint::new(from_node, requested_from_index),
@@ -122,18 +132,35 @@ impl TimetableGraph {
         for (position, node) in topological_order.iter().enumerate() {
             topological_positions[*node] = position;
         }
-        let graph = Self {
+        let mut graph = Self {
+            atomic_effects: None,
             nodes,
             edges,
             topological_order,
             topological_positions,
         };
-        graph.validate_operators()?;
         accesses::validate(&graph)?;
+        graph.validate_programs()?;
+        if let Some(spec) = atomic_spec {
+            graph.atomic_effects = Some(
+                crate::atomic::admit(
+                    &graph,
+                    &spec.memories,
+                    &spec.bindings,
+                    &spec.claims,
+                    &spec.groups,
+                )?
+                .with_streams(&graph, &spec.streams)?,
+            );
+        }
         Ok(graph)
     }
 
     #[must_use]
+    pub fn atomic_effects(&self) -> Option<&crate::atomic::AdmittedEffects> {
+        self.atomic_effects.as_ref()
+    }
+
     pub fn nodes(&self) -> &[TimetableNode] {
         &self.nodes
     }
@@ -152,10 +179,74 @@ impl TimetableGraph {
         self.topological_positions[node]
     }
 
+    fn validate_programs(&self) -> SimResult {
+        for (node_index, node) in self.nodes.iter().enumerate() {
+            if node.is_transfer() {
+                let views = self.compute_views(node_index).unwrap();
+                let source = views
+                    .inputs()
+                    .first()
+                    .and_then(Option::as_ref)
+                    .ok_or_else(|| SimError(format!("Transfer '{}' has no source", node.id())))?;
+                let destination = views
+                    .outputs()
+                    .first()
+                    .and_then(Option::as_ref)
+                    .ok_or_else(|| {
+                        SimError(format!("Transfer '{}' has no destination", node.id()))
+                    })?;
+                gwr_models::transfer::TransferTaskConfig {
+                    id: node.id().into(),
+                    source: source.clone(),
+                    destination: destination.clone(),
+                    buffer_bytes: node.transfer_buffer_bytes().unwrap(),
+                }
+                .validate()?;
+                continue;
+            }
+            if !node.is_compute() {
+                continue;
+            }
+            let Some(views) = self.compute_views(node_index) else {
+                return sim_error!("Node '{}' has no compute views", node.id());
+            };
+            if let Some(program) = node.program() {
+                let bindings = RegionBindings {
+                    inputs: views
+                        .inputs()
+                        .iter()
+                        .cloned()
+                        .collect::<Option<Vec<_>>>()
+                        .ok_or_else(|| {
+                            SimError(format!(
+                                "Compute node '{}' has an unbound program input",
+                                node.id()
+                            ))
+                        })?,
+                    outputs: views
+                        .outputs()
+                        .iter()
+                        .cloned()
+                        .collect::<Option<Vec<_>>>()
+                        .ok_or_else(|| {
+                            SimError(format!(
+                                "Compute node '{}' has an unbound program output",
+                                node.id()
+                            ))
+                        })?,
+                };
+                let region = validate_program(program, &bindings)
+                    .map_err(|error| SimError(format!("Compute node '{}': {error}", node.id())))?;
+                plan_tiles(&region, node.tiling())
+                    .map_err(|error| SimError(format!("Compute node '{}': {error}", node.id())))?;
+            }
+        }
+        Ok(())
+    }
     #[must_use]
     pub fn compute_views(&self, node_index: usize) -> Option<ComputeTensorViews> {
         let node = self.nodes.get(node_index)?;
-        node.operation()?;
+        node.is_task().then_some(())?;
         Some(ComputeTensorViews {
             inputs: node
                 .input_edges
@@ -174,138 +265,6 @@ impl TimetableGraph {
                 })
                 .collect(),
         })
-    }
-
-    fn validate_operators(&self) -> SimResult {
-        for (node_index, node) in self.nodes.iter().enumerate() {
-            let Some(operation) = node.operation() else {
-                continue;
-            };
-            let Some(views) = self.compute_views(node_index) else {
-                return sim_error!("Node '{}' has no compute views", node.id());
-            };
-            operation
-                .validate(views.inputs(), views.outputs())
-                .map_err(|error| SimError(format!("Compute node '{}': {error}", node.id())))?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-pub struct TimetableNode {
-    id: String,
-    kind: TimetableNodeKind,
-    input_edges: Vec<Option<usize>>,
-    output_edges: Vec<Option<usize>>,
-    predecessors: Vec<usize>,
-    successors: Vec<usize>,
-}
-
-#[derive(Debug)]
-enum TimetableNodeKind {
-    Compute {
-        operation: ComputeOp,
-        pe: Option<String>,
-    },
-    Tensor(Tensor),
-}
-
-struct ComputeViewSections {
-    inputs: Vec<Option<TensorViewSection>>,
-    outputs: Vec<Option<TensorViewSection>>,
-}
-
-impl TimetableNode {
-    fn new(section: NodeSection) -> Result<(Self, Option<ComputeViewSections>), SimError> {
-        let (id, kind, views, num_inputs, num_outputs) = match section {
-            NodeSection::Compute {
-                id,
-                op,
-                pe,
-                input_views,
-                output_views,
-            } => {
-                let num_inputs = input_views.len();
-                let num_outputs = output_views.len();
-                (
-                    id,
-                    TimetableNodeKind::Compute { operation: op, pe },
-                    Some(ComputeViewSections {
-                        inputs: input_views,
-                        outputs: output_views,
-                    }),
-                    num_inputs,
-                    num_outputs,
-                )
-            }
-            NodeSection::Tensor { id, config } => {
-                let tensor = Tensor::new(&config.shape, &config.dtype, config.addr)
-                    .map_err(|error| SimError(format!("Tensor '{id}': {error}")))?
-                    .with_id(&id);
-                (id, TimetableNodeKind::Tensor(tensor), None, 0, 0)
-            }
-        };
-        Ok((
-            Self {
-                id,
-                kind,
-                input_edges: vec![None; num_inputs],
-                output_edges: vec![None; num_outputs],
-                predecessors: Vec::new(),
-                successors: Vec::new(),
-            },
-            views,
-        ))
-    }
-
-    #[must_use]
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-
-    #[must_use]
-    pub fn pe(&self) -> Option<&str> {
-        match &self.kind {
-            TimetableNodeKind::Compute { pe, .. } => pe.as_deref(),
-            TimetableNodeKind::Tensor(_) => None,
-        }
-    }
-
-    #[must_use]
-    pub fn operation(&self) -> Option<&ComputeOp> {
-        match &self.kind {
-            TimetableNodeKind::Compute { operation, .. } => Some(operation),
-            TimetableNodeKind::Tensor(_) => None,
-        }
-    }
-
-    #[must_use]
-    pub fn tensor(&self) -> Option<&Tensor> {
-        match &self.kind {
-            TimetableNodeKind::Compute { .. } => None,
-            TimetableNodeKind::Tensor(tensor) => Some(tensor),
-        }
-    }
-
-    #[must_use]
-    pub fn input_edges(&self) -> &[Option<usize>] {
-        &self.input_edges
-    }
-
-    #[must_use]
-    pub fn output_edges(&self) -> &[Option<usize>] {
-        &self.output_edges
-    }
-
-    #[must_use]
-    pub fn predecessors(&self) -> &[usize] {
-        &self.predecessors
-    }
-
-    #[must_use]
-    pub fn successors(&self) -> &[usize] {
-        &self.successors
     }
 }
 
@@ -359,12 +318,6 @@ impl EdgeEndpoint {
     pub fn edge_index(&self) -> Option<usize> {
         self.edge_index
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ComputeTensorDirection {
-    Input,
-    Output,
 }
 
 #[derive(Debug)]
@@ -440,10 +393,13 @@ fn node_indices(nodes: &[NodeSection]) -> Result<HashMap<String, usize>, SimErro
     Ok(indices)
 }
 
-#[derive(Clone, Copy)]
-enum EdgeDirection {
-    Input,
-    Output,
+fn resolve_edge_index(
+    node: &TimetableNode,
+    direction: EdgeDirection,
+    requested_index: Option<usize>,
+    used: &mut EdgeIndexUsage,
+) -> Result<usize, SimError> {
+    used.claim(node, direction, requested_index)
 }
 
 #[derive(Clone, Default)]
@@ -460,8 +416,8 @@ impl EdgeIndexUsage {
         requested_index: Option<usize>,
     ) -> Result<usize, SimError> {
         let limit = match direction {
-            EdgeDirection::Input => node.operation().map(|_| node.input_edges.len()),
-            EdgeDirection::Output => node.operation().map(|_| node.output_edges.len()),
+            EdgeDirection::Input => node.is_task().then_some(node.input_edges.len()),
+            EdgeDirection::Output => node.is_task().then_some(node.output_edges.len()),
         };
         let tensor_index = requested_index.unwrap_or(self.next_free_index);
         if let Some(limit) = limit
@@ -496,6 +452,12 @@ impl EdgeIndexUsage {
     }
 }
 
+#[derive(Clone, Copy)]
+enum EdgeDirection {
+    Input,
+    Output,
+}
+
 impl fmt::Display for EdgeDirection {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -503,15 +465,6 @@ impl fmt::Display for EdgeDirection {
             Self::Output => formatter.write_str("output"),
         }
     }
-}
-
-fn resolve_edge_index(
-    node: &TimetableNode,
-    direction: EdgeDirection,
-    requested_index: Option<usize>,
-    used: &mut EdgeIndexUsage,
-) -> Result<usize, SimError> {
-    used.claim(node, direction, requested_index)
 }
 
 fn validate_disconnected_views(
@@ -626,6 +579,218 @@ fn make_view(
             nodes[compute_node].id()
         ))
     })
+}
+
+#[derive(Debug)]
+pub struct TimetableNode {
+    id: String,
+    kind: TimetableNodeKind,
+    input_edges: Vec<Option<usize>>,
+    output_edges: Vec<Option<usize>>,
+    predecessors: Vec<usize>,
+    successors: Vec<usize>,
+}
+
+impl TimetableNode {
+    fn new(
+        section: NodeSection,
+        programs: &mut ProgramCatalog<'_>,
+    ) -> Result<(Self, Option<ComputeViewSections>), SimError> {
+        let (id, kind, views, num_inputs, num_outputs) = match section {
+            NodeSection::Compute {
+                id,
+                program,
+                tiling,
+                pipeline,
+                pe,
+                input_views,
+                output_views,
+            } => {
+                if let Some(request) = &pipeline {
+                    request.validate()?;
+                }
+                let program = programs.resolve(program, &id)?;
+                let input_views = input_views.unwrap_or_else(|| vec![None; program.inputs.len()]);
+                let output_views =
+                    output_views.unwrap_or_else(|| vec![None; program.outputs.len()]);
+                let num_inputs = input_views.len();
+                let num_outputs = output_views.len();
+                (
+                    id,
+                    TimetableNodeKind::Compute {
+                        program,
+                        tiling,
+                        pipeline,
+                        pe,
+                    },
+                    Some(ComputeViewSections {
+                        inputs: input_views,
+                        outputs: output_views,
+                    }),
+                    num_inputs,
+                    num_outputs,
+                )
+            }
+            NodeSection::Transfer {
+                id,
+                pe,
+                buffer_bytes,
+                input_views,
+                output_views,
+            } => {
+                let inputs = input_views.unwrap_or_else(|| vec![None]);
+                let outputs = output_views.unwrap_or_else(|| vec![None]);
+                if inputs.len() != 1 || outputs.len() != 1 {
+                    return sim_error!(
+                        "Transfer '{id}' requires exactly one input and output view"
+                    );
+                }
+                (
+                    id,
+                    TimetableNodeKind::Transfer { pe, buffer_bytes },
+                    Some(ComputeViewSections { inputs, outputs }),
+                    1,
+                    1,
+                )
+            }
+            NodeSection::Tensor { id, config } => {
+                let tensor = Tensor::new(&config.shape, &config.dtype, config.addr)
+                    .map_err(|error| SimError(format!("Tensor '{id}': {error}")))?
+                    .with_id(&id);
+                (id, TimetableNodeKind::Tensor(tensor), None, 0, 0)
+            }
+        };
+        Ok((
+            Self {
+                id,
+                kind,
+                input_edges: vec![None; num_inputs],
+                output_edges: vec![None; num_outputs],
+                predecessors: Vec::new(),
+                successors: Vec::new(),
+            },
+            views,
+        ))
+    }
+
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn pe(&self) -> Option<&str> {
+        match &self.kind {
+            TimetableNodeKind::Compute { pe, .. } | TimetableNodeKind::Transfer { pe, .. } => {
+                pe.as_deref()
+            }
+            TimetableNodeKind::Tensor(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub fn program(&self) -> Option<&ProgramSpec> {
+        match &self.kind {
+            TimetableNodeKind::Compute { program, .. } => Some(program),
+            TimetableNodeKind::Tensor(_) | TimetableNodeKind::Transfer { .. } => None,
+        }
+    }
+
+    #[must_use]
+    /// Return the explicit bounded block schedule, if selected.
+    pub fn pipeline(
+        &self,
+    ) -> Option<&gwr_models::processing_element::program::pipeline::BlockPipelineSpec> {
+        match &self.kind {
+            TimetableNodeKind::Compute { pipeline, .. } => pipeline.as_ref(),
+            _ => None,
+        }
+    }
+
+    pub fn tiling(&self) -> Option<&TileSpec> {
+        match &self.kind {
+            TimetableNodeKind::Compute { tiling, .. } => tiling.as_ref(),
+            TimetableNodeKind::Tensor(_) | TimetableNodeKind::Transfer { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub fn is_compute(&self) -> bool {
+        matches!(self.kind, TimetableNodeKind::Compute { .. })
+    }
+
+    /// Whether this node executes on a processing element.
+    #[must_use]
+    pub fn is_task(&self) -> bool {
+        self.tensor().is_none()
+    }
+
+    #[must_use]
+    pub fn is_transfer(&self) -> bool {
+        matches!(self.kind, TimetableNodeKind::Transfer { .. })
+    }
+
+    #[must_use]
+    pub fn transfer_buffer_bytes(&self) -> Option<usize> {
+        match self.kind {
+            TimetableNodeKind::Transfer { buffer_bytes, .. } => Some(buffer_bytes),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn tensor(&self) -> Option<&Tensor> {
+        match &self.kind {
+            TimetableNodeKind::Compute { .. } | TimetableNodeKind::Transfer { .. } => None,
+            TimetableNodeKind::Tensor(tensor) => Some(tensor),
+        }
+    }
+
+    #[must_use]
+    pub fn input_edges(&self) -> &[Option<usize>] {
+        &self.input_edges
+    }
+
+    #[must_use]
+    pub fn output_edges(&self) -> &[Option<usize>] {
+        &self.output_edges
+    }
+
+    #[must_use]
+    pub fn predecessors(&self) -> &[usize] {
+        &self.predecessors
+    }
+
+    #[must_use]
+    pub fn successors(&self) -> &[usize] {
+        &self.successors
+    }
+}
+
+#[derive(Debug)]
+enum TimetableNodeKind {
+    Compute {
+        program: ProgramSpec,
+        tiling: Option<TileSpec>,
+        pipeline: Option<gwr_models::processing_element::program::pipeline::BlockPipelineSpec>,
+        pe: Option<String>,
+    },
+    Transfer {
+        pe: Option<String>,
+        buffer_bytes: usize,
+    },
+    Tensor(Tensor),
+}
+
+struct ComputeViewSections {
+    inputs: Vec<Option<TensorViewSection>>,
+    outputs: Vec<Option<TensorViewSection>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ComputeTensorDirection {
+    Input,
+    Output,
 }
 
 fn view_from_section(

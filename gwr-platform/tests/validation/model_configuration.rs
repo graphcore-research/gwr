@@ -1,6 +1,11 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use super::common::*;
+use gwr_engine::test_helpers::start_test;
+use gwr_platform::Platform;
+
+use super::common::{
+    basic_compute, cache, fabric, memory, memory_map, platform, processing_element,
+};
 
 #[test]
 fn unknown_top_level_field_is_rejected() {
@@ -58,6 +63,13 @@ memory_maps:
 defaults:
   pe_config: &default_pe_config
     lsu_access_bytes: 32
+    compute:
+      engines:
+        alu:
+          capabilities: [{ class: add, ops_per_tick: 16 }]
+
+operation_classes:
+  add: { operations: [add], arity: 2 }
 
 processing_elements:
   - name: pe0
@@ -112,35 +124,47 @@ fn rejects_invalid_processing_element_configuration() {
 
 #[test]
 fn rejects_invalid_processing_element_throughput() {
-    for (name, value, expected) in [
-        ("adds", 0.0, "add throughput"),
-        ("muls", -1.0, "multiply throughput"),
-        ("compares", f64::NAN, "comparison throughput"),
-        ("adds", f64::INFINITY, "add throughput"),
+    for (name, value) in [
+        ("adds", 0.0),
+        ("muls", -1.0),
+        ("compares", f64::NAN),
+        ("adds", f64::INFINITY),
     ] {
         let mut pe = processing_element("pe0", "mm0");
-        match name {
-            "adds" => pe.config.adds_per_tick = Some(value),
-            "muls" => pe.config.muls_per_tick = Some(value),
-            "compares" => pe.config.compares_per_tick = Some(value),
+        let mut compute = basic_compute();
+        let capability = match name {
+            "adds" => 0,
+            "muls" => 1,
+            "compares" => 2,
             _ => unreachable!(),
-        }
+        };
+        compute.engines.get_mut("alu").unwrap().capabilities[capability].ops_per_tick = value;
+        pe.config.compute = Some(gwr_platform::types::ComputeSelection::Inline(compute));
         let mut config = platform();
         config.memory_maps = vec![memory_map("mm0", &[])];
         config.processing_elements = Some(vec![pe]);
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("Processing element 'pe0'"));
-        assert!(error.contains(expected));
+        assert!(error.contains("compute throughput"));
     }
 }
 
 #[test]
 fn accepts_positive_fractional_processing_element_throughput() {
     let mut pe = processing_element("pe0", "mm0");
-    pe.config.adds_per_tick = Some(0.25);
-    pe.config.muls_per_tick = Some(0.5);
-    pe.config.compares_per_tick = Some(0.75);
+    let mut compute = basic_compute();
+    for (capability, rate) in compute
+        .engines
+        .get_mut("alu")
+        .unwrap()
+        .capabilities
+        .iter_mut()
+        .zip([0.25, 0.5, 0.75])
+    {
+        capability.ops_per_tick = rate;
+    }
+    pe.config.compute = Some(gwr_platform::types::ComputeSelection::Inline(compute));
     let mut config = platform();
     config.memory_maps = vec![memory_map("mm0", &[])];
     config.processing_elements = Some(vec![pe]);
@@ -159,7 +183,14 @@ fn rejects_invalid_cache_configuration() {
     let mut no_ways = cache("cache0");
     no_ways.config.num_ways = Some(0);
 
+    let mut no_parents = cache("cache0");
+    no_parents.config.max_inflight_parents = Some(0);
+    let mut no_fills = cache("cache0");
+    no_fills.config.max_inflight_fills = Some(0);
+
     for (cache, expected) in [
+        (no_parents, "admission bounds"),
+        (no_fills, "admission bounds"),
         (no_line_bytes, "line size"),
         (no_bandwidth, "bandwidth"),
         (no_sets, "set count"),

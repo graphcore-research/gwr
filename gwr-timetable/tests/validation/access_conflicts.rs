@@ -1,13 +1,26 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use super::common::*;
+use std::collections::BTreeMap;
+
+use gwr_models::processing_element::program::syntax::{
+    AssignmentSpec, BoundsMode, ExprSpec, IndexSpec, ProgramSpec,
+};
+use gwr_models::processing_element::tensors::dtype::DataType;
+use gwr_timetable::timetable_file::NodeSection;
+
+use super::common::{compute_with_program, data_edge, tensor, timetable, view};
 
 #[test]
 fn rejects_overlapping_reads_and_writes() {
     let file = timetable(
         vec![
             tensor("input", 0x1000, DataType::Fp32, &[4]),
-            compute("compute", vec![None], vec![None]),
+            compute_with_program(
+                "compute",
+                read_program(1, &[(0, &[4])]),
+                vec![None],
+                vec![None],
+            ),
             tensor("output", 0x1008, DataType::Fp32, &[4]),
         ],
         vec![
@@ -26,7 +39,12 @@ fn accepts_views_in_adjacent_bytes() {
     let file = timetable(
         vec![
             tensor("input", 0x1000, DataType::Int4, &[4]),
-            compute("compute", vec![view(&[0], &[1])], vec![view(&[2], &[1])]),
+            compute_with_program(
+                "compute",
+                read_program(1, &[(0, &[1])]),
+                vec![view(&[0], &[1])],
+                vec![view(&[2], &[1])],
+            ),
             tensor("output", 0x1000, DataType::Int4, &[4]),
         ],
         vec![
@@ -43,8 +61,9 @@ fn accepts_disjoint_strided_views() {
     let file = timetable(
         vec![
             tensor("input", 0x1000, DataType::Int8, &[2, 4]),
-            compute(
+            compute_with_program(
                 "compute",
+                read_program(1, &[(0, &[2, 2])]),
                 vec![view(&[0, 0], &[2, 2])],
                 vec![view(&[0, 2], &[2, 2])],
             ),
@@ -64,8 +83,9 @@ fn rejects_overlapping_strided_views() {
     let file = timetable(
         vec![
             tensor("input", 0x1000, DataType::Int8, &[2, 4]),
-            compute(
+            compute_with_program(
                 "compute",
+                read_program(1, &[(0, &[2, 2])]),
                 vec![view(&[0, 0], &[2, 2])],
                 vec![view(&[0, 1], &[2, 2])],
             ),
@@ -86,8 +106,9 @@ fn finds_the_first_overlap_in_a_large_strided_view() {
     let file = timetable(
         vec![
             tensor("input", 0x1000, DataType::Int8, &[100_000_000, 2]),
-            compute(
+            compute_with_program(
                 "compute",
+                read_program(1, &[(0, &[100_000_000, 1])]),
                 vec![view(&[0, 0], &[100_000_000, 1])],
                 vec![view(&[0, 0], &[100_000_000, 1])],
             ),
@@ -108,7 +129,12 @@ fn rejects_views_sharing_a_packed_byte() {
     let file = timetable(
         vec![
             tensor("input", 0x1000, DataType::Int4, &[2]),
-            compute("compute", vec![view(&[1], &[1])], vec![view(&[0], &[1])]),
+            compute_with_program(
+                "compute",
+                read_program(1, &[(0, &[1])]),
+                vec![view(&[1], &[1])],
+                vec![view(&[0], &[1])],
+            ),
             tensor("output", 0x1000, DataType::Int4, &[2]),
         ],
         vec![
@@ -126,12 +152,19 @@ fn rejects_packed_views_with_multiple_odd_strides() {
     let file = timetable(
         vec![
             tensor("input", 0x1000, DataType::Int4, &[2, 3, 3]),
-            compute("compute", vec![view(&[0, 0, 0], &[2, 2, 1])], vec![None]),
+            compute_with_program(
+                "compute",
+                read_program(2, &[(1, &[1])]),
+                vec![view(&[0, 0, 0], &[2, 2, 1]), None],
+                vec![None],
+            ),
             tensor("output", 0x1001, DataType::Int8, &[1]),
+            source("source", DataType::Int8, &[1]),
         ],
         vec![
             data_edge("input", "compute"),
             data_edge("compute", "output"),
+            data_edge("source", "compute.1"),
         ],
     );
 
@@ -145,11 +178,20 @@ fn rejects_packed_views_with_multiple_odd_strides() {
 fn rejects_overlapping_outputs_from_one_compute_node() {
     let file = timetable(
         vec![
-            compute("compute", vec![], vec![None, None]),
+            source("source0", DataType::Fp32, &[2]),
+            source("source1", DataType::Fp32, &[2]),
+            compute_with_program(
+                "compute",
+                read_program(2, &[(0, &[2]), (1, &[2])]),
+                vec![None, None],
+                vec![None, None],
+            ),
             tensor("output0", 0x1000, DataType::Fp32, &[2]),
             tensor("output1", 0x1004, DataType::Fp32, &[2]),
         ],
         vec![
+            data_edge("source0", "compute.0"),
+            data_edge("source1", "compute.1"),
             data_edge("compute.0", "output0"),
             data_edge("compute.1", "output1"),
         ],
@@ -164,11 +206,20 @@ fn rejects_overlapping_outputs_from_one_compute_node() {
 fn accepts_adjacent_outputs_from_one_compute_node() {
     let file = timetable(
         vec![
-            compute("compute", vec![], vec![None, None]),
+            source("source0", DataType::Fp32, &[1]),
+            source("source1", DataType::Fp32, &[1]),
+            compute_with_program(
+                "compute",
+                read_program(2, &[(0, &[1]), (1, &[1])]),
+                vec![None, None],
+                vec![None, None],
+            ),
             tensor("output0", 0x1000, DataType::Fp32, &[1]),
             tensor("output1", 0x1004, DataType::Fp32, &[1]),
         ],
         vec![
+            data_edge("source0", "compute.0"),
+            data_edge("source1", "compute.1"),
             data_edge("compute.0", "output0"),
             data_edge("compute.1", "output1"),
         ],
@@ -181,11 +232,25 @@ fn accepts_adjacent_outputs_from_one_compute_node() {
 fn rejects_unordered_writers_to_one_tensor() {
     let file = timetable(
         vec![
-            compute("producer0", vec![], vec![None]),
-            compute("producer1", vec![], vec![None]),
+            source("source0", DataType::Int8, &[4]),
+            source("source1", DataType::Int8, &[4]),
+            compute_with_program(
+                "producer0",
+                read_program(1, &[(0, &[4])]),
+                vec![None],
+                vec![None],
+            ),
+            compute_with_program(
+                "producer1",
+                read_program(1, &[(0, &[4])]),
+                vec![None],
+                vec![None],
+            ),
             tensor("result", 0x1000, DataType::Int8, &[4]),
         ],
         vec![
+            data_edge("source0", "producer0"),
+            data_edge("source1", "producer1"),
             data_edge("producer0", "result.0"),
             data_edge("producer1", "result.1"),
         ],
@@ -200,11 +265,25 @@ fn rejects_unordered_writers_to_one_tensor() {
 fn accepts_disjoint_unordered_writers_to_one_tensor() {
     let file = timetable(
         vec![
-            compute("producer0", vec![], vec![view(&[0], &[2])]),
-            compute("producer1", vec![], vec![view(&[2], &[2])]),
+            source("source0", DataType::Int8, &[2]),
+            source("source1", DataType::Int8, &[2]),
+            compute_with_program(
+                "producer0",
+                read_program(1, &[(0, &[2])]),
+                vec![None],
+                vec![view(&[0], &[2])],
+            ),
+            compute_with_program(
+                "producer1",
+                read_program(1, &[(0, &[2])]),
+                vec![None],
+                vec![view(&[2], &[2])],
+            ),
             tensor("result", 0x1000, DataType::Int8, &[4]),
         ],
         vec![
+            data_edge("source0", "producer0"),
+            data_edge("source1", "producer1"),
             data_edge("producer0", "result.0"),
             data_edge("producer1", "result.1"),
         ],
@@ -217,11 +296,25 @@ fn accepts_disjoint_unordered_writers_to_one_tensor() {
 fn rejects_unordered_writers_sharing_a_packed_byte() {
     let file = timetable(
         vec![
-            compute("producer0", vec![], vec![view(&[0], &[1])]),
-            compute("producer1", vec![], vec![view(&[1], &[1])]),
+            source("source0", DataType::Int4, &[1]),
+            source("source1", DataType::Int4, &[1]),
+            compute_with_program(
+                "producer0",
+                read_program(1, &[(0, &[1])]),
+                vec![None],
+                vec![view(&[0], &[1])],
+            ),
+            compute_with_program(
+                "producer1",
+                read_program(1, &[(0, &[1])]),
+                vec![None],
+                vec![view(&[1], &[1])],
+            ),
             tensor("result", 0x1000, DataType::Int4, &[2]),
         ],
         vec![
+            data_edge("source0", "producer0"),
+            data_edge("source1", "producer1"),
             data_edge("producer0", "result.0"),
             data_edge("producer1", "result.1"),
         ],
@@ -235,12 +328,26 @@ fn rejects_unordered_writers_sharing_a_packed_byte() {
 fn accepts_dependency_ordered_writers_to_one_tensor() {
     let file = timetable(
         vec![
-            compute("producer0", vec![], vec![None, None]),
+            source("source0", DataType::Int8, &[4]),
+            source("source1", DataType::Int8, &[4]),
+            compute_with_program(
+                "producer0",
+                read_program(2, &[(0, &[4]), (1, &[4])]),
+                vec![None, None],
+                vec![None, None],
+            ),
             tensor("gate", 0x2000, DataType::Int8, &[4]),
-            compute("producer1", vec![None], vec![None]),
+            compute_with_program(
+                "producer1",
+                read_program(1, &[(0, &[4])]),
+                vec![None],
+                vec![None],
+            ),
             tensor("result", 0x1000, DataType::Int8, &[4]),
         ],
         vec![
+            data_edge("source0", "producer0.0"),
+            data_edge("source1", "producer0.1"),
             data_edge("producer0.0", "gate"),
             data_edge("producer0.1", "result.0"),
             data_edge("gate", "producer1"),
@@ -255,12 +362,26 @@ fn accepts_dependency_ordered_writers_to_one_tensor() {
 fn rejects_unordered_writers_to_aliased_tensors() {
     let file = timetable(
         vec![
-            compute("producer0", vec![], vec![None]),
+            source("source0", DataType::Int8, &[4]),
+            source("source1", DataType::Int8, &[4]),
+            compute_with_program(
+                "producer0",
+                read_program(1, &[(0, &[4])]),
+                vec![None],
+                vec![None],
+            ),
             tensor("output0", 0x1000, DataType::Int8, &[4]),
-            compute("producer1", vec![], vec![None]),
+            compute_with_program(
+                "producer1",
+                read_program(1, &[(0, &[4])]),
+                vec![None],
+                vec![None],
+            ),
             tensor("output1", 0x1002, DataType::Int8, &[4]),
         ],
         vec![
+            data_edge("source0", "producer0"),
+            data_edge("source1", "producer1"),
             data_edge("producer0", "output0"),
             data_edge("producer1", "output1"),
         ],
@@ -277,12 +398,26 @@ fn rejects_unordered_writers_to_aliased_tensors() {
 fn accepts_disjoint_writers_to_aliased_tensors() {
     let file = timetable(
         vec![
-            compute("producer0", vec![], vec![view(&[0], &[2])]),
+            source("source0", DataType::Int8, &[2]),
+            source("source1", DataType::Int8, &[2]),
+            compute_with_program(
+                "producer0",
+                read_program(1, &[(0, &[2])]),
+                vec![None],
+                vec![view(&[0], &[2])],
+            ),
             tensor("output0", 0x1000, DataType::Int8, &[4]),
-            compute("producer1", vec![], vec![view(&[2], &[2])]),
+            compute_with_program(
+                "producer1",
+                read_program(1, &[(0, &[2])]),
+                vec![None],
+                vec![view(&[2], &[2])],
+            ),
             tensor("output1", 0x1000, DataType::Int8, &[4]),
         ],
         vec![
+            data_edge("source0", "producer0"),
+            data_edge("source1", "producer1"),
             data_edge("producer0", "output0"),
             data_edge("producer1", "output1"),
         ],
@@ -297,12 +432,26 @@ fn accepts_wide_finite_stride_writers() {
 
     let file = timetable(
         vec![
-            compute("producer0", vec![], vec![view(&[0, 0], &[COUNT, 2])]),
+            source("source0", DataType::Int8, &[COUNT, 2]),
+            source("source1", DataType::Int8, &[COUNT, 2]),
+            compute_with_program(
+                "producer0",
+                read_program(1, &[(0, &[COUNT, 2])]),
+                vec![None],
+                vec![view(&[0, 0], &[COUNT, 2])],
+            ),
             tensor("output0", 0, DataType::Int8, &[COUNT, 1_000_000_001]),
-            compute("producer1", vec![], vec![view(&[0, 0], &[COUNT, 2])]),
+            compute_with_program(
+                "producer1",
+                read_program(1, &[(0, &[COUNT, 2])]),
+                vec![None],
+                vec![view(&[0, 0], &[COUNT, 2])],
+            ),
             tensor("output1", 2, DataType::Int8, &[COUNT, 1_000_000_005]),
         ],
         vec![
+            data_edge("source0", "producer0"),
+            data_edge("source1", "producer1"),
             data_edge("producer0", "output0"),
             data_edge("producer1", "output1"),
         ],
@@ -315,12 +464,26 @@ fn accepts_wide_finite_stride_writers() {
 fn rejects_aliased_tensor_views_sharing_a_packed_byte() {
     let file = timetable(
         vec![
-            compute("producer0", vec![], vec![view(&[0], &[1])]),
+            source("source0", DataType::Int4, &[1]),
+            source("source1", DataType::Int4, &[1]),
+            compute_with_program(
+                "producer0",
+                read_program(1, &[(0, &[1])]),
+                vec![None],
+                vec![view(&[0], &[1])],
+            ),
             tensor("output0", 0x1000, DataType::Int4, &[2]),
-            compute("producer1", vec![], vec![view(&[1], &[1])]),
+            compute_with_program(
+                "producer1",
+                read_program(1, &[(0, &[1])]),
+                vec![None],
+                vec![view(&[1], &[1])],
+            ),
             tensor("output1", 0x1000, DataType::Int4, &[2]),
         ],
         vec![
+            data_edge("source0", "producer0"),
+            data_edge("source1", "producer1"),
             data_edge("producer0", "output0"),
             data_edge("producer1", "output1"),
         ],
@@ -334,12 +497,26 @@ fn rejects_aliased_tensor_views_sharing_a_packed_byte() {
 fn rejects_overlapping_strided_writes_to_aliased_tensors() {
     let file = timetable(
         vec![
-            compute("producer0", vec![], vec![view(&[0, 0], &[2, 2])]),
+            source("source0", DataType::Int8, &[2, 2]),
+            source("source1", DataType::Int8, &[2, 2]),
+            compute_with_program(
+                "producer0",
+                read_program(1, &[(0, &[2, 2])]),
+                vec![None],
+                vec![view(&[0, 0], &[2, 2])],
+            ),
             tensor("output0", 0x1000, DataType::Int8, &[2, 4]),
-            compute("producer1", vec![], vec![view(&[0, 1], &[2, 2])]),
+            compute_with_program(
+                "producer1",
+                read_program(1, &[(0, &[2, 2])]),
+                vec![None],
+                vec![view(&[0, 1], &[2, 2])],
+            ),
             tensor("output1", 0x1000, DataType::Int8, &[2, 4]),
         ],
         vec![
+            data_edge("source0", "producer0"),
+            data_edge("source1", "producer1"),
             data_edge("producer0", "output0"),
             data_edge("producer1", "output1"),
         ],
@@ -353,13 +530,29 @@ fn rejects_overlapping_strided_writes_to_aliased_tensors() {
 fn accepts_dependency_ordered_writes_to_aliased_tensors() {
     let file = timetable(
         vec![
-            compute("producer0", vec![], vec![None, None]),
+            source("source0", DataType::Int8, &[1]),
+            source("source1", DataType::Int8, &[4]),
+            source("source2", DataType::Int8, &[4]),
+            compute_with_program(
+                "producer0",
+                read_program(2, &[(0, &[1]), (1, &[4])]),
+                vec![None, None],
+                vec![None, None],
+            ),
             tensor("gate", 0x2000, DataType::Int8, &[1]),
             tensor("output0", 0x1000, DataType::Int8, &[4]),
-            compute("producer1", vec![None], vec![None]),
+            compute_with_program(
+                "producer1",
+                read_program(2, &[(1, &[4])]),
+                vec![None, None],
+                vec![None],
+            ),
             tensor("output1", 0x1000, DataType::Int8, &[4]),
         ],
         vec![
+            data_edge("source0", "producer0.0"),
+            data_edge("source1", "producer0.1"),
+            data_edge("source2", "producer1.1"),
             data_edge("producer0.0", "gate"),
             data_edge("producer0.1", "output0"),
             data_edge("gate", "producer1"),
@@ -375,11 +568,21 @@ fn rejects_unordered_readers_and_writers_to_aliased_tensors() {
     let file = timetable(
         vec![
             tensor("input", 0x1000, DataType::Int8, &[4]),
-            compute("reader", vec![None], vec![]),
-            compute("writer", vec![], vec![None]),
+            compute_with_program("reader", read_program(1, &[]), vec![None], vec![]),
+            compute_with_program(
+                "writer",
+                read_program(1, &[(0, &[4])]),
+                vec![None],
+                vec![None],
+            ),
             tensor("output", 0x1002, DataType::Int8, &[4]),
+            source("source", DataType::Int8, &[4]),
         ],
-        vec![data_edge("input", "reader"), data_edge("writer", "output")],
+        vec![
+            data_edge("input", "reader"),
+            data_edge("writer", "output"),
+            data_edge("source", "writer"),
+        ],
     );
 
     let error = file.validate().unwrap_err().to_string();
@@ -393,13 +596,22 @@ fn rejects_unordered_readers_and_writers_to_aliased_tensors() {
 fn accepts_dependency_ordered_readers_and_writers_to_aliased_tensors() {
     let file = timetable(
         vec![
-            compute("writer", vec![], vec![None, None]),
+            source("source0", DataType::Int8, &[1]),
+            source("source1", DataType::Int8, &[4]),
+            compute_with_program(
+                "writer",
+                read_program(2, &[(0, &[1]), (1, &[4])]),
+                vec![None, None],
+                vec![None, None],
+            ),
             tensor("gate", 0x2000, DataType::Int8, &[1]),
             tensor("output", 0x1000, DataType::Int8, &[4]),
             tensor("input", 0x1000, DataType::Int8, &[4]),
-            compute("reader", vec![None, None], vec![]),
+            compute_with_program("reader", read_program(2, &[]), vec![None, None], vec![]),
         ],
         vec![
+            data_edge("source0", "writer.0"),
+            data_edge("source1", "writer.1"),
             data_edge("writer.0", "gate"),
             data_edge("writer.1", "output"),
             data_edge("gate", "reader.0"),
@@ -414,15 +626,20 @@ fn accepts_dependency_ordered_readers_and_writers_to_aliased_tensors() {
 fn indexes_many_disjoint_partitions_by_address() {
     const NUM_PARTITIONS: usize = 10_000;
 
-    let mut nodes = Vec::with_capacity(NUM_PARTITIONS + 1);
-    let mut edges = Vec::with_capacity(NUM_PARTITIONS);
+    let mut nodes = Vec::with_capacity(NUM_PARTITIONS * 2 + 1);
+    let mut edges = Vec::with_capacity(NUM_PARTITIONS * 2);
     for index in 0..NUM_PARTITIONS {
-        nodes.push(compute(
-            &format!("producer{index}"),
-            vec![],
+        let compute_id = format!("producer{index}");
+        let source_id = format!("source{index}");
+        nodes.push(compute_with_program(
+            &compute_id,
+            read_program(1, &[(0, &[1])]),
+            vec![None],
             vec![view(&[index], &[1])],
         ));
-        edges.push(data_edge(&format!("producer{index}"), "output"));
+        nodes.push(source(&source_id, DataType::Int8, &[1]));
+        edges.push(data_edge(&compute_id, "output"));
+        edges.push(data_edge(&source_id, &compute_id));
     }
     nodes.push(tensor("output", 0, DataType::Int8, &[NUM_PARTITIONS]));
 
@@ -433,15 +650,26 @@ fn indexes_many_disjoint_partitions_by_address() {
 fn validates_a_long_chain_of_ordered_alias_writes() {
     const NUM_WRITERS: usize = 1_000;
 
-    let mut nodes = Vec::with_capacity(NUM_WRITERS * 3);
-    let mut edges = Vec::with_capacity(NUM_WRITERS * 3);
+    let mut nodes = Vec::with_capacity(NUM_WRITERS * 5);
+    let mut edges = Vec::with_capacity(NUM_WRITERS * 5);
     for index in 0..NUM_WRITERS {
         let compute_id = format!("producer{index}");
         let gate_id = format!("gate{index}");
         let output_id = format!("output{index}");
-        nodes.push(compute(
+
+        let source0 = format!("source{index}_0");
+        let source1 = format!("source{index}_1");
+        nodes.push(source(&source0, DataType::Int8, &[1]));
+        nodes.push(source(&source1, DataType::Int8, &[1]));
+
+        let first_source_port = usize::from(index != 0);
+        nodes.push(compute_with_program(
             &compute_id,
-            if index == 0 { vec![] } else { vec![None] },
+            read_program(
+                first_source_port + 2,
+                &[(first_source_port, &[1]), (first_source_port + 1, &[1])],
+            ),
+            vec![None; first_source_port + 2],
             vec![None, None],
         ));
         nodes.push(tensor(
@@ -454,6 +682,15 @@ fn validates_a_long_chain_of_ordered_alias_writes() {
         if index != 0 {
             edges.push(data_edge(&format!("gate{}", index - 1), &compute_id));
         }
+
+        edges.push(data_edge(
+            &source0,
+            &format!("{compute_id}.{first_source_port}"),
+        ));
+        edges.push(data_edge(
+            &source1,
+            &format!("{compute_id}.{}", first_source_port + 1),
+        ));
         edges.push(data_edge(&format!("{compute_id}.0"), &gate_id));
         edges.push(data_edge(&format!("{compute_id}.1"), &output_id));
     }
@@ -466,19 +703,33 @@ fn validates_many_interleaved_dependency_chains() {
     const NUM_CHAINS: usize = 64;
     const NUM_STEPS: usize = 64;
 
-    let mut nodes = Vec::with_capacity(NUM_CHAINS * (2 * NUM_STEPS - 1));
-    let mut edges = Vec::with_capacity(NUM_CHAINS * 2 * (NUM_STEPS - 1));
+    let mut nodes = Vec::with_capacity(NUM_CHAINS * (3 * NUM_STEPS - 2));
+    let mut edges = Vec::with_capacity(NUM_CHAINS * (3 * NUM_STEPS - 2));
     for step in 0..NUM_STEPS {
         for chain in 0..NUM_CHAINS {
-            nodes.push(compute(
-                &format!("compute{chain}_{step}"),
-                if step == 0 { vec![] } else { vec![None] },
-                if step + 1 == NUM_STEPS {
-                    vec![]
-                } else {
-                    vec![None]
-                },
+            let compute_id = format!("compute{chain}_{step}");
+            let has_output = step + 1 != NUM_STEPS;
+            let input_count = usize::from(step != 0) + usize::from(has_output);
+            let source_port = usize::from(step != 0);
+            let outputs: Vec<(usize, &[usize])> = if has_output {
+                vec![(source_port, &[1])]
+            } else {
+                vec![]
+            };
+            nodes.push(compute_with_program(
+                &compute_id,
+                read_program(input_count, &outputs),
+                vec![None; input_count],
+                vec![None; usize::from(has_output)],
             ));
+            if has_output {
+                let source_id = format!("source{chain}_{step}");
+                nodes.push(source(&source_id, DataType::Int8, &[1]));
+                edges.push(data_edge(
+                    &source_id,
+                    &format!("{compute_id}.{source_port}"),
+                ));
+            }
         }
     }
     for step in 0..NUM_STEPS - 1 {
@@ -492,4 +743,50 @@ fn validates_many_interleaved_dependency_chains() {
     }
 
     timetable(nodes, edges).validate().unwrap();
+}
+
+fn source(id: &str, dtype: DataType, shape: &[usize]) -> NodeSection {
+    tensor(id, SOURCE_ADDRESS, dtype, shape)
+}
+
+// Source tensors are explicit in each fixture. They share an address because
+// they are only read, and sit beyond the output address ranges being tested.
+const SOURCE_ADDRESS: u64 = 0xf000_0000_0000_0000;
+
+fn read_program(input_count: usize, outputs: &[(usize, &[usize])]) -> ProgramSpec {
+    let inputs = (0..input_count)
+        .map(|index| format!("input{index}"))
+        .collect::<Vec<_>>();
+    let output_names = (0..outputs.len())
+        .map(|index| format!("output{index}"))
+        .collect::<Vec<_>>();
+    let assignments = outputs
+        .iter()
+        .enumerate()
+        .map(|(output_index, (input_index, shape))| {
+            let axes = (0..shape.len())
+                .map(|dimension| format!("d{output_index}_{dimension}"))
+                .collect::<Vec<_>>();
+            AssignmentSpec {
+                output: Some(output_names[output_index].clone()),
+                indices_output: None,
+                axes: axes.clone(),
+                expr: ExprSpec::Read {
+                    tensor: inputs[*input_index].clone(),
+                    indices: axes.into_iter().map(IndexSpec::Axis).collect(),
+                    bounds: BoundsMode::RequireInRange,
+                },
+            }
+        })
+        .collect();
+    ProgramSpec {
+        metadata_inputs: vec![],
+        indexed_metadata_inputs: vec![],
+        local_round_policy: None,
+        inputs,
+        outputs: output_names,
+        temporaries: BTreeMap::default(),
+        assignments,
+        extents: BTreeMap::default(),
+    }
 }

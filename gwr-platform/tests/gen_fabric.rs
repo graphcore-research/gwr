@@ -1,6 +1,5 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use std::fs;
 use std::path::Path;
 use std::process::Command;
 
@@ -35,7 +34,11 @@ fn generate_platform(working_dir: &Path, output: &Path) {
         "gen-fabric failed: {}",
         String::from_utf8_lossy(&result.stderr)
     );
-    let yaml = fs::read_to_string(working_dir.join(output)).unwrap();
+    let yaml = gwr_platform::catalog::load_yaml_with_includes(
+        &working_dir.join(output),
+        gwr_platform::catalog::CatalogTarget::Platform,
+    )
+    .unwrap();
     let platform: gwr_platform::types::PlatformConfig = yaml_serde::from_str(&yaml).unwrap();
     assert_eq!(platform.fabrics.unwrap().len(), 1);
 }

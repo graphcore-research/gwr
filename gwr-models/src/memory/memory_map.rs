@@ -1,12 +1,16 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
 use std::collections::BTreeMap;
+use std::ops::Range;
 
 use gwr_engine::sim_error;
 use gwr_engine::types::{DeviceId, SimError};
 
 use crate::memory::checked_last_address;
+mod striping;
+use striping::Striping;
 
+/// One physical memory's inclusive address window.
 #[derive(Clone, Debug)]
 pub struct MemoryRegion {
     pub start: u64,
@@ -14,83 +18,173 @@ pub struct MemoryRegion {
     pub device: DeviceId,
 }
 
-#[derive(Clone)]
-pub struct MemoryMap {
-    // key = start address of region
-    regions: BTreeMap<u64, MemoryRegion>,
+/// A logical address resolved into a unique physical memory location.
+#[derive(Clone, Debug)]
+pub struct ResolvedAddress {
+    pub device: DeviceId,
+    pub physical_address: u64,
+    pub offset_in_device: u64,
+    /// Consecutive bytes remaining before a destination or mapping boundary.
+    pub contiguous_bytes: u128,
 }
 
-impl Default for MemoryMap {
-    fn default() -> Self {
-        Self::new()
-    }
+#[derive(Clone)]
+struct Window {
+    region: MemoryRegion,
+    striping: Option<Striping>,
+}
+
+/// Compact address map with optional round-robin physical-memory striping.
+#[derive(Clone, Default)]
+pub struct MemoryMap {
+    windows: BTreeMap<u64, Window>,
 }
 
 impl MemoryMap {
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            regions: BTreeMap::new(),
-        }
+        Self::default()
     }
 
-    /// Map a [start, start+size-1] region to a device.
+    /// Map a nonempty contiguous physical window.
     pub fn insert(&mut self, start: u64, size: u64, device: DeviceId) -> Result<(), SimError> {
         if size == 0 {
             return sim_error!("Invalid region size {size}");
         }
-        let end = checked_last_address(start, size).ok_or_else(|| {
-            SimError(format!(
-                "Region at {start} with size {size} overflows the address space"
-            ))
-        })?;
+        let end = checked_last_address(start, size)
+            .ok_or_else(|| SimError("Region overflows address space".into()))?;
+        self.insert_window(Window {
+            region: MemoryRegion { start, end, device },
+            striping: None,
+        })
+    }
 
-        // Check overlap with previous region (if any)
-        if let Some((_, prev)) = self.regions.range(..=start).next_back()
-            && prev.end >= start
+    /// Map the existing contiguous capacity of equally sized physical memories
+    /// using explicit member order and round-robin stripes. No aliases are
+    /// added.
+    pub fn insert_striped(
+        &mut self,
+        members: Vec<MemoryRegion>,
+        stripe_bytes: u64,
+    ) -> Result<(), SimError> {
+        let striping = Striping::new(members, stripe_bytes)?;
+        let region = striping.logical_region();
+        self.insert_window(Window {
+            region,
+            striping: Some(striping),
+        })
+    }
+
+    fn insert_window(&mut self, window: Window) -> Result<(), SimError> {
+        let MemoryRegion { start, end, .. } = window.region;
+        if self
+            .windows
+            .range(..=start)
+            .next_back()
+            .is_some_and(|(_, prev)| prev.region.end >= start)
+            || self
+                .windows
+                .range(start..)
+                .next()
+                .is_some_and(|(_, next)| next.region.start <= end)
         {
-            return sim_error!("Region overlap at {start}");
+            return sim_error!("Region overlap at {start:#x}");
         }
-
-        // Check overlap with next region (if any)
-        if let Some((_, next)) = self.regions.range(start..).next()
-            && next.start <= end
-        {
-            return sim_error!("Region overlap at {end}");
-        }
-
-        let region = MemoryRegion { start, end, device };
-        self.regions.insert(start, region);
+        self.windows.insert(start, window);
         Ok(())
     }
 
-    /// Remove a region by its exact start address.
+    /// Remove an entire logical window at its exact base, reporting existence.
     #[must_use]
-    pub fn unmap(&mut self, start: u64) -> Option<MemoryRegion> {
-        self.regions.remove(&start)
+    pub fn unmap(&mut self, start: u64) -> bool {
+        self.windows.remove(&start).is_some()
     }
 
-    /// Resolve an address to (device_id, offset_in_region).
+    /// Resolve to (physical device, offset within that device).
     #[must_use]
     pub fn lookup(&self, addr: u64) -> Option<(DeviceId, u64)> {
-        // Find region with greatest start <= addr
-        let (_, region) = self.regions.range(..=addr).next_back()?;
-        if addr <= region.end {
-            let offset = addr - region.start;
-            Some((region.device, offset))
-        } else {
-            None
+        self.resolve(addr).map(|r| (r.device, r.offset_in_device))
+    }
+
+    /// Resolve one logical byte. Wire requests must use `physical_address`.
+    #[must_use]
+    pub fn resolve(&self, addr: u64) -> Option<ResolvedAddress> {
+        let window = self.window_at(addr)?;
+        if let Some(striping) = &window.striping {
+            return Some(striping.resolve(addr));
         }
+        Some(ResolvedAddress {
+            device: window.region.device,
+            physical_address: addr,
+            offset_in_device: addr - window.region.start,
+            contiguous_bytes: u128::from(window.region.end) + 1 - u128::from(addr),
+        })
+    }
+
+    /// Resolve a nonempty request wholly contained in one consecutive physical
+    /// range.
+    pub fn resolve_access(&self, address: u64, bytes: usize) -> Result<ResolvedAddress, SimError> {
+        let resolved = self
+            .resolve(address)
+            .ok_or_else(|| SimError(format!("Unmapped address {address:#x}")))?;
+        if bytes == 0 || bytes as u128 > resolved.contiguous_bytes {
+            return sim_error!(
+                "Access at {address:#x} of {bytes} bytes crosses a stripe/map boundary or is empty"
+            );
+        }
+        Ok(resolved)
+    }
+
+    /// Whether this logical address uses an active striped window.
+    #[must_use]
+    pub fn is_striped_address(&self, address: u64) -> bool {
+        self.window_at(address)
+            .is_some_and(|w| w.striping.is_some())
+    }
+
+    /// Check that ordinary aligned fetches cannot straddle a stripe.
+    pub fn validate_fetch_size(&self, address: u64, bytes: usize) -> Result<(), SimError> {
+        let window = self
+            .window_at(address)
+            .ok_or_else(|| SimError("Unmapped fetch address".into()))?;
+        if bytes == 0
+            || window
+                .striping
+                .as_ref()
+                .is_some_and(|s| !s.supports_fetch(bytes as u64))
+        {
+            return sim_error!("LSU fetch size {bytes} incompatible with stripe geometry");
+        }
+        Ok(())
+    }
+
+    fn window_at(&self, addr: u64) -> Option<&Window> {
+        let (_, w) = self.windows.range(..=addr).next_back()?;
+        (addr <= w.region.end).then_some(w)
+    }
+
+    /// Logical coverage containing this byte, independent of physical
+    /// destinations.
+    pub(crate) fn logical_range_at(&self, addr: u64) -> Option<Range<u128>> {
+        self.window_at(addr)
+            .map(|w| u128::from(w.region.start)..u128::from(w.region.end) + 1)
     }
 
     #[must_use]
     pub fn num_regions(&self) -> usize {
-        self.regions.len()
+        self.windows.len()
     }
 
-    /// Iterate all mapped ranges.
+    /// Iterate each mapped logical window, without per-stripe expansion.
     pub fn regions(&self) -> impl Iterator<Item = &MemoryRegion> {
-        self.regions.values()
+        self.windows.values().map(|window| &window.region)
+    }
+
+    /// Each mapped logical interval exactly once, without per-stripe expansion.
+    pub fn logical_ranges(&self) -> impl Iterator<Item = Range<u128>> + '_ {
+        self.windows
+            .values()
+            .map(|w| u128::from(w.region.start)..u128::from(w.region.end) + 1)
     }
 }
 

@@ -1,6 +1,9 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use super::common::*;
+use gwr_engine::test_helpers::start_test;
+use gwr_platform::Platform;
+
+use super::common::{cache, connection, fabric, memory, memory_map, platform, processing_element};
 
 #[test]
 fn rejects_duplicate_device_names() {
@@ -105,6 +108,8 @@ fn processing_element_requires_a_dispatcher() {
         &engine,
         &clock,
         "
+operation_classes:
+  add: { operations: [add], arity: 2 }
 memory_maps:
   - name: mm0
     devices:
@@ -113,6 +118,10 @@ processing_elements:
   - name: pe0
     memory_map: mm0
     config:
+      compute:
+        engines:
+          alu:
+            capabilities: [{ class: add, ops_per_tick: 1 }]
 memories:
   - name: hbm0
     kind: hbm

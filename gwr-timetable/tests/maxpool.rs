@@ -9,36 +9,6 @@ use gwr_timetable::Timetable;
 use gwr_timetable::timetable_file::TimetableFile;
 use gwr_track::entity::Entity;
 
-fn create_platform() -> (Rc<Entity>, Rc<Platform>) {
-    let mut engine = start_test(file!());
-    let clock = engine.default_clock();
-    let platform = Platform::from_string(
-        &engine,
-        &clock,
-        "
-memory_maps:
-  - name: default
-    devices:
-      - hbm0
-
-processing_elements:
-  - name: pe0
-    memory_map: default
-    config:
-
-memories:
-  - name: hbm0
-    kind: hbm
-    base_address: 0
-    config:
-      capacity_bytes: 0x1000_0000
-",
-    )
-    .unwrap();
-
-    (engine.top().clone(), Rc::new(platform))
-}
-
 #[test]
 fn compute_completion_updates_multiple_outputs() {
     let (top, platform) = create_platform();
@@ -54,15 +24,24 @@ nodes:
 
   - id: pool
     kind: compute
-    op:
-      maxpool:
-        kernel_shape: [2, 2]
+    program:
+      inputs: [A]
+      outputs: [Y, I]
+      extents: { b: 1, c: 1, oh: 3, ow: 3, kh: 2, kw: 2 }
+      assignments:
+        - output: Y
+          indices_output: I
+          axes: [b, c, oh, ow]
+          expr:
+            reduce:
+              op: max
+              over: [kh, kw]
+              value:
+                read:
+                  tensor: A
+                  indices: [b, c, { affine: { terms: { oh: 1, kh: 1 }, offset: 0 } }, { affine: { terms: { ow: 1, kw: 1 }, offset: 0 } }]
+                  bounds: exclude
     pe: pe0
-    input_views:
-      -
-    output_views:
-      -
-      -
 
   - id: pooled
     kind: tensor
@@ -104,4 +83,41 @@ edges:
     assert!(ready_node_indices.is_empty());
 
     timetable.check_tasks_complete().unwrap();
+}
+
+fn create_platform() -> (Rc<Entity>, Rc<Platform>) {
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
+    let platform = Platform::from_string(
+        &engine,
+        &clock,
+        "
+memory_maps:
+  - name: default
+    devices:
+      - hbm0
+
+operation_classes:
+  compare: { operations: [compare], arity: 2 }
+
+processing_elements:
+  - name: pe0
+    memory_map: default
+    config:
+      compute:
+        engines:
+          vector:
+            capabilities: [{ class: compare, ops_per_tick: 16 }]
+
+memories:
+  - name: hbm0
+    kind: hbm
+    base_address: 0
+    config:
+      capacity_bytes: 0x1000_0000
+",
+    )
+    .unwrap();
+
+    (engine.top().clone(), Rc::new(platform))
 }

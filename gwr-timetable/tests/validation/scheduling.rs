@@ -1,6 +1,13 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use super::common::*;
+use gwr_models::processing_element::dispatch::Dispatch;
+use gwr_models::processing_element::tensors::dtype::DataType;
+use gwr_timetable::timetable_file::{EdgeKind, EdgeSection, NodeSection, TensorConfigSection};
+
+use super::common::{
+    build_timetable, compute, control_edge, create_default_timetable_file, data_edge, tensor,
+    timetable,
+};
 
 #[test]
 fn builds_a_valid_timetable() {

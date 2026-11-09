@@ -1,9 +1,12 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+use std::collections::BTreeMap;
+
 use byte_unit::Byte;
 use clap::ValueEnum;
 use gwr_models::fabric::FabricPortSelection;
 use gwr_models::fabric::node::FabricRoutingAlgorithm;
+use gwr_models::processing_element::compute::{ComputeConfig, OperationClass};
 use serde::{Deserialize, Serialize, de};
 use yaml_serde::Value;
 
@@ -80,6 +83,10 @@ where
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlatformConfig {
+    #[serde(default)]
+    pub operation_classes: BTreeMap<String, OperationClass>,
+    #[serde(default)]
+    pub compute_profiles: BTreeMap<String, ComputeConfig>,
     pub memory_maps: Vec<MemoryMapSection>,
     pub defaults: Option<DefaultsSection>,
     pub processing_elements: Option<Vec<ProcessingElementSection>>,
@@ -100,7 +107,35 @@ pub struct DefaultsSection {
 #[serde(deny_unknown_fields)]
 pub struct MemoryMapSection {
     pub name: String,
+    /// Optional round-robin placement; omission preserves contiguous mapping.
+    #[serde(default)]
+    pub address_mapping: Option<AddressMappingSection>,
     /// Names of memories included in this map.
+    pub devices: Vec<String>,
+}
+
+/// Placement policy retained in platform files even when striping is disabled.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct AddressMappingSection {
+    pub mode: AddressMappingMode,
+    pub stripe_bytes: u64,
+    pub groups: Vec<MemoryStripeGroupSection>,
+}
+
+/// Contiguous placement is the compatibility baseline; striped is opt-in.
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AddressMappingMode {
+    Contiguous,
+    Striped,
+}
+
+/// Ordered members of one capacity-preserving stripe group.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryStripeGroupSection {
+    pub name: String,
     pub devices: Vec<String>,
 }
 
@@ -109,7 +144,23 @@ pub struct MemoryMapSection {
 pub struct ProcessingElementSection {
     pub name: String,
     pub memory_map: String,
+    /// Optional memory map for a connected independent `.dma` issuer.
+    /// Omission makes DMA use the compute memory map.
+    #[serde(default, deserialize_with = "parse_optional_map_name")]
+    pub dma_memory_map: Option<String>,
     pub config: ProcessingElementConfigSection,
+}
+
+fn parse_optional_map_name<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    let value = Option::<yaml_serde::Value>::deserialize(deserializer)?;
+    value
+        .map(|value| match value {
+            yaml_serde::Value::String(name) => Ok(name),
+            _ => Err(serde::de::Error::custom("DMA memory map must be a string")),
+        })
+        .transpose()
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
@@ -120,9 +171,37 @@ pub struct ProcessingElementConfigSection {
     pub overhead_size_bytes: Option<usize>,
     #[serde(default, deserialize_with = "parse_optional_u64_byte_str")]
     pub sram_bytes: Option<u64>,
-    pub adds_per_tick: Option<f64>,
-    pub muls_per_tick: Option<f64>,
-    pub compares_per_tick: Option<f64>,
+    #[serde(default)]
+    pub boundary_payload_service: Option<BoundaryPayloadServiceSection>,
+    /// Caller logical local-temporary bytes/actual 1 ns tick, not vendor SRAM.
+    #[serde(default)]
+    pub local_payload_service: Option<LocalPayloadServiceSection>,
+    /// Optional PE-wide bounded block execution limits.
+    #[serde(default)]
+    pub block_execution:
+        Option<gwr_models::processing_element::block_execution::BlockExecutionConfig>,
+    pub compute: Option<ComputeSelection>,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct LocalPayloadServiceSection {
+    pub bytes_per_tick: u64,
+}
+
+/// Explicit caller combined-direction boundary payload, not local hardware
+/// traffic.
+#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct BoundaryPayloadServiceSection {
+    pub bytes_per_tick: u64,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum ComputeSelection {
+    Named(String),
+    Inline(ComputeConfig),
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -166,8 +245,7 @@ pub struct FabricConfigSection {
     pub rx_buffer_bytes: Option<usize>,
     pub tx_buffer_bytes: Option<usize>,
     pub port_bits_per_tick: Option<usize>,
-    /// Independent bandwidth of each directed routed neighbor link; omitted
-    /// links retain their existing hop-delay-only behaviour.
+    /// Optional independent directional interior service; Routed fabrics only.
     pub internal_link_bits_per_tick: Option<usize>,
     pub routing: Option<FabricRoutingAlgorithm>,
     pub port_selection: Option<FabricPortSelection>,
@@ -190,6 +268,33 @@ pub struct MemoryConfigSection {
     pub capacity_bytes: u64,
     pub bw_bytes_per_tick: Option<usize>,
     pub delay_ticks: Option<usize>,
+    /// Optional analytic FIFO byte service; omission preserves legacy timing.
+    pub arrival_aware_service: Option<MemoryServiceSection>,
+    /// Explicit caller atomic capabilities sharing that exact service budget.
+    #[serde(default)]
+    pub atomic_service: Option<gwr_models::memory::atomic::AtomicServiceConfig>,
+}
+
+/// One total admission bound including queued, active and undelivered
+/// responses. Uses configured integer bytes/tick and requires the actual
+/// native1ns clock.
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryServiceSection {
+    /// Nonphysical descriptor limit1..=4096; not a hardware queue-depth claim.
+    pub max_pending_requests: usize,
+    /// Explicit caller-assumed address service lanes; absent preserves recipe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lanes: Option<MemoryServiceLanesSection>,
+}
+
+/// Caller-assumed relative modulo stripes and integral native1ns rates.
+/// This does not certify physical HBM channels, mapping or per-stack rates.
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryServiceLanesSection {
+    pub interleave_bytes: u64,
+    pub bytes_per_tick: Vec<u64>,
 }
 
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, ValueEnum)]

@@ -1,0 +1,26 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+nodes:
+ - {id: A, kind: tensor, config: {addr: 0, dtype: fp8, shape: [2,8,16]}}
+ - {id: B, kind: tensor, config: {addr: 4096, dtype: fp8, shape: [2,16,8]}}
+ - {id: C, kind: tensor, config: {addr: 8192, dtype: fp16, shape: [2,8,8]}}
+ - id: gemm
+   kind: compute
+   pe: pe
+   tiling: {sizes: {b: 1, m: 8, n: 8, k: 4}}
+   pipeline: {mode: overlap, input_buffers: 2, output_buffers: 1, prefetch_distance: 1}
+   program:
+    inputs: [A,B]
+    outputs: [C]
+    temporaries: {P: {dtype: fp32}}
+    assignments:
+     - output: P
+       axes: [b,m,n]
+       expr: {matrix_mac: {over: [k], execution: {instruction: test, accumulator: fp32, sparsity: dense}, args: [{read: {tensor: A, indices: [b,m,k]}}, {read: {tensor: B, indices: [b,k,n]}}]}}
+     - output: C
+       axes: [b,m,n]
+       expr: {convert: [{read: {tensor: P, indices: [b,m,n]}}]}
+edges:
+ - {from: A, to: gemm.0, kind: data}
+ - {from: B, to: gemm.1, kind: data}
+ - {from: gemm.0, to: C, kind: data}

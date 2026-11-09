@@ -4,16 +4,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
 use std::hash::BuildHasher;
 
-use gwr_models::processing_element::operators::{HasShape, TensorView, shape_string};
+use gwr_models::processing_element::tensors::{HasShape, TensorView, shape_string};
 
 use crate::graph::{TimetableGraph, TimetableNode};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MermaidNodeStatus {
-    Pending,
-    Active,
-    Complete,
-}
 
 #[must_use]
 pub fn render_mermaid<T: BuildHasher>(
@@ -83,6 +76,13 @@ pub fn render_mermaid<T: BuildHasher>(
     out
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MermaidNodeStatus {
+    Pending,
+    Active,
+    Complete,
+}
+
 fn mermaid_id(raw: &str) -> String {
     let mut s = String::from("n_");
     for ch in raw.chars() {
@@ -93,6 +93,45 @@ fn mermaid_id(raw: &str) -> String {
         }
     }
     s
+}
+
+fn render_node_label(graph: &TimetableGraph, node_index: usize, node: &TimetableNode) -> String {
+    if let Some(tensor) = node.tensor() {
+        let label = format!(
+            "{}\n{:?}\n{}",
+            node.id(),
+            tensor.dtype(),
+            shape_string(tensor.shape().dims())
+        );
+        return format!("([{}])", escape_mermaid_label(&label));
+    }
+
+    if node.is_transfer() {
+        return format!(
+            "[\"{}\"]",
+            escape_mermaid_label(&format!(
+                "{}\ntransfer\n{}\nbuffer {} bytes",
+                node.id(),
+                node.pe().unwrap_or("?"),
+                node.transfer_buffer_bytes().unwrap()
+            ))
+        );
+    }
+    let program = node.program().expect("non-tensor node has a program");
+    let views = graph
+        .compute_views(node_index)
+        .expect("non-tensor node has compute views");
+    let pe = node.pe().unwrap_or("?");
+    let input_str = create_view_string("input", views.inputs());
+    let output_str = create_view_string("output", views.outputs());
+    format!(
+        "[\"{}\"]",
+        escape_mermaid_label(&format!(
+            "{input_str}\n{} assignments\n{}\n{pe}\n\n{output_str}",
+            program.assignments.len(),
+            node.id()
+        ))
+    )
 }
 
 fn escape_mermaid_label(s: &str) -> String {
@@ -119,31 +158,4 @@ fn create_view_string(prefix: &str, views: &[Option<TensorView>]) -> String {
         }
     }
     result
-}
-
-fn render_node_label(graph: &TimetableGraph, node_index: usize, node: &TimetableNode) -> String {
-    if let Some(tensor) = node.tensor() {
-        let label = format!(
-            "{}\n{:?}\n{}",
-            node.id(),
-            tensor.dtype(),
-            shape_string(tensor.shape().dims())
-        );
-        return format!("([{}])", escape_mermaid_label(&label));
-    }
-
-    let operation = node.operation().expect("non-tensor node has an operation");
-    let views = graph
-        .compute_views(node_index)
-        .expect("non-tensor node has compute views");
-    let pe = node.pe().unwrap_or("?");
-    let input_str = create_view_string("input", views.inputs());
-    let output_str = create_view_string("output", views.outputs());
-    format!(
-        "[\"{}\"]",
-        escape_mermaid_label(&format!(
-            "{input_str}\n{operation:?}\n{}\n{pe}\n\n{output_str}",
-            node.id()
-        ))
-    )
 }

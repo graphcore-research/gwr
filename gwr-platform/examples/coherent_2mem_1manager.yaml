@@ -10,12 +10,19 @@ memory_maps:
       - hbm0
       - hbm1
 
+operation_classes:
+  add: { operations: [add], arity: 2 }
+
 processing_elements:
   - name: pe0
     memory_map: pe_memory_map
     config:
       num_active_requests: 8
       lsu_access_bytes: 32
+      compute:
+        engines:
+          vector:
+            capabilities: [{ class: add, ops_per_tick: 256 }]
 
 caches:
   - name: l1_0

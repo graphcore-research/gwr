@@ -9,13 +9,17 @@ use std::fmt::Write as _;
 use serde::Serialize;
 use yaml_serde::Value;
 
-use crate::types::{CacheConfigSection, PlatformConfig, ProcessingElementConfigSection};
+use crate::types::{
+    CacheConfigSection, ComputeSelection, PlatformConfig, ProcessingElementConfigSection,
+};
 
 pub fn platform_to_yaml_str(
     platform: &PlatformConfig,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let mut out = String::new();
 
+    emit_optional_section(&mut out, emit_operation_classes(platform)?);
+    emit_optional_section(&mut out, emit_compute_profiles(platform)?);
     emit_optional_section(&mut out, emit_memory_maps(platform)?);
     emit_optional_section(&mut out, emit_processing_elements(platform)?);
     emit_optional_section(&mut out, emit_fabrics(platform)?);
@@ -25,6 +29,36 @@ pub fn platform_to_yaml_str(
     emit_optional_section(&mut out, emit_coherency_managers(platform)?);
 
     Ok(out)
+}
+
+fn emit_operation_classes(
+    platform: &PlatformConfig,
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    if platform.operation_classes.is_empty() {
+        return Ok(None);
+    };
+
+    let mut classes = start_section("operation_classes")?;
+    for line in yaml_serde::to_string(&platform.operation_classes)?.lines() {
+        emit_line(&mut classes, line, 1)?;
+    }
+
+    Ok(Some(classes))
+}
+
+fn emit_compute_profiles(
+    platform: &PlatformConfig,
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    if platform.compute_profiles.is_empty() {
+        return Ok(None);
+    };
+
+    let mut profiles = start_section("compute_profiles")?;
+    for line in yaml_serde::to_string(&platform.compute_profiles)?.lines() {
+        emit_line(&mut profiles, line, 1)?;
+    }
+
+    Ok(Some(profiles))
 }
 
 fn emit_memory_maps(
@@ -38,9 +72,15 @@ fn emit_memory_maps(
 
     for memory_map in &platform.memory_maps {
         emit_line(&mut out, format_args!("- name: {}", memory_map.name), 1)?;
+        if let Some(mapping) = &memory_map.address_mapping {
+            emit_line(&mut out, "address_mapping:", 2)?;
+            for line in yaml_serde::to_string(mapping)?.lines() {
+                emit_line(&mut out, line, 3)?;
+            }
+        }
         emit_line(&mut out, "devices:", 2)?;
-        for device in &memory_map.devices {
-            emit_line(&mut out, format_args!("- {device}"), 3)?;
+        for range in &memory_map.devices {
+            emit_line(&mut out, format_args!("- {}", range), 3)?;
         }
     }
     Ok(Some(out))
@@ -73,6 +113,9 @@ fn emit_processing_elements(
 
         emit_line(&mut out, format_args!("- name: {}", pe.name), 1)?;
         emit_line(&mut out, format_args!("memory_map: {}", pe.memory_map), 2)?;
+        if let Some(map) = &pe.dma_memory_map {
+            emit_line(&mut out, format_args!("dma_memory_map: {}", map), 2)?;
+        }
         if emitted_anchors[config_idx] {
             emit_line(&mut out, format_args!("config: *{anchor}"), 2)?;
         } else {
@@ -81,9 +124,10 @@ fn emit_processing_elements(
                 && config.lsu_access_bytes.is_none()
                 && config.overhead_size_bytes.is_none()
                 && config.sram_bytes.is_none()
-                && config.adds_per_tick.is_none()
-                && config.muls_per_tick.is_none()
-                && config.compares_per_tick.is_none()
+                && config.boundary_payload_service.is_none()
+                && config.local_payload_service.is_none()
+                && config.block_execution.is_none()
+                && config.compute.is_none()
             {
                 emit_line(&mut out, format_args!("config: &{anchor} {{}}"), 2)?;
             } else {
@@ -107,9 +151,33 @@ fn emit_processing_elements(
                     config.sram_bytes.map(u64_hex_str),
                     3,
                 )?;
-                emit_optional_kv(&mut out, "adds_per_tick", config.adds_per_tick, 3)?;
-                emit_optional_kv(&mut out, "muls_per_tick", config.muls_per_tick, 3)?;
-                emit_optional_kv(&mut out, "compares_per_tick", config.compares_per_tick, 3)?;
+                if let Some(service) = &config.boundary_payload_service {
+                    emit_line(&mut out, "boundary_payload_service:", 3)?;
+                    emit_kv(&mut out, "bytes_per_tick", service.bytes_per_tick, 4)?;
+                }
+                if let Some(service) = &config.local_payload_service {
+                    emit_line(&mut out, "local_payload_service:", 3)?;
+                    emit_kv(&mut out, "bytes_per_tick", service.bytes_per_tick, 4)?;
+                }
+                if let Some(block) = &config.block_execution {
+                    emit_line(&mut out, "block_execution:", 3)?;
+                    for line in yaml_serde::to_string(block)?.lines() {
+                        emit_line(&mut out, line, 4)?;
+                    }
+                }
+                if let Some(compute) = &config.compute {
+                    match compute {
+                        ComputeSelection::Named(name) => {
+                            emit_kv(&mut out, "compute", serde_json::to_string(name)?, 3)?;
+                        }
+                        ComputeSelection::Inline(config) => {
+                            emit_line(&mut out, "compute:", 3)?;
+                            for line in yaml_serde::to_string(config)?.lines() {
+                                emit_line(&mut out, line, 4)?;
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -279,52 +347,36 @@ fn emit_memories(platform: &PlatformConfig) -> Result<Option<String>, Box<dyn st
             3,
         )?;
         emit_optional_kv(&mut out, "delay_ticks", memory.config.delay_ticks, 3)?;
+        if let Some(service) = &memory.config.atomic_service {
+            emit_line(&mut out, "atomic_service:", 3)?;
+            // Use the existing serde YAML encoder for the closed carrier, then
+            // indent its complete mapping. None contributes zero old bytes.
+            let yaml = yaml_serde::to_string(service)?;
+            for line in yaml.lines() {
+                emit_line(&mut out, line, 4)?;
+            }
+        }
+        if let Some(service) = &memory.config.arrival_aware_service {
+            emit_line(&mut out, "arrival_aware_service:", 3)?;
+            emit_kv(
+                &mut out,
+                "max_pending_requests",
+                service.max_pending_requests,
+                4,
+            )?;
+            if let Some(lanes) = &service.lanes {
+                emit_line(&mut out, "lanes:", 4)?;
+                emit_kv(&mut out, "interleave_bytes", lanes.interleave_bytes, 5)?;
+                emit_kv(
+                    &mut out,
+                    "bytes_per_tick",
+                    serde_json::to_string(&lanes.bytes_per_tick)?,
+                    5,
+                )?;
+            }
+        }
     }
     Ok(Some(out))
-}
-
-/// Format a `u64` as lowercase hexadecimal with a `0x` prefix and underscores
-/// inserted every 4 hex digits (grouped from the right).
-///
-/// Examples:
-/// - `0x1000000` -> `0x100_0000`
-/// - `0x100000000` -> `0x1_0000_0000`
-fn u64_hex_str(v: u64) -> String {
-    let hex = format!("{v:x}");
-    let mut out = String::with_capacity(2 + hex.len() + ((hex.len().saturating_sub(1)) / 4));
-    out.push_str("0x");
-
-    let first_group_len = match hex.len() % 4 {
-        0 => 4,
-        n => n,
-    };
-    out.push_str(&hex[..first_group_len]);
-    for chunk in hex.as_bytes()[first_group_len..].chunks(4) {
-        out.push('_');
-        // `hex` is a String, so each byte chunk should be UTF-8.
-        out.push_str(std::str::from_utf8(chunk).expect("hex chunk should be utf-8"));
-    }
-
-    out
-}
-
-fn emit_optional_kv<T: std::fmt::Display>(
-    out: &mut String,
-    key: &str,
-    value: Option<T>,
-    indent_level: usize,
-) -> Result<(), std::fmt::Error> {
-    if let Some(v) = value {
-        emit_kv(out, key, v, indent_level)?;
-    }
-    Ok(())
-}
-
-fn serializable_to_str<T: Serialize>(value: &T) -> Result<String, Box<dyn std::error::Error>> {
-    match yaml_serde::to_value(value)? {
-        Value::String(s) => Ok(s),
-        other => Err(format!("expected type to serialize a string, got: {other:?}").into()),
-    }
 }
 
 fn emit_connections(
@@ -396,6 +448,18 @@ fn start_section(section: &str) -> Result<String, std::fmt::Error> {
     Ok(out)
 }
 
+fn emit_optional_kv<T: std::fmt::Display>(
+    out: &mut String,
+    key: &str,
+    value: Option<T>,
+    indent_level: usize,
+) -> Result<(), std::fmt::Error> {
+    if let Some(v) = value {
+        emit_kv(out, key, v, indent_level)?;
+    }
+    Ok(())
+}
+
 fn emit_kv<T: std::fmt::Display>(
     out: &mut String,
     key: &str,
@@ -413,21 +477,51 @@ fn emit_line(
     writeln!(out, "{}{line}", "  ".repeat(indent_level))
 }
 
+fn serializable_to_str<T: Serialize>(value: &T) -> Result<String, Box<dyn std::error::Error>> {
+    match yaml_serde::to_value(value)? {
+        Value::String(s) => Ok(s),
+        other => Err(format!("expected type to serialize a string, got: {other:?}").into()),
+    }
+}
+
+/// Format a `u64` as lowercase hexadecimal with a `0x` prefix and underscores
+/// inserted every 4 hex digits (grouped from the right).
+///
+/// Examples:
+/// - `0x1000000` -> `0x100_0000`
+/// - `0x100000000` -> `0x1_0000_0000`
+fn u64_hex_str(v: u64) -> String {
+    let hex = format!("{v:x}");
+    let mut out = String::with_capacity(2 + hex.len() + ((hex.len().saturating_sub(1)) / 4));
+    out.push_str("0x");
+
+    let first_group_len = match hex.len() % 4 {
+        0 => 4,
+        n => n,
+    };
+    out.push_str(&hex[..first_group_len]);
+    for chunk in hex.as_bytes()[first_group_len..].chunks(4) {
+        out.push('_');
+        // `hex` is a String, so each byte chunk should be UTF-8.
+        out.push_str(std::str::from_utf8(chunk).expect("hex chunk should be utf-8"));
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
-    use gwr_models::fabric::FabricPortSelection;
+    use std::collections::BTreeMap;
 
-    use super::platform_to_yaml_str;
-    use crate::types::{
-        CacheConfigSection, CacheSection, ConnectSection, FabricConfigSection, FabricKind,
-        FabricSection, MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
-        PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
-    };
+    use gwr_models::fabric::FabricPortSelection;
+    use gwr_models::processing_element::compute::{CapabilityConfig, ComputeConfig, EngineConfig};
 
     #[test]
     fn emitted_null_endpoint_is_a_yaml_string_and_round_trips() {
         let platform = PlatformConfig {
             coherency_managers: None,
+            compute_profiles: Default::default(),
+            operation_classes: BTreeMap::new(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: None,
@@ -453,41 +547,48 @@ mod tests {
     #[test]
     fn emits_distinct_pe_config_anchors_for_distinct_configs() {
         let shared_config = ProcessingElementConfigSection {
+            block_execution: None,
             num_active_requests: Some(8),
             lsu_access_bytes: Some(32),
             overhead_size_bytes: None,
             sram_bytes: Some(0x0010_0000),
-            adds_per_tick: Some(16.0),
-            muls_per_tick: Some(4.0),
-            compares_per_tick: None,
+            boundary_payload_service: None,
+            local_payload_service: None,
+            compute: Some(super::ComputeSelection::Inline(alu(16.0, 4.0, 16.0))),
         };
         let unique_config = ProcessingElementConfigSection {
+            block_execution: None,
             num_active_requests: Some(16),
             lsu_access_bytes: Some(64),
             overhead_size_bytes: Some(12),
             sram_bytes: Some(0x0020_0000),
-            adds_per_tick: Some(32.0),
-            muls_per_tick: Some(8.0),
-            compares_per_tick: Some(16.0),
+            boundary_payload_service: None,
+            local_payload_service: None,
+            compute: Some(super::ComputeSelection::Inline(alu(32.0, 8.0, 16.0))),
         };
         let platform = PlatformConfig {
             coherency_managers: None,
+            compute_profiles: Default::default(),
+            operation_classes: BTreeMap::new(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: Some(vec![
                 ProcessingElementSection {
                     name: "pe0".to_string(),
                     memory_map: "memory_map".to_string(),
+                    dma_memory_map: None,
                     config: shared_config.clone(),
                 },
                 ProcessingElementSection {
                     name: "pe1".to_string(),
                     memory_map: "memory_map".to_string(),
+                    dma_memory_map: None,
                     config: unique_config.clone(),
                 },
                 ProcessingElementSection {
                     name: "pe2".to_string(),
                     memory_map: "memory_map".to_string(),
+                    dma_memory_map: None,
                     config: shared_config.clone(),
                 },
             ]),
@@ -521,16 +622,45 @@ mod tests {
         assert_eq!(pes[2].config, shared_config);
     }
 
+    use super::platform_to_yaml_str;
+    use crate::types::{
+        CacheConfigSection, CacheSection, ConnectSection, FabricConfigSection, FabricKind,
+        FabricSection, MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
+        PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
+    };
+
+    fn alu(add: f64, mul: f64, compare: f64) -> ComputeConfig {
+        ComputeConfig {
+            engines: BTreeMap::from([(
+                "alu".into(),
+                EngineConfig {
+                    matrix_accumulator_capacity_bytes: None,
+                    capabilities: [("add", add), ("mul", mul), ("compare", compare)]
+                        .into_iter()
+                        .map(|(class, ops_per_tick)| CapabilityConfig {
+                            matrix_service_tile: None,
+                            execution: None,
+                            class: class.into(),
+                            input_dtypes: None,
+                            ops_per_tick,
+                        })
+                        .collect(),
+                },
+            )]),
+        }
+    }
+
     #[test]
     fn emits_empty_pe_and_cache_configs_as_inline_maps() {
         let empty_pe_config = ProcessingElementConfigSection {
+            block_execution: None,
             num_active_requests: None,
             lsu_access_bytes: None,
             overhead_size_bytes: None,
             sram_bytes: None,
-            adds_per_tick: None,
-            muls_per_tick: None,
-            compares_per_tick: None,
+            boundary_payload_service: None,
+            local_payload_service: None,
+            compute: None,
         };
         let empty_cache_config = CacheConfigSection {
             bw_bytes_per_tick: None,
@@ -543,11 +673,14 @@ mod tests {
         };
         let platform = PlatformConfig {
             coherency_managers: None,
+            compute_profiles: Default::default(),
+            operation_classes: BTreeMap::new(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: Some(vec![ProcessingElementSection {
                 name: "pe0".to_string(),
                 memory_map: "memory_map".to_string(),
+                dma_memory_map: None,
                 config: empty_pe_config.clone(),
             }]),
             caches: Some(vec![
@@ -602,12 +735,16 @@ mod tests {
             port_selection: None,
         };
         let memory_config = MemoryConfigSection {
+            atomic_service: None,
             capacity_bytes: 0x2000,
             bw_bytes_per_tick: Some(8),
             delay_ticks: Some(9),
+            arrival_aware_service: None,
         };
         let platform = PlatformConfig {
             coherency_managers: None,
+            compute_profiles: Default::default(),
+            operation_classes: BTreeMap::new(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: None,
@@ -660,6 +797,8 @@ mod tests {
         };
         let platform = PlatformConfig {
             coherency_managers: None,
+            compute_profiles: Default::default(),
+            operation_classes: BTreeMap::new(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: None,
@@ -702,6 +841,7 @@ mod tests {
 
     fn test_memory_map() -> MemoryMapSection {
         MemoryMapSection {
+            address_mapping: None,
             name: "memory_map".to_string(),
             devices: vec!["hbm0".to_string()],
         }

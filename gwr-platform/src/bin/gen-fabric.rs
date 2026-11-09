@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use gwr_models::fabric::node::FabricRoutingAlgorithm;
@@ -9,121 +9,312 @@ use gwr_platform::builder::{
     DEFAULT_CACHE_LINE_SIZE_BYTES, DEFAULT_FABRIC_PORT_BITS_PER_TICK,
     DEFAULT_FABRIC_PORTS_PER_NODE, DEFAULT_FABRIC_ROUTING, DEFAULT_FABRIC_RX_BUFFER_BYTES,
     DEFAULT_FABRIC_TICKS_OVERHEAD, DEFAULT_FABRIC_TICKS_PER_HOP, DEFAULT_FABRIC_TX_BUFFER_BYTES,
-    DEFAULT_HBM_DELAY_TICKS, DEFAULT_HBM_SIZE_BYTES, DEFAULT_PE_ADDS_PER_TICK,
-    DEFAULT_PE_COMPARES_PER_TICK, DEFAULT_PE_LSU_ACCESS_BYTES, DEFAULT_PE_MULS_PER_TICK,
+    DEFAULT_HBM_DELAY_TICKS, DEFAULT_HBM_SIZE_BYTES, DEFAULT_PE_LSU_ACCESS_BYTES,
     DEFAULT_PE_NUM_ACTIVE_REQUESTS, DEFAULT_PE_OVERHEAD_SIZE_BYTES, DEFAULT_PE_SRAM_BYTES,
 };
 use gwr_platform::connection_id::{
     cache_endpoint_id, fabric_port_endpoint_id, mem_endpoint_id, pe_endpoint_id,
 };
 use gwr_platform::types::{
-    CacheConfigSection, CacheSection, ConnectSection, FabricConfigSection, FabricKind,
-    FabricSection, MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
+    CacheConfigSection, CacheSection, ComputeSelection, ConnectSection, FabricConfigSection,
+    FabricKind, FabricSection, MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
     PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
 };
 use gwr_platform::yaml::platform_to_yaml_str;
 
-const FABRIC_NAME: &str = "fabric0";
-const PE_MEMORY_MAP_NAME: &str = "default_memory_map";
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+    if let Some(parent) = args.out.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let output_parent = args
+        .out
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let output_directory = output_parent.canonicalize()?;
+    let output = match fs::symlink_metadata(&args.out) {
+        Ok(_) => args.out.canonicalize()?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            output_directory.join(args.out.file_name().ok_or("output path needs a filename")?)
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let catalog = args.compute_catalog.as_ref().map_or_else(
+        || Ok(output_directory.join("default_compute.yaml")),
+        |path| path.canonicalize(),
+    )?;
+    if output == catalog || (catalog.exists() && output == catalog.canonicalize()?) {
+        return Err("output must differ from the compute catalog path".into());
+    }
+    if args.compute_catalog.is_none() {
+        let contents = include_str!("../../examples/default_compute.yaml");
+        if catalog.exists() {
+            if fs::read_to_string(&catalog)? != contents {
+                return Err(format!(
+                    "{} already exists with different contents; use --compute-catalog to select it",
+                    catalog.display()
+                )
+                .into());
+            }
+        } else {
+            fs::write(&catalog, contents)?;
+        }
+    }
+    let catalog_yaml = gwr_platform::catalog::load_yaml_with_includes(
+        &catalog,
+        gwr_platform::catalog::CatalogTarget::Platform,
+    )?;
+    let catalog_config: yaml_serde::Value = yaml_serde::from_str(&catalog_yaml)?;
+    let has_profile = catalog_config
+        .get("compute_profiles")
+        .and_then(|profiles| profiles.get(&args.compute_profile))
+        .is_some();
+    if !has_profile {
+        return Err(format!(
+            "Unknown compute profile '{}' in {}",
+            args.compute_profile,
+            catalog.display()
+        )
+        .into());
+    }
+    let platform = build_platform(&args)?;
+    let include = relative_path(
+        output.parent().ok_or("output path needs a parent")?,
+        &catalog,
+    );
+    let mut yaml = format!(
+        "includes:\n  - {}\n",
+        serde_json::to_string(&include.display().to_string())?
+    );
+    yaml.push_str(&platform_to_yaml_str(&platform)?);
+    fs::write(&args.out, yaml)?;
 
-#[derive(Debug, Parser)]
-#[command(about = "Build a platform file based around a 2D fabric")]
-struct Args {
-    #[arg(long, default_value = "platform.yaml")]
-    out: PathBuf,
-
-    #[arg(long, default_value_t = DEFAULT_PE_NUM_ACTIVE_REQUESTS)]
-    pe_active_requests: usize,
-
-    #[arg(long, default_value_t = DEFAULT_PE_LSU_ACCESS_BYTES)]
-    pe_lsu_access_bytes: usize,
-
-    #[arg(long, default_value_t = DEFAULT_PE_SRAM_BYTES)]
-    pe_sram_bytes: u64,
-
-    #[arg(long, default_value_t = DEFAULT_PE_ADDS_PER_TICK)]
-    pe_adds_per_tick: f64,
-
-    #[arg(long, default_value_t = DEFAULT_PE_MULS_PER_TICK)]
-    pe_muls_per_tick: f64,
-
-    #[arg(long, default_value_t = DEFAULT_PE_COMPARES_PER_TICK)]
-    pe_compares_per_tick: f64,
-
-    #[arg(long, default_value_t = DEFAULT_PE_OVERHEAD_SIZE_BYTES)]
-    pe_overhead_size_bytes: usize,
-
-    #[arg(long, value_enum, default_value_t = FabricKind::Functional)]
-    fabric_model: FabricKind,
-
-    #[arg(long, value_enum, default_value_t = DEFAULT_FABRIC_ROUTING)]
-    fabric_routing: FabricRoutingAlgorithm,
-
-    #[arg(long, default_value_t = 2)]
-    num_columns: usize,
-
-    #[arg(long, default_value_t = 2)]
-    num_rows: usize,
-
-    #[arg(long, default_value_t = 2)]
-    num_hbms: usize,
-
-    #[arg(long, default_value_t = DEFAULT_HBM_SIZE_BYTES)]
-    hbm_base: usize,
-
-    #[arg(long, default_value_t = DEFAULT_HBM_SIZE_BYTES)]
-    hbm_size: usize,
-
-    #[arg(long, default_value_t = 0)]
-    l1_kib: usize,
-
-    #[arg(long, default_value_t = 32)]
-    l1_bytes_per_tick: usize,
-
-    #[arg(long, default_value_t = 4)]
-    l1_num_ways: usize,
-
-    #[arg(long, default_value_t = 5)]
-    l1_latency: usize,
-
-    #[arg(long, default_value_t = 0)]
-    l2_kib: usize,
-
-    #[arg(long, default_value_t = 32)]
-    l2_bytes_per_tick: usize,
-
-    #[arg(long, default_value_t = 8)]
-    l2_num_ways: usize,
-
-    #[arg(long, default_value_t = 20)]
-    l2_latency: usize,
-
-    #[arg(long, default_value_t = false)]
-    use_coherency_managers: bool,
+    Ok(())
 }
 
-impl Args {
-    fn validate(&self) -> Result<(), String> {
-        if self.use_coherency_managers
-            && (self.l1_kib == 0 || self.l2_kib != 0 || self.num_hbms == 0)
-        {
-            return Err("Coherency requires L1 caches, at least one HBM, and no L2 cache (hierarchical coherence is unsupported)".into());
+fn build_platform(args: &Args) -> Result<PlatformConfig, String> {
+    let memory_map = MemoryMapSection {
+        address_mapping: None,
+        name: PE_MEMORY_MAP_NAME.to_string(),
+        devices: build_memory_map_ranges(args),
+    };
+    let pe_config = build_pe_config(args);
+    let mut caches = build_caches(args)?;
+    if args.use_coherency_managers {
+        for cache in caches.iter_mut().flatten() {
+            cache.coherency_managers = Some(vec!["cm0".to_owned()]);
         }
-        if self.l2_kib != 0 && self.l1_kib == 0 {
-            return Err("Cannot have an L2 cache without an L1 cache".to_string());
-        }
+    }
 
-        let num_nodes = self.num_columns * self.num_rows;
-        if self.num_hbms > num_nodes {
-            return Err(format!(
-                "num-hbms ({}) cannot exceed number of fabric nodes ({num_nodes})",
-                self.num_hbms
+    Ok(PlatformConfig {
+        coherency_managers: args.use_coherency_managers.then(|| {
+            vec![gwr_platform::types::CoherencyManagerSection {
+                name: "cm0".to_owned(),
+                memory_map: PE_MEMORY_MAP_NAME.to_owned(),
+                config: gwr_platform::types::CoherencyManagerConfigSection {
+                    line_size_bytes: Some(DEFAULT_CACHE_LINE_SIZE_BYTES),
+                    operations_per_tick: None,
+                },
+            }]
+        }),
+        operation_classes: Default::default(),
+        compute_profiles: Default::default(),
+        memory_maps: vec![memory_map],
+        defaults: None,
+        processing_elements: Some(build_processing_elements(args, &pe_config)?),
+        caches,
+        fabrics: Some(build_fabrics(args)),
+        memories: Some(build_memories(args)),
+        connections: Some(build_connections(args)?),
+    })
+}
+
+fn build_memory_map_ranges(args: &Args) -> Vec<String> {
+    (0..args.num_hbms).map(|mm| format!("hbm{mm}")).collect()
+}
+
+fn build_pe_config(args: &Args) -> ProcessingElementConfigSection {
+    ProcessingElementConfigSection {
+        block_execution: None,
+        num_active_requests: Some(args.pe_active_requests),
+        lsu_access_bytes: Some(args.pe_lsu_access_bytes),
+        overhead_size_bytes: Some(args.pe_overhead_size_bytes),
+        sram_bytes: Some(args.pe_sram_bytes),
+        boundary_payload_service: None,
+        local_payload_service: None,
+        compute: Some(ComputeSelection::Named(args.compute_profile.clone())),
+    }
+}
+
+fn build_processing_elements(
+    args: &Args,
+    pe_config: &ProcessingElementConfigSection,
+) -> Result<Vec<ProcessingElementSection>, String> {
+    Ok(PeIdGen::new(args)?
+        .map(|(column, row)| ProcessingElementSection {
+            name: create_name("pe", column, row),
+            memory_map: PE_MEMORY_MAP_NAME.to_string(),
+            dma_memory_map: None,
+            config: pe_config.clone(),
+        })
+        .collect())
+}
+const PE_MEMORY_MAP_NAME: &str = "default_memory_map";
+
+fn build_caches(args: &Args) -> Result<Option<Vec<CacheSection>>, String> {
+    if args.l1_kib == 0 && args.l2_kib == 0 {
+        return Ok(None);
+    }
+
+    let mut caches = Vec::new();
+
+    for (column, row) in PeIdGen::new(args)? {
+        if args.l1_kib != 0 {
+            caches.push(build_cache(
+                create_name("l1", column, row),
+                args.l1_kib,
+                args.l1_bytes_per_tick,
+                args.l1_num_ways,
+                args.l1_latency,
             ));
         }
 
-        Ok(())
+        if args.l2_kib != 0 {
+            caches.push(build_cache(
+                create_name("l2", column, row),
+                args.l2_kib,
+                args.l2_bytes_per_tick,
+                args.l2_num_ways,
+                args.l2_latency,
+            ));
+        }
+    }
+
+    Ok(Some(caches))
+}
+
+fn build_cache(
+    name: String,
+    kib: usize,
+    bytes_per_tick: usize,
+    num_ways: usize,
+    latency: usize,
+) -> CacheSection {
+    let num_sets = (kib * 1024) / num_ways / DEFAULT_CACHE_LINE_SIZE_BYTES;
+    CacheSection {
+        coherency_managers: None,
+        name,
+        config: CacheConfigSection {
+            max_inflight_parents: None,
+            max_inflight_fills: None,
+            bw_bytes_per_tick: Some(bytes_per_tick),
+            line_size_bytes: Some(DEFAULT_CACHE_LINE_SIZE_BYTES),
+            num_ways: Some(num_ways),
+            num_sets: Some(num_sets),
+            delay_ticks: Some(latency),
+        },
     }
 }
+
+fn build_fabrics(args: &Args) -> Vec<FabricSection> {
+    vec![FabricSection {
+        name: FABRIC_NAME.to_string(),
+        kind: args.fabric_model,
+        columns: args.num_columns,
+        rows: args.num_rows,
+        config: FabricConfigSection {
+            fabric_ports_per_node: Some(if args.use_coherency_managers {
+                2
+            } else {
+                DEFAULT_FABRIC_PORTS_PER_NODE
+            }),
+            ticks_per_hop: Some(DEFAULT_FABRIC_TICKS_PER_HOP),
+            ticks_overhead: Some(DEFAULT_FABRIC_TICKS_OVERHEAD),
+            rx_buffer_bytes: Some(DEFAULT_FABRIC_RX_BUFFER_BYTES),
+            tx_buffer_bytes: Some(DEFAULT_FABRIC_TX_BUFFER_BYTES),
+            port_bits_per_tick: Some(DEFAULT_FABRIC_PORT_BITS_PER_TICK),
+            internal_link_bits_per_tick: None,
+            routing: Some(args.fabric_routing),
+            port_selection: None,
+        },
+    }]
+}
+
+fn build_memories(args: &Args) -> Vec<MemorySection> {
+    let mut base = args.hbm_base;
+
+    (0..args.num_hbms)
+        .map(|i| {
+            let mem = MemorySection {
+                name: format!("hbm{i}"),
+                kind: MemoryKind::HBM,
+                base_address: base as u64,
+                config: MemoryConfigSection {
+                    atomic_service: None,
+                    capacity_bytes: args.hbm_size as u64,
+                    bw_bytes_per_tick: None,
+                    delay_ticks: Some(DEFAULT_HBM_DELAY_TICKS),
+                    arrival_aware_service: None,
+                },
+            };
+            base += args.hbm_size;
+            mem
+        })
+        .collect()
+}
+
+fn build_connections(args: &Args) -> Result<Vec<ConnectSection>, String> {
+    let mut connections = Vec::new();
+
+    for (column, row) in PeIdGen::new(args)? {
+        let mut entities = vec![pe_endpoint_id(create_name("pe", column, row))];
+
+        if args.l1_kib != 0 {
+            entities.push(cache_endpoint_id(create_name("l1", column, row)));
+        }
+        if args.l2_kib != 0 {
+            entities.push(cache_endpoint_id(create_name("l2", column, row)));
+        }
+
+        entities.push(fabric_port_endpoint_id(FABRIC_NAME, column, row, 0));
+
+        for pair in entities.windows(2) {
+            connections.push(ConnectSection {
+                connect: vec![pair[0].clone(), pair[1].clone()],
+            });
+        }
+    }
+
+    for (i, (column, row)) in HbmIdGen::new(args)?.enumerate() {
+        connections.push(ConnectSection {
+            connect: vec![
+                mem_endpoint_id(format!("hbm{i}")),
+                fabric_port_endpoint_id(FABRIC_NAME, column, row, 0),
+            ],
+        });
+    }
+
+    if args.use_coherency_managers {
+        for column in 0..args.num_columns {
+            for row in 0..args.num_rows {
+                connections.push(ConnectSection {
+                    connect: vec![
+                        if column == 0 && row == 0 {
+                            "coherency_manager.cm0".to_owned()
+                        } else {
+                            "null".to_owned()
+                        },
+                        fabric_port_endpoint_id(FABRIC_NAME, column, row, 1),
+                    ],
+                });
+            }
+        }
+    }
+    Ok(connections)
+}
+
+const FABRIC_NAME: &str = "fabric0";
 
 struct PeIdGen {
     num_rows: usize,
@@ -189,231 +380,119 @@ impl Iterator for HbmIdGen {
     }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = Args::parse();
-    let platform = build_platform(&args)?;
-    let yaml = platform_to_yaml_str(&platform)?;
-    if let Some(parent) = args.out.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(&args.out, yaml)?;
+#[derive(Debug, Parser)]
+#[command(about = "Build a platform file based around a 2D fabric")]
+struct Args {
+    #[arg(long, default_value = "platform.yaml")]
+    out: PathBuf,
 
-    Ok(())
+    #[arg(long)]
+    compute_catalog: Option<PathBuf>,
+
+    #[arg(long, default_value = "basic_alu")]
+    compute_profile: String,
+
+    #[arg(long, default_value_t = DEFAULT_PE_NUM_ACTIVE_REQUESTS)]
+    pe_active_requests: usize,
+
+    #[arg(long, default_value_t = DEFAULT_PE_LSU_ACCESS_BYTES)]
+    pe_lsu_access_bytes: usize,
+
+    #[arg(long, default_value_t = DEFAULT_PE_SRAM_BYTES)]
+    pe_sram_bytes: u64,
+
+    #[arg(long, default_value_t = DEFAULT_PE_OVERHEAD_SIZE_BYTES)]
+    pe_overhead_size_bytes: usize,
+
+    #[arg(long, value_enum, default_value_t = FabricKind::Functional)]
+    fabric_model: FabricKind,
+
+    #[arg(long, value_enum, default_value_t = DEFAULT_FABRIC_ROUTING)]
+    fabric_routing: FabricRoutingAlgorithm,
+
+    #[arg(long, default_value_t = 2)]
+    num_columns: usize,
+
+    #[arg(long, default_value_t = 2)]
+    num_rows: usize,
+
+    #[arg(long, default_value_t = 2)]
+    num_hbms: usize,
+
+    #[arg(long, default_value_t = DEFAULT_HBM_SIZE_BYTES)]
+    hbm_base: usize,
+
+    #[arg(long, default_value_t = DEFAULT_HBM_SIZE_BYTES)]
+    hbm_size: usize,
+
+    #[arg(long, default_value_t = 0)]
+    l1_kib: usize,
+
+    #[arg(long, default_value_t = 32)]
+    l1_bytes_per_tick: usize,
+
+    #[arg(long, default_value_t = 4)]
+    l1_num_ways: usize,
+
+    #[arg(long, default_value_t = 5)]
+    l1_latency: usize,
+
+    #[arg(long, default_value_t = 0)]
+    l2_kib: usize,
+
+    #[arg(long, default_value_t = 32)]
+    l2_bytes_per_tick: usize,
+
+    #[arg(long, default_value_t = 8)]
+    l2_num_ways: usize,
+
+    #[arg(long, default_value_t = 20)]
+    l2_latency: usize,
+    #[arg(long, default_value_t = false)]
+    use_coherency_managers: bool,
 }
 
-fn build_platform(args: &Args) -> Result<PlatformConfig, String> {
-    let memory_map = MemoryMapSection {
-        name: PE_MEMORY_MAP_NAME.to_string(),
-        devices: build_memory_map_devices(args),
-    };
-    let pe_config = build_pe_config(args);
-
-    let mut caches = build_caches(args)?;
-    if args.use_coherency_managers {
-        for cache in caches.iter_mut().flatten() {
-            cache.coherency_managers = Some(vec!["cm0".to_owned()]);
+impl Args {
+    fn validate(&self) -> Result<(), String> {
+        if self.use_coherency_managers
+            && (self.l1_kib == 0 || self.l2_kib != 0 || self.num_hbms == 0)
+        {
+            return Err("Coherency requires L1 caches, at least one HBM, and no L2 cache (hierarchical coherence is unsupported)".into());
         }
-    }
-    Ok(PlatformConfig {
-        coherency_managers: args.use_coherency_managers.then(|| {
-            vec![gwr_platform::types::CoherencyManagerSection {
-                name: "cm0".to_owned(),
-                memory_map: PE_MEMORY_MAP_NAME.to_owned(),
-                config: gwr_platform::types::CoherencyManagerConfigSection {
-                    line_size_bytes: Some(DEFAULT_CACHE_LINE_SIZE_BYTES),
-                    operations_per_tick: None,
-                },
-            }]
-        }),
-        memory_maps: vec![memory_map],
-        defaults: None,
-        processing_elements: Some(build_processing_elements(args, &pe_config)?),
-        caches,
-        fabrics: Some(build_fabrics(args)),
-        memories: Some(build_memories(args)),
-        connections: Some(build_connections(args)?),
-    })
-}
+        if self.l2_kib != 0 && self.l1_kib == 0 {
+            return Err("Cannot have an L2 cache without an L1 cache".to_string());
+        }
 
-fn build_fabrics(args: &Args) -> Vec<FabricSection> {
-    vec![FabricSection {
-        name: FABRIC_NAME.to_string(),
-        kind: args.fabric_model,
-        columns: args.num_columns,
-        rows: args.num_rows,
-        config: FabricConfigSection {
-            fabric_ports_per_node: Some(if args.use_coherency_managers {
-                2
-            } else {
-                DEFAULT_FABRIC_PORTS_PER_NODE
-            }),
-            ticks_per_hop: Some(DEFAULT_FABRIC_TICKS_PER_HOP),
-            ticks_overhead: Some(DEFAULT_FABRIC_TICKS_OVERHEAD),
-            rx_buffer_bytes: Some(DEFAULT_FABRIC_RX_BUFFER_BYTES),
-            tx_buffer_bytes: Some(DEFAULT_FABRIC_TX_BUFFER_BYTES),
-            port_bits_per_tick: Some(DEFAULT_FABRIC_PORT_BITS_PER_TICK),
-            internal_link_bits_per_tick: None,
-            routing: Some(args.fabric_routing),
-            port_selection: None,
-        },
-    }]
-}
-
-fn build_caches(args: &Args) -> Result<Option<Vec<CacheSection>>, String> {
-    if args.l1_kib == 0 && args.l2_kib == 0 {
-        return Ok(None);
-    }
-
-    let mut caches = Vec::new();
-
-    for (column, row) in PeIdGen::new(args)? {
-        if args.l1_kib != 0 {
-            caches.push(build_cache(
-                create_name("l1", column, row),
-                args.l1_kib,
-                args.l1_bytes_per_tick,
-                args.l1_num_ways,
-                args.l1_latency,
+        let num_nodes = self.num_columns * self.num_rows;
+        if self.num_hbms > num_nodes {
+            return Err(format!(
+                "num-hbms ({}) cannot exceed number of fabric nodes ({num_nodes})",
+                self.num_hbms
             ));
         }
 
-        if args.l2_kib != 0 {
-            caches.push(build_cache(
-                create_name("l2", column, row),
-                args.l2_kib,
-                args.l2_bytes_per_tick,
-                args.l2_num_ways,
-                args.l2_latency,
-            ));
-        }
+        Ok(())
     }
-
-    Ok(Some(caches))
-}
-
-fn build_cache(
-    name: String,
-    kib: usize,
-    bytes_per_tick: usize,
-    num_ways: usize,
-    latency: usize,
-) -> CacheSection {
-    let num_sets = (kib * 1024) / num_ways / DEFAULT_CACHE_LINE_SIZE_BYTES;
-    CacheSection {
-        coherency_managers: None,
-        name,
-        config: CacheConfigSection {
-            bw_bytes_per_tick: Some(bytes_per_tick),
-            line_size_bytes: Some(DEFAULT_CACHE_LINE_SIZE_BYTES),
-            max_inflight_parents: None,
-            max_inflight_fills: None,
-            num_ways: Some(num_ways),
-            num_sets: Some(num_sets),
-            delay_ticks: Some(latency),
-        },
-    }
-}
-
-fn build_memories(args: &Args) -> Vec<MemorySection> {
-    let mut base = args.hbm_base;
-
-    (0..args.num_hbms)
-        .map(|i| {
-            let mem = MemorySection {
-                name: format!("hbm{i}"),
-                kind: MemoryKind::HBM,
-                base_address: base as u64,
-                config: MemoryConfigSection {
-                    capacity_bytes: args.hbm_size as u64,
-                    bw_bytes_per_tick: None,
-                    delay_ticks: Some(DEFAULT_HBM_DELAY_TICKS),
-                },
-            };
-            base += args.hbm_size;
-            mem
-        })
-        .collect()
-}
-
-fn build_connections(args: &Args) -> Result<Vec<ConnectSection>, String> {
-    let mut connections = Vec::new();
-
-    for (column, row) in PeIdGen::new(args)? {
-        let mut entities = vec![pe_endpoint_id(create_name("pe", column, row))];
-
-        if args.l1_kib != 0 {
-            entities.push(cache_endpoint_id(create_name("l1", column, row)));
-        }
-        if args.l2_kib != 0 {
-            entities.push(cache_endpoint_id(create_name("l2", column, row)));
-        }
-
-        entities.push(fabric_port_endpoint_id(FABRIC_NAME, column, row, 0));
-
-        for pair in entities.windows(2) {
-            connections.push(ConnectSection {
-                connect: vec![pair[0].clone(), pair[1].clone()],
-            });
-        }
-    }
-
-    for (i, (column, row)) in HbmIdGen::new(args)?.enumerate() {
-        connections.push(ConnectSection {
-            connect: vec![
-                mem_endpoint_id(format!("hbm{i}")),
-                fabric_port_endpoint_id(FABRIC_NAME, column, row, 0),
-            ],
-        });
-    }
-
-    if args.use_coherency_managers {
-        for column in 0..args.num_columns {
-            for row in 0..args.num_rows {
-                connections.push(ConnectSection {
-                    connect: vec![
-                        if column == 0 && row == 0 {
-                            "coherency_manager.cm0".to_owned()
-                        } else {
-                            "null".to_owned()
-                        },
-                        fabric_port_endpoint_id(FABRIC_NAME, column, row, 1),
-                    ],
-                });
-            }
-        }
-    }
-    Ok(connections)
-}
-
-fn build_pe_config(args: &Args) -> ProcessingElementConfigSection {
-    ProcessingElementConfigSection {
-        num_active_requests: Some(args.pe_active_requests),
-        lsu_access_bytes: Some(args.pe_lsu_access_bytes),
-        overhead_size_bytes: Some(args.pe_overhead_size_bytes),
-        sram_bytes: Some(args.pe_sram_bytes),
-        adds_per_tick: Some(args.pe_adds_per_tick),
-        muls_per_tick: Some(args.pe_muls_per_tick),
-        compares_per_tick: Some(args.pe_compares_per_tick),
-    }
-}
-
-fn build_memory_map_devices(args: &Args) -> Vec<String> {
-    (0..args.num_hbms).map(|mm| format!("hbm{mm}")).collect()
-}
-
-fn build_processing_elements(
-    args: &Args,
-    pe_config: &ProcessingElementConfigSection,
-) -> Result<Vec<ProcessingElementSection>, String> {
-    Ok(PeIdGen::new(args)?
-        .map(|(column, row)| ProcessingElementSection {
-            name: create_name("pe", column, row),
-            memory_map: PE_MEMORY_MAP_NAME.to_string(),
-            config: pe_config.clone(),
-        })
-        .collect())
 }
 
 fn create_name(prefix: &str, column: usize, row: usize) -> String {
     format!("{prefix}_{column}_{row}")
+}
+
+fn relative_path(from_directory: &Path, target: &Path) -> PathBuf {
+    let from: Vec<_> = from_directory.components().collect();
+    let to: Vec<_> = target.components().collect();
+    let common = from
+        .iter()
+        .zip(&to)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let mut path = PathBuf::new();
+    for _ in common..from.len() {
+        path.push("..");
+    }
+    for component in &to[common..] {
+        path.push(component.as_os_str());
+    }
+    path
 }

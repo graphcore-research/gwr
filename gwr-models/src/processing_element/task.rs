@@ -1,294 +1,40 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use std::rc::Rc;
-
-use gwr_engine::sim_error;
-use gwr_engine::types::SimError;
-use rand::RngExt;
-use serde::ser::SerializeMap;
-use serde::{Deserialize, Serialize, Serializer};
-
-use crate::processing_element::operators::{
-    ExpansionDirection, HasShape, Operator, OperatorAdd, OperatorCustom, OperatorGemm,
-    OperatorMaxPool, Shape, Tensor, TensorPartition, TensorView, create_maxpool_op,
-    maybe_add_indices_output, partition_tensors,
-};
-use crate::processing_element::{ComputeCapabilities, MachineOpCounts};
+pub use super::runner::streamed_matrix::{StreamedMatrixTaskConfig, StreamedOutputSlot};
+use crate::processing_element::program::syntax::{ProgramSpec, TileSpec};
+use crate::processing_element::tensors::TensorView;
 
 #[derive(Debug, Clone)]
-pub struct ComputeTaskConfig {
-    /// Only needed as a debug aid
+pub enum Task {
+    StreamedMatrix {
+        config: std::rc::Rc<super::runner::streamed_matrix::StreamedOutputSlot>,
+    },
+    AtomicEffect {
+        config: Box<AtomicTaskConfig>,
+    },
+    AtomicControlJoin {
+        config: Box<AtomicJoinConfig>,
+    },
+    ProgramTask {
+        config: Box<ProgramTaskConfig>,
+    },
+    TransferTask {
+        config: Box<crate::transfer::TransferTaskConfig>,
+    },
+    SyncTask {
+        region: SyncRegion,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct ProgramTaskConfig {
     pub id: String,
-    pub op: ComputeOp,
-    pub inputs: Vec<Option<TensorView>>,
-    pub outputs: Vec<Option<TensorView>>,
-}
-
-impl ComputeTaskConfig {
-    #[must_use]
-    pub fn activity_name(&self) -> &str {
-        match &self.op {
-            ComputeOp::Custom(operator) => operator.name.as_deref().unwrap_or(&self.id),
-            _ => &self.id,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ComputeOp {
-    Add,
-    Gemm,
-    MaxPool(OperatorMaxPool),
-    Custom(OperatorCustom),
-}
-
-impl Serialize for ComputeOp {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match self {
-            Self::Add => serializer.serialize_str("add"),
-            Self::Gemm => serializer.serialize_str("gemm"),
-            Self::MaxPool(operator) => {
-                let mut map = serializer.serialize_map(Some(1))?;
-                map.serialize_entry("maxpool", operator)?;
-                map.end()
-            }
-            Self::Custom(operator) => {
-                let mut map = serializer.serialize_map(Some(1))?;
-                map.serialize_entry("custom", operator)?;
-                map.end()
-            }
-        }
-    }
-}
-
-impl ComputeOp {
-    #[must_use]
-    pub fn trace_name(&self) -> &str {
-        match self {
-            ComputeOp::Add => "add",
-            ComputeOp::Gemm => "gemm",
-            ComputeOp::MaxPool(_) => "maxpool",
-            ComputeOp::Custom(operator) => operator.name.as_deref().unwrap_or("custom"),
-        }
-    }
-
-    pub fn compute_delay_ticks(
-        &self,
-        compute_capabilities: &Rc<ComputeCapabilities>,
-        input_views: &[Option<TensorView>],
-        output_views: &[Option<TensorView>],
-    ) -> Result<usize, SimError> {
-        self.operator()
-            .compute_delay_ticks(compute_capabilities, input_views, output_views)
-    }
-
-    pub fn validate(
-        &self,
-        input_views: &[Option<TensorView>],
-        output_views: &[Option<TensorView>],
-    ) -> Result<(), SimError> {
-        self.operator().validate(input_views, output_views)
-    }
-
-    pub fn compute_machine_ops(
-        &self,
-        input_views: &[Option<TensorView>],
-        output_views: &[Option<TensorView>],
-    ) -> Result<MachineOpCounts, SimError> {
-        self.operator()
-            .compute_machine_ops(input_views, output_views)
-    }
-
-    pub fn create_partitions(
-        &self,
-        input_views: &[Option<TensorView>],
-        output_views: &[Option<TensorView>],
-        num_partitions: usize,
-    ) -> Result<Vec<TensorPartition>, SimError> {
-        self.operator()
-            .partition_views(input_views, output_views, num_partitions)?
-            .collect()
-    }
-
-    pub(crate) fn create_partitions_for_sram(
-        &self,
-        input_views: &[Option<TensorView>],
-        output_views: &[Option<TensorView>],
-        sram_bytes: usize,
-    ) -> Result<Vec<TensorPartition>, SimError> {
-        let operator = self.operator();
-        let max_partition_count = operator.max_partition_count(input_views, output_views)?;
-        let mut candidate_count = 1;
-        let Some(mut oversized_working_set) = first_oversized_working_set(
-            operator,
-            input_views,
-            output_views,
-            candidate_count,
-            sram_bytes,
-        )?
-        else {
-            return self.create_partitions(input_views, output_views, candidate_count);
-        };
-        if sram_bytes == 0 {
-            return sim_error!("Compute task requires memory but the PE has no SRAM");
-        }
-
-        let mut failing_count = candidate_count;
-        loop {
-            if candidate_count == max_partition_count {
-                return sim_error!(
-                    "{} cannot fit in {sram_bytes} bytes of SRAM: a partition at the maximum useful partition count requires {oversized_working_set} bytes",
-                    self.trace_name(),
-                );
-            }
-
-            candidate_count = candidate_count.saturating_mul(2).min(max_partition_count);
-            let Some(working_set_bytes) = first_oversized_working_set(
-                operator,
-                input_views,
-                output_views,
-                candidate_count,
-                sram_bytes,
-            )?
-            else {
-                break;
-            };
-            oversized_working_set = working_set_bytes;
-            failing_count = candidate_count;
-        }
-
-        let mut fitting_count = candidate_count;
-        while fitting_count - failing_count > 1 {
-            let middle = failing_count + (fitting_count - failing_count) / 2;
-            if first_oversized_working_set(operator, input_views, output_views, middle, sram_bytes)?
-                .is_none()
-            {
-                fitting_count = middle;
-            } else {
-                failing_count = middle;
-            }
-        }
-        self.create_partitions(input_views, output_views, fitting_count)
-    }
-
-    pub fn create_tensor_partitions(
-        &self,
-        inputs: &[Option<Tensor>],
-        outputs: &[Option<Tensor>],
-        num_partitions: usize,
-    ) -> Result<Vec<TensorPartition>, SimError> {
-        partition_tensors(self.operator(), inputs, outputs, num_partitions)
-    }
-
-    pub fn create_inputs(
-        &self,
-        outputs: &[Option<Tensor>],
-        expand_ratio: f64,
-        rng: &mut impl RngExt,
-    ) -> Result<Vec<Option<Tensor>>, SimError> {
-        match self {
-            Self::Add => OperatorAdd::create_inputs(outputs, expand_ratio, rng),
-            Self::Gemm => OperatorGemm::create_inputs(outputs, expand_ratio, rng),
-            Self::MaxPool(operator) => operator.create_inputs(outputs, expand_ratio, rng),
-            Self::Custom(_) => Err(SimError(
-                "Custom operators cannot generate tensors".to_string(),
-            )),
-        }
-    }
-
-    pub fn create_outputs(
-        &self,
-        inputs: &[Option<Tensor>],
-        expand_ratio: f64,
-        rng: &mut impl RngExt,
-    ) -> Result<Vec<Option<Tensor>>, SimError> {
-        match self {
-            Self::Add => OperatorAdd::create_outputs(inputs, expand_ratio, rng),
-            Self::Gemm => OperatorGemm::create_outputs(inputs, expand_ratio, rng),
-            Self::MaxPool(operator) => operator.create_outputs(inputs, expand_ratio, rng),
-            Self::Custom(_) => Err(SimError(
-                "Custom operators cannot generate tensors".to_string(),
-            )),
-        }
-    }
-
-    pub fn configured_for_tensor<T: HasShape>(
-        &self,
-        tensor: &T,
-        direction: ExpansionDirection,
-        expand_ratio: f64,
-    ) -> Result<Self, SimError> {
-        match self {
-            Self::Add => Ok(Self::Add),
-            Self::Gemm => Ok(Self::Gemm),
-            Self::MaxPool(_) => Ok(Self::MaxPool(create_maxpool_op(
-                tensor,
-                direction,
-                expand_ratio,
-            )?)),
-            Self::Custom(_) => Err(SimError("Custom operators cannot be generated".to_string())),
-        }
-    }
-
-    pub fn add_optional_inputs(
-        &self,
-        inputs: &mut Vec<Option<Tensor>>,
-        expand_ratio: f64,
-        rng: &mut impl RngExt,
-    ) -> Result<bool, SimError> {
-        match self {
-            Self::Gemm => super::operators::maybe_add_input_c(inputs, expand_ratio, rng),
-            _ => Ok(false),
-        }
-    }
-
-    pub fn add_optional_outputs(
-        &self,
-        outputs: &mut Vec<Option<Tensor>>,
-        expand_ratio: f64,
-        rng: &mut impl RngExt,
-    ) -> Result<bool, SimError> {
-        match self {
-            Self::MaxPool(_) => maybe_add_indices_output(outputs, expand_ratio, rng),
-            _ => Ok(false),
-        }
-    }
-
-    pub fn gemm_rhs_shape<T: HasShape>(input: &T) -> Result<Shape, SimError> {
-        super::operators::gemm_rhs_shape(input)
-    }
-
-    fn operator(&self) -> &dyn Operator {
-        static ADD: OperatorAdd = OperatorAdd;
-        static GEMM: OperatorGemm = OperatorGemm;
-
-        match self {
-            Self::Add => &ADD,
-            Self::Gemm => &GEMM,
-            Self::MaxPool(operator) => operator,
-            Self::Custom(operator) => operator,
-        }
-    }
-}
-
-fn first_oversized_working_set(
-    operator: &dyn Operator,
-    input_views: &[Option<TensorView>],
-    output_views: &[Option<TensorView>],
-    num_partitions: usize,
-    sram_bytes: usize,
-) -> Result<Option<usize>, SimError> {
-    for partition in operator.partition_views(input_views, output_views, num_partitions)? {
-        let working_set_bytes = partition?.working_set_bytes()?;
-        if working_set_bytes > sram_bytes {
-            return Ok(Some(working_set_bytes));
-        }
-    }
-    Ok(None)
+    pub program: ProgramSpec,
+    pub tiling: Option<TileSpec>,
+    /// Explicit bounded block schedule; absence preserves legacy execution.
+    pub pipeline: Option<super::program::pipeline::BlockPipelineSpec>,
+    pub inputs: Vec<TensorView>,
+    pub outputs: Vec<TensorView>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -297,172 +43,195 @@ pub enum SyncRegion {
     Global,
 }
 
-#[derive(Debug, Clone)]
-pub enum Task {
-    ComputeTask { config: ComputeTaskConfig },
-    SyncTask { region: SyncRegion },
+/// Opaque admitted static dispatch. Clones do not mint owners or source IDs.
+#[derive(Clone)]
+pub struct AtomicTaskConfig {
+    pub id: String,
+    target: std::rc::Rc<crate::memory::atomic::AtomicTargetSender>,
+    device: u64,
+    address: u64,
+    effect: crate::memory::atomic::Effect,
+    issuer: Option<std::rc::Weak<super::ProcessingElement>>,
+    controller: Option<std::rc::Rc<crate::memory::atomic::SplitKController>>,
+    source_operand: Option<(
+        std::rc::Rc<super::runner::streamed_matrix::StreamedOutputSlot>,
+        usize,
+    )>,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::processing_element::operators::dtype::DataType;
-
-    fn largest_working_set(partitions: &[TensorPartition]) -> Result<usize, SimError> {
-        partitions.iter().try_fold(0usize, |largest, partition| {
-            Ok(largest.max(partition.working_set_bytes()?))
-        })
+impl std::fmt::Debug for AtomicTaskConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AtomicTaskConfig")
+            .field("id", &self.id)
+            .field("device", &self.device)
+            .field("address", &self.address)
+            .field("physical_issuer_bound", &self.issuer.is_some())
+            .finish()
     }
-
-    fn view(dims: &[usize], dtype: DataType) -> Option<TensorView> {
-        Some(TensorView::new_full(Tensor::new(dims, &dtype, 0).unwrap()))
+}
+impl AtomicTaskConfig {
+    /// Bind only an actual PE identity, never a caller-provided proof callback.
+    /// Direct request/reply identity is independently verified by the private
+    /// models-owned endpoints captured from successful physical connections.
+    /// ```compile_fail
+    /// use std::rc::Rc;
+    /// use gwr_models::processing_element::task::AtomicTaskConfig;
+    /// fn forge(config:AtomicTaskConfig) {config.with_physical_issuer(Rc::new(|_|Ok(())));}
+    /// ```
+    pub fn with_physical_issuer(mut self, pe: &std::rc::Rc<super::ProcessingElement>) -> Self {
+        self.issuer = Some(std::rc::Rc::downgrade(pe));
+        self
     }
-
-    fn assert_working_sets_do_not_increase(
-        op: &ComputeOp,
-        inputs: &[Option<TensorView>],
-        outputs: &[Option<TensorView>],
-    ) {
-        let max_count = op.operator().max_partition_count(inputs, outputs).unwrap();
-        let mut previous = usize::MAX;
-        for requested in 1..=max_count {
-            let partitions = op.create_partitions(inputs, outputs, requested).unwrap();
-            let largest = largest_working_set(&partitions).unwrap();
-            assert!(
-                largest <= previous,
-                "{} working set increased from {previous} to {largest} at {requested} partitions",
-                op.trace_name()
-            );
-            previous = largest;
+    pub fn validate_for_pe(&self, pe: &super::ProcessingElement) -> gwr_engine::types::SimResult {
+        self.validate()?;
+        if let Some((slot, _)) = &self.source_operand {
+            slot.validate_for_pe(pe)?;
+        }
+        pe.validate_atomic_word_mapping(self.device, self.address)?;
+        let expected = self
+            .issuer
+            .as_ref()
+            .and_then(std::rc::Weak::upgrade)
+            .ok_or_else(|| {
+                gwr_engine::types::SimError(
+                    "atomic task lacks actual platform issuer binding".into(),
+                )
+            })?;
+        if !std::ptr::eq(expected.as_ref(), pe) {
+            return Err(gwr_engine::types::SimError(
+                "atomic task activated on a foreign PE".into(),
+            ));
+        }
+        pe.validate_atomic_direct_target(&self.target)
+    }
+    pub fn new(
+        id: String,
+        target: std::rc::Rc<crate::memory::atomic::AtomicTargetSender>,
+        device: u64,
+        address: u64,
+        effect: crate::memory::atomic::Effect,
+    ) -> Result<Self, gwr_engine::types::SimError> {
+        let config = Self {
+            id,
+            target,
+            device,
+            address,
+            effect,
+            issuer: None,
+            controller: None,
+            source_operand: None,
+        };
+        config.validate()?;
+        Ok(config)
+    }
+    pub fn new_controlled(
+        id: String,
+        target: std::rc::Rc<crate::memory::atomic::AtomicTargetSender>,
+        device: u64,
+        address: u64,
+        effect: crate::memory::atomic::Effect,
+        controller: std::rc::Rc<crate::memory::atomic::SplitKController>,
+    ) -> Result<Self, gwr_engine::types::SimError> {
+        if !controller.targets(&target) || controller.group().device != device {
+            return Err(gwr_engine::types::SimError(
+                "controller target differs from actual task target".into(),
+            ));
+        }
+        let config = Self {
+            id,
+            target,
+            device,
+            address,
+            effect,
+            issuer: None,
+            controller: Some(controller),
+            source_operand: None,
+        };
+        config.validate()?;
+        Ok(config)
+    }
+    pub fn with_streamed_operand(
+        mut self,
+        slot: std::rc::Rc<super::runner::streamed_matrix::StreamedOutputSlot>,
+        offset: usize,
+    ) -> Result<Self, gwr_engine::types::SimError> {
+        slot.validate_target(&self.target)?;
+        slot.validate_word(self.effect, offset)?;
+        self.source_operand = Some((slot, offset));
+        Ok(self)
+    }
+    pub fn validate(&self) -> gwr_engine::types::SimResult {
+        self.target.path().validate()?;
+        if let Some((slot, offset)) = &self.source_operand {
+            slot.validate_target(&self.target)?;
+            slot.validate_word(self.effect, *offset)?;
+        }
+        if self.id.is_empty() {
+            return Err(gwr_engine::types::SimError(
+                "atomic task ID cannot be empty".into(),
+            ));
+        }
+        if let Some(controller) = &self.controller {
+            controller.validate_role(self.address, self.effect)
+        } else {
+            self.target
+                .validate_effect(self.device, self.address, self.effect)
         }
     }
-
-    #[test]
-    fn refines_add_partitions_until_they_fit() {
-        let inputs = vec![view(&[3], DataType::Int8), view(&[3], DataType::Int8)];
-        let outputs = vec![view(&[3], DataType::Int8)];
-
-        let partitions = ComputeOp::Add
-            .create_partitions_for_sram(&inputs, &outputs, 5)
-            .unwrap();
-
-        assert_eq!(partitions.len(), 3);
-        assert_eq!(largest_working_set(&partitions).unwrap(), 3);
+    pub async fn execute(
+        &self,
+    ) -> Result<crate::memory::atomic::Completion, gwr_engine::types::SimError> {
+        self.validate()?;
+        let operand = if let Some((slot, offset)) = &self.source_operand {
+            Some(slot.take(self.effect, *offset)?)
+        } else {
+            None
+        };
+        if let Some(controller) = &self.controller {
+            controller
+                .execute_with_operand(self.address, self.effect, operand)
+                .await
+        } else {
+            self.target
+                .receive_with_operand(self.device, self.address, self.effect, operand)
+                .await?
+                .acknowledge()
+                .await
+        }
     }
+}
 
-    #[test]
-    fn refines_gemm_partitions_until_they_fit() {
-        let inputs = vec![
-            view(&[10, 10], DataType::Bf16),
-            view(&[10, 10], DataType::Bf16),
-        ];
-        let outputs = vec![view(&[10, 10], DataType::Bf16)];
-
-        let partitions = ComputeOp::Gemm
-            .create_partitions_for_sram(&inputs, &outputs, 250)
-            .unwrap();
-
-        assert_eq!(partitions.len(), 10);
-        assert!(largest_working_set(&partitions).unwrap() <= 250);
+#[derive(Clone, Debug)]
+pub struct AtomicJoinConfig {
+    pub(crate) binding: AtomicTaskConfig,
+    controller: std::rc::Rc<crate::memory::atomic::SplitKController>,
+}
+impl AtomicJoinConfig {
+    pub fn new(
+        binding: AtomicTaskConfig,
+        controller: std::rc::Rc<crate::memory::atomic::SplitKController>,
+    ) -> Result<Self, gwr_engine::types::SimError> {
+        if !controller.targets(&binding.target)
+            || !binding
+                .controller
+                .as_ref()
+                .is_some_and(|actual| std::rc::Rc::ptr_eq(actual, &controller))
+        {
+            return Err(gwr_engine::types::SimError(
+                "join target/controller mismatch".into(),
+            ));
+        }
+        Ok(Self {
+            binding,
+            controller,
+        })
     }
-
-    #[test]
-    fn refines_maxpool_partitions_for_overlapping_input_windows() {
-        let op = ComputeOp::MaxPool(OperatorMaxPool::new(&[3]));
-        let inputs = vec![view(&[1, 1, 10], DataType::Int8)];
-        let outputs = vec![view(&[1, 1, 8], DataType::Int8)];
-
-        let partitions = op.create_partitions_for_sram(&inputs, &outputs, 9).unwrap();
-
-        assert_eq!(partitions.len(), 3);
-        assert!(largest_working_set(&partitions).unwrap() <= 9);
+    pub fn validate_for_pe(&self, pe: &super::ProcessingElement) -> gwr_engine::types::SimResult {
+        self.binding.validate_for_pe(pe)
     }
-
-    #[test]
-    fn uses_one_maxpool_partition_when_trailing_input_is_unused() {
-        let mut operator = OperatorMaxPool::new(&[3]);
-        operator.strides = Some(vec![3]);
-        let inputs = vec![view(&[1, 1, 10], DataType::Int8)];
-        let outputs = vec![view(&[1, 1, 3], DataType::Int8)];
-
-        let partitions = ComputeOp::MaxPool(operator)
-            .create_partitions_for_sram(&inputs, &outputs, 12)
-            .unwrap();
-
-        assert_eq!(partitions.len(), 1);
-        assert_eq!(largest_working_set(&partitions).unwrap(), 12);
+    pub fn observation(&self) -> crate::memory::atomic::ControllerObservation {
+        self.controller.observation()
     }
-
-    #[test]
-    fn partition_working_set_overflow_returns_error() {
-        let tensor = Tensor::new(&[usize::MAX / 2], &DataType::Int8, 0).unwrap();
-        let view = Some(TensorView::new_full(tensor));
-        let inputs = vec![view.clone(), view.clone()];
-        let outputs = vec![view];
-
-        let error = ComputeOp::Add
-            .create_partitions_for_sram(&inputs, &outputs, usize::MAX)
-            .unwrap_err();
-
-        assert!(
-            error
-                .to_string()
-                .contains("Tensor partition byte count overflows")
-        );
-    }
-
-    #[test]
-    fn rejects_an_irreducible_custom_working_set() {
-        let op = ComputeOp::Custom(OperatorCustom {
-            name: None,
-            machine_ops: MachineOpCounts::default(),
-        });
-        let inputs = vec![view(&[6], DataType::Int8)];
-
-        let error = op.create_partitions_for_sram(&inputs, &[], 5).unwrap_err();
-
-        assert!(
-            error
-                .to_string()
-                .contains("maximum useful partition count requires 6 bytes")
-        );
-    }
-
-    #[test]
-    fn rejects_an_irreducible_gemm_without_materializing_every_partition() {
-        let inputs = vec![
-            view(&[10_000, 10_000], DataType::Bf16),
-            view(&[10_000, 10_000], DataType::Bf16),
-        ];
-        let outputs = vec![view(&[10_000, 10_000], DataType::Bf16)];
-
-        let error = ComputeOp::Gemm
-            .create_partitions_for_sram(&inputs, &outputs, 32 * 1024)
-            .unwrap_err();
-
-        assert!(
-            error
-                .to_string()
-                .contains("maximum useful partition count requires 40002 bytes")
-        );
-    }
-
-    #[test]
-    fn operator_working_sets_do_not_increase_with_finer_partitions() {
-        assert_working_sets_do_not_increase(
-            &ComputeOp::Add,
-            &[view(&[3, 4], DataType::Int8), view(&[3, 4], DataType::Int8)],
-            &[view(&[3, 4], DataType::Int8)],
-        );
-        assert_working_sets_do_not_increase(
-            &ComputeOp::Gemm,
-            &[view(&[4, 4], DataType::Bf16), view(&[4, 4], DataType::Bf16)],
-            &[view(&[4, 4], DataType::Bf16)],
-        );
-        assert_working_sets_do_not_increase(
-            &ComputeOp::MaxPool(OperatorMaxPool::new(&[3])),
-            &[view(&[1, 2, 8], DataType::Int8)],
-            &[view(&[1, 2, 6], DataType::Int8)],
-        );
+    pub fn execute(&self) -> gwr_engine::types::SimResult {
+        self.controller.verify_final_join()
     }
 }

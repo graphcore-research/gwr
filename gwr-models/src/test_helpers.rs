@@ -521,7 +521,9 @@ pub fn create_read(
     src_addr: u64,
     overhead_size_bytes: usize,
 ) -> MemoryAccess {
-    let (dst_device, _) = memory_map.lookup(dst_addr).unwrap();
+    let resolved = memory_map.resolve_access(dst_addr, num_bytes).unwrap();
+    let dst_device = resolved.device;
+    let dst_addr = resolved.physical_address;
     let (src_device, _) = memory_map.lookup(src_addr).unwrap();
     MemoryAccess::new(
         created_by,
@@ -544,7 +546,9 @@ pub fn create_write(
     src_addr: u64,
     overhead_size_bytes: usize,
 ) -> MemoryAccess {
-    let (dst_device, _) = memory_map.lookup(dst_addr).unwrap();
+    let resolved = memory_map.resolve_access(dst_addr, num_bytes).unwrap();
+    let dst_device = resolved.device;
+    let dst_addr = resolved.physical_address;
     let (src_device, _) = memory_map.lookup(src_addr).unwrap();
     MemoryAccess::new(
         created_by,
@@ -567,7 +571,9 @@ pub fn create_write_np(
     src_addr: u64,
     overhead_size_bytes: usize,
 ) -> MemoryAccess {
-    let (dst_device, _) = memory_map.lookup(dst_addr).unwrap();
+    let resolved = memory_map.resolve_access(dst_addr, num_bytes).unwrap();
+    let dst_device = resolved.device;
+    let dst_addr = resolved.physical_address;
     let (src_device, _) = memory_map.lookup(src_addr).unwrap();
     MemoryAccess::new(
         created_by,

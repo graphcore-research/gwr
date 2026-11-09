@@ -1,6 +1,14 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use super::common::*;
+use gwr_models::processing_element::dispatch::Dispatch;
+use gwr_models::processing_element::tensors::dtype::DataType;
+use gwr_timetable::timetable_file::{
+    EdgeKind, EdgeSection, NodeSection, TensorConfigSection, TimetableFile,
+};
+
+use super::common::{
+    build_timetable, compute, create_default_timetable_file, data_edge, tensor, timetable,
+};
 
 #[test]
 fn rejects_tensor_to_tensor_data_edges() {
@@ -130,7 +138,7 @@ fn invalid_to_edge_pe() {
 }
 
 #[test]
-fn invalid_edge_endpoint_syntax() {
+fn dotted_endpoint_is_parsed_as_a_logical_node_id() {
     let (_, _, mut timetable_file) = create_default_timetable_file();
     timetable_file.edges.push(EdgeSection {
         from: "tensor0.invalid".to_string(),
@@ -139,7 +147,7 @@ fn invalid_edge_endpoint_syntax() {
     });
 
     let err = timetable_file.validate().unwrap_err();
-    assert!(format!("{err}").contains("Unable to parse edge id 'tensor0.invalid'"));
+    assert!(format!("{err}").contains("Edge contains invalid from Node ID 'tensor0.invalid'"));
 }
 
 #[test]
@@ -219,4 +227,21 @@ fn resolves_many_implicit_tensor_indices_in_source_order() {
     for (tensor_index, edge) in graph.edges().iter().enumerate() {
         assert_eq!(edge.from().edge_index(), Some(tensor_index));
     }
+}
+
+#[test]
+fn dotted_logical_node_ids_resolve_with_explicit_tensor_ports() {
+    let (_, _, mut file) = create_default_timetable_file();
+    for node in &mut file.nodes {
+        match node {
+            NodeSection::Compute { id, .. }
+            | NodeSection::Transfer { id, .. }
+            | NodeSection::Tensor { id, .. } => *id = format!("layer.0.{id}"),
+        }
+    }
+    for edge in &mut file.edges {
+        edge.from = format!("layer.0.{}", edge.from);
+        edge.to = format!("layer.0.{}", edge.to);
+    }
+    file.validate().unwrap();
 }

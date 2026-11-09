@@ -1,13 +1,13 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
 use std::cmp::Reverse;
-use std::collections::{BTreeSet, BinaryHeap, HashSet};
+use std::collections::{BTreeSet, BinaryHeap, HashSet, VecDeque};
 use std::fmt;
 use std::ops::Range;
 
 use gwr_engine::sim_error;
 use gwr_engine::types::SimResult;
-use gwr_models::processing_element::operators::TensorView;
+use gwr_models::processing_element::tensors::TensorView;
 
 use super::{ComputeTensorDirection, TimetableEdge, TimetableGraph};
 
@@ -79,29 +79,6 @@ fn conflict_candidates<'a>(
 ) -> impl Iterator<Item = &'a usize> {
     let reads = (kind == AccessKind::Write).then_some(reads);
     writes.iter().chain(reads.into_iter().flatten())
-}
-
-#[derive(Clone, Copy, Eq, Hash, PartialEq)]
-enum AccessKind {
-    Read,
-    Write,
-}
-
-impl fmt::Display for AccessKind {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Read => formatter.write_str("reads"),
-            Self::Write => formatter.write_str("writes"),
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct TensorAccess<'a> {
-    node: usize,
-    tensor: usize,
-    kind: AccessKind,
-    view: &'a TensorView,
 }
 
 struct AccessConflict<'a> {
@@ -181,6 +158,29 @@ impl AccessConflict<'_> {
     }
 }
 
+#[derive(Clone, Copy)]
+struct TensorAccess<'a> {
+    node: usize,
+    tensor: usize,
+    kind: AccessKind,
+    view: &'a TensorView,
+}
+
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+enum AccessKind {
+    Read,
+    Write,
+}
+
+impl fmt::Display for AccessKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Read => formatter.write_str("reads"),
+            Self::Write => formatter.write_str("writes"),
+        }
+    }
+}
+
 struct DependencyOrder<'a> {
     graph: &'a TimetableGraph,
     current: Option<usize>,
@@ -221,7 +221,7 @@ impl<'a> DependencyOrder<'a> {
 #[derive(Default)]
 struct ReachabilitySearch {
     reached: HashSet<usize>,
-    pending: Vec<usize>,
+    pending: VecDeque<usize>,
 }
 
 impl ReachabilitySearch {
@@ -239,11 +239,14 @@ impl ReachabilitySearch {
     ) -> bool {
         if self.reached.is_empty() {
             self.reached.insert(start);
-            self.pending.push(start);
+            self.pending.push_back(start);
         }
 
         while !self.reached.contains(&target) {
-            let Some(node) = self.pending.pop() else {
+            // Most conflicts are ordered by nearby cache-version or producer
+            // dependencies. Breadth-first search checks those short paths
+            // before walking a whole unrelated branch of the model.
+            let Some(node) = self.pending.pop_front() else {
                 return false;
             };
             let adjacent = match direction {
@@ -252,7 +255,7 @@ impl ReachabilitySearch {
             };
             for adjacent in adjacent {
                 if self.reached.insert(*adjacent) {
-                    self.pending.push(*adjacent);
+                    self.pending.push_back(*adjacent);
                 }
             }
         }
@@ -268,20 +271,61 @@ enum SearchDirection {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::DependencyOrder;
     use crate::timetable_file::TimetableFile;
+
+    #[test]
+    fn short_dependency_path_does_not_scan_a_long_alternative() {
+        use super::{ReachabilitySearch, SearchDirection};
+        let mut nodes = Vec::new();
+        let mut edges = Vec::new();
+        for index in 0..1000 {
+            nodes.push(format!("{{ id: n{index}, kind: compute, program: {{ inputs: [], outputs: [], assignments: [] }} }}"));
+        }
+        for index in 2..999 {
+            edges.push(format!(
+                "{{ from: n{index}, to: n{}, kind: dependency }}",
+                index + 1
+            ));
+        }
+        edges.push("{ from: n0, to: n1, kind: dependency }".into());
+        edges.push("{ from: n0, to: n2, kind: dependency }".into());
+        edges.push("{ from: n1, to: n999, kind: dependency }".into());
+        let source = format!("nodes: [{}]\nedges: [{}]", nodes.join(","), edges.join(","));
+        let mut graph = TimetableFile::from_string(&source)
+            .unwrap()
+            .into_graph()
+            .unwrap();
+        // Put the unrelated long branch first in depth-first search order.
+        graph.nodes[999].predecessors = vec![1, 998];
+        graph.nodes[0].successors = vec![1, 2];
+        for (start, target, direction) in [
+            (999, 0, SearchDirection::Ancestors),
+            (0, 999, SearchDirection::Descendants),
+        ] {
+            let mut search = ReachabilitySearch::default();
+            assert!(search.contains(&graph, start, target, direction));
+            assert!(
+                search.reached.len() < 20,
+                "nearby dependency explored {} nodes",
+                search.reached.len()
+            );
+        }
+    }
 
     #[test]
     fn searches_dependencies_lazily_in_each_direction() {
         let graph = TimetableFile::from_string(
             r"
 nodes:
-  - { id: compute0, kind: compute, op: { custom: { machine_ops: {} } }, input_views: [], output_views: [~] }
+  - { id: initial, kind: tensor, config: { addr: 10, dtype: int8, shape: [1] } }
+  - { id: compute0, kind: compute, program: { inputs: [A], outputs: [Y], assignments: [{ output: Y, axes: [i], expr: { identity: [{ read: { tensor: A, indices: [i] } }] } }] } }
   - { id: tensor0, kind: tensor, config: { addr: 0, dtype: int8, shape: [1] } }
-  - { id: compute1, kind: compute, op: { custom: { machine_ops: {} } }, input_views: [~], output_views: [~] }
+  - { id: compute1, kind: compute, program: { inputs: [A], outputs: [Y], assignments: [{ output: Y, axes: [i], expr: { identity: [{ read: { tensor: A, indices: [i] } }] } }] } }
   - { id: tensor1, kind: tensor, config: { addr: 1, dtype: int8, shape: [1] } }
-  - { id: compute2, kind: compute, op: { custom: { machine_ops: {} } }, input_views: [~], output_views: [] }
+  - { id: compute2, kind: compute, program: { inputs: [A], outputs: [], assignments: [] } }
 edges:
+  - { from: initial, to: compute0, kind: data }
   - { from: compute0, to: tensor0, kind: data }
   - { from: tensor0, to: compute1, kind: data }
   - { from: compute1, to: tensor1, kind: data }
@@ -297,21 +341,21 @@ edges:
         assert!(dependencies.ancestors.reached.is_empty());
         assert!(dependencies.descendants.reached.is_empty());
 
-        assert!(dependencies.are_ordered(2, 0));
-        assert_eq!(dependencies.current, Some(2));
-        assert!(dependencies.ancestors.reached.contains(&0));
+        assert!(dependencies.are_ordered(3, 1));
+        assert_eq!(dependencies.current, Some(3));
+        assert!(dependencies.ancestors.reached.contains(&1));
         assert!(dependencies.descendants.reached.is_empty());
 
         let num_ancestors_reached = dependencies.ancestors.reached.len();
-        assert!(dependencies.are_ordered(2, 1));
+        assert!(dependencies.are_ordered(3, 2));
         assert_eq!(dependencies.ancestors.reached.len(), num_ancestors_reached);
 
-        assert!(dependencies.are_ordered(2, 4));
-        assert!(dependencies.descendants.reached.contains(&4));
+        assert!(dependencies.are_ordered(3, 5));
+        assert!(dependencies.descendants.reached.contains(&5));
 
-        assert!(dependencies.are_ordered(0, 4));
-        assert_eq!(dependencies.current, Some(0));
+        assert!(dependencies.are_ordered(1, 5));
+        assert_eq!(dependencies.current, Some(1));
         assert!(dependencies.ancestors.reached.is_empty());
-        assert!(dependencies.descendants.reached.contains(&4));
+        assert!(dependencies.descendants.reached.contains(&5));
     }
 }

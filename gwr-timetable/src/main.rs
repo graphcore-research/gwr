@@ -3,6 +3,7 @@
 //! A simple front-end for running a [Timetable] on a [Platform].
 
 use std::fs;
+use std::io::IsTerminal;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -12,6 +13,7 @@ use clap::Parser;
 use gwr_engine::engine::Engine;
 use gwr_engine::executor::ExecutorStats;
 use gwr_engine::time::clock::Clock;
+use gwr_engine::types::SimResult;
 use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_platform::Platform;
 use gwr_timetable::Timetable;
@@ -20,12 +22,19 @@ use gwr_track::Track;
 use gwr_track::builder::{TrackerArgs, setup_trackers};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 
-fn main() -> Result<()> {
+fn main() {
+    if let Err(error) = run() {
+        eprintln!("Error: {error}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<()> {
     let mut args = Cli::parse();
     args.tracker
         .ensure_visiblity(args.dump_stats, "--dump-stats", log::Level::Info);
 
-    let tracker: Rc<dyn Track> = setup_trackers(&args.tracker.trackers_config()).unwrap();
+    let tracker: Rc<dyn Track> = setup_trackers(&args.tracker.trackers_config())?;
     let mut engine = Engine::new(&tracker);
     let clock = engine.default_clock();
     let platform = Rc::new(Platform::from_file(
@@ -47,8 +56,9 @@ fn main() -> Result<()> {
 
     println!("Loaded timetable with {num_nodes} nodes, {num_edges} edges.");
 
+    let progress_log = args.progress && !std::io::stderr().is_terminal();
     let mut progress_bars = None;
-    if args.progress {
+    if args.progress && !progress_log {
         let workload = timetable.workload_totals()?;
         timetable.enable_completed_workload_tracking()?;
         let bars = ProgressBars::new(workload);
@@ -63,6 +73,16 @@ fn main() -> Result<()> {
                 &clock,
                 snapshot.stats,
                 snapshot.active_task_count,
+            )
+        })
+    } else if progress_log {
+        engine.run_with_executor_observer(Duration::from_secs(1), |snapshot| {
+            log_progress(
+                &timetable,
+                &clock,
+                num_nodes,
+                snapshot.stats,
+                snapshot.active_task_count,
             );
             Ok(())
         })
@@ -71,9 +91,12 @@ fn main() -> Result<()> {
     };
     let run_elapsed = run_started.elapsed();
     let executor_stats = engine.executor_stats();
+    if progress_log {
+        log_progress(&timetable, &clock, num_nodes, executor_stats, 0);
+    }
 
     if let Some(progress_bars) = progress_bars {
-        progress_bars.update(&timetable, &clock, executor_stats, 0);
+        progress_bars.update(&timetable, &clock, executor_stats, 0)?;
         progress_bars.finish();
     }
 
@@ -101,11 +124,28 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+fn log_progress(
+    timetable: &Timetable,
+    clock: &Clock,
+    total: usize,
+    stats: ExecutorStats,
+    tasks: usize,
+) {
+    eprintln!(
+        "Progress {} / {total} nodes | {}",
+        timetable.num_graph_nodes_completed(),
+        activity_message(
+            timetable.num_graph_nodes_active(),
+            stats,
+            tasks,
+            clock.time_now_ns()
+        )
+    );
+}
+
 fn refresh_interval(progress_hz: NonZeroU32) -> Duration {
     Duration::from_secs(1) / progress_hz.get()
 }
-
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 /// Command-line arguments.
 #[derive(Parser)]
@@ -154,6 +194,8 @@ fn parse_progress_hz(value: &str) -> std::result::Result<NonZeroU32, String> {
     Ok(progress_hz)
 }
 
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
 #[derive(Clone)]
 struct ProgressBars {
     _multi: MultiProgress,
@@ -190,12 +232,15 @@ impl ProgressBars {
         let activity = multi.add(ProgressBar::new_spinner());
         activity.set_style(ProgressStyle::with_template("{spinner:.green} {msg}").unwrap());
 
+        let compute = multi.add(ProgressBar::new_spinner());
+        compute.set_style(ProgressStyle::with_template("{spinner:.cyan} {msg}").unwrap());
+
         Self {
             workload,
             nodes: add_bar("nodes", workload.nodes),
             reads: add_bar("reads", workload.read_bytes),
             writes: add_bar("writes", workload.written_bytes),
-            compute: add_bar("compute", workload.machine_operations),
+            compute,
             activity,
             _multi: multi,
         }
@@ -207,7 +252,7 @@ impl ProgressBars {
         clock: &Clock,
         executor_stats: ExecutorStats,
         active_task_count: usize,
-    ) {
+    ) -> SimResult {
         let completed = timetable
             .completed_workload()
             .expect("progress tracking is enabled");
@@ -225,19 +270,18 @@ impl ProgressBars {
             self.workload.written_bytes,
             "bytes",
         );
-        Self::update_bar(
-            &self.compute,
-            completed.machine_operations,
-            self.workload.machine_operations,
-            "ops",
-        );
-
+        self.compute.set_message(format!(
+            "{} machine operations completed",
+            timetable.machine_operations_executed()?
+        ));
+        self.compute.tick();
         self.update_activity(
             timetable.num_graph_nodes_active(),
             executor_stats,
             active_task_count,
             clock.time_now_ns(),
         );
+        Ok(())
     }
 
     fn update_activity(
