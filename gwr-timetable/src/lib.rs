@@ -20,6 +20,7 @@ use gwr_platform::Platform;
 use gwr_track::entity::Entity;
 use gwr_track::{debug, info, trace};
 
+pub mod analysis;
 pub mod atomic;
 pub mod collective;
 pub mod graph;
