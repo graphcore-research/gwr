@@ -21,10 +21,13 @@ use gwr_track::entity::Entity;
 use gwr_track::{debug, info, trace};
 
 pub mod atomic;
+pub mod collective;
 pub mod graph;
+pub mod indexed;
 pub mod mermaid;
 mod program_compose;
 pub mod scheduled;
+pub mod segmented;
 pub mod timetable_file;
 pub use graph::{
     ComputeTensorDirection, ComputeTensorViews, EdgeEndpoint, TensorConnection, TimetableEdge,
