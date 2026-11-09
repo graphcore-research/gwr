@@ -1,5 +1,7 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+use std::collections::HashMap;
+use std::hash::BuildHasher;
 use std::rc::Rc;
 
 use gwr_engine::engine::Engine;
@@ -17,6 +19,7 @@ use gwr_track::debug;
 use gwr_track::entity::GetEntity;
 
 use crate::Platform;
+use crate::builder::clock_for;
 use crate::connection_id::{CachePortId, ConnectionEndpointId, parse_connection_endpoint_id};
 use crate::types::PlatformConfig;
 
@@ -41,11 +44,11 @@ pub enum PortId<'a> {
     },
 }
 
-pub fn connect_ports(
+pub fn connect_ports<C: BuildHasher>(
     engine: &Engine,
-    clock: &Clock,
     platform: &Platform,
     cfg: &PlatformConfig,
+    clocks: &HashMap<String, Clock, C>,
 ) -> SimResult {
     if let Some(connections) = &cfg.connections {
         for c in connections {
@@ -56,17 +59,21 @@ pub fn connect_ports(
                 );
             }
 
-            let from = parse_port_id(platform, &c.connect[0])?;
-            let to = parse_port_id(platform, &c.connect[1])?;
-            connect_port(engine, clock, platform, &from, &to)?;
+            let from = parse_connection_endpoint_id(&c.connect[0])?;
+            let to = parse_connection_endpoint_id(&c.connect[1])?;
+            match (&from, &to) {
+                (ConnectionEndpointId::Null, peer) | (peer, ConnectionEndpointId::Null) => {
+                    connect_null_port(engine, platform, cfg, clocks, peer)?;
+                }
+                _ => {
+                    let from = resolve_port_id(platform, &from)?;
+                    let to = resolve_port_id(platform, &to)?;
+                    connect_port(platform, &from, &to)?;
+                }
+            }
         }
     }
     Ok(())
-}
-
-pub fn parse_port_id<'a>(platform: &'a Platform, s: &str) -> Result<PortId<'a>, SimError> {
-    let endpoint = parse_connection_endpoint_id(s)?;
-    resolve_port_id(platform, &endpoint)
 }
 
 fn resolve_port_id<'a>(
@@ -101,27 +108,48 @@ fn resolve_port_id<'a>(
     })
 }
 
-fn connect_port(
+fn connect_null_port<C: BuildHasher>(
     engine: &Engine,
-    clock: &Clock,
     platform: &Platform,
-    from: &PortId,
-    to: &PortId,
+    cfg: &PlatformConfig,
+    clocks: &HashMap<String, Clock, C>,
+    peer: &ConnectionEndpointId,
 ) -> SimResult {
-    match (from, to) {
-        (PortId::Null, PortId::FabricTile { fabric, port_idx })
-        | (PortId::FabricTile { fabric, port_idx }, PortId::Null) => {
-            return connect_fabric_to_null(engine, clock, fabric, *port_idx);
+    match peer {
+        ConnectionEndpointId::FabricPort {
+            fabric,
+            column,
+            row,
+            port,
+        } => {
+            let section = cfg
+                .fabrics
+                .iter()
+                .flatten()
+                .find(|section| section.name == *fabric)
+                .ok_or_else(|| SimError(format!("No Fabric '{fabric}'")))?;
+            let clock = clock_for(clocks, cfg, section.clock.as_deref())?;
+            let fabric = platform.fabric(fabric)?;
+            let port_idx = fabric.col_row_port_to_fabric_port_index(*column, *row, *port);
+            connect_fabric_to_null(engine, clock, fabric, port_idx)
         }
-        (PortId::Null, PortId::Cache { cache, port })
-        | (PortId::Cache { cache, port }, PortId::Null) => {
-            return connect_cache_to_null(engine, clock, cache, port.as_ref());
+        ConnectionEndpointId::Cache { name, port } => {
+            let section = cfg
+                .caches
+                .iter()
+                .flatten()
+                .find(|section| section.name == *name)
+                .ok_or_else(|| SimError(format!("No Cache '{name}'")))?;
+            let clock = clock_for(clocks, cfg, section.clock.as_deref())?;
+            connect_cache_to_null(engine, clock, platform.cache(name)?, port.as_ref())
         }
-        (PortId::Null, _) | (_, PortId::Null) => {
-            return sim_error!("Null can only connect to a Fabric or Cache port");
+        _ => {
+            sim_error!("Null can only connect to a Fabric or Cache port")
         }
-        _ => {}
     }
+}
+
+fn connect_port(platform: &Platform, from: &PortId, to: &PortId) -> SimResult {
     match from {
         PortId::Manager { manager } => match to {
             PortId::FabricTile { fabric, port_idx } => {

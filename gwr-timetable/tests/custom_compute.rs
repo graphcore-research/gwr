@@ -16,6 +16,11 @@ use gwr_timetable::{Timetable, Workload};
 use tempfile::tempdir;
 
 const PLATFORM_YAML: &str = "
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps:
   - name: default
     devices:
@@ -118,8 +123,7 @@ edges:
 
 fn create_timetable(yaml: &str) -> Timetable {
     let mut engine = start_test(file!());
-    let clock = engine.default_clock();
-    let platform = Rc::new(Platform::from_string(&engine, &clock, PLATFORM_YAML).unwrap());
+    let platform = Rc::new(Platform::from_string(&mut engine, PLATFORM_YAML).unwrap());
     let timetable_file = TimetableFile::from_string(yaml).unwrap();
 
     Timetable::new(
@@ -281,8 +285,7 @@ edges: []
 fn custom_compute_name_is_used_in_activity_trace() {
     let (test_tracker, tracker) = gwr_track::test_init!(1000);
     let mut engine = Engine::new(&tracker);
-    let clock = engine.default_clock();
-    let platform = Rc::new(Platform::from_string(&engine, &clock, PLATFORM_YAML).unwrap());
+    let platform = Rc::new(Platform::from_string(&mut engine, PLATFORM_YAML).unwrap());
     let timetable_file = TimetableFile::from_string(CUSTOM_TIMETABLE_YAML).unwrap();
     let graph = timetable_file.into_graph().unwrap();
     let timetable = Rc::new(Timetable::new(engine.top(), graph, &platform).unwrap());

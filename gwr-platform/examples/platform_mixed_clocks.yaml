@@ -1,0 +1,55 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+clocks:
+  - name: compute
+    frequency_mhz: 1000
+  - name: fabric
+    frequency_mhz: 750
+  - name: memory
+    frequency_mhz: 500
+default_clock: compute
+
+memory_maps:
+  - name: pe_memory_map
+    devices: [mem0]
+
+processing_elements:
+  - name: pe0
+    # Inherits the 1 GHz compute clock.
+    memory_map: pe_memory_map
+    config:
+      lsu_access_bytes: 32
+      sram_bytes: 64KiB
+
+caches:
+  - name: l1
+    clock: compute
+    config:
+      bw_bytes_per_tick: 32
+      line_size_bytes: 32
+      delay_ticks: 4
+
+fabrics:
+  - name: fabric0
+    clock: fabric
+    kind: functional
+    columns: 1
+    rows: 1
+    config:
+      fabric_ports_per_node: 2
+
+memories:
+  - name: mem0
+    clock: memory
+    kind: ddr
+    base_address: 0x1_0000_0000
+    config:
+      capacity_bytes: 1GiB
+      bw_bytes_per_tick: 32
+      # Uses four ticks of the memory clock, whose period is 2 ns.
+      delay_ticks: 4
+
+connections:
+  - connect: [pe.pe0, cache.l1.dev]
+  - connect: [cache.l1.mem, "fabric.fabric0@(0,0).0"]
+  - connect: ["fabric.fabric0@(0,0).1", mem.mem0]

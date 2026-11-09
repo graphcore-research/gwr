@@ -18,14 +18,17 @@ use gwr_track::entity::Entity;
 
 pub(crate) fn create_default_timetable_file() -> (Rc<Entity>, Rc<Platform>, TimetableFile) {
     let mut engine = start_test(file!());
-    let clock = engine.default_clock();
     (
         engine.top().clone(),
         Rc::new(
             Platform::from_string(
-                &engine,
-                &clock,
+                &mut engine,
                 "
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps:
   - name: default
     devices:

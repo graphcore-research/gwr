@@ -27,12 +27,8 @@ fn main() -> Result<()> {
 
     let tracker: Rc<dyn Track> = setup_trackers(&args.tracker.trackers_config()).unwrap();
     let mut engine = Engine::new(&tracker);
-    let clock = engine.default_clock();
-    let platform = Rc::new(Platform::from_file(
-        &engine,
-        &clock,
-        Path::new(&args.platform),
-    )?);
+    let platform = Rc::new(Platform::from_file(&mut engine, Path::new(&args.platform))?);
+    let clock = platform.default_clock().clone();
 
     println!("Loaded platform:\n{platform}");
 

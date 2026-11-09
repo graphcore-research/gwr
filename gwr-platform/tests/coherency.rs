@@ -137,6 +137,7 @@ fn upstream_pe_memory_map_must_be_covered_by_selected_managers() {
     });
     cfg.processing_elements = Some(vec![gwr_platform::types::ProcessingElementSection {
         name: "pe".into(),
+        clock: None,
         memory_map: "pe_map".into(),
         config: yaml_serde::from_str("{}").unwrap(),
     }]);
@@ -161,6 +162,11 @@ fn create_coherent_platform_config(
 ) -> PlatformConfig {
     yaml_serde::from_str(&format!(
         r"
+clocks:
+  - name: default
+    frequency_mhz: 1000
+default_clock: default
+
 memory_maps:
   - name: backing
     devices: [memory]
