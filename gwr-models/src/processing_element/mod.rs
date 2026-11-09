@@ -65,6 +65,14 @@ pub(crate) mod runner;
 use runner::TaskRunner;
 pub use runner::estimate_peak_tile_sram;
 pub(crate) use runner::streamed_matrix::LocalOperandHandle;
+#[cfg(feature = "functional")]
+mod functional;
+#[cfg(feature = "functional")]
+mod functional_convolution;
+#[cfg(feature = "functional")]
+mod functional_gemm;
+#[cfg(feature = "functional")]
+mod functional_matmul;
 pub mod model;
 pub mod task;
 pub mod tensors;
@@ -90,6 +98,10 @@ pub struct ProcessingElement {
     activity_lanes: Rc<ProcessingElementActivityLanes>,
     dispatcher: RefCell<Option<Dispatcher>>,
     flop_monitor: Option<Rc<FlopMonitor>>,
+    #[cfg(feature = "functional")]
+    functional: RefCell<Option<crate::memory::FunctionalContext>>,
+    #[cfg(feature = "functional")]
+    functional_started: std::cell::Cell<bool>,
 }
 
 impl ProcessingElement {
@@ -268,9 +280,33 @@ impl ProcessingElement {
 
             dispatcher: RefCell::new(None),
             flop_monitor,
+            #[cfg(feature = "functional")]
+            functional: RefCell::new(None),
+            #[cfg(feature = "functional")]
+            functional_started: std::cell::Cell::new(false),
         });
         engine.register(rc_self.clone());
         Ok(rc_self)
+    }
+
+    /// Enable numerical FP32 execution before starting the simulation.
+    /// All participating PEs must share the same physical backing store.
+    /// Striped maps, pipelines, caches, atomic memory and non-FP32 programs
+    /// are outside the current functional contract and return errors.
+    #[cfg(feature = "functional")]
+    pub fn enable_functional(&self, memory: Rc<crate::memory::FunctionalMemory>) -> SimResult {
+        if self.functional_started.get() {
+            return sim_error!("functional mode must be enabled before PE execution starts");
+        }
+        self.lsu.validate_functional_mapping()?;
+        if let Some(dma) = self.dma.borrow().as_ref() {
+            dma.validate_functional_mapping()?;
+        }
+        if self.functional.borrow().is_some() {
+            return sim_error!("functional mode is already enabled");
+        }
+        *self.functional.borrow_mut() = Some(crate::memory::FunctionalContext::new(memory));
+        Ok(())
     }
 
     /// Validate a copy's views and memory mappings before simulation starts.
@@ -284,6 +320,10 @@ impl ProcessingElement {
             .borrow()
             .clone()
             .unwrap_or_else(|| self.lsu.clone());
+        #[cfg(feature = "functional")]
+        if self.functional.borrow().is_some() {
+            issuer.validate_functional_mapping()?;
+        }
         issuer.validate_mapped_view(&config.source)?;
         issuer.validate_mapped_view(&config.destination)?;
         Ok(())
@@ -298,6 +338,10 @@ impl ProcessingElement {
         config: &ProcessingElementConfig,
         device_id: DeviceId,
     ) -> SimResult {
+        #[cfg(feature = "functional")]
+        if self.functional.borrow().is_some() && memory_map.has_striping() {
+            return sim_error!("functional mode does not support striped DMA memory maps");
+        }
         let dma_parent = Rc::new(Entity::new(&self.entity, "dma"));
         let lsu = LoadStoreUnit::new_and_register(
             engine,
@@ -402,6 +446,10 @@ impl ProcessingElement {
     /// or reserving engines. This uses the same lowering and admission rules as
     /// execution, so unsupported modes fail before publishing a workload.
     pub fn preflight_program_task(&self, config: &task::ProgramTaskConfig) -> SimResult {
+        #[cfg(feature = "functional")]
+        if self.functional.borrow().is_some() {
+            functional::preflight(config)?;
+        }
         self.lsu.validate_program_views(config)?;
         if config.pipeline.is_some() {
             for view in config.inputs.iter().chain(&config.outputs) {
@@ -512,6 +560,8 @@ impl Runnable for ProcessingElement {
         reason = "Keep task admission and completion ownership in the runnable scope"
     )]
     async fn run(&self) -> SimResult {
+        #[cfg(feature = "functional")]
+        self.functional_started.set(true);
         let dispatcher = self
             .dispatcher
             .borrow()
@@ -546,6 +596,17 @@ impl Runnable for ProcessingElement {
                         task::Task::AtomicControlJoin { config } => config.validate_for_pe(self)?,
                         task::Task::SyncTask { .. } => (),
                     }
+                    #[cfg(feature = "functional")]
+                    if self.functional.borrow().is_some() {
+                        match dispatcher.task_by_id(task_idx)? {
+                            task::Task::ProgramTask { .. } | task::Task::TransferTask { .. } => (),
+                            _ => {
+                                return sim_error!(
+                                    "functional mode supports program and transfer tasks only"
+                                );
+                            }
+                        }
+                    }
                     dispatcher.set_task_active(task_idx)?;
 
                     if let task::Task::TransferTask { config } = dispatcher.task_by_id(task_idx)? {
@@ -558,6 +619,8 @@ impl Runnable for ProcessingElement {
                         let lanes = self.activity_lanes.clone();
                         let stats = self.stats.clone();
                         let dispatcher = dispatcher.clone();
+                        #[cfg(feature = "functional")]
+                        let functional = self.functional.borrow().clone();
                         self.spawner.spawn(async move {
                             config.validate()?;
                             let _reservation =
@@ -565,20 +628,18 @@ impl Runnable for ProcessingElement {
                             let group = lanes.create_group(&config.id);
                             for (source, destination) in config.chunks() {
                                 let bytes = usize::try_from(source.end - source.start).unwrap();
-                                lsu.access_ranges(
-                                    gwr_engine::types::AccessType::ReadRequest,
-                                    [source],
-                                    &lanes.lsu_read,
+                                #[cfg(feature = "functional")]
+                                let context = functional
+                                    .as_ref()
+                                    .map(crate::memory::FunctionalContext::fresh);
+                                lsu.transfer_chunk(
+                                    source,
+                                    destination,
+                                    &lanes,
                                     &config.id,
                                     &group,
-                                )
-                                .await?;
-                                lsu.access_ranges(
-                                    gwr_engine::types::AccessType::WriteNonPostedRequest,
-                                    [destination],
-                                    &lanes.lsu_write,
-                                    &config.id,
-                                    &group,
+                                    #[cfg(feature = "functional")]
+                                    context.as_ref(),
                                 )
                                 .await?;
                                 let mut stats = stats.borrow_mut();
@@ -610,6 +671,8 @@ impl Runnable for ProcessingElement {
                         stats: self.stats.clone(),
                         activity_lanes: self.activity_lanes.clone(),
                         flop_monitor: self.flop_monitor.clone(),
+                        #[cfg(feature = "functional")]
+                        functional: self.functional.borrow().clone(),
                     };
                     self.spawner
                         .spawn(async move { Box::pin(runner.run(task_idx)).await });

@@ -1,0 +1,37 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+nodes:
+  - {
+      id: A,
+      kind: tensor,
+      config: { addr: 0x1000, dtype: fp32, shape: [2, 5] },
+    }
+  - {
+      id: B,
+      kind: tensor,
+      config: { addr: 0x2000, dtype: fp32, shape: [5, 3] },
+    }
+  - id: gemm
+    kind: compute
+    pe: pe0
+    program:
+      inputs: [A, B]
+      outputs: [Y]
+      assignments:
+        - output: Y
+          axes: [m, n]
+          expr:
+            matrix_mac:
+              over: [k]
+              args:
+                - { read: { tensor: A, indices: [m, k] } }
+                - { read: { tensor: B, indices: [k, n] } }
+    tiling: { sizes: { m: 1, n: 2, k: 2 } }
+  - {
+      id: Y,
+      kind: tensor,
+      config: { addr: 0x3000, dtype: fp32, shape: [2, 3] },
+    }
+edges:
+  - { from: A, to: gemm.0, kind: data }
+  - { from: B, to: gemm.1, kind: data }
+  - { from: gemm.0, to: Y, kind: data }

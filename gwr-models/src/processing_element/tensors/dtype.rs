@@ -23,7 +23,9 @@ pub enum DataType {
     Fp32,
     Bf16,
     Fp16,
+    /// E4M3FN in functional execution: bias 7, signed zero, NaN, no infinity.
     Fp8,
+    /// E2M1 in functional execution: signed finite values, maximum magnitude 6.
     Fp4,
     Int64,
     Int32,

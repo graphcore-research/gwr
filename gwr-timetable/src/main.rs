@@ -27,6 +27,9 @@ use gwr_track::builder::{TrackerArgs, setup_trackers};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use sha2::{Digest, Sha256};
 
+#[cfg(feature = "functional")]
+mod functional_data;
+
 fn main() {
     if let Err(error) = run() {
         eprintln!("Error: {error}");
@@ -55,6 +58,12 @@ fn run() -> Result<()> {
     )?;
     let platform_started = Instant::now();
     let platform = Rc::new(Platform::from_string(&engine, &clock, &platform_yaml)?);
+    #[cfg(feature = "functional")]
+    let functional_data = args
+        .functional_data
+        .as_deref()
+        .map(|path| functional_data::FunctionalData::load(path, &platform))
+        .transpose()?;
     if std::env::var_os("GWR_ROOFLINE_TIMINGS").is_some() {
         eprintln!(
             "roofline timing: platform_build={:.3}s",
@@ -151,6 +160,11 @@ fn run() -> Result<()> {
     if let Err(err) = timetable.check_tasks_complete() {
         write_error_mermaid(&timetable, &args.error_mermaid);
         return Err(err.into());
+    }
+
+    #[cfg(feature = "functional")]
+    if let Some(data) = functional_data {
+        data.check()?;
     }
 
     if args.dump_stats {
@@ -290,6 +304,12 @@ struct Cli {
     /// Export aggregate typed compute actions without enabling trace recording
     #[arg(long)]
     activity_out: Option<PathBuf>,
+
+    /// Load typed inputs and check reference outputs from a YAML fixture.
+    /// Requires a binary built with the functional Cargo feature.
+    #[cfg(feature = "functional")]
+    #[arg(long, conflicts_with = "roofline_analyze")]
+    functional_data: Option<PathBuf>,
 
     /// Write a Mermaid diagram of the timetable state to this file if execution
     /// fails.
