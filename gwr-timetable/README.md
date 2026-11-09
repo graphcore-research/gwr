@@ -501,3 +501,18 @@ reachable through that PE's memory map. The copy counts actual movement,
 including packed sub-byte storage, without adding compute operations.
 Packed views must have matching physical byte counts, including alignment
 effects. Transfers use the PE's DMA issuer when configured and its LSU otherwise.
+
+The Rust `indexed::lower_gather` and `lower_scatter` helpers create transfer
+fragments for concrete row selections. Both require a `selection_producer`
+task dependency; merge the fragment with that task before validating the
+graph. Gather permits duplicate source rows and charges traffic for each;
+scatter rejects duplicate destination rows. Empty selections still wait for
+the producer. The row indices are supplied scenario metadata, not values
+calculated by the simulator.
+
+`collective::lower` supports all-gather, all-to-allv, all-reduce, and
+reduce-scatter on one-dimensional, byte-aligned tensors. It emits explicit
+transfers, completion dependencies, and software reduction work. Reduction
+collectives require caller-supplied scratch addresses; allocate storage for
+`ranks * input_elements + input_elements` values. This coordinator algorithm
+does not model switch reduction offload or choose an optimal collective.
