@@ -110,8 +110,7 @@ fn coverage_decreases_when_any_metric_decreases() {
 #[test]
 fn diff_coverage_exits_success_when_no_total_coverage_metric_drops() {
     let status = Command::new(env!("CARGO_BIN_EXE_diff-coverage"))
-        .arg(BEFORE_FIXTURE)
-        .arg(AFTER_FIXTURE)
+        .args(["--before", BEFORE_FIXTURE, "--after", AFTER_FIXTURE])
         .status()
         .unwrap();
 
@@ -121,8 +120,7 @@ fn diff_coverage_exits_success_when_no_total_coverage_metric_drops() {
 #[test]
 fn diff_coverage_exits_failure_when_any_total_coverage_metric_drops() {
     let status = Command::new(env!("CARGO_BIN_EXE_diff-coverage"))
-        .arg(AFTER_FIXTURE)
-        .arg(BEFORE_FIXTURE)
+        .args(["--before", AFTER_FIXTURE, "--after", BEFORE_FIXTURE])
         .status()
         .unwrap();
 

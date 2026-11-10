@@ -20,9 +20,12 @@ publish.workspace = true
 
 [dependencies]
 clap.workspace = true
+figment.workspace = true
+gwr-config = { path = "../gwr-config", version = "0.2.0" }
 proc-macro2.workspace = true
 quote.workspace = true
 regex.workspace = true
+serde.workspace = true
 syn.workspace = true
 
 [build-dependencies]

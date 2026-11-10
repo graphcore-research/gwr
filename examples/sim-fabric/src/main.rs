@@ -6,9 +6,9 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use clap::Parser;
-use gwr_components::cli::parse_bytes_string;
+use gwr_components::cli::{deserialize_bytes, parse_bytes_string};
 use gwr_components::connect_port;
+use gwr_config::multi_source_config;
 use gwr_engine::engine::Engine;
 use gwr_engine::executor::Spawner;
 use gwr_engine::time::clock::Clock;
@@ -20,97 +20,116 @@ use gwr_models::fabric::node::FabricRoutingAlgorithm;
 use gwr_models::fabric::routed::RoutedFabric;
 use gwr_models::fabric::{Fabric, FabricConfig, FabricGeometry, FabricPortConfig};
 use gwr_models::memory::memory_access::MemoryAccess;
-use gwr_track::builder::{TrackerArgs, setup_trackers};
+use gwr_track::builder::{TrackerArgs, TrackerArgsPartial, setup_trackers};
 use gwr_track::entity::Entity;
 use gwr_track::{Track, error, info};
 use indicatif::ProgressBar;
 use sim_fabric::access_gen::TrafficPattern;
 use sim_fabric::source_sink_builder::{Sinks, build_source_sinks};
 
+const DEFAULT_PROGRESS_TICKS: usize = 1000;
+const DEFAULT_FINISH_TICK: usize = 0;
+const DEFAULT_FABRIC_COLUMNS: usize = 4;
+const DEFAULT_FABRIC_ROWS: usize = 3;
+const DEFAULT_FABRIC_PORTS_PER_NODE: usize = 2;
+const DEFAULT_PORT_BITS_PER_TICK: usize = 128;
+const DEFAULT_FRAME_OVERHEAD_BYTES: usize = 8;
+const DEFAULT_FRAME_PAYLOAD_BYTES: usize = 32;
+const DEFAULT_TICKS_PER_HOP: usize = 1;
+const DEFAULT_TICKS_OVERHEAD: usize = 1;
+const DEFAULT_SEED: u64 = 1;
+
 /// Command-line arguments.
-#[derive(Parser)]
+#[multi_source_config(default_conf_file = "sim-fabric.toml", conf_file_flag = "conf-file")]
+#[derive(PartialEq)]
 #[command(about = "Fabric evaluation application")]
 struct Cli {
     #[command(flatten)]
+    #[serde(flatten)]
     tracker: TrackerArgs,
 
     /// Show a progress bar for the received frame count (updated at the rate
     /// defined by `progress_ticks`).
-    #[arg(long)]
+    #[arg(long, default_value_t = false)]
     progress: bool,
 
     /// Number of ticks between updates to the progress bar. Only used when
     /// `progress` is enabled.
-    #[arg(long, default_value = "1000")]
+    #[arg(long, default_value_t = DEFAULT_PROGRESS_TICKS)]
     progress_ticks: usize,
 
     /// Configure a clock tick on which to terminate the simulation. Use 0 to
     /// run until completion.
-    #[arg(long, default_value = "0")]
+    #[arg(long, default_value_t = DEFAULT_FINISH_TICK)]
     finish_tick: usize,
 
     /// The number of columns in the fabric.
-    #[arg(long, default_value = "4")]
+    #[arg(long, default_value_t = DEFAULT_FABRIC_COLUMNS)]
     fabric_columns: usize,
 
     /// The number of rows in the fabric.
-    #[arg(long, default_value = "3")]
+    #[arg(long, default_value_t = DEFAULT_FABRIC_ROWS)]
     fabric_rows: usize,
 
     /// The number of ports at each node of the fabric.
-    #[arg(long, default_value = "2")]
+    #[arg(long, default_value_t = DEFAULT_FABRIC_PORTS_PER_NODE)]
     fabric_ports_per_node: usize,
 
     /// The number of bytes to send from each source.
-    #[arg(long, default_value = "100KiB", value_parser = parse_bytes_string)]
+    #[arg(long, value_parser = parse_bytes_string, default_value_t = parse_bytes_string("100KiB").unwrap())]
+    #[serde(default, deserialize_with = "deserialize_bytes")]
     bytes_to_send: usize,
 
     /// Set the number of bytes each fabric TX port can hold.
-    #[arg(long, default_value = "32KiB", value_parser = parse_bytes_string)]
+    #[arg(long, value_parser = parse_bytes_string, default_value_t = parse_bytes_string("32KiB").unwrap())]
+    #[serde(default, deserialize_with = "deserialize_bytes")]
     tx_buffer_bytes: usize,
 
     /// Set the number of bytes each fabric RX port can hold.
-    #[arg(long, default_value = "32KiB", value_parser = parse_bytes_string)]
+    #[arg(long, value_parser = parse_bytes_string, default_value_t = parse_bytes_string("32KiB").unwrap())]
+    #[serde(default, deserialize_with = "deserialize_bytes")]
     rx_buffer_bytes: usize,
 
     /// Set many bits per clock tick the fabric TX/RX ports move.
-    #[arg(long, default_value = "128")]
+    #[arg(long, default_value_t = DEFAULT_PORT_BITS_PER_TICK)]
     port_bits_per_tick: usize,
 
     /// Set the frame overhead (protocol) bytes.
-    #[arg(long, default_value = "8", value_parser = parse_bytes_string)]
+    #[arg(long, value_parser = parse_bytes_string, default_value_t = DEFAULT_FRAME_OVERHEAD_BYTES)]
+    #[serde(default, deserialize_with = "deserialize_bytes")]
     frame_overhead_bytes: usize,
 
     /// Set the default frame payload bytes.
-    #[arg(long, default_value = "32", value_parser = parse_bytes_string)]
+    #[arg(long, value_parser = parse_bytes_string, default_value_t = DEFAULT_FRAME_PAYLOAD_BYTES)]
+    #[serde(default, deserialize_with = "deserialize_bytes")]
     frame_payload_bytes: usize,
 
     /// Set the clock ticks required to move one hop in the fabric.
-    #[arg(long, default_value = "1")]
+    #[arg(long, default_value_t = DEFAULT_TICKS_PER_HOP)]
     ticks_per_hop: usize,
 
     /// An extra overhead for every frame passing through the fabric.
-    #[arg(long, default_value = "1")]
+    #[arg(long, default_value_t = DEFAULT_TICKS_OVERHEAD)]
     ticks_overhead: usize,
 
     /// What traffic pattern to use.
-    #[clap(long, default_value_t, value_enum)]
+    #[arg(long, value_enum, default_value_t = TrafficPattern::default())]
     traffic_pattern: TrafficPattern,
 
     /// Number of active sources (chosen at random from possible sources).
-    #[clap(long)]
+    #[arg(long)]
     active_sources: Option<usize>,
 
     /// Seed for random number generator.
-    #[clap(long, default_value = "1")]
+    #[arg(long, default_value_t = DEFAULT_SEED)]
     seed: u64,
 
     /// Whether or not to use the routed model
-    #[clap(long, default_value = "false")]
+    #[arg(long, default_value_t = false)]
     routed: bool,
 
     /// Seed for random number generator.
-    #[clap(long, default_value_t, value_enum)]
+    #[arg(long, value_enum, default_value_t = FabricRoutingAlgorithm::default())]
     fabric_routing: FabricRoutingAlgorithm,
 }
 
@@ -204,7 +223,7 @@ fn identity_destination_port_map(num_ports: usize) -> HashMap<u64, Vec<usize>> {
 }
 
 fn main() -> Result<(), SimError> {
-    let args = Cli::parse();
+    let args = Cli::parse_all_sources();
     let tracker: Rc<dyn Track> = setup_trackers(&args.tracker.trackers_config()).unwrap();
 
     let mut engine = Engine::new(&tracker);
@@ -267,8 +286,9 @@ fn main() -> Result<(), SimError> {
         );
     }
 
-    if args.finish_tick != 0 {
-        finish_at(&spawner, clock.clone(), args.finish_tick);
+    let finish_tick = args.finish_tick;
+    if finish_tick != 0 {
+        finish_at(&spawner, clock.clone(), finish_tick);
     }
 
     run_simulation!(engine);
@@ -320,21 +340,16 @@ fn print_summary(
 
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
-
-    use super::{Cli, max_fabric_port_count};
+    use super::{Cli, CliPartial, max_fabric_port_count};
 
     #[test]
     fn fabric_port_count_overflow_is_recoverable() {
-        let args = Cli::parse_from([
-            "sim-fabric",
-            "--fabric-columns",
-            &usize::MAX.to_string(),
-            "--fabric-rows",
-            "2",
-            "--fabric-ports-per-node",
-            "1",
-        ]);
+        let args = Cli::partial_to_config(CliPartial {
+            fabric_columns: Some(usize::MAX),
+            fabric_rows: Some(2),
+            fabric_ports_per_node: Some(1),
+            ..CliPartial::default()
+        });
 
         let error = max_fabric_port_count(&args).expect_err("overflow should return an error");
 

@@ -8,6 +8,7 @@ use tempfile::{TempDir, tempdir};
 
 const SUCCESS_STATUS: i32 = 0;
 const FAILURE_STATUS: i32 = 1;
+const ARGUMENT_ERROR_STATUS: i32 = 2;
 const LICENSE_FILENAME: &str = "LICENSE";
 
 const GENERAL_CORRECT: &str = "// Copyright (c) 2025 Graphcore Ltd. All rights reserved.
@@ -72,6 +73,19 @@ fn no_arg() {
         run.status.code().expect("exit code not signal"),
         SUCCESS_STATUS
     );
+}
+
+#[test]
+fn filenames_must_come_from_command_line_arguments() {
+    let directory = create_files(&[("example.rs", GENERAL_CORRECT)]);
+    let files = format!(r#"["{}"]"#, directory.path().join("example.rs").display());
+    let run = check_copyright()
+        .current_dir(directory.path())
+        .env("GWR_FILES", files)
+        .output()
+        .expect("failed to execute process");
+
+    assert_eq!(run.status.code(), Some(ARGUMENT_ERROR_STATUS));
 }
 
 #[test]
