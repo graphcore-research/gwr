@@ -53,6 +53,10 @@ the impact of changes on the performance of core components within the [engine].
 cargo bench
 ```
 
+## Application Configuration
+
+{{#include ../../../gwr-config/README.md:configuration}}
+
 ## Formatting the Code
 
 The Rust toolchain provides a formatting tool that helps to keep all of the
