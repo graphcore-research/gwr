@@ -138,6 +138,10 @@ jobs:
       RUSTFLAGS: -D warnings
       BASELINE_BRANCH_NAME: main
       GH_TOKEN: ${{ github.token }}
+      # Use a fixed timestamp for the build date and time embedded by
+      # mimalloc, to prevent it affecting the memory layout of the benchmark
+      # binaries.
+      SOURCE_DATE_EPOCH: "0"
 
     steps:
       - uses: actions/checkout@v7
@@ -179,7 +183,9 @@ jobs:
       - name: Run one-shot benchmarks and update baseline results
         id: run-benchmarks-save-results
         if: github.ref == format('refs/heads/{0}', env.BASELINE_BRANCH_NAME)
-        run: cargo bench --all-features ${{ case(runner.debug == '1', '--verbose', '') }} --bench one_shot_benchmarks -- --save-baseline=$BASELINE_BRANCH_NAME
+        # MIMALLOC_PURGE_DELAY=-1 disables mimalloc's timed memory purging, to
+        # avoid variation between runs.
+        run: cargo bench --all-features ${{ case(runner.debug == '1', '--verbose', '') }} --bench one_shot_benchmarks -- --envs=MIMALLOC_PURGE_DELAY=-1 --save-baseline=$BASELINE_BRANCH_NAME
 
       - name: Upload baseline benchmark results
         id: upload-baseline-benchmark-results
@@ -193,4 +199,6 @@ jobs:
       - name: Run one-shot benchmarks
         id: run-benchmarks
         if: github.ref != format('refs/heads/{0}', env.BASELINE_BRANCH_NAME)
-        run: cargo bench --all-features ${{ case(runner.debug == '1', '--verbose', '') }} --bench one_shot_benchmarks -- --baseline=$BASELINE_BRANCH_NAME
+        # MIMALLOC_PURGE_DELAY=-1 disables mimalloc's timed memory purging, to
+        # avoid variation between runs.
+        run: cargo bench --all-features ${{ case(runner.debug == '1', '--verbose', '') }} --bench one_shot_benchmarks -- --envs=MIMALLOC_PURGE_DELAY=-1 --baseline=$BASELINE_BRANCH_NAME

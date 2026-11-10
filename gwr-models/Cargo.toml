@@ -38,7 +38,7 @@ gwr-track = { path = "../gwr-track", version = "0.13.0" }
 log.workspace = true
 paste.workspace = true
 rand.workspace = true
-rand_xoshiro = "0.8.1"
+rand_xoshiro.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
