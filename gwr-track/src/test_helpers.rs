@@ -15,6 +15,7 @@ use std::io::BufWriter;
 use std::path::Path;
 use std::rc::Rc;
 
+use gwr_std::time::Duration;
 use regex::Regex;
 
 use crate::entity::Capacity;
@@ -158,8 +159,8 @@ impl Track for TestTracker {
         self.add_event(format!("{id}:{level}: {msg}"));
     }
 
-    fn time(&self, set_by: Id, time_ns: f64) {
-        self.add_event(format!("{set_by}: set time {time_ns:.1}ns"));
+    fn time(&self, set_by: Id, time: Duration) {
+        self.add_event(format!("{set_by}: set time {}ns", time.to_nanos_string()));
     }
 
     fn shutdown(&self) {

@@ -6,7 +6,7 @@ use std::fs;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::{Duration as WallClockDuration, Instant};
 
 use clap::Parser;
 use gwr_engine::engine::Engine;
@@ -14,6 +14,7 @@ use gwr_engine::executor::ExecutorStats;
 use gwr_engine::time::clock::Clock;
 use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_platform::Platform;
+use gwr_std::time::Duration;
 use gwr_timetable::Timetable;
 use gwr_timetable::timetable_file::TimetableFile;
 use gwr_track::Track;
@@ -82,7 +83,10 @@ fn main() -> Result<()> {
     }
     run_result?;
 
-    println!("Ran simulation. Time now {}ns", clock.time_now_ns());
+    println!(
+        "Ran simulation. Time now {}ns",
+        clock.time_now().to_nanos_string()
+    );
     println!(
         "{}",
         executor_performance_message(executor_stats, run_elapsed)
@@ -95,14 +99,14 @@ fn main() -> Result<()> {
 
     if args.dump_stats {
         timetable.dump_stats()?;
-        platform.try_dump_stats(clock.time_now_ns())?;
+        platform.try_dump_stats(clock.time_now())?;
     }
 
     Ok(())
 }
 
-fn refresh_interval(progress_hz: NonZeroU32) -> Duration {
-    Duration::from_secs(1) / progress_hz.get()
+fn refresh_interval(progress_hz: NonZeroU32) -> WallClockDuration {
+    WallClockDuration::from_secs(1) / progress_hz.get()
 }
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -236,7 +240,7 @@ impl ProgressBars {
             timetable.num_graph_nodes_active(),
             executor_stats,
             active_task_count,
-            clock.time_now_ns(),
+            clock.time_now(),
         );
     }
 
@@ -245,13 +249,13 @@ impl ProgressBars {
         active: usize,
         executor_stats: ExecutorStats,
         active_task_count: usize,
-        simulated_ns: f64,
+        simulated: Duration,
     ) {
         self.activity.set_message(activity_message(
             active,
             executor_stats,
             active_task_count,
-            simulated_ns,
+            simulated,
         ));
         self.activity.tick();
     }
@@ -274,11 +278,14 @@ fn activity_message(
     active: usize,
     stats: ExecutorStats,
     active_task_count: usize,
-    simulated_ns: f64,
+    simulated: Duration,
 ) -> String {
     format!(
-        "{active:>6} active nodes | {:>6} executor tasks | {} polls, {} completed | {simulated_ns:.3} ns simulated",
-        active_task_count, stats.futures_polled, stats.futures_completed,
+        "{active:>6} active nodes | {:>6} executor tasks | {} polls, {} completed | {} ns simulated",
+        active_task_count,
+        stats.futures_polled,
+        stats.futures_completed,
+        simulated.to_nanos_string(),
     )
 }
 
@@ -305,7 +312,7 @@ fn write_error_mermaid(timetable: &Timetable, path: &Path) {
     }
 }
 
-fn executor_performance_message(stats: ExecutorStats, elapsed: Duration) -> String {
+fn executor_performance_message(stats: ExecutorStats, elapsed: WallClockDuration) -> String {
     format!(
         "{} async futures completed in {:.3}s ({:.1} futures/s wall-clock, {} polls)",
         stats.futures_completed,
@@ -315,7 +322,7 @@ fn executor_performance_message(stats: ExecutorStats, elapsed: Duration) -> Stri
     )
 }
 
-fn futures_per_second(futures_completed: usize, elapsed: Duration) -> f64 {
+fn futures_per_second(futures_completed: usize, elapsed: WallClockDuration) -> f64 {
     if elapsed.is_zero() {
         0.0
     } else {
@@ -325,11 +332,18 @@ fn futures_per_second(futures_completed: usize, elapsed: Duration) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::time::Duration as WallClockDuration;
 
     use gwr_engine::executor::ExecutorStats;
 
     use super::*;
+
+    #[test]
+    fn activity_message_preserves_long_fractional_simulation_time() {
+        let simulated = Duration::new(10_000_000, 0.25);
+        let message = activity_message(2, ExecutorStats::default(), 3, simulated);
+        assert!(message.ends_with("10000000000000000.25 ns simulated"));
+    }
 
     #[test]
     fn progress_hz_defaults_to_ten() {
@@ -359,7 +373,7 @@ mod tests {
     fn progress_hz_maps_to_wall_clock_interval() {
         assert_eq!(
             refresh_interval(NonZeroU32::new(4).unwrap()),
-            Duration::from_millis(250)
+            WallClockDuration::from_millis(250)
         );
     }
 
@@ -392,7 +406,7 @@ mod tests {
 
     #[test]
     fn executor_rate_is_zero_when_no_wall_clock_time_elapsed() {
-        assert_eq!(futures_per_second(123, Duration::ZERO), 0.0);
+        assert_eq!(futures_per_second(123, WallClockDuration::ZERO), 0.0);
     }
 
     #[test]
@@ -403,7 +417,7 @@ mod tests {
                     futures_polled: 80,
                     futures_completed: 50,
                 },
-                Duration::from_millis(250),
+                WallClockDuration::from_millis(250),
             ),
             "50 async futures completed in 0.250s (200.0 futures/s wall-clock, 80 polls)",
         );

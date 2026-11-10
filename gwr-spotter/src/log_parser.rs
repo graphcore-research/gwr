@@ -8,6 +8,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use gwr_std::time::Duration;
 use itertools::Itertools;
 use log::Level;
 use regex::{Captures, Regex};
@@ -33,7 +34,7 @@ struct LogParser {
     group_memberships: HashMap<u64, u64>,
     activity_lanes: HashMap<u64, u64>,
 
-    current_time: f64,
+    current_time: Duration,
 }
 
 fn u64_value(e: &Captures, field_name: &str) -> u64 {
@@ -59,12 +60,12 @@ impl LogParser {
             enter_re: Regex::new(r"(\d+): enter (\d+)$").unwrap(),
             exit_re: Regex::new(r"(\d+): exit (\d+)$").unwrap(),
             value_re: Regex::new(r"(\d+): value (.*)$").unwrap(),
-            time_re: Regex::new(r"\d+: set time to ([^n]+)ns").unwrap(),
+            time_re: Regex::new(r"^\d+: set time to (.*)ns$").unwrap(),
             text_re: Regex::new(r"(\d+): (\d+) entered$").unwrap(),
             group_memberships: HashMap::new(),
             activity_lanes: HashMap::new(),
 
-            current_time: 0.0,
+            current_time: Duration::ZERO,
         }
     }
 
@@ -232,7 +233,10 @@ impl LogParser {
             return false;
         };
         let time_str = e.get(1).unwrap().as_str();
-        self.current_time = time_str.parse().unwrap();
+        let Ok(time) = Duration::from_nanos_str(time_str) else {
+            return false;
+        };
+        self.current_time = time;
         true
     }
 
@@ -452,7 +456,7 @@ pub fn start_background_load(
                             level: log::Level::Error,
                             id: 0,
                             msg: e.to_string(),
-                            time: 0.0,
+                            time: Duration::ZERO,
                         };
                         events.push(err_line);
                     }
@@ -477,6 +481,93 @@ pub fn start_background_load(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::ToTime;
+
+    #[test]
+    fn fractional_time_events_reach_rendered_activities() {
+        let mut parser = LogParser::new();
+        for (timestamp, time) in [
+            ("0.125", Duration::new(0, 0.125)),
+            (
+                "9007199254740993.125",
+                Duration::new(9_007_199, 254_740_993.125),
+            ),
+        ] {
+            assert!(parser.parse_time(&format!("0: set time to {timestamp}ns")));
+            let event = parser
+                .parse_begin_activity("12: activity begin compute on lane 56")
+                .unwrap();
+            assert_eq!(event.time(), time);
+            let mut renderer = Renderer::new();
+            renderer.add_chunk(vec![event]);
+            assert_eq!(
+                renderer.render_line(0),
+                format!("56: ???: activity begin compute @{timestamp}ns")
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_time_events_leave_the_current_time_unchanged() {
+        let mut parser = LogParser::new();
+        let time = Duration::new(0, 0.125);
+        parser.current_time = time;
+
+        for timestamp in [
+            "",
+            "-1",
+            "-0.125",
+            "+1",
+            "NaN",
+            "inf",
+            "Infinity",
+            "1e3",
+            "1.2.3",
+            " 1",
+            "1 ",
+            "4294967296000000000",
+            "340282366920938463463374607431768211456",
+            "1ns trailing",
+        ] {
+            let msg = format!("0: set time to {timestamp}ns");
+            assert!(!parser.parse_time(&msg), "{msg}");
+            assert_eq!(parser.current_time, time, "{msg}");
+        }
+    }
+
+    #[test]
+    fn time_events_preserve_integer_nanoseconds_for_activities() {
+        let mut parser = LogParser::new();
+        let nanos = 9_007_199_254_740_993;
+        let time = Duration::from_nanos(nanos);
+
+        assert!(parser.parse_time(&format!("0: set time to {nanos}ns")));
+        assert_eq!(parser.current_time, time);
+        parser.parse_add_to_group("12: added to group 34").unwrap();
+        let event = parser
+            .parse_begin_activity("12: activity begin add compute on lane 56")
+            .unwrap();
+        assert!(matches!(
+            event,
+            EventLine::ActivityBegin {
+                id: 56,
+                correlation_id: Some(34),
+                time: event_time,
+                ..
+            } if event_time == time
+        ));
+
+        let next_time = time + Duration::from_nanos(1);
+        assert!(parser.parse_time(&format!("0: set time to {}ns", next_time.as_nanos())));
+        let event = parser.parse_end_activity("12: activity end").unwrap();
+        assert!(matches!(
+            event,
+            EventLine::ActivityEnd {
+                id: 56,
+                time: event_time,
+            } if event_time == next_time
+        ));
+    }
 
     #[test]
     fn parse_created_events_from_shared_prefix() {

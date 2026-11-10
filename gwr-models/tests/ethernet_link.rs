@@ -5,6 +5,7 @@ use std::rc::Rc;
 use gwr_engine::test_helpers::start_test;
 use gwr_models::ethernet_frame::{EthernetFrame, FRAME_OVERHEAD_BYTES};
 use gwr_models::ethernet_link::{self, EthernetLink};
+use gwr_std::time::Duration;
 
 mod ethernet_link_harness {
     use gwr_components::build_component_harness;
@@ -40,7 +41,10 @@ mod ethernet_link_harness {
 
         harness.run_steps([send_rx_a!(value), expect_tx_a!(value)]);
 
-        assert_eq!(harness.clock.time_now_ns(), delay_ticks as f64);
+        assert_eq!(
+            harness.clock.time_now(),
+            Duration::from_nanos(delay_ticks as u64)
+        );
     }
 
     #[test]
@@ -67,8 +71,8 @@ mod ethernet_link_harness {
         ])]);
 
         assert_eq!(
-            harness.clock.time_now_ns(),
-            ethernet_link::DELAY_TICKS as f64
+            harness.clock.time_now(),
+            Duration::from_nanos(ethernet_link::DELAY_TICKS as u64)
         );
     }
 

@@ -6,6 +6,7 @@
 
 use std::rc::Rc;
 
+use gwr_std::time::Duration;
 use gwr_track::entity::Entity;
 use gwr_track::set_time;
 
@@ -14,12 +15,12 @@ use crate::time::clock::TaskWaker;
 
 /// The overall owner of time within a simulation.
 ///
-/// Contains all Clocks and the current simulation time in ns.
+/// Contains all Clocks and the current simulation time.
 #[derive(Clone)]
 pub struct SimTime {
     entity: Rc<Entity>,
 
-    current_ns: f64,
+    current_time: Duration,
 
     /// Clocks are auto-created as required and kept in a HashMap.
     ///
@@ -33,7 +34,7 @@ impl SimTime {
     pub fn new(parent: &Rc<Entity>) -> Self {
         Self {
             entity: Rc::new(Entity::new(parent, "time")),
-            current_ns: 0.0,
+            current_time: Duration::ZERO,
             clocks: Vec::new(),
         }
     }
@@ -53,10 +54,10 @@ impl SimTime {
     pub fn advance_time(&mut self) -> Option<Vec<TaskWaker>> {
         if let Some(next_clock) = self.clocks.iter().min_by(|a, b| a.cmp(b)) {
             if let Some(clock_time) = next_clock.shared_state.waiting_times.borrow_mut().pop() {
-                let next_ns = next_clock.to_ns(&clock_time);
-                if self.current_ns != next_ns {
-                    set_time!(self.entity ; next_ns);
-                    self.current_ns = next_ns;
+                let next_time = next_clock.to_duration(&clock_time);
+                if self.current_time != next_time {
+                    set_time!(self.entity ; next_time);
+                    self.current_time = next_time;
                 }
                 next_clock.advance_time(clock_time);
                 next_clock.shared_state.waiting.borrow_mut().pop()
@@ -69,8 +70,8 @@ impl SimTime {
     }
 
     #[must_use]
-    pub fn time_now_ns(&self) -> f64 {
-        self.current_ns
+    pub fn time_now(&self) -> Duration {
+        self.current_time
     }
 
     /// The simulation can exit if all scheduled tasks can exit.
@@ -162,15 +163,46 @@ mod tests {
             assert_eq!(Pin::new(delay).poll(&mut cx), Poll::Pending);
         }
 
-        for expected_ns in [1.0, 1.0, 2.0, 2.0] {
+        for expected_ns in [1, 1, 2, 2] {
             let wakers = time.advance_time().unwrap();
 
             assert_eq!(wakers.len(), 1);
-            assert_eq!(time.time_now_ns(), expected_ns);
+            assert_eq!(time.time_now(), Duration::from_nanos(expected_ns));
         }
 
         assert_eq!(clock_1ghz.tick_now().tick(), 2);
         assert_eq!(clock_2ghz.tick_now().tick(), 4);
+        assert!(time.advance_time().is_none());
+    }
+
+    #[test]
+    fn advance_time_preserves_long_mixed_clock_order() {
+        let tracker = create_tracker(file!());
+        let top = toplevel(&tracker, "top");
+        let mut time = SimTime::new(&top);
+        let clock_1ghz = time.get_clock(1000.0);
+        let clock_2ghz = time.get_clock(2000.0);
+        let ticks = 1_u64 << 53;
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let mut delays = [
+            clock_1ghz.wait_ticks(ticks + 1).unwrap(),
+            clock_2ghz.wait_ticks(ticks * 2 + 1).unwrap(),
+        ];
+        for delay in &mut delays {
+            assert_eq!(Pin::new(delay).poll(&mut cx), Poll::Pending);
+        }
+
+        assert_eq!(time.advance_time().unwrap().len(), 1);
+        let earlier = time.time_now();
+        assert_eq!(clock_2ghz.tick_now().tick(), ticks * 2 + 1);
+        assert_eq!(clock_1ghz.tick_now().tick(), 0);
+        assert_eq!(time.advance_time().unwrap().len(), 1);
+        assert_eq!(
+            time.time_now().checked_sub(earlier).unwrap(),
+            Duration::new(0, 0.5),
+        );
+        assert_eq!(clock_1ghz.tick_now().tick(), ticks + 1);
         assert!(time.advance_time().is_none());
     }
 

@@ -7,6 +7,7 @@ use futures::executor::block_on;
 use gwr_components::capacity_allocator::CapacityAllocator;
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
+use gwr_std::time::Duration;
 
 #[test]
 fn rejects_zero_capacity() {
@@ -119,7 +120,7 @@ fn reserve_waits_until_capacity_is_released() {
 
     assert!(reservation_done.get());
     assert_eq!(allocator.used(), 0);
-    assert_eq!(clock.time_now_ns(), 1.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(1));
 }
 
 #[test]
@@ -163,5 +164,5 @@ fn reserve_rechecks_capacity_after_shared_wakeup() {
 
     assert_eq!(reservations_done.get(), 2);
     assert_eq!(allocator.used(), 1);
-    assert_eq!(clock.time_now_ns(), 21.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(21));
 }

@@ -6,6 +6,7 @@
 
 use core::cmp::Ordering;
 use std::cell::{Cell, RefCell};
+use std::fmt::Display;
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -13,8 +14,12 @@ use std::task::{Context, Poll, Waker};
 
 use futures::future::FusedFuture;
 use gwr_std::error::{SimError, SimResult};
+use gwr_std::time::Duration;
 
 use crate::traits::{Resolve, Resolver};
+
+const HERTZ_PER_MHZ: f64 = 1_000_000.0;
+const NANOS_PER_SEC: f64 = 1_000_000_000.0;
 
 pub mod phase {
     pub const BEGIN: u32 = 0;
@@ -88,7 +93,7 @@ impl PartialOrd for ClockTick {
     }
 }
 
-impl std::fmt::Display for ClockTick {
+impl Display for ClockTick {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}.{:?}", self.tick, self.phase)
     }
@@ -102,6 +107,12 @@ pub struct Clock {
     freq_mhz: f64,
 
     pub shared_state: Rc<ClockState>,
+}
+
+impl Display for Clock {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.time_now().to_appropriate_unit_fmt(f)
+    }
 }
 
 pub struct TaskWaker {
@@ -226,19 +237,19 @@ impl Clock {
         *self.shared_state.now.borrow()
     }
 
-    /// Returns the current time in `ns`.
+    /// Returns the current time.
     #[must_use]
-    pub fn time_now_ns(&self) -> f64 {
+    pub fn time_now(&self) -> Duration {
         let now = *self.shared_state.now.borrow();
-        self.to_ns(&now)
+        self.to_duration(&now)
     }
 
-    /// Returns the time in `ns` of the next event registered with this clock.
+    /// Returns the time of the next event registered with this clock.
     #[must_use]
-    pub fn time_of_next(&self) -> f64 {
+    pub fn time_of_next(&self) -> Duration {
         match self.shared_state.waiting_times.borrow().last() {
-            Some(clock_time) => self.to_ns(clock_time),
-            None => f64::MAX,
+            Some(clock_time) => self.to_duration(clock_time),
+            None => Duration::MAX,
         }
     }
 
@@ -251,10 +262,31 @@ impl Clock {
         }
     }
 
-    /// Convert the given [ClockTick] to a time in `ns` for this clock.
+    /// Convert the given [ClockTick] to a time for this clock.
     #[must_use]
-    pub fn to_ns(&self, clock_time: &ClockTick) -> f64 {
-        clock_time.tick as f64 / self.freq_mhz * 1000.0
+    pub fn to_duration(&self, clock_time: &ClockTick) -> Duration {
+        self.try_to_duration(clock_time.tick)
+            .expect("clock time is outside the simulation duration range")
+    }
+
+    fn try_to_duration(&self, tick: u64) -> Result<Duration, SimError> {
+        if let Some(hertz) = self.integral_hz() {
+            let seconds = u32::try_from(tick / hertz)
+                .map_err(|_| SimError("clock time exceeds the simulation duration range".into()))?;
+            let nanoseconds = (tick % hertz) as f64 * (NANOS_PER_SEC / hertz as f64);
+            Duration::try_new(seconds, nanoseconds)
+        } else {
+            Duration::try_from_secs_f64(tick as f64 / (self.freq_mhz * HERTZ_PER_MHZ))
+        }
+    }
+
+    fn integral_hz(&self) -> Option<u64> {
+        let hertz = self.freq_mhz * HERTZ_PER_MHZ;
+        if hertz > 0.0 && hertz < u64::MAX as f64 && hertz.fract() == 0.0 {
+            Some(hertz as u64)
+        } else {
+            None
+        }
     }
 
     /// Returns a [ClockDelay] future which must be `await`ed to delay the
@@ -312,23 +344,38 @@ impl Clock {
 
     /// Advance to the next tick after the specified time, rejecting
     /// unrepresentable durations and tick overflow.
-    pub fn advance_to(&self, time_ns: f64) -> SimResult {
-        let now_ns = self.time_now_ns();
-        assert!(now_ns < time_ns);
-        let diff_ns = time_ns - now_ns;
-        let ticks = (diff_ns * (self.freq_mhz / 1000.0)).ceil();
-        // u64::MAX rounds up to 2^64 as f64, so the upper bound is exclusive.
-        if !ticks.is_finite() || !(0.0..u64::MAX as f64).contains(&ticks) {
-            return Err(SimError(
-                "clock advance duration is outside u64 range".into(),
-            ));
+    pub fn advance_to(&self, time: Duration) -> SimResult {
+        let now = self.time_now();
+        assert!(now < time);
+        let mut until = self.tick_now();
+        let mut first_tick = until
+            .tick
+            .checked_add(1)
+            .ok_or_else(|| SimError("clock advance deadline overflows".into()))?;
+        let mut last_tick = u64::MAX;
+        let mut next_tick = None;
+
+        while first_tick <= last_tick {
+            let midpoint = first_tick.midpoint(last_tick);
+            match self.try_to_duration(midpoint) {
+                Ok(duration) if duration < time => {
+                    let Some(after) = midpoint.checked_add(1) else {
+                        break;
+                    };
+                    first_tick = after;
+                }
+                result => {
+                    if result.is_ok() {
+                        next_tick = Some(midpoint);
+                    }
+                    last_tick = midpoint - 1;
+                }
+            }
         }
 
-        let mut until = self.tick_now();
-        until.tick = until
-            .tick
-            .checked_add(ticks as u64)
-            .ok_or_else(|| SimError("clock advance deadline overflows".into()))?;
+        until.tick = next_tick.ok_or_else(|| {
+            SimError("clock advance target has no representable future tick".into())
+        })?;
         until.phase = phase::BEGIN;
 
         self.shared_state.advance_time(until);
@@ -346,16 +393,25 @@ impl Default for Clock {
 /// The comparison operators for Clocks - use the next pending Waker time.
 impl PartialEq for Clock {
     fn eq(&self, other: &Self) -> bool {
-        self.time_of_next() == other.time_of_next() && self.phase_of_next() == other.phase_of_next()
+        self.cmp(other) == Ordering::Equal
     }
 }
 impl Eq for Clock {}
 
 impl Ord for Clock {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.time_of_next()
-            .total_cmp(&other.time_of_next())
-            .then_with(|| self.phase_of_next().cmp(&other.phase_of_next()))
+        let next = self.shared_state.waiting_times.borrow().last().copied();
+        let other_next = other.shared_state.waiting_times.borrow().last().copied();
+        match (next, other_next) {
+            (Some(next), Some(other_next)) => self
+                .to_duration(&next)
+                .partial_cmp(&other.to_duration(&other_next))
+                .expect("validated clock durations are comparable")
+                .then_with(|| next.phase.cmp(&other_next.phase)),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        }
     }
 }
 
@@ -427,6 +483,85 @@ mod tests {
 
     use super::*;
 
+    fn assert_advance_reaches_first_tick(clock: &Clock, target: Duration) {
+        let start = clock.tick_now().tick();
+        clock.advance_to(target).unwrap();
+        let advanced = clock.tick_now();
+        assert!(advanced.tick() > start);
+        assert_eq!(advanced.phase(), phase::BEGIN);
+        assert!(clock.time_now() >= target);
+        let predecessor = advanced.tick() - 1;
+        if predecessor > start {
+            assert!(clock.to_duration(&ClockTick::new().set_tick(predecessor)) < target);
+        }
+    }
+
+    #[test]
+    fn advance_to_roundtrips_fractional_tick_deadline() {
+        let clock = Clock::new(1800.0);
+        let target = clock.to_duration(&ClockTick::new().set_tick(7));
+        assert_advance_reaches_first_tick(&clock, target);
+        assert_eq!(clock.tick_now().tick(), 7);
+    }
+
+    #[test]
+    fn advance_to_chooses_minimal_ticks_around_represented_deadlines() {
+        for freq_mhz in [1000.0, 1800.0, 2000.0, 8000.0] {
+            for start in [0, 3, 1_u64 << 53] {
+                let clock = Clock::new(freq_mhz);
+                let deadline = clock.to_duration(&ClockTick::new().set_tick(start + 7));
+                let nanos = deadline.subsec_nanos();
+                for target_nanos in [nanos.next_down(), nanos, nanos.next_up()] {
+                    let clock = Clock::new(freq_mhz);
+                    clock.advance_time(ClockTick::new().set_tick(start).set_phase(phase::END));
+                    let target = Duration::new(deadline.as_secs(), target_nanos);
+                    assert_advance_reaches_first_tick(&clock, target);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn advance_to_chooses_first_tick_on_fractional_hertz_plateau() {
+        let clock = Clock::new(1_000.000_000_5);
+        let ticks = 1_u64 << 53;
+        let target = clock.to_duration(&ClockTick::new().set_tick(ticks + 4));
+        assert_eq!(
+            target,
+            clock.to_duration(&ClockTick::new().set_tick(ticks + 3)),
+        );
+        clock.advance_time(ClockTick::new().set_tick(ticks - 4));
+        assert_advance_reaches_first_tick(&clock, target);
+        assert_eq!(clock.tick_now().tick(), ticks + 3);
+    }
+
+    #[test]
+    fn advance_to_rejects_exhausted_clock_without_advancing() {
+        let clock = Clock::new(8000.0);
+        let start = ClockTick::new().set_tick(u64::MAX).set_phase(phase::END);
+        clock.advance_time(start);
+        let target = clock.time_now() + Duration::new(0, 0.125);
+        assert!(clock.advance_to(target).is_err());
+        assert_eq!(clock.tick_now(), start);
+    }
+
+    #[test]
+    fn advance_to_searches_past_out_of_range_ticks() {
+        let clock = Clock::new(0.000_001);
+        let target = Duration::from_secs(u32::MAX);
+        assert_advance_reaches_first_tick(&clock, target);
+        assert_eq!(clock.tick_now().tick(), u64::from(u32::MAX));
+    }
+
+    #[test]
+    fn advance_to_rejects_unrepresentable_final_tick_without_advancing() {
+        let clock = Clock::new(0.000_001);
+        let start = ClockTick::new().set_phase(phase::END);
+        clock.advance_time(start);
+        assert!(clock.advance_to(Duration::MAX).is_err());
+        assert_eq!(clock.tick_now(), start);
+    }
+
     #[test]
     fn wait_ticks_or_exit_rejects_overflow_and_accepts_maximum_deadline() {
         let clock = Clock::default();
@@ -453,35 +588,35 @@ mod tests {
 
     #[test]
     fn advance_to_rejects_tick_overflow_without_advancing_time() {
-        let clock = Clock::default();
-        // The duration is a representable 2048 ticks, but its deadline is 2^64.
+        let clock = Clock::new(8000.0);
         let start_tick = u64::MAX - 2047;
         clock.advance_time(ClockTick::new().set_tick(start_tick));
-        assert!(clock.advance_to(u64::MAX as f64).is_err());
+        let target = Duration::new(2_305_843_009, 213_693_952.0);
+        assert!(clock.advance_to(target).is_err());
         assert_eq!(clock.tick_now().tick(), start_tick);
     }
 
     #[test]
     fn advance_to_rejects_duration_at_u64_upper_bound() {
-        let clock = Clock::default();
-        assert!(clock.advance_to(u64::MAX as f64).is_err());
+        let clock = Clock::new(8000.0);
+        let target = Duration::new(2_305_843_009, 213_693_952.0);
+        assert!(clock.advance_to(target).is_err());
         assert_eq!(clock.tick_now(), ClockTick::default());
     }
 
     #[test]
-    fn advance_to_rejects_infinite_duration() {
-        let clock = Clock::default();
-        assert!(clock.advance_to(f64::INFINITY).is_err());
+    fn advance_to_rejects_duration_outside_tick_range() {
+        let clock = Clock::new(8000.0);
+        assert!(clock.advance_to(Duration::MAX).is_err());
         assert_eq!(clock.tick_now(), ClockTick::default());
     }
 
     #[test]
-    fn advance_to_accepts_largest_f64_duration_below_u64_upper_bound() {
-        let clock = Clock::default();
-        // The largest f64 below 2^64 is 2^64 - 2048.
-        let ticks = 18_446_744_073_709_549_568_u64;
-        clock.advance_to(ticks as f64).unwrap();
-        assert_eq!(clock.tick_now().tick(), ticks);
+    fn advance_to_accepts_maximum_tick_deadline() {
+        let clock = Clock::new(8000.0);
+        let target = clock.to_duration(&ClockTick::new().set_tick(u64::MAX));
+        clock.advance_to(target).unwrap();
+        assert_eq!(clock.tick_now().tick(), u64::MAX);
         assert_eq!(clock.tick_now().phase(), phase::BEGIN);
     }
 
@@ -492,6 +627,23 @@ mod tests {
         assert!(clock.wait_ticks(2).is_err());
         assert!(clock.shared_state.waiting_times.borrow().is_empty());
         assert!(clock.shared_state.waiting.borrow().is_empty());
+    }
+
+    #[test]
+    fn advance_to_accepts_exact_tick_deadlines() {
+        for ticks in [1, 2, 13] {
+            let clock = Clock::default();
+            clock.advance_to(Duration::from_nanos(ticks)).unwrap();
+            assert_eq!(clock.tick_now().tick(), ticks);
+        }
+    }
+
+    #[test]
+    fn advance_to_rounds_up_to_next_tick() {
+        let clock = Clock::new(100.0);
+        clock.advance_to(Duration::from_nanos(21)).unwrap();
+        assert_eq!(clock.tick_now().tick(), 3);
+        assert_eq!(clock.time_now(), Duration::from_nanos(30));
     }
 
     #[test]
@@ -506,12 +658,145 @@ mod tests {
     }
 
     #[test]
-    fn convert_to_ns() {
+    fn convert_to_duration() {
         let clk_ghz = Clock::new(1000.0);
-        assert_eq!(1.0, clk_ghz.to_ns(&ClockTick::new().set_tick(1)));
+        assert_eq!(
+            Duration::from_nanos(1),
+            clk_ghz.to_duration(&ClockTick::new().set_tick(1))
+        );
 
         let slow_clk = Clock::new(0.5);
-        assert_eq!(2000.0, slow_clk.to_ns(&ClockTick::new().set_tick(1)));
+        assert_eq!(
+            Duration::from_nanos(2000),
+            slow_clk.to_duration(&ClockTick::new().set_tick(1))
+        );
+    }
+
+    #[test]
+    fn convert_to_duration_preserves_exact_second_boundary() {
+        let clock = Clock::default();
+        assert_eq!(
+            clock.to_duration(&ClockTick::new().set_tick(1_000_000_001)),
+            Duration::new(1, 1.0),
+        );
+    }
+
+    #[test]
+    fn convert_to_duration_preserves_subnanosecond_ticks() {
+        for (freq_mhz, nanoseconds) in [(2000.0, 0.5), (4000.0, 0.25)] {
+            let clock = Clock::new(freq_mhz);
+            assert_eq!(
+                clock.to_duration(&ClockTick::new().set_tick(1)),
+                Duration::new(0, nanoseconds),
+            );
+        }
+    }
+
+    #[test]
+    fn convert_to_duration_preserves_adjacent_long_ticks() {
+        let ticks = 1_u64 << 53;
+        for (freq_mhz, nanoseconds_per_tick) in [(1000.0, 1.0), (2000.0, 0.5)] {
+            let clock = Clock::new(freq_mhz);
+            let earlier = clock.to_duration(&ClockTick::new().set_tick(ticks));
+            let later = clock.to_duration(&ClockTick::new().set_tick(ticks + 1));
+            assert!(earlier < later);
+            assert_eq!(
+                later.checked_sub(earlier).unwrap(),
+                Duration::new(0, nanoseconds_per_tick),
+            );
+        }
+    }
+
+    #[test]
+    fn advance_to_preserves_long_time_fraction() {
+        let ticks = 1_u64 << 53;
+        for (freq_mhz, nanoseconds_per_tick) in [(1000.0, 1.0), (2000.0, 0.5)] {
+            let clock = Clock::new(freq_mhz);
+            clock.advance_time(ClockTick::new().set_tick(ticks));
+            let target = clock.time_now() + Duration::new(0, nanoseconds_per_tick);
+            clock.advance_to(target).unwrap();
+            assert_eq!(clock.tick_now().tick(), ticks + 1);
+            assert_eq!(clock.time_now(), target);
+        }
+    }
+
+    #[test]
+    fn advance_to_preserves_whole_seconds_and_fraction() {
+        let clock = Clock::new(2000.0);
+        let target = Duration::new(10_000_000, 0.5);
+        clock.advance_to(target).unwrap();
+        assert_eq!(clock.tick_now().tick(), 20_000_000_000_000_001);
+        assert_eq!(clock.time_now(), target);
+    }
+
+    #[test]
+    fn advance_to_rounds_subnanosecond_deadline_up() {
+        let clock = Clock::new(4000.0);
+        clock.advance_to(Duration::new(0, 0.1)).unwrap();
+        assert_eq!(clock.tick_now().tick(), 1);
+        assert_eq!(clock.time_now(), Duration::new(0, 0.25));
+    }
+
+    #[test]
+    fn fractional_hertz_clock_preserves_approximate_conversion() {
+        let clock = Clock::new(0.000_001_5);
+        let target = Duration::from_secs_f64(0.5);
+        clock.advance_to(target).unwrap();
+        assert_eq!(clock.tick_now().tick(), 1);
+        assert_eq!(clock.time_now(), Duration::from_secs_f64(1.0 / 1.5));
+    }
+
+    #[test]
+    fn clock_ordering_preserves_long_mixed_clock_deadlines_before_phase() {
+        let ticks = 1_u64 << 53;
+        let earlier = Clock::new(2000.0);
+        let later = Clock::default();
+        earlier.shared_state.waiting_times.borrow_mut().push(
+            ClockTick::new()
+                .set_tick(ticks * 2 + 1)
+                .set_phase(phase::END),
+        );
+        later
+            .shared_state
+            .waiting_times
+            .borrow_mut()
+            .push(ClockTick::new().set_tick(ticks + 1).set_phase(phase::BEGIN));
+        assert!(earlier < later);
+    }
+
+    #[test]
+    fn clock_ordering_uses_phase_at_equal_long_deadlines() {
+        let ticks = 1_u64 << 53;
+        let earlier = Clock::new(2000.0);
+        let later = Clock::default();
+        earlier
+            .shared_state
+            .waiting_times
+            .borrow_mut()
+            .push(ClockTick::new().set_tick(ticks * 2).set_phase(1));
+        later
+            .shared_state
+            .waiting_times
+            .borrow_mut()
+            .push(ClockTick::new().set_tick(ticks).set_phase(2));
+        assert_eq!(earlier.time_of_next(), later.time_of_next());
+        assert!(earlier < later);
+    }
+
+    #[test]
+    fn clock_without_waiters_orders_after_latest_deadline_and_phase() {
+        let scheduled = Clock::new(0.000_001);
+        let empty = Clock::default();
+        scheduled.shared_state.waiting_times.borrow_mut().push(
+            ClockTick::new()
+                .set_tick(u64::from(u32::MAX))
+                .set_phase(phase::END),
+        );
+        assert_eq!(empty.time_of_next(), Duration::MAX);
+        assert_eq!(empty.phase_of_next(), phase::END);
+        assert!(scheduled < empty);
+        assert!(empty > scheduled);
+        assert!(empty == Clock::new(2000.0));
     }
 
     #[test]
@@ -545,10 +830,10 @@ mod tests {
         let clock = Clock::default();
         assert_eq!(clock.freq_mhz(), 1000.0);
 
-        clock.advance_to(2.1).unwrap();
+        clock.advance_to(Duration::from_nanos(3)).unwrap();
         assert_eq!(clock.tick_now().tick(), 3);
         assert_eq!(clock.tick_now().phase(), phase::BEGIN);
-        assert_eq!(clock.time_now_ns(), 3.0);
+        assert_eq!(clock.time_now(), Duration::from_nanos(3));
 
         let earlier = Clock::new(1000.0);
         let later = Clock::new(1000.0);

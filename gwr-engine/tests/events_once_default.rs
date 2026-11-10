@@ -7,6 +7,7 @@ use gwr_engine::events::once::Once;
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::Event;
+use gwr_std::time::Duration;
 
 #[test]
 fn notify_zero_listeners() {
@@ -22,7 +23,7 @@ fn notify_zero_listeners() {
 
     run_simulation!(engine);
 
-    assert_eq!(clock.time_now_ns(), 0.0);
+    assert_eq!(clock.time_now(), Duration::ZERO);
 }
 
 #[test]
@@ -38,7 +39,7 @@ fn notify_one_listener() {
         engine.spawn(async move {
             once.listen().await;
             // Ensure this hasn't completed early
-            assert_eq!(clock.time_now_ns(), 10.0);
+            assert_eq!(clock.time_now(), Duration::from_nanos(10));
             Ok(())
         });
     }
@@ -54,7 +55,7 @@ fn notify_one_listener() {
 
     run_simulation!(engine);
 
-    assert_eq!(clock.time_now_ns(), 10.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(10));
 }
 
 #[test]
@@ -71,7 +72,7 @@ fn notify_before_listener() {
             clock.wait_ticks(10)?.await;
             once.listen().await;
             // Ensure this hasn't completed early
-            assert_eq!(clock.time_now_ns(), 10.0);
+            assert_eq!(clock.time_now(), Duration::from_nanos(10));
             Ok(())
         });
     }
@@ -83,7 +84,7 @@ fn notify_before_listener() {
 
     run_simulation!(engine);
 
-    assert_eq!(clock.time_now_ns(), 10.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(10));
 }
 
 #[test]
@@ -103,7 +104,7 @@ fn notify_multiple_listeners() {
         engine.spawn(async move {
             once.listen().await;
             // Ensure this hasn't completed early
-            assert_eq!(clock.time_now_ns(), 10.0);
+            assert_eq!(clock.time_now(), Duration::from_nanos(10));
             *count.borrow_mut() += 1;
             Ok(())
         });
@@ -120,7 +121,7 @@ fn notify_multiple_listeners() {
 
     run_simulation!(engine);
 
-    assert_eq!(clock.time_now_ns(), 10.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(10));
     assert_eq!(*count.borrow(), num_listen);
 }
 

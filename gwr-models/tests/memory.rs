@@ -15,6 +15,7 @@ use gwr_models::test_helpers::{
     create_default_memory_map, create_read, create_write, create_write_np,
 };
 use gwr_std::error::SimError;
+use gwr_std::time::Duration;
 
 const DST_ADDR: u64 = 0x80000;
 const SRC_ADDR: u64 = DST_ADDR + 0x1000;
@@ -144,7 +145,10 @@ mod memory_harness {
         let last_packet_ack = TICKS_PER_ACCESS * ((num_accesses - 1) as u64) + DELAY_TICKS as u64;
         let last_event_time = max(last_bw_limit_event, last_packet_ack) + DELAY_TICKS as u64;
 
-        assert_eq!(harness.engine.time_now_ns(), last_event_time as f64);
+        assert_eq!(
+            harness.engine.time_now(),
+            Duration::from_nanos(last_event_time)
+        );
     }
 
     #[test]
@@ -174,7 +178,10 @@ mod memory_harness {
             ),
         ]);
 
-        assert_eq!(harness.engine.time_now_ns(), DELAY_TICKS as f64);
+        assert_eq!(
+            harness.engine.time_now(),
+            Duration::from_nanos(DELAY_TICKS as u64)
+        );
     }
 
     #[test]
@@ -233,7 +240,10 @@ mod memory_harness {
         // all the delay imposed by the data it is carrying
         let last_bw_limit_event = TICKS_PER_ACCESS * num_accesses as u64;
         let last_event_time = last_bw_limit_event + DELAY_TICKS as u64;
-        assert_eq!(harness.engine.time_now_ns(), last_event_time as f64);
+        assert_eq!(
+            harness.engine.time_now(),
+            Duration::from_nanos(last_event_time)
+        );
     }
 
     #[test]
@@ -276,6 +286,9 @@ mod memory_harness {
         let last_bw_limit_event = TICKS_PER_ACCESS * num_accesses as u64;
         let last_packet_ack = TICKS_PER_ACCESS * ((num_accesses - 1) as u64) + DELAY_TICKS as u64;
         let last_event_time = max(last_bw_limit_event, last_packet_ack) + DELAY_TICKS as u64;
-        assert_eq!(harness.engine.time_now_ns(), last_event_time as f64);
+        assert_eq!(
+            harness.engine.time_now(),
+            Duration::from_nanos(last_event_time)
+        );
     }
 }

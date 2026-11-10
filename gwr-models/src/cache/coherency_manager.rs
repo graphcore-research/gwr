@@ -64,6 +64,7 @@ use gwr_engine::traits::{Runnable, SimObject};
 use gwr_engine::types::{AccessType, DeviceId};
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_std::error::{SimError, SimResult};
+use gwr_std::time::Duration;
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
 
@@ -222,7 +223,7 @@ impl<T: SimObject + CoherentAccess> CoherencyManager<T> {
         self.sent.borrow()[op as usize]
     }
 
-    pub fn dump_stats(&self, _time_now_ns: f64) {
+    pub fn dump_stats(&self, _elapsed: Duration) {
         gwr_track::info!(self.entity ; "Coherence received: {}, sent: {}", self.received_coherence_message_count(), self.sent_coherence_message_count());
     }
 

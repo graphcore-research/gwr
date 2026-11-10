@@ -367,6 +367,8 @@ fn run_filter_pass(
 mod tests {
     use std::collections::HashMap;
 
+    use gwr_std::time::Duration;
+
     use super::SearchState;
     use crate::app::EventLine;
 
@@ -388,23 +390,23 @@ mod tests {
         assert!(search_state.search_matches(&EventLine::Create {
             created_by: 40,
             id: 41,
-            time: 0.0,
+            time: Duration::ZERO,
         }));
         assert!(search_state.search_matches(&EventLine::Create {
             created_by: 41,
             id: 99,
-            time: 0.0,
+            time: Duration::ZERO,
         }));
         assert!(search_state.search_matches(&EventLine::Enter {
             id: 40,
             entered: 41,
             fullness: 1,
-            time: 0.0,
+            time: Duration::ZERO,
         }));
         assert!(search_state.search_matches(&EventLine::Connect {
             from_id: 41,
             to_id: 99,
-            time: 0.0,
+            time: Duration::ZERO,
         }));
     }
 
@@ -419,19 +421,22 @@ mod tests {
         assert!(search_state.search_matches(&EventLine::Value {
             id: 7,
             value: 1.0,
-            time: 0.0,
+            time: Duration::ZERO,
         }));
-        assert!(search_state.search_matches(&EventLine::ActivityEnd { id: 8, time: 0.0 }));
+        assert!(search_state.search_matches(&EventLine::ActivityEnd {
+            id: 8,
+            time: Duration::ZERO
+        }));
         assert!(search_state.search_matches(&EventLine::Log {
             level: log::Level::Info,
             id: 99,
             msg: "sent to mailbox".to_string(),
-            time: 0.0,
+            time: Duration::ZERO,
         }));
         assert!(!search_state.search_matches(&EventLine::Create {
             created_by: 0,
             id: 99,
-            time: 0.0,
+            time: Duration::ZERO,
         }));
     }
 
@@ -445,29 +450,29 @@ mod tests {
         assert!(search_state.search_matches(&EventLine::Create {
             created_by: 0,
             id: 41,
-            time: 0.0,
+            time: Duration::ZERO,
         }));
         assert!(search_state.search_matches(&EventLine::Create {
             created_by: 41,
             id: 99,
-            time: 0.0,
+            time: Duration::ZERO,
         }));
         assert!(search_state.search_matches(&EventLine::Enter {
             id: 1,
             entered: 41,
             fullness: 1,
-            time: 0.0,
+            time: Duration::ZERO,
         }));
         assert!(!search_state.search_matches(&EventLine::Create {
             created_by: 0,
             id: 141,
-            time: 0.0,
+            time: Duration::ZERO,
         }));
         assert!(!search_state.search_matches(&EventLine::Log {
             level: log::Level::Info,
             id: 1,
             msg: "mentions id 41".to_string(),
-            time: 0.0,
+            time: Duration::ZERO,
         }));
     }
 }

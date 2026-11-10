@@ -28,6 +28,7 @@ axum = { version = "0.8.9", default-features = false, features = ["http1", "http
 capnp.workspace = true
 clap.workspace = true
 crossterm.workspace = true
+gwr-std = { path = "../gwr-std", version = "0.1.0" }
 gwr-track = { path = "../gwr-track", version = "0.14.0" }
 itertools.workspace = true
 log.workspace = true

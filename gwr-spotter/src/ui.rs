@@ -3,11 +3,12 @@
 use std::cmp::max;
 use std::vec;
 
+use gwr_std::time::Duration;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{BarChart, Block, BorderType, Borders, Paragraph};
+use ratatui::widgets::{Bar, BarChart, BarGroup, Block, BorderType, Borders, Paragraph};
 
 use crate::app::{App, InputState};
 use crate::handler::TOGGLE_RE;
@@ -257,40 +258,49 @@ fn render_help(_app: &mut App, frame: &mut Frame, area: Rect) {
 fn render_chart(app: &mut App, frame: &mut Frame, area: Rect) {
     let renderer = app.renderer.lock().unwrap();
     let plot_fullness = renderer.plot_fullness;
-    let mut data = Vec::new();
-    for index in renderer.into_iter().take(area.height as usize) {
-        let value = if plot_fullness {
-            renderer.line_fullness(index)
-        } else {
-            renderer.line_time(index) as u64
-        };
-        data.push(("", value));
-    }
-
     let mut max_value = 0;
+    let mut max_time = Duration::ZERO;
     let mut max_capacity: Option<u64> = None;
     if let Some(indices) = renderer.render_indices.as_ref() {
         for index in indices {
-            let value = if plot_fullness {
+            if plot_fullness {
                 if let Some(capacity) = renderer.line_capacity(*index) {
                     max_capacity = Some(max_capacity.map_or(capacity, |max| max.max(capacity)));
                 }
-                renderer.line_fullness(*index)
+                max_value = max(max_value, renderer.line_fullness(*index));
             } else {
-                renderer.line_time(*index) as u64
-            };
-            max_value = max(max_value, value);
+                let time = renderer.line_time(*index);
+                if time > max_time {
+                    max_time = time;
+                }
+            }
         }
     }
     if plot_fullness && let Some(capacity) = max_capacity {
         max_value = capacity;
+    } else if !plot_fullness {
+        const BAR_SUBDIVISIONS: u64 = 8;
+        max_value = u64::from(area.width.max(1)) * BAR_SUBDIVISIONS;
+    }
+
+    let mut data = Vec::new();
+    for index in renderer.into_iter().take(area.height as usize) {
+        let bar = if plot_fullness {
+            Bar::default().value(renderer.line_fullness(index))
+        } else {
+            let time = renderer.line_time(index);
+            Bar::default()
+                .value(time_plot_value(time, max_time, max_value))
+                .text_value(time.to_nanos_string())
+        };
+        data.push(bar);
     }
 
     let title = if plot_fullness { "Fullness:" } else { "Time:" };
 
     let barchart = BarChart::default()
         .block(Block::default().title(title).borders(Borders::ALL))
-        .data(&data)
+        .data(BarGroup::new(data))
         .max(max_value)
         .bar_width(1)
         .bar_gap(0)
@@ -301,4 +311,33 @@ fn render_chart(app: &mut App, frame: &mut Frame, area: Rect) {
         .direction(Direction::Horizontal);
 
     frame.render_widget(barchart, area);
+}
+
+fn time_plot_value(time: Duration, max_time: Duration, max_value: u64) -> u64 {
+    if max_time == Duration::ZERO {
+        0
+    } else {
+        (time.as_nanos_f64() / max_time.as_nanos_f64() * max_value as f64).round() as u64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gwr_std::time::Duration;
+
+    use super::time_plot_value;
+
+    #[test]
+    fn subnanosecond_times_keep_proportional_plot_widths() {
+        let max_time = Duration::new(0, 0.5);
+        assert_eq!(time_plot_value(Duration::ZERO, max_time, 80), 0);
+        assert_eq!(time_plot_value(Duration::new(0, 0.125), max_time, 80), 20);
+        assert_eq!(time_plot_value(Duration::new(0, 0.25), max_time, 80), 40);
+        assert_eq!(time_plot_value(max_time, max_time, 80), 80);
+    }
+
+    #[test]
+    fn zero_time_plot_stays_empty() {
+        assert_eq!(time_plot_value(Duration::ZERO, Duration::ZERO, 80), 0);
+    }
 }

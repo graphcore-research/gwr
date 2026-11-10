@@ -62,6 +62,11 @@ struct Create @0xc95443fd58b475bb {
   id        @0 :UInt64;
 }
 
+struct Duration @0xbb9dea1ae271789d {
+  nanosecs @1  :Float64;
+  seconds  @0  :UInt32; # Approximately 136 years of range
+}
+
 struct Event @0xc13b4d9cc5ead95b {
   union {
     removeFromGroup @13 :UInt64;
@@ -71,7 +76,7 @@ struct Event @0xc13b4d9cc5ead95b {
     capacity        @9  :Capacity;
     value           @8  :Float64;
     connect         @7  :UInt64;
-    time            @6  :Float64;
+    time            @6  :Duration;
     enter           @5  :UInt64;
     exit            @4  :UInt64;
     destroy         @3  :UInt64;

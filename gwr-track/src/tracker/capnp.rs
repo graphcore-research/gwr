@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use capnp::serialize_packed;
+use gwr_std::time::Duration;
 
 use crate::entity::Capacity;
 use crate::gwr_track_capnp::event;
@@ -231,9 +232,11 @@ impl Track for CapnProtoTracker {
         }
     }
 
-    fn time(&self, set_by: Id, time_ns: f64) {
-        self.write_event(set_by, |mut event| {
-            event.set_time(time_ns);
+    fn time(&self, set_by: Id, time: Duration) {
+        self.write_event(set_by, |event| {
+            let mut duration = event.init_time();
+            duration.set_seconds(time.as_secs());
+            duration.set_nanosecs(time.subsec_nanos());
         });
     }
 

@@ -32,6 +32,7 @@
 //! An event being created to co-ordinate between two tasks.
 //!
 //! ```rust
+//! # use gwr_std::time::Duration;
 //! # use gwr_engine::engine::Engine;
 //! # use gwr_engine::events::once::Once;
 //! # use gwr_engine::run_simulation;
@@ -67,7 +68,7 @@
 //!     spawn_listen(&mut engine, event.clone());
 //!     spawn_notify(&mut engine, event);
 //!     run_simulation!(engine);
-//!     # assert_eq!(engine.time_now_ns(), 10.0);
+//!     # assert_eq!(engine.time_now(), Duration::from_nanos(10));
 //! }
 //! ```
 

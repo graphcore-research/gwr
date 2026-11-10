@@ -3,9 +3,10 @@
 use std::cell::RefCell;
 use std::future::Future;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::Duration as WallClockDuration;
 
 use gwr_std::error::SimResult;
+use gwr_std::time::Duration;
 use gwr_track::entity::{Entity, toplevel};
 use gwr_track::tracker::stdout_tracker;
 use gwr_track::{Tracker, trace};
@@ -108,7 +109,7 @@ impl Engine {
     /// clocks, ports, or events. Returns an error when `interval` is zero.
     pub fn run_with_executor_observer(
         &mut self,
-        interval: Duration,
+        interval: WallClockDuration,
         observer: impl FnMut(ExecutorSnapshot) -> SimResult,
     ) -> SimResult {
         self.registry.spawn_components(&self.spawner);
@@ -158,8 +159,8 @@ impl Engine {
     }
 
     #[must_use]
-    pub fn time_now_ns(&self) -> f64 {
-        self.executor.time_now_ns()
+    pub fn time_now(&self) -> Duration {
+        self.executor.time_now()
     }
 
     /// Return cumulative future activity from the most recent run.

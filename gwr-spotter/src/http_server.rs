@@ -7,6 +7,7 @@ use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::Response;
 use axum::routing::get;
 use axum::{Router, middleware};
+use gwr_std::time::Duration;
 use gwr_track::Id;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
@@ -47,7 +48,7 @@ pub(crate) struct SharedState {
     pub(crate) selected: Option<u64>,
     pub(crate) current_line: usize,
     pub(crate) num_lines: usize,
-    pub(crate) current_time_ns: f64,
+    pub(crate) current_time: Duration,
     pub(crate) seek_line: Option<usize>,
 }
 
@@ -62,7 +63,7 @@ impl SharedState {
             selected: None,
             current_line: 0,
             num_lines: 0,
-            current_time_ns: 0.0,
+            current_time: Duration::ZERO,
             seek_line: None,
         }
     }
@@ -77,7 +78,7 @@ impl SharedState {
         self.selected = None;
         self.current_line = 0;
         self.num_lines = 0;
-        self.current_time_ns = 0.0;
+        self.current_time = Duration::ZERO;
         self.seek_line = None;
     }
 }
@@ -123,8 +124,10 @@ async fn selected() -> String {
 async fn position() -> String {
     let state = SHARED_STATE.lock().unwrap();
     format!(
-        "line={}\nlines={}\ntime={:.1}",
-        state.current_line, state.num_lines, state.current_time_ns
+        "line={}\nlines={}\ntime={}",
+        state.current_line,
+        state.num_lines,
+        state.current_time.to_nanos_string()
     )
 }
 
@@ -170,7 +173,8 @@ mod tests {
 
     use super::{router, spawn_on};
     use crate::server_contract::{
-        HttpClient, HttpResponse, assert_command_routes, assert_error_routes, assert_read_routes,
+        HttpClient, HttpResponse, assert_command_routes, assert_error_routes,
+        assert_position_timestamps, assert_read_routes,
     };
 
     struct AxumClient(Router);
@@ -225,6 +229,12 @@ mod tests {
     #[serial]
     async fn read_routes_follow_server_contract() {
         assert_read_routes(&client()).await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn position_preserves_fractional_and_long_timestamps() {
+        assert_position_timestamps(&client()).await;
     }
 
     #[tokio::test]

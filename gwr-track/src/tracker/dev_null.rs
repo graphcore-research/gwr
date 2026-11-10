@@ -2,6 +2,8 @@
 
 use std::str::FromStr;
 
+use gwr_std::time::Duration;
+
 use crate::Id;
 use crate::entity::Capacity;
 use crate::tracker::Track;
@@ -55,7 +57,7 @@ impl Track for DevNullTracker {
     fn destroy(&self, _id: Id, _obj: Id) {}
     fn connect(&self, _connect_from: Id, _connect_to: Id) {}
     fn log(&self, _id: Id, _level: log::Level, _msg: std::fmt::Arguments) {}
-    fn time(&self, _set_by: Id, _time_ns: f64) {}
+    fn time(&self, _set_by: Id, _time: Duration) {}
     fn shutdown(&self) {}
 }
 

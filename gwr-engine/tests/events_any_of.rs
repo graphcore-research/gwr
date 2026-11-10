@@ -3,6 +3,7 @@
 use gwr_engine::events::any_of::AnyOf;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::Event;
+use gwr_std::time::Duration;
 
 pub mod common;
 use common::create_once_event_at_delay;
@@ -26,12 +27,12 @@ fn anyof_once_and_anyof_once() {
     let clock = engine.default_clock();
     engine.spawn(async move {
         anyof_2.listen().await;
-        assert_eq!(clock.time_now_ns(), 10.0);
+        assert_eq!(clock.time_now(), Duration::from_nanos(10));
         Ok(())
     });
     engine.run().unwrap();
 
-    assert_eq!(engine.time_now_ns(), 20.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(20));
 }
 
 #[test]
@@ -51,7 +52,7 @@ fn multiple_listen() {
         engine.spawn(async move {
             let res = anyof.listen().await;
             assert_eq!(res, 1);
-            assert_eq!(clock.time_now_ns(), 10.0);
+            assert_eq!(clock.time_now(), Duration::from_nanos(10));
             Ok(())
         });
     }
@@ -60,14 +61,14 @@ fn multiple_listen() {
         clock.wait_ticks(1)?.await;
         let res = anyof.listen().await;
         assert_eq!(res, 1);
-        assert_eq!(clock.time_now_ns(), 10.0);
+        assert_eq!(clock.time_now(), Duration::from_nanos(10));
         Ok(())
     });
 
     engine.run().unwrap();
 
     // The simulation doesn't complete until all events have fired
-    assert_eq!(engine.time_now_ns(), 30.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(30));
 }
 
 #[test]
@@ -84,10 +85,10 @@ fn using_enum() {
             EventResults::Result1 => panic!("Wrong event fired"),
             EventResults::Result2 => println!("Correct event fired"),
         }
-        assert_eq!(clock.time_now_ns(), 5.0);
+        assert_eq!(clock.time_now(), Duration::from_nanos(5));
         Ok(())
     });
 
     engine.run().unwrap();
-    assert_eq!(engine.time_now_ns(), 10.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(10));
 }

@@ -5,6 +5,7 @@ use std::fs::File;
 use std::io::{BufReader, Write};
 use std::path::Path;
 
+use gwr_std::time::Duration;
 use gwr_track::Id;
 use gwr_track::perfetto_trace_builder::PerfettoTraceBuilder;
 use gwr_track::trace_visitor::{TraceVisitor, process_capnp};
@@ -192,8 +193,8 @@ impl TraceVisitor for PerfettoGenerator {
         }
     }
 
-    fn time(&mut self, _id: Id, time_ns: f64) {
-        self.current_time_ns = time_ns as u64;
+    fn time(&mut self, _id: Id, time: Duration) {
+        self.current_time_ns = time.as_nanos().try_into().expect("Simulations should span less time than the maximum range supported by Perfetto timestamps (approximately 584 years)");
     }
 }
 
@@ -210,4 +211,25 @@ pub fn generate_perfetto_trace(input_bin_file_path: &Path, output_file_path: &Pa
     let mut perfetto_gen = PerfettoGenerator::new(output_file_path);
     process_capnp(reader, &mut perfetto_gen);
     perfetto_gen.finish();
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{env, fs, process};
+
+    use super::*;
+
+    #[test]
+    fn perfetto_timestamps_truncate_to_whole_nanoseconds() {
+        let path = env::temp_dir().join(format!("gwr-spotter-perfetto-time-{}", process::id()));
+        let mut generator = PerfettoGenerator::new(&path);
+
+        generator.time(Id(0), Duration::new(0, 0.125));
+        assert_eq!(generator.current_time_ns, 0);
+        generator.time(Id(0), Duration::new(9_007_199, 254_740_993.125));
+        assert_eq!(generator.current_time_ns, 9_007_199_254_740_993);
+
+        drop(generator);
+        fs::remove_file(path).unwrap();
+    }
 }

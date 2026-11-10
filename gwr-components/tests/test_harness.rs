@@ -15,6 +15,7 @@ use gwr_components::source::Source;
 use gwr_components::store::{ObjectStore, Store};
 use gwr_components::types::Credit;
 use gwr_engine::test_helpers::start_test;
+use gwr_std::time::Duration;
 
 mod source_harness {
     use super::*;
@@ -332,7 +333,7 @@ mod object_store_harness {
             expect_tx!(20),
         ]);
 
-        assert_eq!(harness.clock.time_now_ns(), 1.0);
+        assert_eq!(harness.clock.time_now(), Duration::from_nanos(1));
     }
 
     struct ObjectStoreFillGenerator {

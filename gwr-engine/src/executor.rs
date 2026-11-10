@@ -50,11 +50,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
-use std::time::Duration;
+use std::time::Duration as WallClockDuration;
 use std::{mem, thread};
 
 use futures::task::WakerRef;
 use gwr_std::error::SimResult;
+use gwr_std::time::Duration;
 use gwr_track::entity::Entity;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -233,7 +234,7 @@ impl Executor {
     /// interval has passed. Observations occur at completed step boundaries.
     pub(crate) fn run_with_observer(
         &self,
-        minimum_interval: Duration,
+        minimum_interval: WallClockDuration,
         observer: impl FnMut(ExecutorSnapshot) -> SimResult,
     ) -> SimResult {
         if minimum_interval.is_zero() {
@@ -354,8 +355,8 @@ impl Executor {
     }
 
     #[must_use]
-    pub fn time_now_ns(&self) -> f64 {
-        self.state.time.borrow().time_now_ns()
+    pub fn time_now(&self) -> Duration {
+        self.state.time.borrow().time_now()
     }
 
     pub fn set_randomize_task_order(&self, randomize: bool) {
@@ -400,7 +401,7 @@ mod tests {
     use std::rc::Rc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::task::{Context, Poll};
-    use std::time::Duration;
+    use std::time::Duration as WallClockDuration;
 
     use futures::task::noop_waker;
     use gwr_track::entity::toplevel;
@@ -779,7 +780,7 @@ mod tests {
         let top = toplevel(&tracker, "top");
         let executor = new_executor(&top);
         let error = executor
-            .run_with_observer(Duration::ZERO, |_| Ok(()))
+            .run_with_observer(WallClockDuration::ZERO, |_| Ok(()))
             .unwrap_err();
 
         assert_eq!(

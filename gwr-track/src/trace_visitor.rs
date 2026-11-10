@@ -6,6 +6,7 @@
 use std::io::BufRead;
 
 use capnp::serialize_packed;
+use gwr_std::time::Duration;
 
 use crate::entity::Capacity;
 use crate::gwr_track_capnp::log::LogLevel;
@@ -231,11 +232,11 @@ pub trait TraceVisitor {
     /// # Arguments
     ///
     /// * `id` - The originator of this event.
-    /// * `time_ns` - The new simulation time in `ns`.
-    fn time(&mut self, id: Id, time_ns: f64) {
+    /// * `time` - The new simulation time.
+    fn time(&mut self, id: Id, time: Duration) {
         // Remove the unused variable warnings
         let _ = id;
-        let _ = time_ns;
+        let _ = time;
     }
 }
 
@@ -494,8 +495,17 @@ fn handle_capacity(
     );
 }
 
-fn handle_time(visitor: &mut dyn TraceVisitor, id: Id, time: f64) {
-    visitor.time(id, time);
+fn handle_time(
+    visitor: &mut dyn TraceVisitor,
+    id: Id,
+    time: capnp::Result<gwr_track_capnp::duration::Reader<'_>>,
+) {
+    let time = time.expect("should be able to parse Duration");
+    visitor.time(
+        id,
+        Duration::try_new(time.get_seconds(), time.get_nanosecs())
+            .expect("trace Duration should be finite, nonnegative and within range"),
+    );
 }
 
 fn to_log_level(level: LogLevel) -> log::Level {

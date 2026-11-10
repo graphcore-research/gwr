@@ -4,6 +4,7 @@ use std::fs;
 use std::io::{BufReader, BufWriter};
 use std::rc::Rc;
 
+use gwr_std::time::Duration;
 use gwr_track::entity::{EntityGroup, EntityLane, toplevel};
 use gwr_track::trace_visitor::{TraceVisitor, process_capnp};
 use gwr_track::tracker::{CapnProtoTracker, EntityManager};
@@ -12,6 +13,7 @@ use gwr_track::{Id, Tracker};
 #[derive(Default)]
 struct ActivityVisitor {
     events: Vec<String>,
+    times: Vec<(Id, Duration)>,
 }
 
 impl TraceVisitor for ActivityVisitor {
@@ -42,6 +44,10 @@ impl TraceVisitor for ActivityVisitor {
     fn end_activity(&mut self, id: Id) {
         self.events.push(format!("{id}: activity end"));
     }
+
+    fn time(&mut self, id: Id, time: Duration) {
+        self.times.push((id, time));
+    }
 }
 
 #[test]
@@ -52,14 +58,22 @@ fn activity_events_round_trip_through_capnp_trace() {
         EntityManager::new(log::Level::Trace),
         writer,
     ));
+    let times = [
+        Duration::ZERO,
+        Duration::new(42, 123_456_789.0),
+        Duration::new(u32::MAX, 999_999_999.0),
+    ];
 
     {
         let top = toplevel(&tracker, "top");
         let mut lane = EntityLane::new(&top, "lane::add");
         let group = EntityGroup::new(&top, "group::add_task");
+        tracker.time(top.id, times[0]);
         lane.begin("add_task (add)");
+        tracker.time(top.id, times[1]);
         lane.end();
         lane.begin_in_group("add_task compute", &group);
+        tracker.time(top.id, times[2]);
         lane.end();
     }
     tracker.shutdown();
@@ -68,6 +82,8 @@ fn activity_events_round_trip_through_capnp_trace() {
     let reader = BufReader::new(fs::File::open(&path).unwrap());
     process_capnp(reader, &mut visitor);
     fs::remove_file(path).unwrap();
+
+    assert_eq!(visitor.times, times.map(|time| (Id(2), time)));
 
     assert_eq!(
         visitor.events,
