@@ -7,6 +7,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use gwr_std::time::Duration;
 use gwr_track::Id;
 use gwr_track::entity::Capacity;
 use gwr_track::trace_visitor::{TraceVisitor, process_capnp};
@@ -27,7 +28,7 @@ struct BinLoader {
     id_to_req_type: Option<HashMap<u64, u8>>,
     group_memberships: HashMap<u64, u64>,
     activity_lanes: HashMap<u64, u64>,
-    current_time_ns: f64,
+    current_time: Duration,
 }
 
 impl BinLoader {
@@ -43,7 +44,7 @@ impl BinLoader {
             id_to_req_type: Some(HashMap::new()),
             group_memberships: HashMap::new(),
             activity_lanes: HashMap::new(),
-            current_time_ns: 0.0,
+            current_time: Duration::ZERO,
         }
     }
 
@@ -98,7 +99,7 @@ impl TraceVisitor for BinLoader {
             level,
             id: id.0,
             msg: message.to_owned(),
-            time: self.current_time_ns,
+            time: self.current_time,
         });
     }
 
@@ -115,7 +116,7 @@ impl TraceVisitor for BinLoader {
         self.add_event(EventLine::Create {
             created_by: created_by.0,
             id: id.0,
-            time: self.current_time_ns,
+            time: self.current_time,
         });
     }
 
@@ -132,7 +133,7 @@ impl TraceVisitor for BinLoader {
         self.add_event(EventLine::Create {
             created_by: created_by.0,
             id: id.0,
-            time: self.current_time_ns,
+            time: self.current_time,
         });
     }
 
@@ -149,7 +150,7 @@ impl TraceVisitor for BinLoader {
         self.add_event(EventLine::Create {
             created_by: created_by.0,
             id: id.0,
-            time: self.current_time_ns,
+            time: self.current_time,
         });
     }
 
@@ -185,7 +186,7 @@ impl TraceVisitor for BinLoader {
         self.add_event(EventLine::Create {
             created_by: created_by.0,
             id: id.0,
-            time: self.current_time_ns,
+            time: self.current_time,
         });
     }
 
@@ -197,7 +198,7 @@ impl TraceVisitor for BinLoader {
             .unwrap()
             .connections
             .push(format!("{connect_from} -> {connect_to}").to_string());
-        let time = self.current_time_ns;
+        let time = self.current_time;
         self.add_event(EventLine::Connect {
             from_id: connect_from.0,
             to_id: connect_to.0,
@@ -221,7 +222,7 @@ impl TraceVisitor for BinLoader {
             }
             *fullness
         };
-        let time = self.current_time_ns;
+        let time = self.current_time;
         self.add_event(EventLine::Enter {
             id: id.0,
             entered: entered.0,
@@ -247,7 +248,7 @@ impl TraceVisitor for BinLoader {
             }
             *fullness
         };
-        let time = self.current_time_ns;
+        let time = self.current_time;
         self.add_event(EventLine::Exit {
             id: id.0,
             exited: exited.0,
@@ -257,7 +258,7 @@ impl TraceVisitor for BinLoader {
     }
 
     fn value(&mut self, id: Id, value: f64) {
-        let time = self.current_time_ns;
+        let time = self.current_time;
         self.add_event(EventLine::Value {
             id: id.0,
             value,
@@ -282,7 +283,7 @@ impl TraceVisitor for BinLoader {
             id: lane.0,
             name: name.to_owned(),
             correlation_id,
-            time: self.current_time_ns,
+            time: self.current_time,
         });
     }
 
@@ -290,7 +291,7 @@ impl TraceVisitor for BinLoader {
         if let Some(lane) = self.activity_lanes.remove(&activity.0) {
             self.add_event(EventLine::ActivityEnd {
                 id: lane,
-                time: self.current_time_ns,
+                time: self.current_time,
             });
         }
     }
@@ -307,8 +308,8 @@ impl TraceVisitor for BinLoader {
             .set_capacity(id.0, capacity.value as u64, capacity.units);
     }
 
-    fn time(&mut self, _id: Id, time_ns: f64) {
-        self.current_time_ns = time_ns;
+    fn time(&mut self, _id: Id, time: Duration) {
+        self.current_time = time;
     }
 }
 
@@ -331,4 +332,31 @@ pub fn start_background_load(
         process_capnp(reader, &mut bin_loader);
         bin_loader.finish();
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc::channel;
+
+    use super::*;
+
+    #[test]
+    fn fractional_timestamps_reach_rendered_binary_events() {
+        let renderer = Arc::new(Mutex::new(Renderer::new()));
+        let (tx, _rx) = channel();
+        let filter = Arc::new(Mutex::new(Filter::new(tx)));
+        let mut loader = BinLoader::new(renderer.clone(), filter);
+        let time = Duration::new(9_007_199, 254_740_993.125);
+
+        loader.time(Id(0), time);
+        loader.log(Id(0), log::Level::Info, "message");
+        loader.finish();
+
+        let renderer = renderer.lock().unwrap();
+        assert_eq!(renderer.current_time(), time);
+        assert_eq!(
+            renderer.render_line(0),
+            "0: root: message @9007199254740993.125ns"
+        );
+    }
 }

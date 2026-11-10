@@ -6,6 +6,8 @@ use std::path::PathBuf;
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 
+use gwr_std::time::Duration;
+
 use crate::filter::{Filter, start_background_filter};
 use crate::http_server::SHARED_STATE;
 use crate::renderer::Renderer;
@@ -21,7 +23,7 @@ pub const CHUNK_SIZE: usize = 50000;
 pub const INITIAL_SIZE: usize = CHUNK_SIZE;
 
 pub trait ToTime {
-    fn time(&self) -> f64;
+    fn time(&self) -> Duration;
 }
 
 pub trait ToFullness {
@@ -33,59 +35,59 @@ pub enum EventLine {
     Create {
         created_by: u64,
         id: u64,
-        time: f64,
+        time: Duration,
     },
     Connect {
         from_id: u64,
         to_id: u64,
-        time: f64,
+        time: Duration,
     },
     Log {
         level: log::Level,
         id: u64,
         msg: String,
-        time: f64,
+        time: Duration,
     },
     Enter {
         id: u64,
         entered: u64,
         fullness: u64,
-        time: f64,
+        time: Duration,
     },
     Exit {
         id: u64,
         exited: u64,
         fullness: u64,
-        time: f64,
+        time: Duration,
     },
     Value {
         id: u64,
         value: f64,
-        time: f64,
+        time: Duration,
     },
     ActivityBegin {
         id: u64,
         name: String,
         correlation_id: Option<u64>,
-        time: f64,
+        time: Duration,
     },
     ActivityEnd {
         id: u64,
-        time: f64,
+        time: Duration,
     },
 }
 
 impl ToTime for EventLine {
-    fn time(&self) -> f64 {
+    fn time(&self) -> Duration {
         match self {
-            EventLine::Create { time, .. } => *time,
-            EventLine::Connect { time, .. } => *time,
-            EventLine::Enter { time, .. } => *time,
-            EventLine::Exit { time, .. } => *time,
-            EventLine::Value { time, .. } => *time,
-            EventLine::Log { time, .. } => *time,
-            EventLine::ActivityBegin { time, .. } => *time,
-            EventLine::ActivityEnd { time, .. } => *time,
+            EventLine::Create { time, .. }
+            | EventLine::Connect { time, .. }
+            | EventLine::Enter { time, .. }
+            | EventLine::Exit { time, .. }
+            | EventLine::Value { time, .. }
+            | EventLine::Log { time, .. }
+            | EventLine::ActivityBegin { time, .. }
+            | EventLine::ActivityEnd { time, .. } => *time,
         }
     }
 }
@@ -291,7 +293,7 @@ impl App {
             self.trace_absolute_index + 1
         };
         shared_state.num_lines = renderer.num_lines;
-        shared_state.current_time_ns = renderer.line_time(self.trace_absolute_index);
+        shared_state.current_time = renderer.line_time(self.trace_absolute_index);
         shared_state.fullnesses = self
             .fullness_by_id
             .iter()

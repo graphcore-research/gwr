@@ -17,6 +17,7 @@ use gwr_engine::types::AccessType;
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_std::error::{SimError, SimResult};
 use gwr_std::sim_error;
+use gwr_std::time::Duration;
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
 use gwr_track::{build_aka, debug};
@@ -102,7 +103,7 @@ pub struct MemoryStats {
 
 pub struct MemoryStatsDisplay {
     prefix: String,
-    time_now_ns: f64,
+    elapsed: Duration,
     bytes_read: usize,
     bytes_written: usize,
 }
@@ -111,13 +112,13 @@ impl MemoryStatsDisplay {
     #[must_use]
     pub fn new(
         prefix: impl Into<String>,
-        time_now_ns: f64,
+        elapsed: Duration,
         bytes_read: usize,
         bytes_written: usize,
     ) -> Self {
         Self {
             prefix: prefix.into(),
-            time_now_ns,
+            elapsed,
             bytes_read,
             bytes_written,
         }
@@ -127,9 +128,9 @@ impl MemoryStatsDisplay {
 impl Display for MemoryStatsDisplay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (read_value, read_per_second) =
-            compute_adjusted_value_and_rate(self.time_now_ns, self.bytes_read);
+            compute_adjusted_value_and_rate(self.elapsed, self.bytes_read);
         let (write_value, write_per_second) =
-            compute_adjusted_value_and_rate(self.time_now_ns, self.bytes_written);
+            compute_adjusted_value_and_rate(self.elapsed, self.bytes_written);
 
         writeln!(f, "{}:", self.prefix)?;
         writeln!(
@@ -251,13 +252,13 @@ where
         self.config.capacity_bytes
     }
 
-    pub fn dump_stats(&self, time_now_ns: f64) {
+    pub fn dump_stats(&self, elapsed: Duration) {
         let stats = self.stats.borrow();
         log_stats(
             &self.entity,
             MemoryStatsDisplay::new(
                 format!("Memory {}", self.entity.full_name()),
-                time_now_ns,
+                elapsed,
                 stats.bytes_read,
                 stats.bytes_written,
             ),

@@ -66,7 +66,7 @@ snippet below the `println!` will be called when the time has advanced to
 let clock = engine.clock_ghz(1.0);
 # spawner.spawn(async move {
 clock.wait_ticks(1)?.await;
-println!("Time now {:.2}", clock.time_now_ns());
+println!("Time now {clock:.2}");
 # Ok(())
 #  });
 # }
@@ -129,7 +129,7 @@ let clock = engine.clock_ghz(1.0);
 spawner.spawn(async move {
   loop {
     clock.wait_ticks_or_exit(1000)?.await;
-    println!("Time now {:.2}", clock.time_now_ns());
+    println!("Time now {clock:.2}");
   }
 });
 # }
@@ -141,6 +141,7 @@ spawner.spawn(async move {
 */
 
 use byte_unit::{AdjustedByte, Byte, UnitType};
+use gwr_std::time::Duration;
 
 pub mod clock;
 pub mod simtime;
@@ -148,10 +149,10 @@ pub mod simtime;
 // Convert a number of bytes to a binary-only unit (KiB, MiB, etc)
 #[must_use]
 pub fn compute_adjusted_value_and_rate(
-    time_now_ns: f64,
+    elapsed: Duration,
     num_bytes: usize,
 ) -> (AdjustedByte, AdjustedByte) {
-    let time_now_s = time_now_ns / (1000.0 * 1000.0 * 1000.0);
+    let time_now_s = elapsed.as_secs_f64();
     let count = Byte::from_u64(num_bytes as u64).get_appropriate_unit(UnitType::Binary);
     let per_second = if time_now_s == 0.0 {
         Byte::from_f64(0.0).unwrap()
@@ -168,11 +169,11 @@ mod tests {
 
     #[test]
     fn adjusted_value_and_rate_handles_zero_and_elapsed_time() {
-        let (count, rate) = compute_adjusted_value_and_rate(0.0, 1024);
+        let (count, rate) = compute_adjusted_value_and_rate(Duration::ZERO, 1024);
         assert_eq!(count.get_value(), 1.0);
         assert_eq!(rate.get_value(), 0.0);
 
-        let (count, rate) = compute_adjusted_value_and_rate(1_000_000_000.0, 2048);
+        let (count, rate) = compute_adjusted_value_and_rate(Duration::from_secs(1), 2048);
         assert_eq!(count.get_value(), 2.0);
         assert_eq!(rate.get_value(), 2.0);
     }

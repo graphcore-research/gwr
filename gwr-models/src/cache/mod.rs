@@ -125,6 +125,7 @@ use gwr_engine::types::AccessType;
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_std::error::{SimError, SimResult};
 use gwr_std::sim_error;
+use gwr_std::time::Duration;
 use gwr_track::entity::Entity;
 use gwr_track::tracker::aka::Aka;
 use gwr_track::{build_aka, trace};
@@ -197,7 +198,7 @@ pub struct CacheInflightFills {
 
 pub struct CacheStatsDisplay {
     prefix: String,
-    time_now_ns: f64,
+    elapsed: Duration,
     payload_bytes_read: usize,
     payload_bytes_written: usize,
     num_hits: usize,
@@ -208,7 +209,7 @@ impl CacheStatsDisplay {
     #[must_use]
     pub fn new(
         prefix: impl Into<String>,
-        time_now_ns: f64,
+        elapsed: Duration,
         payload_bytes_read: usize,
         payload_bytes_written: usize,
         num_hits: usize,
@@ -216,7 +217,7 @@ impl CacheStatsDisplay {
     ) -> Self {
         Self {
             prefix: prefix.into(),
-            time_now_ns,
+            elapsed,
             payload_bytes_read,
             payload_bytes_written,
             num_hits,
@@ -228,9 +229,9 @@ impl CacheStatsDisplay {
 impl Display for CacheStatsDisplay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (read_value, read_per_second) =
-            compute_adjusted_value_and_rate(self.time_now_ns, self.payload_bytes_read);
+            compute_adjusted_value_and_rate(self.elapsed, self.payload_bytes_read);
         let (write_value, write_per_second) =
-            compute_adjusted_value_and_rate(self.time_now_ns, self.payload_bytes_written);
+            compute_adjusted_value_and_rate(self.elapsed, self.payload_bytes_written);
         let num_accesses = self.num_hits + self.num_misses;
         let hit_rate = if num_accesses == 0 {
             0.0
@@ -534,13 +535,13 @@ where
         self.contents.borrow().inflight_fills_snapshot()
     }
 
-    pub fn dump_stats(&self, time_now_ns: f64) {
+    pub fn dump_stats(&self, elapsed: Duration) {
         let metrics = self.metrics.borrow();
         log_stats(
             &self.entity,
             CacheStatsDisplay::new(
                 format!("Cache {}", self.entity.full_name()),
-                time_now_ns,
+                elapsed,
                 metrics.payload_bytes_read,
                 metrics.payload_bytes_written,
                 metrics.num_hits,

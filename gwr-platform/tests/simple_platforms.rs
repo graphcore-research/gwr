@@ -18,6 +18,7 @@ use gwr_models::processing_element::operators::{OperatorCustom, Tensor, TensorVi
 use gwr_models::processing_element::task::{ComputeOp, ComputeTaskConfig, Task};
 use gwr_platform::Platform;
 use gwr_std::error::SimError;
+use gwr_std::time::Duration;
 
 /// A struct that implements `Dispatch`
 ///
@@ -105,7 +106,7 @@ fn simple_pe_mem_one_request() {
 
     // There are two compute tasks, each issuing two 32-byte reads and one
     // 32-byte write. Each memory access has a 10ns delay.
-    assert_eq!(clock.time_now_ns(), 60.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(60));
 }
 
 macro_rules! pe_mem_config {
@@ -149,7 +150,7 @@ fn simple_pe_mem_two_requests() {
 
     // Two compute tasks can overlap their LSU requests when the LSU has two
     // outstanding request slots.
-    assert_eq!(clock.time_now_ns(), 32.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(32));
 }
 
 #[test]
@@ -164,7 +165,7 @@ fn strided_ranges_share_active_requests() {
         let pe = platform.pe("pe0").unwrap();
         assert_eq!(pe.bytes_consumed(), 8);
         assert_eq!(pe.bytes_produced(), 0);
-        clock.time_now_ns()
+        clock.time_now()
     };
 
     assert_eq!(run(true), run(false));
@@ -232,14 +233,14 @@ fn strided_partition_checks_the_complete_working_set() {
             .to_string()
             .contains("maximum useful partition count requires 8 bytes")
     );
-    assert_eq!(clock.time_now_ns(), 0.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(0));
 }
 
 #[test]
 fn simple_pe_fabric_mem_routes_by_device_id() {
     let (_, clock) = run_pe_fabric_mem(1);
 
-    assert!(clock.time_now_ns() > 80.0);
+    assert!(clock.time_now() > Duration::from_nanos(80));
 }
 
 #[test]
@@ -306,7 +307,7 @@ connections:
     assert_eq!(traffic.fill_requests, 2);
     assert_eq!(traffic.downstream_read_bytes, 64);
     assert_eq!(traffic.downstream_write_bytes, 64);
-    assert_eq!(clock.time_now_ns(), 154.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(154));
 }
 
 #[test]

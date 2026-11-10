@@ -3,6 +3,8 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
+use gwr_std::time::Duration;
+
 use crate::app::{CHUNK_SIZE, EventLine, INITIAL_SIZE, ToFullness, ToTime};
 
 const UNKNOWN: &str = "???";
@@ -89,7 +91,7 @@ impl Renderer {
     }
 
     /// Return the timestamp for the current rendered line.
-    pub fn current_time(&self) -> f64 {
+    pub fn current_time(&self) -> Duration {
         self.line_time(self.current_absolute_index())
     }
 
@@ -168,11 +170,11 @@ impl Renderer {
         chunk.get(chunk_offset)
     }
 
-    pub fn line_time(&self, line_index: usize) -> f64 {
+    pub fn line_time(&self, line_index: usize) -> Duration {
         if let Some(line) = self.line_from_index(line_index) {
             line.time()
         } else {
-            0.0
+            Duration::ZERO
         }
     }
 
@@ -229,13 +231,13 @@ impl Renderer {
         let (mut line, time) = self.render_event_line(event_line);
 
         if self.print_times {
-            let _ = write!(line, " @{time:.1}ns");
+            let _ = write!(line, " @{}ns", time.to_nanos_string());
         }
 
         line
     }
 
-    fn render_event_line(&self, event_line: &EventLine) -> (String, f64) {
+    fn render_event_line(&self, event_line: &EventLine) -> (String, Duration) {
         match event_line {
             EventLine::Enter {
                 id,
@@ -506,6 +508,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn current_time_keeps_fractional_timestamps_in_a_filtered_view() {
+        let fractional_time = Duration::new(0, 0.125);
+        let long_time = Duration::new(9_007_199, 254_740_993.125);
+        let mut renderer = Renderer::new();
+        renderer.add_chunk(vec![
+            EventLine::Log {
+                level: log::Level::Info,
+                id: 0,
+                msg: "first".to_string(),
+                time: fractional_time,
+            },
+            EventLine::Log {
+                level: log::Level::Info,
+                id: 0,
+                msg: "second".to_string(),
+                time: long_time,
+            },
+        ]);
+        assert_eq!(renderer.current_time(), fractional_time);
+        assert_eq!(renderer.line_time(99), Duration::ZERO);
+        renderer.set_render_indices(vec![1]);
+        assert_eq!(renderer.current_time(), long_time);
+        assert_eq!(
+            renderer.render_line(1),
+            "0: root: second @9007199254740993.125ns"
+        );
+    }
+
+    #[test]
     fn renders_activity_events() {
         let mut renderer = Renderer::new();
         renderer.extend_id_to_name(HashMap::from([(7, "pe0::lane::compute::0".to_string())]));
@@ -514,18 +545,21 @@ mod tests {
                 id: 7,
                 name: "add compute".to_string(),
                 correlation_id: Some(42),
-                time: 10.0,
+                time: Duration::from_nanos(10),
             },
-            EventLine::ActivityEnd { id: 7, time: 15.0 },
+            EventLine::ActivityEnd {
+                id: 7,
+                time: Duration::from_nanos(15),
+            },
         ]);
 
         assert_eq!(
             renderer.render_line(0),
-            "7: pe0::lane::compute::0: activity begin add compute correlation 42 @10.0ns"
+            "7: pe0::lane::compute::0: activity begin add compute correlation 42 @10ns"
         );
         assert_eq!(
             renderer.render_line(1),
-            "7: pe0::lane::compute::0: activity end @15.0ns"
+            "7: pe0::lane::compute::0: activity end @15ns"
         );
     }
 
@@ -544,22 +578,22 @@ mod tests {
             EventLine::Create {
                 created_by: 0,
                 id: 1,
-                time: 10.0,
+                time: Duration::from_nanos(10),
             },
             EventLine::Create {
                 created_by: 1,
                 id: 2,
-                time: 20.0,
+                time: Duration::from_nanos(20),
             },
         ]);
 
         assert_eq!(
             renderer.render_line(0),
-            "0: created 1: pe0::lane (worker lane) @10.0ns"
+            "0: created 1: pe0::lane (worker lane) @10ns"
         );
         assert_eq!(
             renderer.render_line(1),
-            "1: created object 2 (packet<f32>) @20.0ns"
+            "1: created object 2 (packet<f32>) @20ns"
         );
     }
 
@@ -571,19 +605,19 @@ mod tests {
                 id: 7,
                 entered: 100,
                 fullness: 1,
-                time: 10.0,
+                time: Duration::from_nanos(10),
             },
             EventLine::Enter {
                 id: 8,
                 entered: 101,
                 fullness: 2,
-                time: 11.0,
+                time: Duration::from_nanos(11),
             },
             EventLine::Exit {
                 id: 7,
                 exited: 100,
                 fullness: 0,
-                time: 12.0,
+                time: Duration::from_nanos(12),
             },
         ]);
 

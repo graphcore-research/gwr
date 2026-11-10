@@ -7,6 +7,7 @@ use gwr_engine::engine::Engine;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::{Routable, SimObject, TotalBytes};
 use gwr_engine::types::AccessType;
+use gwr_std::time::Duration;
 use gwr_track::id::{Id, Unique};
 
 #[derive(Clone, Debug)]
@@ -73,33 +74,33 @@ fn test_rate_limiter(
 fn one_ghz_1_byte_8_bits() {
     let mut engine = start_test(file!());
     test_rate_limiter(&mut engine, 1000.0, 8, RateLimiterTest::new(1));
-    assert_eq!(engine.time_now_ns(), 1.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(1));
 }
 
 #[test]
 fn one_ghz_1_byte_1_bit() {
     let mut engine = start_test(file!());
     test_rate_limiter(&mut engine, 1000.0, 1, RateLimiterTest::new(1));
-    assert_eq!(engine.time_now_ns(), 8.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(8));
 }
 
 #[test]
 fn one_mhz_1_byte_8_bits() {
     let mut engine = start_test(file!());
     test_rate_limiter(&mut engine, 1.0, 8, RateLimiterTest::new(1));
-    assert_eq!(engine.time_now_ns(), 1000.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(1000));
 }
 
 #[test]
 fn one_ghz_1_byte_7_bits() {
     let mut engine = start_test(file!());
     test_rate_limiter(&mut engine, 1000.0, 7, RateLimiterTest::new(1));
-    assert_eq!(engine.time_now_ns(), 2.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(2));
 }
 
 #[test]
 fn one_ghz_2_byte_8_bits() {
     let mut engine = start_test(file!());
     test_rate_limiter(&mut engine, 1000.0, 7, RateLimiterTest::new(1));
-    assert_eq!(engine.time_now_ns(), 2.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(2));
 }

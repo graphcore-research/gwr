@@ -6,6 +6,7 @@ use std::rc::Rc;
 use futures::{FutureExt, select};
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::{Resolve, Resolver};
+use gwr_std::time::Duration;
 
 /// Test that runs different clocks that add to a shared vector and then checks
 /// that everything has been done in the correct order and at the right times.
@@ -25,7 +26,7 @@ fn dual_clock() {
     engine.spawn(async move {
         for _ in 0..5 {
             clk1.wait_ticks(1)?.await;
-            values.borrow_mut().push((1, clk1.time_now_ns()));
+            values.borrow_mut().push((1, clk1.time_now()));
         }
         Ok(())
     });
@@ -34,27 +35,25 @@ fn dual_clock() {
     engine.spawn(async move {
         for _ in 0..5 {
             clk2.wait_ticks(1)?.await;
-            values.borrow_mut().push((2, clk2.time_now_ns()));
+            values.borrow_mut().push((2, clk2.time_now()));
         }
         Ok(())
     });
 
     engine.run().unwrap();
 
-    let ns1 = 1000.0 / mhz1;
-    let ns2 = 1000.0 / mhz2;
     assert_eq!(
         vec![
-            (2, 1.0 * ns2),
-            (1, 1.0 * ns1),
-            (2, 2.0 * ns2),
-            (2, 3.0 * ns2),
-            (1, 2.0 * ns1),
-            (2, 4.0 * ns2),
-            (2, 5.0 * ns2),
-            (1, 3.0 * ns1),
-            (1, 4.0 * ns1),
-            (1, 5.0 * ns1),
+            (2, Duration::new(0, 5.0 / 9.0)),
+            (1, Duration::from_nanos(1)),
+            (2, Duration::new(0, 10.0 / 9.0)),
+            (2, Duration::new(0, 5.0 / 3.0)),
+            (1, Duration::from_nanos(2)),
+            (2, Duration::new(0, 20.0 / 9.0)),
+            (2, Duration::new(0, 25.0 / 9.0)),
+            (1, Duration::from_nanos(3)),
+            (1, Duration::from_nanos(4)),
+            (1, Duration::from_nanos(5)),
         ],
         *all_values.borrow()
     );
@@ -89,7 +88,7 @@ fn wait_ticks_or_exit() {
     engine.run().unwrap();
 
     // Simulation should have finished when the first loop completed
-    assert_eq!(engine.time_now_ns(), 5.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(5));
 }
 
 struct PendingUpdate {
@@ -181,11 +180,11 @@ fn cancelled_wait_ticks_does_not_leave_stale_schedule() {
             }
 
             clock.wait_ticks(5)?.await;
-            assert_eq!(clock.time_now_ns(), 10.0);
+            assert_eq!(clock.time_now(), Duration::from_nanos(10));
             Ok(())
         });
     }
 
     engine.run().unwrap();
-    assert_eq!(engine.time_now_ns(), 10.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(10));
 }

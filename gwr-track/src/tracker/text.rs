@@ -3,6 +3,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use gwr_std::time::Duration;
 #[doc(hidden)]
 pub use log;
 
@@ -214,11 +215,13 @@ impl Track for TextTracker {
         }
     }
 
-    fn time(&self, set_by: Id, time_ns: f64) {
+    fn time(&self, set_by: Id, time: Duration) {
         if self.is_entity_enabled(set_by, log::Level::Trace) {
             self.writer
                 .borrow_mut()
-                .write_all(format!("{set_by}: set time to {time_ns:.1}ns\n").as_bytes())
+                .write_all(
+                    format!("{set_by}: set time to {}ns\n", time.to_nanos_string()).as_bytes(),
+                )
                 .unwrap();
         }
     }

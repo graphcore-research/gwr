@@ -24,6 +24,7 @@ use gwr_models::processing_element::{
 };
 use gwr_std::error::{SimError, SimResult};
 use gwr_std::sim_error;
+use gwr_std::time::Duration;
 use gwr_track::entity::{Entity, GetEntity};
 
 use crate::builder::{
@@ -241,22 +242,22 @@ impl Platform {
         }
     }
 
-    pub fn try_dump_stats(&self, time_now_ns: f64) -> SimResult {
+    pub fn try_dump_stats(&self, elapsed: Duration) -> SimResult {
         let (machine_ops, bytes_consumed, bytes_produced) = self.processing_element_totals()?;
-        self.dump_memory_totals(time_now_ns);
-        self.dump_cache_totals(time_now_ns);
-        self.dump_pe_totals(time_now_ns, machine_ops, bytes_consumed, bytes_produced);
+        self.dump_memory_totals(elapsed);
+        self.dump_cache_totals(elapsed);
+        self.dump_pe_totals(elapsed, machine_ops, bytes_consumed, bytes_produced);
         for manager in self.coherency_managers.values() {
-            manager.dump_stats(time_now_ns);
+            manager.dump_stats(elapsed);
         }
         for mem in &self.memories {
-            mem.dump_stats(time_now_ns);
+            mem.dump_stats(elapsed);
         }
         for cache in &self.caches {
-            cache.dump_stats(time_now_ns);
+            cache.dump_stats(elapsed);
         }
         for pe in &self.processing_elements {
-            pe.dump_stats(time_now_ns);
+            pe.dump_stats(elapsed);
         }
         Ok(())
     }
@@ -299,7 +300,7 @@ impl Platform {
         out
     }
 
-    fn dump_memory_totals(&self, time_now_ns: f64) {
+    fn dump_memory_totals(&self, elapsed: Duration) {
         let total_bytes_read: usize = self.memories.iter().map(|mem| mem.bytes_read()).sum();
         let total_bytes_written: usize = self.memories.iter().map(|mem| mem.bytes_written()).sum();
 
@@ -307,14 +308,14 @@ impl Platform {
             &self.entity,
             MemoryStatsDisplay::new(
                 "Memory totals",
-                time_now_ns,
+                elapsed,
                 total_bytes_read,
                 total_bytes_written,
             ),
         );
     }
 
-    fn dump_cache_totals(&self, time_now_ns: f64) {
+    fn dump_cache_totals(&self, elapsed: Duration) {
         let total_payload_bytes_read = self.total_cache_stat(Cache::payload_bytes_read);
         let total_payload_bytes_written = self.total_cache_stat(Cache::payload_bytes_written);
         let total_hits = self.total_cache_stat(Cache::num_hits);
@@ -323,7 +324,7 @@ impl Platform {
             &self.entity,
             CacheStatsDisplay::new(
                 "Cache totals",
-                time_now_ns,
+                elapsed,
                 total_payload_bytes_read,
                 total_payload_bytes_written,
                 total_hits,
@@ -360,19 +361,15 @@ impl Platform {
 
     fn dump_pe_totals(
         &self,
-        time_now_ns: f64,
+        elapsed: Duration,
         machine_ops: MachineOpCounts,
         bytes_consumed: usize,
         bytes_produced: usize,
     ) {
         log_stats(
             &self.entity,
-            ProcessingElementStatsDisplay::new(
-                "ProcessingElement totals",
-                time_now_ns,
-                machine_ops,
-            )
-            .with_data(bytes_consumed, bytes_produced),
+            ProcessingElementStatsDisplay::new("ProcessingElement totals", elapsed, machine_ops)
+                .with_data(bytes_consumed, bytes_produced),
         );
     }
 }

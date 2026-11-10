@@ -12,6 +12,7 @@ use gwr_engine::engine::Engine;
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
 use gwr_std::error::SimResult;
+use gwr_std::time::Duration;
 use gwr_track::tracker::dev_null_tracker;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -60,7 +61,7 @@ fn default_engine_runs() {
 
     run_simulation!(engine);
 
-    assert_eq!(engine.time_now_ns(), 1.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(1));
 }
 
 #[test]
@@ -83,7 +84,7 @@ fn task_error_ends_the_current_run() {
     });
 
     assert_eq!(engine.run().unwrap_err().0, "simulation stopped");
-    assert_eq!(engine.time_now_ns(), 3.0);
+    assert_eq!(engine.time_now(), Duration::from_nanos(3));
     assert!(!later_task_ran.get());
 }
 
@@ -99,7 +100,7 @@ fn clock_khz_sets_clock_frequency() {
 
     run_simulation!(engine);
 
-    assert_eq!(engine.time_now_ns(), 1_000_000.0);
+    assert_eq!(engine.time_now(), Duration::from_millis(1));
 }
 
 #[test]
@@ -114,7 +115,7 @@ fn clock_ghz_sets_clock_frequency() {
 
     run_simulation!(engine);
 
-    assert_eq!(engine.time_now_ns(), 0.5);
+    assert_eq!(engine.time_now(), Duration::from_secs_f64(0.5e-9));
 }
 
 #[test]

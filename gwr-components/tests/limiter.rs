@@ -281,7 +281,7 @@ fn packet_bit_overflow_precedes_delivery_and_ack() {
 #[test]
 fn service_deadline_overflow_precedes_delivery_and_ack() {
     let mut engine = Engine::default();
-    let clock = engine.default_clock();
+    let clock = engine.clock_ghz(8.0);
     let limiter = Limiter::new_and_register(
         &engine,
         &clock,

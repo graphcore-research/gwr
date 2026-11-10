@@ -4,6 +4,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use gwr_std::time::Duration;
+
 use crate::entity::Capacity;
 use crate::perfetto_trace_builder::PerfettoTraceBuilder;
 use crate::tracker::EntityManager;
@@ -223,8 +225,8 @@ impl Track for PerfettoTracker {
         // todo!()
     }
 
-    fn time(&self, _set_by: Id, time_ns: f64) {
-        *self.current_time_ns.borrow_mut() = time_ns as u64;
+    fn time(&self, _set_by: Id, time: Duration) {
+        *self.current_time_ns.borrow_mut() = time.as_nanos().try_into().expect("Simulations should span less time than the maximum range supported by Perfetto timestamps (almost 585 years)");
     }
 
     fn shutdown(&self) {

@@ -7,6 +7,7 @@ use gwr_components::build_component_harness;
 use gwr_components::store::{ByteStore, Store};
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::{SimObject, TotalBytes};
+use gwr_std::time::Duration;
 use gwr_track::Id;
 use gwr_track::id::Unique;
 
@@ -99,7 +100,7 @@ fn byte_store_push_waits_until_enough_bytes_are_available() {
     ]);
 
     assert_eq!(store.capacity_used(), 0);
-    assert_eq!(harness.clock.time_now_ns(), 1.0);
+    assert_eq!(harness.clock.time_now(), Duration::from_nanos(1));
 }
 
 #[test]

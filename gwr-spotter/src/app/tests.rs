@@ -7,9 +7,12 @@ use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 
+use gwr_std::time::Duration;
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 use serial_test::serial;
 
-use crate::app::{App, InputState};
+use crate::app::{App, EventLine, InputState};
 use crate::filter::Filter;
 use crate::http_server::SHARED_STATE;
 use crate::renderer::Renderer;
@@ -64,6 +67,76 @@ fn create_test_app() -> (App, Receiver<()>) {
     let renderer = create_test_renderer();
     let (filter, rx) = create_test_filter();
     (create_test_app_with(renderer, filter), rx)
+}
+
+#[test]
+#[serial]
+fn tick_publishes_fractional_timestamps_when_seeking() {
+    let (mut app, _rx) = create_test_app();
+    let times = [
+        Duration::new(0, 0.125),
+        Duration::new(9_007_199, 254_740_993.125),
+    ];
+    {
+        let mut renderer = app.renderer.lock().unwrap();
+        renderer.add_chunk(
+            times
+                .iter()
+                .map(|time| EventLine::Log {
+                    level: log::Level::Info,
+                    id: 0,
+                    msg: "message".to_string(),
+                    time: *time,
+                })
+                .collect(),
+        );
+        renderer.set_render_indices(vec![0, 1]);
+    }
+
+    app.tick();
+    assert_eq!(SHARED_STATE.lock().unwrap().current_time, times[0]);
+    SHARED_STATE.lock().unwrap().seek_line = Some(2);
+    app.tick();
+    let state = SHARED_STATE.lock().unwrap();
+    assert_eq!(state.current_line, 2);
+    assert_eq!(state.current_time, times[1]);
+}
+
+#[test]
+#[serial]
+fn subnanosecond_time_chart_renders_when_indices_are_ready() {
+    let (mut app, _rx) = create_test_app();
+    app.filter.lock().unwrap().set("id=1");
+    app.renderer.lock().unwrap().add_chunk(vec![
+        EventLine::Value {
+            id: 1,
+            value: 0.0,
+            time: Duration::new(0, 0.125),
+        },
+        EventLine::Value {
+            id: 1,
+            value: 1.0,
+            time: Duration::new(0, 0.25),
+        },
+    ]);
+    let mut terminal = Terminal::new(TestBackend::new(100, 12)).unwrap();
+    terminal
+        .draw(|frame| crate::ui::render(&mut app, frame))
+        .unwrap();
+    assert_eq!(terminal.backend().buffer()[(65, 1)].symbol(), " ");
+
+    app.renderer.lock().unwrap().set_render_indices(vec![0, 1]);
+    terminal
+        .draw(|frame| crate::ui::render(&mut app, frame))
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    for (row, timestamp) in [(1, "0.125"), (2, "0.25")] {
+        let text: String = (51..99)
+            .map(|column| buffer[(column, row)].symbol())
+            .collect();
+        assert!(text.starts_with(timestamp), "{text}");
+        assert_eq!(buffer[(65, row)].symbol(), "█");
+    }
 }
 
 #[test]

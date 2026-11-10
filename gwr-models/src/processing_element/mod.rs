@@ -34,6 +34,7 @@ use gwr_engine::types::{AccessType, DeviceId};
 use gwr_model_builder::{EntityDisplay, EntityGet};
 use gwr_std::error::{SimError, SimResult};
 use gwr_std::sim_error;
+use gwr_std::time::Duration;
 use gwr_track::debug;
 use gwr_track::entity::{Entity, EntityGroup, EntityLane};
 use gwr_track::tracker::aka::Aka;
@@ -101,7 +102,7 @@ impl MachineOpCounts {
 
 pub struct ProcessingElementStatsDisplay {
     prefix: String,
-    time_now_ns: f64,
+    elapsed: Duration,
     machine_ops: MachineOpCounts,
     bytes_consumed: usize,
     bytes_produced: usize,
@@ -109,10 +110,10 @@ pub struct ProcessingElementStatsDisplay {
 
 impl ProcessingElementStatsDisplay {
     #[must_use]
-    pub fn new(prefix: impl Into<String>, time_now_ns: f64, machine_ops: MachineOpCounts) -> Self {
+    pub fn new(prefix: impl Into<String>, elapsed: Duration, machine_ops: MachineOpCounts) -> Self {
         Self {
             prefix: prefix.into(),
-            time_now_ns,
+            elapsed,
             machine_ops,
             bytes_consumed: 0,
             bytes_produced: 0,
@@ -132,7 +133,7 @@ impl Display for ProcessingElementStatsDisplay {
         let total_flops = self.machine_ops.adds as u128
             + self.machine_ops.muls as u128
             + self.machine_ops.compares as u128;
-        let time_now_s = self.time_now_ns / 1e9;
+        let time_now_s = self.elapsed.as_secs_f64();
         let total_gflops = total_flops as f64 / 1e9;
         let average_gflops_per_second = if time_now_s == 0.0 {
             0.0
@@ -464,13 +465,13 @@ impl ProcessingElement {
         self.stats.borrow().bytes_produced
     }
 
-    pub fn dump_stats(&self, time_now_ns: f64) {
+    pub fn dump_stats(&self, elapsed: Duration) {
         let stats = self.stats.borrow();
         log_stats(
             &self.entity,
             ProcessingElementStatsDisplay::new(
                 format!("ProcessingElement {}", self.entity.full_name()),
-                time_now_ns,
+                elapsed,
                 stats.machine_ops,
             )
             .with_data(stats.bytes_consumed, stats.bytes_produced),

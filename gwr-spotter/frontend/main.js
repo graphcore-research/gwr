@@ -260,17 +260,24 @@
     const position = {
       line: 0,
       lines: 0,
-      time: 0.0,
+      time: "0",
     };
 
     text.split("\n").forEach(function (line) {
-      const [key, value] = line.split("=");
+      const separator = line.indexOf("=");
+      if (separator < 0) {
+        return;
+      }
+      const key = line.slice(0, separator);
+      const value = line.slice(separator + 1);
       if (key == "line") {
         position.line = Number(value);
       } else if (key == "lines") {
         position.lines = Number(value);
       } else if (key == "time") {
-        position.time = Number(value);
+        if (typeof value == "string" && /^\d+(?:\.\d+)?$/.test(value)) {
+          position.time = value;
+        }
       }
     });
 
@@ -279,9 +286,6 @@
     }
     if (Number.isNaN(position.lines)) {
       position.lines = 0;
-    }
-    if (Number.isNaN(position.time)) {
-      position.time = 0.0;
     }
     return position;
   }
@@ -317,7 +321,7 @@
       this.lastPosition = {
         line: 0,
         lines: 0,
-        time: 0.0,
+        time: "0",
       };
     }
 
@@ -470,9 +474,7 @@
         .attr("min", maxLine > 0 ? 1 : 0)
         .attr("max", maxLine)
         .property("value", line);
-      this.positionLabel.text(
-        `${line} / ${maxLine} @ ${position.time.toFixed(1)}ns`,
-      );
+      this.positionLabel.text(`${line} / ${maxLine} @ ${position.time}ns`);
     }
 
     _debounced_seek(line) {

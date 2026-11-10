@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 
+use gwr_std::time::Duration;
+
 use crate::TEST_SERVER_STATE;
 
 pub(crate) struct HttpResponse {
@@ -55,7 +57,7 @@ pub(crate) async fn assert_read_routes(client: &impl HttpClient) {
         state.connections = vec!["0->1".to_string(), "1->2".to_string()];
         state.current_line = 12;
         state.num_lines = 34;
-        state.current_time_ns = 56.7;
+        state.current_time = Duration::from_nanos(57);
     }
 
     for (path, expected_body) in [
@@ -64,7 +66,7 @@ pub(crate) async fn assert_read_routes(client: &impl HttpClient) {
         ("/fullnesses", "1:3\n2:4"),
         ("/connections", "0->1\n1->2"),
         ("/selected", "none"),
-        ("/position", "line=12\nlines=34\ntime=56.7"),
+        ("/position", "line=12\nlines=34\ntime=57"),
     ] {
         let response = client.get(path).await;
         assert_success(&response, expected_body);
@@ -73,6 +75,31 @@ pub(crate) async fn assert_read_routes(client: &impl HttpClient) {
     TEST_SERVER_STATE.lock().unwrap().selected = Some(7);
     let response = client.get("/selected").await;
     assert_success(&response, "7 selected");
+}
+
+pub(crate) async fn assert_position_timestamps(client: &impl HttpClient) {
+    {
+        let mut state = TEST_SERVER_STATE.lock().unwrap();
+        state.reset();
+        state.current_line = 12;
+        state.num_lines = 34;
+    }
+
+    for (time, timestamp) in [
+        (Duration::new(0, 0.125), "0.125"),
+        (
+            Duration::from_nanos(9_007_199_254_740_993),
+            "9007199254740993",
+        ),
+        (
+            Duration::new(9_007_199, 254_740_993.125),
+            "9007199254740993.125",
+        ),
+    ] {
+        TEST_SERVER_STATE.lock().unwrap().current_time = time;
+        let response = client.get("/position").await;
+        assert_success(&response, &format!("line=12\nlines=34\ntime={timestamp}"));
+    }
 }
 
 pub(crate) async fn assert_command_routes(client: &impl HttpClient) {

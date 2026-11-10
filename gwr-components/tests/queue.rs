@@ -8,6 +8,7 @@ use gwr_components::queue::{Queue, QueueCore};
 use gwr_engine::run_simulation;
 use gwr_engine::test_helpers::start_test;
 use gwr_engine::traits::Event;
+use gwr_std::time::Duration;
 
 #[test]
 fn queue_rejects_zero_capacity() {
@@ -122,7 +123,7 @@ fn bounded_queue_push_waits_until_space_is_available() {
 
     assert!(push_done.get());
     assert_eq!(queue.values(), vec![2]);
-    assert_eq!(clock.time_now_ns(), 1.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(1));
 }
 
 #[test]
@@ -171,7 +172,7 @@ fn queue_changed_event_fires_for_mutations() {
         *snapshots.borrow(),
         vec![vec![10], vec![10, 20], vec![20], Vec::<usize>::new()]
     );
-    assert_eq!(clock.time_now_ns(), 4.0);
+    assert_eq!(clock.time_now(), Duration::from_nanos(4));
 }
 
 mod queue_harness {

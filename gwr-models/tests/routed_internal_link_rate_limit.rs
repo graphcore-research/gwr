@@ -12,6 +12,7 @@ use gwr_models::ethernet_frame::{EthernetFrame, FRAME_OVERHEAD_BYTES, u64_to_mac
 use gwr_models::fabric::node::FabricRoutingAlgorithm;
 use gwr_models::fabric::routed::RoutedFabric;
 use gwr_models::fabric::{Fabric, FabricConfig, FabricGeometry, FabricPortConfig};
+use gwr_std::time::Duration;
 
 const PAYLOAD_BYTES: usize = 40;
 
@@ -44,7 +45,7 @@ struct Observed {
     arrivals: Vec<Arrival>,
     producer_acks: Vec<(u64, u64)>,
     whole_ticks: u64,
-    whole_ns: f64,
+    elapsed: Duration,
 }
 
 struct TestPorts {
@@ -237,7 +238,7 @@ fn irregular_packet_headers_and_non_one_ns_clock_keep_tick_law() {
     );
     assert_eq!(a.producer_acks, b.producer_acks);
     assert_eq!(a.whole_ticks, b.whole_ticks);
-    assert_eq!(b.whole_ns, 2.0 * a.whole_ns);
+    assert_eq!(b.elapsed, a.elapsed * 2);
     let ordered = sorted_arrivals(&a);
     for pair in ordered.windows(2) {
         let expected = (pair[0].bytes * 8).div_ceil(rate) as u64;
@@ -417,7 +418,7 @@ fn run_and_observe(
         arrivals: arrivals.borrow().clone(),
         producer_acks: acks.borrow().clone(),
         whole_ticks: clock.tick_now().tick(),
-        whole_ns: engine.time_now_ns(),
+        elapsed: engine.time_now(),
     };
     validate_observed(&mut observed, streams, expected);
     println!("routed_native cols={cols} rows={rows} rate={rate:?} mhz={mhz} observed={observed:?}");

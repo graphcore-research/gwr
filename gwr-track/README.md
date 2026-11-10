@@ -68,6 +68,21 @@ it at the level of any [`Entity`] within the simulation hierarchy.
 [`Entity`]: #entities
 [`Id`]: #ids
 
+## Time
+
+GWR uses the std::time::Duration type to represent time periods. The underlying
+type uses a u64 to represent the second component so within gwr-engine
+simulations can theoretically span almost 585 billion years...
+
+The Duration type in the gwr_track.capnp schema allows serialisation of
+std::time::Durations, up to a maximum of approximately 136 years, as it
+represents the seconds component as a u32 rather than as a u64. This to avoid
+inflating the size of binary trace files whilst there is no current known use
+case for simulations spanning larger timescales.
+
+Perfetto traces use a u64 to represent nanosecond durations, which allow for
+simulations spanning almost 585 years.
+
 <!-- ANCHOR_END: overview -->
 
 [component]: ../gwr-components/README.md
