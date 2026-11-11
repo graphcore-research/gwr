@@ -40,8 +40,8 @@ use crate::mermaid::{MermaidNodeStatus, render_mermaid};
 /// and reference errors are reported before the simulation relies on them.
 pub struct Timetable {
     entity: Rc<Entity>,
-    platform: Rc<Platform>,
     graph: TimetableGraph,
+    pe_indices: HashMap<String, usize>,
     node_pe_indices: Vec<Option<usize>>,
     completed_node_indices: RefCell<HashSet<usize>>,
     completed_workload: Cell<Option<Workload>>,
@@ -73,20 +73,21 @@ impl Timetable {
     pub fn new(
         parent: &Rc<Entity>,
         graph: TimetableGraph,
-        platform: &Rc<Platform>,
+        platform: &Platform,
     ) -> Result<Self, SimError> {
         let entity = Rc::new(Entity::new(parent, "timetable"));
+        let pe_indices = platform.pe_idx_by_id();
         let mut nodes_per_pe = HashMap::new();
         let mut node_pe_indices = Vec::with_capacity(graph.nodes().len());
 
         for (node_index, node) in graph.nodes().iter().enumerate() {
             let pe_idx = if let Some(pe) = node.pe() {
-                let pe_idx = platform.pe_idx_from_name(pe).map_err(|_| {
-                    SimError(format!(
+                let Some(&pe_idx) = pe_indices.get(pe) else {
+                    return Err(SimError(format!(
                         "Node '{}' contains invalid PE ID '{pe}'",
                         node.id()
-                    ))
-                })?;
+                    )));
+                };
                 nodes_per_pe
                     .entry(pe_idx)
                     .or_insert_with(BTreeSet::new)
@@ -101,8 +102,8 @@ impl Timetable {
         let timetable = Self {
             entity,
             graph,
+            pe_indices,
             node_pe_indices,
-            platform: platform.clone(),
             completed_node_indices: RefCell::new(HashSet::new()),
             completed_workload: Cell::new(None),
             active_node_indices: RefCell::new(HashSet::new()),
@@ -435,7 +436,9 @@ impl Dispatch for Timetable {
 
     fn ready_task_indices(&self, pe_id: &str) -> Result<(bool, Vec<usize>), SimError> {
         trace!(self.entity ; "ready_node_indices for {pe_id}");
-        let pe_idx = self.platform.pe_idx_from_name(pe_id)?;
+        let Some(&pe_idx) = self.pe_indices.get(pe_id) else {
+            return sim_error!("No PE '{pe_id}'");
+        };
         let pe_done = self
             .remaining_nodes_per_pe
             .borrow()
@@ -459,7 +462,7 @@ impl Dispatch for Timetable {
     }
 
     fn total_tasks_for_pe(&self, pe_name: &str) -> usize {
-        let Ok(pe_idx) = self.platform.pe_idx_from_name(pe_name) else {
+        let Some(&pe_idx) = self.pe_indices.get(pe_name) else {
             return 0;
         };
         self.nodes_per_pe

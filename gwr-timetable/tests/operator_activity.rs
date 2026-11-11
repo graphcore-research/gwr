@@ -192,3 +192,41 @@ fn activity_group(events: &[String], activity_name: &str) -> Option<String> {
     }
     None
 }
+
+#[test]
+fn dropping_engine_drops_timetable_and_platform() {
+    for run_simulation in [false, true] {
+        let (weak_timetable, weak_platform, weak_pe, weak_clock) = {
+            let tracker = gwr_track::tracker::dev_null_tracker();
+            let mut engine = Engine::new(&tracker);
+            let clock = engine.default_clock();
+
+            let platform = Rc::new(Platform::from_string(&engine, &clock, PLATFORM_YAML).unwrap());
+            let graph = TimetableFile::from_string(TIMETABLE_YAML)
+                .unwrap()
+                .into_graph()
+                .unwrap();
+            let timetable = Rc::new(Timetable::new(engine.top(), graph, &platform).unwrap());
+
+            let dispatcher: Rc<dyn Dispatch> = timetable.clone();
+            platform.attach_dispatcher(&dispatcher);
+
+            if run_simulation {
+                engine.run().unwrap();
+                timetable.check_tasks_complete().unwrap();
+            }
+
+            (
+                Rc::downgrade(&timetable),
+                Rc::downgrade(&platform),
+                Rc::downgrade(platform.pe("pe0").unwrap()),
+                Rc::downgrade(&clock.shared_state),
+            )
+        };
+
+        assert!(weak_timetable.upgrade().is_none());
+        assert!(weak_platform.upgrade().is_none());
+        assert!(weak_pe.upgrade().is_none());
+        assert!(weak_clock.upgrade().is_none());
+    }
+}
