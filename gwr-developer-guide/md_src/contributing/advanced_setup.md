@@ -79,7 +79,7 @@ sudo RUSTC_WRAPPER="" cargo ...
 #### Agents
 
 Tools such as Codex can run Cargo in environments where [sccache] is not
-avaliable resulting it unexpected failures for agents.
+available resulting in unexpected failures for agents.
 
 To avoid Codex attempting to run Cargo commands with [sccache] the following can
 be added to `$HOME/.codex/config.toml`:

@@ -19,7 +19,7 @@ cargo build
 
 Or `cargo build --release` to create a release binary.
 
-A quicker version of the command while you are developping is:
+A quicker version of the command while you are developing is:
 
 ```bash
 cargo check
@@ -111,7 +111,7 @@ cargo install flamegraph
 ```
 
 And then it can be run against binaries, tests, benchmarks. This is an example
-commandline for running it against the `flakey-component` binary with a few
+command line for running it against the `flakey-component` binary with a few
 arguments.
 
 ```bash
@@ -134,8 +134,8 @@ xcode-select --install
 cargo install cargo-instruments
 ```
 
-The list of [templates] describes the preconfigured set of probes avaliable
-which can be enabled during the profiling run. The current list of avaliable
+The list of [templates] describes the pre-configured set of probes available
+which can be enabled during the profiling run. The current list of available
 templates can be shown with:
 
 ```bash

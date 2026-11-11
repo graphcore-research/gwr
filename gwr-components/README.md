@@ -304,7 +304,7 @@ required.
 #[async_trait(?Send)]
 impl<T> Runnable for MyComponent<T> where T: SimObject {
     async fn run(&self) -> SimResult {
-        // Implement custom-functionality
+        // Implement custom functionality
 
         // Return result - Ok unless there is an error to raise
         Ok(())
@@ -419,7 +419,7 @@ Use `run_steps([Step<...>])` for fixed test sequences and
 `run_step_generator(iterator)` for stateful generators that yield steps as the
 test progresses.
 
-Use `script!` for behavior that depends on received values or needs async Rust
+Use `script!` for behaviour that depends on received values or needs async Rust
 control flow. Declare the ports it uses, then write an ordinary async block:
 
 ```rust,ignore

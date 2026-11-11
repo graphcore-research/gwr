@@ -23,7 +23,7 @@ top::processor0::cpu102::memory
 Tracing can be configured globally or enabled/disabled depending on regular
 expressions matching entity names.
 
-## EntitiyMonitor
+## EntityMonitor
 
 The `EntityMonitor` allows the user to create helper structs that can monitor an
 `Entity` and emit useful statistics through `track_value()` calls.
@@ -38,8 +38,7 @@ simulation.
 ## IDs
 
 Each [`Entity`] will have a unique 64-bit [`Id`]. This ID is used throughout the
-log/bin files in order to identify the originator of messages and to reduce the
-size of the files.
+log/bin files in order to identify the originator of messages.
 
 `Id`s are also assigned to track `Objects`. `Objects` do not contain an
 [`Entity`] because they flow through the simulation and so their location within
@@ -48,7 +47,7 @@ the simulation changes. However, the logging of packets is controlled by the
 
 ## Macros
 
-The library provides a number of macros that provide the logging functionlity
+The library provides a number of macros that provide the logging functionality
 with a minimal run-time overhead when not enabled.
 
 There are the macros that map to log messages of the specified level:

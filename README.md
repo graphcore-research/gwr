@@ -86,9 +86,9 @@ gwr-engine package for this purpose, which supports both event-driven and
 clocked modelling.
 
 GWR is designed with scalability in mind, with the aim being to enable both high
-accuracy/detailed simulations and large scale simulations in a tractable
-timeframe. To meet this goal it is therefore important that both the development
-of models using GWR, as well as the execution of these models is efficient. A
+accuracy/detailed simulations and large scale simulations in a tractable time
+frame. To meet this goal it is therefore important that both the development of
+models using GWR, as well as the execution of these models is efficient. A
 developer guide covering the use of the GWR for modelling, as well as API
 documentation for each package is included. The general philosophy adopted is to
 raise errors as early as possible for developers, so as many as possible will be
@@ -125,9 +125,9 @@ included in the [Rust chapter] of the developer guide.
 ## Cloning the GWR repo
 
 Some packages within the GWR workspace, such as the `-sys` packages, use [git
-submodule]s to make source code from other repositories avaliable. When cloning
+submodule]s to make source code from other repositories available. When cloning
 this repo passing the `--recurse-submodules` option is sufficient to make
-everything required avaliable. The `--shallow-submodules` can also be passed.
+everything required available. The `--shallow-submodules` can also be passed.
 
 [git submodule]: https://git-scm.com/docs/git-submodule
 
@@ -143,7 +143,7 @@ to be used by both users and the CI system.
 
 Dependencies will be installed using package managers where possible, with [APT]
 being used on Linux and [Homebrew] on macOS ([Homebrew] itself will be installed
-as required if not already avaliable). Various cross-platform package managers
+as required if not already available). Various cross-platform package managers
 are also used, including [rustup], [Cargo], and [npm].
 
 See the [Using GWR Packages](#using-gwr-packages) and
