@@ -18,56 +18,60 @@ fabrics:
 defaults:
   pe_config: &default_pe_config
     num_active_requests: 8
-    lsu_access_bytes: 32
+
+address_spaces:
+  - name: pe_address_space
+    memory_map: pe_memory_map
+    access_bytes: 32
 
 processing_elements:
   - name: pe_0_0
-    memory_map: pe_memory_map
+    address_space: pe_address_space
     config: *default_pe_config
   - name: pe_0_1
-    memory_map: pe_memory_map
+    address_space: pe_address_space
     config: *default_pe_config
   - name: pe_0_2
-    memory_map: pe_memory_map
+    address_space: pe_address_space
     config: *default_pe_config
   - name: pe_0_3
-    memory_map: pe_memory_map
+    address_space: pe_address_space
     config: *default_pe_config
 
   - name: pe_1_0
-    memory_map: pe_memory_map
+    address_space: pe_address_space
     config: *default_pe_config
   - name: pe_1_1
-    memory_map: pe_memory_map
+    address_space: pe_address_space
     config: *default_pe_config
   - name: pe_1_2
-    memory_map: pe_memory_map
+    address_space: pe_address_space
     config: *default_pe_config
   - name: pe_1_3
-    memory_map: pe_memory_map
+    address_space: pe_address_space
     config: *default_pe_config
 
   - name: pe_2_0
-    memory_map: pe_memory_map
+    address_space: pe_address_space
     config: *default_pe_config
   - name: pe_2_1
-    memory_map: pe_memory_map
+    address_space: pe_address_space
     config: *default_pe_config
   - name: pe_2_2
-    memory_map: pe_memory_map
+    address_space: pe_address_space
     config: *default_pe_config
   - name: pe_2_3
-    memory_map: pe_memory_map
+    address_space: pe_address_space
     config: *default_pe_config
 
   - name: pe_3_0
-    memory_map: pe_memory_map
+    address_space: pe_address_space
     config: *default_pe_config
   - name: pe_3_1
-    memory_map: pe_memory_map
+    address_space: pe_address_space
     config: *default_pe_config
   - name: pe_3_2
-    memory_map: pe_memory_map
+    address_space: pe_address_space
     config: *default_pe_config
   # No need to create PE for 3,3 as the HBM is connected there
 

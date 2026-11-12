@@ -37,7 +37,7 @@ use gwr_track::entity::{Entity, EntityGroup};
 use gwr_track::tracker::aka::Aka;
 
 use crate::memory::memory_access::MemoryAccess;
-use crate::memory::memory_map::MemoryMap;
+use crate::processing_element::address_space::AddressSpace;
 use crate::processing_element::{ActivityLanes, ProcessingElementConfig};
 
 /// Each active request slot manages the request from the Processing Element
@@ -62,7 +62,7 @@ impl Default for ActiveRequestSlot {
 
 struct LsuState {
     entity: Rc<Entity>,
-    memory_map: Rc<MemoryMap>,
+    address_space: Rc<AddressSpace>,
     device_id: DeviceId,
 
     overhead_size_bytes: usize,
@@ -120,17 +120,18 @@ impl LsuState {
         // correctly on reply
         let src_addr = request_slot_idx as u64;
 
-        let dst_device = match self.memory_map.lookup(dst_addr) {
-            Some((dst_device, _)) => dst_device,
+        let (dst_device, physical_addr) = match self.address_space.resolve(dst_addr) {
+            Some(destination) => destination,
             None => return sim_error!("0x{dst_addr:x} not mapped"),
         };
+
         let src_device = self.device_id;
 
         Ok(MemoryAccess::new(
             &self.entity,
             access_type,
             access_size_bytes,
-            dst_addr,
+            physical_addr,
             src_addr,
             dst_device,
             src_device,
@@ -232,9 +233,6 @@ pub struct LoadStoreUnit {
     spawner: Spawner,
     clock: Clock,
 
-    /// Bytes requested by each LSU memory access.
-    access_size_bytes: usize,
-
     rx: RefCell<Option<InPort<MemoryAccess>>>,
     tx: RefCell<Option<OutPort<MemoryAccess>>>,
 
@@ -256,7 +254,7 @@ impl LoadStoreUnit {
         parent: &Rc<Entity>,
         aka: Option<&Aka>,
         pe_config: &ProcessingElementConfig,
-        memory_map: &Rc<MemoryMap>,
+        address_space: &Rc<AddressSpace>,
         device_id: DeviceId,
     ) -> Result<Rc<Self>, SimError> {
         let entity = Rc::new(Entity::new(parent, "lsu"));
@@ -264,7 +262,6 @@ impl LoadStoreUnit {
         let rx = InPort::new_with_renames(engine, clock, &entity, "rx", aka);
 
         let num_active_requests = pe_config.num_active_requests;
-        let access_size_bytes = pe_config.lsu_access_bytes;
         let overhead_size_bytes = pe_config.overhead_size_bytes;
         let mut requests = Vec::with_capacity(num_active_requests);
         for _ in 0..num_active_requests {
@@ -273,7 +270,7 @@ impl LoadStoreUnit {
 
         let state = LsuState {
             entity: entity.clone(),
-            memory_map: memory_map.clone(),
+            address_space: address_space.clone(),
             device_id,
             overhead_size_bytes,
             active_request_slots: RefCell::new(requests),
@@ -287,7 +284,6 @@ impl LoadStoreUnit {
             entity,
             spawner,
             clock: clock.clone(),
-            access_size_bytes,
             rx: RefCell::new(Some(rx)),
             tx: RefCell::new(Some(tx)),
             state: Rc::new(state),
@@ -304,8 +300,9 @@ impl LoadStoreUnit {
         port_rx!(self.rx, state)
     }
 
-    /// Transfer validated physical address ranges in aligned, fixed-size memory
-    /// accesses.
+    /// Transfer virtual address ranges using aligned, fixed-size accesses.
+    /// Each access is resolved through the PE's address space before it is
+    /// issued.
     pub(crate) async fn access_ranges(
         &self,
         access_type: AccessType,
@@ -343,13 +340,14 @@ impl LoadStoreUnit {
                     ));
                 }
 
-                let offset = (tensor_address % self.access_size_bytes as u64) as usize;
+                let access_size_bytes = self.state.address_space.access_size_bytes();
+                let offset = (tensor_address % access_size_bytes) as usize;
                 let access_address = tensor_address - offset as u64;
                 // Only the tensor bytes within this aligned block are covered.
-                let covered_bytes = min(self.access_size_bytes - offset, bytes_remaining);
+                let covered_bytes = min(access_size_bytes as usize - offset, bytes_remaining);
                 let access = self.state.create_memory_access(
                     access_type,
-                    self.access_size_bytes,
+                    access_size_bytes as usize,
                     access_address,
                     request_slot_idx,
                 )?;

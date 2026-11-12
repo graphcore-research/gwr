@@ -5,9 +5,12 @@ use std::collections::{HashMap, HashSet};
 use gwr_engine::sim_error;
 use gwr_engine::types::{SimError, SimResult};
 
-use crate::builder::EffectiveConfigs;
+use crate::builder::{DEFAULT_ADDRESS_SPACE_ACCESS_BYTES, EffectiveConfigs};
 use crate::connection_id::{CachePortId, ConnectionEndpointId, parse_connection_endpoint_id};
-use crate::types::{CacheSection, FabricSection, MemoryMapSection, MemorySection, PlatformConfig};
+use crate::types::{
+    AddressRegionSection, AddressSpaceSection, CacheSection, FabricSection, MemoryMapSection,
+    MemorySection, PlatformConfig,
+};
 
 impl PlatformConfig {
     /// Validate platform properties that do not require building the simulator.
@@ -27,7 +30,7 @@ impl PlatformConfig {
         let effective = EffectiveConfigs::new(self)?;
         self.validate_memory_ranges(&effective)?;
         self.validate_references(&lookup)?;
-        self.validate_memory_fetch_alignment(&effective)?;
+        self.validate_memory_fetch_alignment(&lookup, &effective)?;
         self.validate_coherence(&effective)?;
         self.validate_connections(&lookup, &effective)?;
         Ok(effective)
@@ -61,6 +64,11 @@ impl PlatformConfig {
             collect_unique_sections("memory map", self.memory_maps.iter(), |memory_map| {
                 memory_map.name.as_str()
             })?;
+        let address_spaces = collect_unique_sections(
+            "address space",
+            self.address_spaces.iter(),
+            |address_space| address_space.name.as_str(),
+        )?;
         let caches = collect_unique_sections("cache", self.caches.iter().flatten(), |cache| {
             cache.name.as_str()
         })?;
@@ -86,6 +94,7 @@ impl PlatformConfig {
         Ok(PlatformValidationLookup {
             devices,
             memory_maps,
+            address_spaces,
             caches,
             fabrics,
         })
@@ -112,11 +121,43 @@ impl PlatformConfig {
             }
         }
 
-        for pe in self.processing_elements.iter().flatten() {
-            if !lookup.memory_maps.contains_key(pe.memory_map.as_str()) {
+        for address_space in &self.address_spaces {
+            let Some(memory_map) = lookup.memory_maps.get(address_space.memory_map.as_str()) else {
                 return sim_error!(
-                    "Unknown memory map '{}' for processing element '{}'",
-                    pe.memory_map,
+                    "Unknown memory map '{}' for address space '{}'",
+                    address_space.memory_map,
+                    address_space.name
+                );
+            };
+            let mut seen_devices = HashSet::new();
+            for region in address_space.address_regions.iter().flatten() {
+                let AddressRegionSection::Striped { devices } = region;
+                for name in devices {
+                    if !memory_map.devices.contains(name) {
+                        return sim_error!(
+                            "Address space '{}': Memory '{name}' in striped region is not in memory map '{}'",
+                            address_space.name,
+                            memory_map.name
+                        );
+                    }
+                    if !seen_devices.insert(name.as_str()) {
+                        return sim_error!(
+                            "Duplicate memory '{name}' in address space '{}'",
+                            address_space.name
+                        );
+                    }
+                }
+            }
+        }
+
+        for pe in self.processing_elements.iter().flatten() {
+            if !lookup
+                .address_spaces
+                .contains_key(pe.address_space.as_str())
+            {
+                return sim_error!(
+                    "Unknown address space '{}' for processing element '{}'",
+                    pe.address_space,
                     pe.name
                 );
             }
@@ -156,20 +197,53 @@ impl PlatformConfig {
     }
 
     /// Validate every fetch size, including non-power-of-two sizes, without
-    /// computing an LCM that could overflow. Applies to all physical memories.
-    fn validate_memory_fetch_alignment(&self, effective: &EffectiveConfigs) -> SimResult {
+    /// computing an LCM that could overflow. Includes unused address spaces;
+    /// PE and cache fetch sizes also apply to all physical memories.
+    fn validate_memory_fetch_alignment(
+        &self,
+        lookup: &PlatformValidationLookup<'_>,
+        effective: &EffectiveConfigs,
+    ) -> SimResult {
+        for section in &self.address_spaces {
+            let bytes = section
+                .access_size_bytes()
+                .map_err(|error| SimError(format!("Address space '{}': {error}", section.name)))?;
+            let memory_map = lookup.memory_maps[section.memory_map.as_str()];
+            for name in &memory_map.devices {
+                let memory = lookup
+                    .memory(name)
+                    .expect("memory map references validated");
+                let start = memory.base_address;
+                let size = memory.config.capacity_bytes;
+                if !start.is_multiple_of(bytes) {
+                    return sim_error!(
+                        "Address space '{}': Memory '{name}': Region start {start} not aligned to access size {bytes}",
+                        section.name
+                    );
+                }
+                if !size.is_multiple_of(bytes) {
+                    return sim_error!(
+                        "Address space '{}': Memory '{name}': Region size {size} not a multiple of access size {bytes}",
+                        section.name
+                    );
+                }
+            }
+        }
+
         let fetches =
             self.processing_elements
                 .iter()
                 .flatten()
-                .zip(&effective.processing_elements)
-                .map(|(pe, config)| {
+                .map(|pe| {
+                    let bytes = lookup.address_spaces[pe.address_space.as_str()]
+                        .access_bytes
+                        .unwrap_or(DEFAULT_ADDRESS_SPACE_ACCESS_BYTES);
                     (
                         format!(
-                            "Processing element '{}', memory map '{}', LSU access size {}",
-                            pe.name, pe.memory_map, config.lsu_access_bytes,
+                            "Processing element '{}', address space '{}', LSU access size {}",
+                            pe.name, pe.address_space, bytes,
                         ),
-                        config.lsu_access_bytes,
+                        bytes,
                     )
                 })
                 .chain(self.caches.iter().flatten().zip(&effective.caches).map(
@@ -249,6 +323,7 @@ enum PlatformDevice<'a> {
 struct PlatformValidationLookup<'a> {
     devices: HashMap<&'a str, PlatformDevice<'a>>,
     memory_maps: HashMap<&'a str, &'a MemoryMapSection>,
+    address_spaces: HashMap<&'a str, &'a AddressSpaceSection>,
     caches: HashMap<&'a str, &'a CacheSection>,
     fabrics: HashMap<&'a str, FabricReference<'a>>,
 }
@@ -621,6 +696,11 @@ impl PlatformConfig {
         managers: &HashMap<&str, &crate::types::CoherencyManagerSection>,
         maps: &HashMap<&str, &MemoryMapSection>,
     ) -> SimResult {
+        let address_spaces = self
+            .address_spaces
+            .iter()
+            .map(|address_space| (address_space.name.as_str(), address_space))
+            .collect::<HashMap<_, _>>();
         for (cache, config) in self.caches.iter().flatten().zip(&effective.caches) {
             if let Some(names) = &cache.coherency_managers {
                 if names.is_empty() {
@@ -695,7 +775,8 @@ impl PlatformConfig {
                                 .flatten()
                                 .find(|pe| &pe.name == name)
                                 .ok_or_else(|| SimError(format!("No PE '{name}'")))?;
-                            for memory in &maps[pe.memory_map.as_str()].devices {
+                            let address_space = address_spaces[pe.address_space.as_str()];
+                            for memory in &maps[address_space.memory_map.as_str()].devices {
                                 if !covered.contains(memory.as_str()) {
                                     return sim_error!(
                                         "Cache '{}' has no coherency manager for Memory '{}' used by PE '{}'",

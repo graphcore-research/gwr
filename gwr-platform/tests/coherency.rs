@@ -122,7 +122,7 @@ fn independently_selected_managers_cannot_own_the_same_backing_memory() {
 }
 
 #[test]
-fn upstream_pe_memory_map_must_be_covered_by_selected_managers() {
+fn upstream_pe_address_space_must_be_covered_by_selected_managers() {
     // Add memory that the selected directory does not cover.
     let mut cfg = create_coherent_platform_config(DEFAULT_LINE_SIZE_BYTES, DEFAULT_LINE_SIZE_BYTES);
     let mut other = cfg.memories.as_ref().unwrap()[0].clone();
@@ -130,14 +130,21 @@ fn upstream_pe_memory_map_must_be_covered_by_selected_managers() {
     other.base_address = BACKING_MEMORY_CAPACITY_BYTES;
     cfg.memories.as_mut().unwrap().push(other);
 
-    // Expose both memories through the processing element memory map.
+    // Expose both memories through the processing element address space.
     cfg.memory_maps.push(gwr_platform::types::MemoryMapSection {
         name: "pe_map".into(),
         devices: vec!["memory".into(), "other".into()],
     });
+    cfg.address_spaces
+        .push(gwr_platform::types::AddressSpaceSection {
+            name: "pe_space".into(),
+            memory_map: "pe_map".into(),
+            access_bytes: None,
+            address_regions: None,
+        });
     cfg.processing_elements = Some(vec![gwr_platform::types::ProcessingElementSection {
         name: "pe".into(),
-        memory_map: "pe_map".into(),
+        address_space: "pe_space".into(),
         config: yaml_serde::from_str("{}").unwrap(),
     }]);
 

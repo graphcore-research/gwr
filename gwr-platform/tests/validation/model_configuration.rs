@@ -11,6 +11,7 @@ fn unknown_top_level_field_is_rejected() {
         &clock,
         "
 memory_maps: []
+address_spaces: []
 processing_elementz: []
 ",
     )
@@ -30,10 +31,13 @@ fn unknown_pe_config_field_is_rejected() {
 memory_maps:
   - name: mm0
     devices: []
+address_spaces:
+  - name: as0
+    memory_map: mm0
 
 processing_elements:
   - name: pe0
-    memory_map: mm0
+    address_space: as0
     config:
       lsu_acess_bytes: 32
 ",
@@ -54,14 +58,17 @@ fn defaults_pe_config_anchor_is_allowed() {
 memory_maps:
   - name: mm0
     devices: []
+address_spaces:
+  - name: as0
+    memory_map: mm0
 
 defaults:
   pe_config: &default_pe_config
-    lsu_access_bytes: 32
+    num_active_requests: 8
 
 processing_elements:
   - name: pe0
-    memory_map: mm0
+    address_space: as0
     config: *default_pe_config
 ",
     )
@@ -79,6 +86,7 @@ fn defaults_pe_config_anchor_is_type_checked() {
         &clock,
         "
 memory_maps: []
+address_spaces: []
 
 defaults:
   pe_config:
@@ -92,20 +100,31 @@ defaults:
 
 #[test]
 fn rejects_invalid_processing_element_configuration() {
-    let mut no_requests = processing_element("pe0", "mm0");
+    let mut no_requests = processing_element("pe0", "as0");
     no_requests.config.num_active_requests = Some(0);
-    let mut no_access_bytes = processing_element("pe0", "mm0");
-    no_access_bytes.config.lsu_access_bytes = Some(0);
+    let mut no_access_bytes = address_space("as0", "mm0");
+    no_access_bytes.access_bytes = Some(0);
 
-    for (pe, expected) in [
-        (no_requests, "LSU request-slot count"),
-        (no_access_bytes, "LSU access size"),
+    for (pe, space, source, expected) in [
+        (
+            no_requests,
+            address_space("as0", "mm0"),
+            "Processing element 'pe0'",
+            "LSU request-slot count",
+        ),
+        (
+            processing_element("pe0", "as0"),
+            no_access_bytes,
+            "Address space 'as0'",
+            "Invalid access size 0",
+        ),
     ] {
         let mut config = platform();
         config.memory_maps = vec![memory_map("mm0", &[])];
+        config.address_spaces = vec![space];
         config.processing_elements = Some(vec![pe]);
         let error = config.validate().unwrap_err().to_string();
-        assert!(error.contains("Processing element 'pe0'"));
+        assert!(error.contains(source));
         assert!(error.contains(expected));
     }
 }
@@ -118,7 +137,7 @@ fn rejects_invalid_processing_element_throughput() {
         ("compares", f64::NAN, "comparison throughput"),
         ("adds", f64::INFINITY, "add throughput"),
     ] {
-        let mut pe = processing_element("pe0", "mm0");
+        let mut pe = processing_element("pe0", "as0");
         match name {
             "adds" => pe.config.adds_per_tick = Some(value),
             "muls" => pe.config.muls_per_tick = Some(value),
@@ -127,6 +146,7 @@ fn rejects_invalid_processing_element_throughput() {
         }
         let mut config = platform();
         config.memory_maps = vec![memory_map("mm0", &[])];
+        config.address_spaces = vec![address_space("as0", "mm0")];
         config.processing_elements = Some(vec![pe]);
 
         let error = config.validate().unwrap_err().to_string();
@@ -137,12 +157,13 @@ fn rejects_invalid_processing_element_throughput() {
 
 #[test]
 fn accepts_positive_fractional_processing_element_throughput() {
-    let mut pe = processing_element("pe0", "mm0");
+    let mut pe = processing_element("pe0", "as0");
     pe.config.adds_per_tick = Some(0.25);
     pe.config.muls_per_tick = Some(0.5);
     pe.config.compares_per_tick = Some(0.75);
     let mut config = platform();
     config.memory_maps = vec![memory_map("mm0", &[])];
+    config.address_spaces = vec![address_space("as0", "mm0")];
     config.processing_elements = Some(vec![pe]);
 
     config.validate().unwrap();

@@ -40,12 +40,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::log_stats;
 use crate::memory::memory_access::MemoryAccess;
-use crate::memory::memory_map::MemoryMap;
+use crate::processing_element::address_space::AddressSpace;
 use crate::processing_element::dispatch::Dispatch;
 use crate::processing_element::flop_monitor::FlopMonitor;
 use crate::processing_element::load_store_unit::LoadStoreUnit;
 use crate::processing_element::task::{ComputeTaskConfig, Task};
 
+pub mod address_space;
 pub mod dispatch;
 mod flop_monitor;
 mod load_store_unit;
@@ -163,9 +164,6 @@ pub struct ProcessingElementConfig {
     /// The number of outstanding requests can the LSU handle at once
     pub num_active_requests: usize,
 
-    /// The number of bytes fetched or written by each LSU memory access
-    pub lsu_access_bytes: usize,
-
     /// The number of bytes of protocol overhead for each memory transaction
     pub overhead_size_bytes: usize,
 
@@ -186,9 +184,6 @@ impl ProcessingElementConfig {
     pub fn validate(&self) -> SimResult {
         if self.num_active_requests == 0 {
             return sim_error!("LSU request-slot count must be greater than zero");
-        }
-        if self.lsu_access_bytes == 0 {
-            return sim_error!("LSU access size must be greater than zero");
         }
         for (name, value) in [
             ("add", self.adds_per_tick),
@@ -367,7 +362,7 @@ impl ProcessingElement {
         parent: &Rc<Entity>,
         name: &str,
         aka: Option<&Aka>,
-        memory_map: &Rc<MemoryMap>,
+        address_space: &Rc<AddressSpace>,
         pe_config: &ProcessingElementConfig,
         device_id: DeviceId,
     ) -> Result<Rc<Self>, SimError> {
@@ -377,7 +372,13 @@ impl ProcessingElement {
         let entity = Rc::new(Entity::new(parent, name));
 
         let lsu = LoadStoreUnit::new_and_register(
-            engine, clock, &entity, aka, pe_config, memory_map, device_id,
+            engine,
+            clock,
+            &entity,
+            aka,
+            pe_config,
+            address_space,
+            device_id,
         )?;
         let monitor_window_size = entity.tracker.monitoring_window_size_for(entity.id);
         let flop_monitor = monitor_window_size.map(|window_size_ticks| {
@@ -411,12 +412,19 @@ impl ProcessingElement {
         clock: &Clock,
         parent: &Rc<Entity>,
         name: &str,
-        memory_map: &Rc<MemoryMap>,
+        address_space: &Rc<AddressSpace>,
         pe_config: &ProcessingElementConfig,
         device_id: DeviceId,
     ) -> Result<Rc<Self>, SimError> {
         Self::new_and_register_with_renames(
-            engine, clock, parent, name, None, memory_map, pe_config, device_id,
+            engine,
+            clock,
+            parent,
+            name,
+            None,
+            address_space,
+            pe_config,
+            device_id,
         )
     }
 
@@ -794,7 +802,6 @@ mod tests {
         ] {
             let mut config = ProcessingElementConfig {
                 num_active_requests: 1,
-                lsu_access_bytes: 1,
                 overhead_size_bytes: 0,
                 sram_bytes: 1,
                 adds_per_tick: 1.0,
@@ -817,7 +824,6 @@ mod tests {
     fn processing_element_config_accepts_fractional_throughput() {
         ProcessingElementConfig {
             num_active_requests: 1,
-            lsu_access_bytes: 1,
             overhead_size_bytes: 0,
             sram_bytes: 1,
             adds_per_tick: 0.25,

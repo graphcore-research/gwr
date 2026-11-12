@@ -8,11 +8,15 @@ memory_maps:
     devices:
       - mem0
 
+address_spaces:
+  - name: pe_address_space
+    memory_map: pe_memory_map
+    access_bytes: 32
+
 processing_elements:
   - name: pe0
-    memory_map: pe_memory_map
+    address_space: pe_address_space
     config:
-      lsu_access_bytes: 32
       sram_bytes: 64KiB
 
 caches:

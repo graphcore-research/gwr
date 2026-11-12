@@ -3,8 +3,8 @@
 pub(crate) use gwr_engine::test_helpers::start_test;
 pub(crate) use gwr_platform::Platform;
 pub(crate) use gwr_platform::types::{
-    CacheConfigSection, CacheSection, ConnectSection, FabricConfigSection, FabricKind,
-    FabricSection, MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
+    AddressSpaceSection, CacheConfigSection, CacheSection, ConnectSection, FabricConfigSection,
+    FabricKind, FabricSection, MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
     PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
 };
 
@@ -12,6 +12,7 @@ pub(crate) fn platform() -> PlatformConfig {
     PlatformConfig {
         coherency_managers: None,
         memory_maps: Vec::new(),
+        address_spaces: Vec::new(),
         defaults: None,
         processing_elements: None,
         caches: None,
@@ -41,13 +42,21 @@ pub(crate) fn memory_map(name: &str, devices: &[&str]) -> MemoryMapSection {
     }
 }
 
-pub(crate) fn processing_element(name: &str, memory_map: &str) -> ProcessingElementSection {
-    ProcessingElementSection {
+pub(crate) fn address_space(name: &str, memory_map: &str) -> AddressSpaceSection {
+    AddressSpaceSection {
         name: name.to_string(),
         memory_map: memory_map.to_string(),
+        access_bytes: None,
+        address_regions: None,
+    }
+}
+
+pub(crate) fn processing_element(name: &str, address_space: &str) -> ProcessingElementSection {
+    ProcessingElementSection {
+        name: name.to_string(),
+        address_space: address_space.to_string(),
         config: ProcessingElementConfigSection {
             num_active_requests: None,
-            lsu_access_bytes: None,
             overhead_size_bytes: None,
             sram_bytes: None,
             adds_per_tick: None,
