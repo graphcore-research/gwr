@@ -187,7 +187,11 @@ impl TensorView {
         self.num_packed_bytes
     }
 
-    /// Return sorted, disjoint physical address ranges touched by the view.
+    /// Return sorted, disjoint byte ranges in the tensor's address space.
+    ///
+    /// These are virtual addresses when the view is used by a PE; the LSU
+    /// translates them through its address space before issuing memory
+    /// accesses.
     pub fn address_ranges(&self) -> impl Iterator<Item = Range<u128>> + '_ {
         let base = u128::from(self.tensor.addr());
         self.layout
@@ -195,7 +199,8 @@ impl TensorView {
             .map(move |range| base + range.start as u128..base + range.end as u128)
     }
 
-    /// Return the smallest physical address range containing this view.
+    /// Return the smallest range in the tensor's address space containing this
+    /// view.
     ///
     /// The range can contain untouched gaps. Use it to identify possible
     /// overlaps, then use [`Self::first_overlapping_byte_ranges`] when an
@@ -207,7 +212,8 @@ impl TensorView {
         base + bounds.start as u128..base + bounds.end as u128
     }
 
-    /// Return the bytes touched by this view inside a physical address range.
+    /// Return the bytes touched by this view within a range in the tensor's
+    /// address space.
     #[must_use]
     pub fn num_access_bytes_in(&self, range: Range<u128>) -> usize {
         let base = u128::from(self.tensor.addr());
@@ -225,7 +231,8 @@ impl TensorView {
         self.layout.num_access_bytes_in(start..end)
     }
 
-    /// Return the first pair of physical byte ranges touched by both views.
+    /// Return the first pair of overlapping byte ranges in the tensor address
+    /// space.
     #[must_use]
     pub fn first_overlapping_byte_ranges(
         &self,

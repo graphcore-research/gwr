@@ -46,7 +46,8 @@ these connections.
 Every selected manager must have the same positive line size as its cache.
 Memory ranges must align to that size, and each physical memory can belong to
 only one manager. Matching sizes need not be powers of two. The selected
-managers must cover the connected processing element's memory map.
+managers must cover the physical memory map backing the connected processing
+element's address space.
 
 Coherent caches retain `max_inflight_parents` and `max_inflight_fills` (both
 default to 64). The child bound includes read fills and exclusive acquisitions;
@@ -65,7 +66,8 @@ An example of a simple platform could include:
 - a processing element
 - an L1 cache
 - a backing memory
-- a memory map describing what memory the PE can address
+- a memory map selecting the backing physical memories
+- an address space describing how the PE addresses those memories
 
 For example:
 
@@ -81,11 +83,15 @@ memory_maps:
     devices:
       - mem0
 
+address_spaces:
+  - name: pe_address_space
+    memory_map: pe_memory_map
+    access_bytes: 32
+
 processing_elements:
   - name: pe0
-    memory_map: pe_memory_map
+    address_space: pe_address_space
     config:
-      lsu_access_bytes: 32
       sram_bytes: 64KiB
 
 caches:
@@ -114,11 +120,6 @@ connections:
 # }
 ```
 
-Each memory in a processing element's memory map must have a base address and
-capacity that are multiples of that PE's `lsu_access_bytes` (32 by default).
-This keeps each aligned LSU access entirely within one mapped memory region.
-When PEs share a memory map, its memories must satisfy every PE's access size.
-
 Connect an unused fabric endpoint to `null` so its ingress and egress ports are
 deliberately left idle without causing an unconnected-port error when the
 simulator starts. For example: `connect: ['null', "fabric.fabric0@(11,16)"]`.
@@ -126,6 +127,38 @@ Cache device and memory ports can also connect to `null`; processing elements
 and memories cannot. Quote `null` in YAML so it is parsed as a string. See
 `gwr-platform/examples/platform_null_connection.yaml` for a complete
 configuration.
+
+## Address Spaces
+
+Each processing element (PE) uses a named `address_space` to translate tensor
+addresses into destination devices and physical addresses. Each space references
+a `memory_map` and can be shared by several PEs.
+
+By default, all memories use passthrough mappings, so virtual and physical
+addresses are identical. To cycle successive accesses through a group of banks,
+add a striped region:
+
+```yaml
+address_spaces:
+  - name: striped_space
+    memory_map: pe_memory_map
+    access_bytes: 64
+    address_regions:
+      - policy: striped
+        devices: [hbm0, hbm1]
+```
+
+`access_bytes` sets both the LSU transfer size and stripe size. It must be
+positive and defaults to 32 bytes. Memory bases and capacities must be multiples
+of this size.
+
+Striped banks must come from the selected memory map, have equal capacities, and
+be contiguous in increasing physical address order. The region starts at the
+first bank's physical base and spans their combined capacity. Each bank can
+appear only once within an address space; unlisted memories retain passthrough
+mappings.
+
+See `gwr-platform/examples/simple_pe_striped_mem.yaml` for a complete example.
 
 ## Example
 

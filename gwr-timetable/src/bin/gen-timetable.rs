@@ -1126,9 +1126,14 @@ mod tests {
 memory_maps:
   - name: default
     devices: [hbm0]
+address_spaces:
+  - name: default
+    memory_map: default
+    access_bytes: 32
+
 processing_elements:
   - name: pe0
-    memory_map: default
+    address_space: default
     config: {}
 memories:
   - name: hbm0

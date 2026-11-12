@@ -1,0 +1,61 @@
+# Copyright (c) 2026 Graphcore Ltd. All rights reserved.
+
+memory_maps:
+  - name: pe_memory_map
+    devices:
+      - hbm0
+      - hbm1
+
+address_spaces:
+  - name: striped_space
+    memory_map: pe_memory_map
+    access_bytes: 64
+    address_regions:
+      # Equal banks in increasing, contiguous physical address order.
+      # The virtual region spans [0x8000, 0xa000).
+      # Virtual address -> device / physical address:
+      # 0x8000 -> hbm0 / 0x8000
+      # 0x8040 -> hbm1 / 0x9000
+      # 0x8080 -> hbm0 / 0x8040
+      # 0x80c0 -> hbm1 / 0x9040
+      - policy: striped
+        devices: [hbm0, hbm1]
+
+processing_elements:
+  - name: pe0
+    address_space: striped_space
+    config:
+      num_active_requests: 2
+
+fabrics:
+  - name: fabric0
+    kind: functional
+    columns: 3
+    rows: 1
+    config:
+      fabric_ports_per_node: 1
+
+memories:
+  - name: hbm0
+    kind: hbm
+    base_address: 0x8000
+    config:
+      capacity_bytes: 4KiB
+      delay_ticks: 10
+  - name: hbm1
+    kind: hbm
+    base_address: 0x9000
+    config:
+      capacity_bytes: 4KiB
+      delay_ticks: 10
+
+connections:
+  - connect:
+      - pe.pe0
+      - fabric.fabric0@(0,0)
+  - connect:
+      - mem.hbm0
+      - fabric.fabric0@(1,0)
+  - connect:
+      - mem.hbm1
+      - fabric.fabric0@(2,0)

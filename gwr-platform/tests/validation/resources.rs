@@ -1,14 +1,17 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
+use gwr_platform::types::AddressRegionSection;
+
 use super::common::*;
 
 #[test]
 fn rejects_duplicate_device_names() {
     let mut duplicate_pes = platform();
     duplicate_pes.memory_maps = vec![memory_map("mm0", &[])];
+    duplicate_pes.address_spaces = vec![address_space("as0", "mm0")];
     duplicate_pes.processing_elements = Some(vec![
-        processing_element("pe0", "mm0"),
-        processing_element("pe0", "mm0"),
+        processing_element("pe0", "as0"),
+        processing_element("pe0", "as0"),
     ]);
 
     let mut duplicate_memories = platform();
@@ -16,7 +19,8 @@ fn rejects_duplicate_device_names() {
 
     let mut shared_name = platform();
     shared_name.memory_maps = vec![memory_map("mm0", &[])];
-    shared_name.processing_elements = Some(vec![processing_element("dev0", "mm0")]);
+    shared_name.address_spaces = vec![address_space("as0", "mm0")];
+    shared_name.processing_elements = Some(vec![processing_element("dev0", "as0")]);
     shared_name.memories = Some(vec![memory("dev0", 0, 1)]);
 
     for config in [duplicate_pes, duplicate_memories, shared_name] {
@@ -31,6 +35,13 @@ fn rejects_duplicate_resource_names() {
     duplicate_memory_maps.memory_maps =
         vec![memory_map("duplicate", &[]), memory_map("duplicate", &[])];
 
+    let mut duplicate_address_spaces = platform();
+    duplicate_address_spaces.memory_maps = vec![memory_map("mm0", &[])];
+    duplicate_address_spaces.address_spaces = vec![
+        address_space("duplicate", "mm0"),
+        address_space("duplicate", "mm0"),
+    ];
+
     let mut duplicate_caches = platform();
     duplicate_caches.caches = Some(vec![cache("duplicate"), cache("duplicate")]);
 
@@ -39,6 +50,10 @@ fn rejects_duplicate_resource_names() {
 
     for (config, expected) in [
         (duplicate_memory_maps, "Duplicate memory map name duplicate"),
+        (
+            duplicate_address_spaces,
+            "Duplicate address space name duplicate",
+        ),
         (duplicate_caches, "Duplicate cache name duplicate"),
         (duplicate_fabrics, "Duplicate fabric name duplicate"),
     ] {
@@ -51,7 +66,8 @@ fn rejects_duplicate_resource_names() {
 fn rejects_a_processing_element_as_a_memory_map_device() {
     let mut config = platform();
     config.memory_maps = vec![memory_map("mm0", &["pe0"])];
-    config.processing_elements = Some(vec![processing_element("pe0", "mm0")]);
+    config.address_spaces = vec![address_space("as0", "mm0")];
+    config.processing_elements = Some(vec![processing_element("pe0", "as0")]);
 
     let error = config.validate().unwrap_err().to_string();
     assert!(error.contains("Unknown memory 'pe0' in memory map 'mm0'"));
@@ -78,12 +94,93 @@ fn rejects_duplicate_memories_in_one_memory_map() {
 }
 
 #[test]
-fn rejects_an_unknown_processing_element_memory_map() {
+fn rejects_an_unknown_processing_element_address_space() {
     let mut config = platform();
     config.processing_elements = Some(vec![processing_element("pe0", "missing")]);
 
     let error = config.validate().unwrap_err().to_string();
-    assert!(error.contains("Unknown memory map 'missing' for processing element 'pe0'"));
+    assert!(error.contains("Unknown address space 'missing' for processing element 'pe0'"));
+}
+
+#[test]
+fn rejects_an_unknown_address_space_memory_map() {
+    let mut config = platform();
+    config.address_spaces = vec![address_space("as0", "missing")];
+
+    let error = config.validate().unwrap_err().to_string();
+    assert!(
+        error.contains("Unknown memory map 'missing' for address space 'as0'"),
+        "{error}"
+    );
+}
+
+#[test]
+fn rejects_striped_banks_outside_the_memory_map() {
+    let mut config = platform();
+    config.memory_maps = vec![memory_map("mm0", &["hbm0"])];
+    config.memories = Some(vec![
+        memory("hbm0", 0, 0x1000),
+        memory("hbm1", 0x1000, 0x1000),
+    ]);
+    let mut space = address_space("as0", "mm0");
+    space.address_regions = Some(vec![AddressRegionSection::Striped {
+        devices: vec!["hbm1".to_string()],
+    }]);
+    config.address_spaces = vec![space];
+
+    let error = config.validate().unwrap_err().to_string();
+    assert!(
+        error.contains(
+            "Address space 'as0': Memory 'hbm1' in striped region is not in memory map 'mm0'"
+        ),
+        "{error}"
+    );
+}
+
+#[test]
+fn rejects_duplicate_memories_in_one_address_space() {
+    for address_regions in [
+        vec![AddressRegionSection::Striped {
+            devices: vec!["hbm0".to_string(), "hbm0".to_string()],
+        }],
+        vec![
+            AddressRegionSection::Striped {
+                devices: vec!["hbm0".to_string()],
+            },
+            AddressRegionSection::Striped {
+                devices: vec!["hbm0".to_string()],
+            },
+        ],
+    ] {
+        let mut config = platform();
+        config.memory_maps = vec![memory_map("mm0", &["hbm0"])];
+        config.memories = Some(vec![memory("hbm0", 0, 0x1000)]);
+        let mut space = address_space("as0", "mm0");
+        space.address_regions = Some(address_regions);
+        config.address_spaces = vec![space];
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(
+            error.contains("Duplicate memory 'hbm0' in address space 'as0'"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn allows_striped_banks_in_different_address_spaces() {
+    let mut config = platform();
+    config.memory_maps = vec![memory_map("mm0", &["hbm0"])];
+    config.memories = Some(vec![memory("hbm0", 0, 0x1000)]);
+    let mut space = address_space("as0", "mm0");
+    space.address_regions = Some(vec![AddressRegionSection::Striped {
+        devices: vec!["hbm0".to_string()],
+    }]);
+    let mut second_space = space.clone();
+    second_space.name = "as1".to_string();
+    config.address_spaces = vec![space, second_space];
+
+    config.validate().unwrap();
 }
 
 #[test]
@@ -109,9 +206,12 @@ memory_maps:
   - name: mm0
     devices:
       - hbm0
+address_spaces:
+  - name: as0
+    memory_map: mm0
 processing_elements:
   - name: pe0
-    memory_map: mm0
+    address_space: as0
     config:
 memories:
   - name: hbm0
