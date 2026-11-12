@@ -65,34 +65,48 @@ fn rejects_overlapping_physical_memories() {
 #[test]
 fn rejects_lsu_mappings_with_unaligned_bases() {
     for (base, capacity, access_bytes) in [(1, 64, None), (25, 48, Some(24))] {
-        let mut pe = processing_element("pe0", "mm0");
-        pe.config.lsu_access_bytes = access_bytes;
+        let mut space = address_space("as0", "mm0");
+        space.access_bytes = access_bytes;
         let mut config = platform();
         config.memory_maps = vec![memory_map("mm0", &["hbm0"])];
+        config.address_spaces = vec![space];
         config.memories = Some(vec![memory("hbm0", base, capacity)]);
-        config.processing_elements = Some(vec![pe]);
+        config.processing_elements = Some(vec![processing_element("pe0", "as0")]);
 
         let error = config.validate().unwrap_err().to_string();
-        assert!(error.contains("Processing element 'pe0'"), "{error}");
-        assert!(error.contains("memory map 'mm0'"), "{error}");
-        assert!(error.contains("Memory 'hbm0': base address"), "{error}");
-        assert!(error.contains("LSU access size"), "{error}");
+        assert!(error.contains("Address space 'as0'"), "{error}");
+        assert!(error.contains(&format!("Region start {base}")), "{error}");
+        assert!(
+            error.contains(&format!("access size {}", access_bytes.unwrap_or(32))),
+            "{error}"
+        );
     }
 }
 
 #[test]
 fn rejects_lsu_mappings_with_partial_final_blocks() {
     for (base, capacity, access_bytes) in [(0, 33, None), (48, 25, Some(24))] {
-        let mut pe = processing_element("pe0", "mm0");
-        pe.config.lsu_access_bytes = access_bytes;
+        let mut space = address_space("as0", "mm0");
+        space.access_bytes = access_bytes;
         let mut config = platform();
         config.memory_maps = vec![memory_map("mm0", &["hbm0"])];
+        config.address_spaces = vec![space];
         config.memories = Some(vec![memory("hbm0", base, capacity)]);
-        config.processing_elements = Some(vec![pe]);
+        config.processing_elements = Some(vec![processing_element("pe0", "as0")]);
 
         let error = config.validate().unwrap_err().to_string();
-        assert!(error.contains("Memory 'hbm0': capacity"), "{error}");
-        assert!(error.contains("LSU access size"), "{error}");
+        assert!(error.contains("Address space 'as0'"), "{error}");
+        assert!(
+            error.contains(&format!("Region size {capacity}")),
+            "{error}"
+        );
+        assert!(
+            error.contains(&format!(
+                "not a multiple of access size {}",
+                access_bytes.unwrap_or(32)
+            )),
+            "{error}"
+        );
     }
 }
 
@@ -104,31 +118,37 @@ fn accepts_lsu_mappings_containing_whole_blocks() {
         (u64::MAX - 31, 32, 32),
         (u64::MAX, 1, 1),
     ] {
-        let mut pe = processing_element("pe0", "mm0");
-        pe.config.lsu_access_bytes = Some(access_bytes);
+        let mut space = address_space("as0", "mm0");
+        space.access_bytes = Some(access_bytes);
         let mut config = platform();
         config.memory_maps = vec![memory_map("mm0", &["hbm0"])];
+        config.address_spaces = vec![space];
         config.memories = Some(vec![memory("hbm0", base, capacity)]);
-        config.processing_elements = Some(vec![pe]);
+        config.processing_elements = Some(vec![processing_element("pe0", "as0")]);
 
         config.validate().unwrap();
     }
 }
 
 #[test]
-fn validates_lsu_alignment_for_every_pe_sharing_a_map() {
-    let mut small_pe = processing_element("small", "mm0");
-    small_pe.config.lsu_access_bytes = Some(16);
-    let mut large_pe = processing_element("large", "mm0");
-    large_pe.config.lsu_access_bytes = Some(32);
+fn validates_lsu_alignment_for_every_address_space_sharing_a_map() {
+    let mut small_space = address_space("small", "mm0");
+    small_space.access_bytes = Some(16);
+    let mut large_space = address_space("large", "mm0");
+    large_space.access_bytes = Some(32);
     let mut config = platform();
     config.memory_maps = vec![memory_map("mm0", &["hbm0"])];
+    config.address_spaces = vec![small_space, large_space];
     config.memories = Some(vec![memory("hbm0", 16, 48)]);
-    config.processing_elements = Some(vec![small_pe, large_pe]);
+    config.processing_elements = Some(vec![
+        processing_element("small", "small"),
+        processing_element("large", "large"),
+    ]);
 
     let error = config.validate().unwrap_err().to_string();
-    assert!(error.contains("Processing element 'large'"), "{error}");
-    assert!(error.contains("LSU access size 32"), "{error}");
+    assert!(error.contains("Address space 'large'"), "{error}");
+    assert!(error.contains("Region start 16"), "{error}");
+    assert!(error.contains("access size 32"), "{error}");
 }
 
 #[test]
@@ -139,7 +159,8 @@ fn rejects_unaligned_memories_outside_the_pe_map() {
         memory_map("unused", &["other"]),
     ];
     config.memories = Some(vec![memory("hbm0", 0, 64), memory("other", 65, 1)]);
-    config.processing_elements = Some(vec![processing_element("pe0", "mm0")]);
+    config.address_spaces = vec![address_space("as0", "mm0")];
+    config.processing_elements = Some(vec![processing_element("pe0", "as0")]);
 
     let error = config.validate().unwrap_err().to_string();
     assert!(error.contains("Memory 'other'"), "{error}");
@@ -165,14 +186,13 @@ fn rejects_memory_boundaries_not_aligned_to_cache_lines() {
 fn checks_all_memories_against_effective_lsu_and_cache_sizes() {
     let mut config = platform();
     config.memory_maps = vec![memory_map("mm0", &["used"])];
-    config.processing_elements = Some(vec![processing_element("pe0", "mm0")]);
+    config.address_spaces = vec![address_space("as0", "mm0")];
+    config.processing_elements = Some(vec![processing_element("pe0", "as0")]);
     config.memories = Some(vec![memory("used", 0, 256), memory("unused", 257, 32)]);
     assert!(config.validate().is_err());
     config.memories.as_mut().unwrap()[1].base_address = 256;
     config.validate().unwrap();
-    config.processing_elements.as_mut().unwrap()[0]
-        .config
-        .lsu_access_bytes = Some(64);
+    config.address_spaces[0].access_bytes = Some(64);
     assert!(config.validate().is_err());
     config.memories.as_mut().unwrap()[1].config.capacity_bytes = 192;
     let mut l2 = cache("l2");

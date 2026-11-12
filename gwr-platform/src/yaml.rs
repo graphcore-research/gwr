@@ -9,7 +9,9 @@ use std::fmt::Write as _;
 use serde::Serialize;
 use yaml_serde::Value;
 
-use crate::types::{CacheConfigSection, PlatformConfig, ProcessingElementConfigSection};
+use crate::types::{
+    AddressRegionSection, CacheConfigSection, PlatformConfig, ProcessingElementConfigSection,
+};
 
 pub fn platform_to_yaml_str(
     platform: &PlatformConfig,
@@ -17,6 +19,7 @@ pub fn platform_to_yaml_str(
     let mut out = String::new();
 
     emit_optional_section(&mut out, emit_memory_maps(platform)?);
+    emit_optional_section(&mut out, emit_address_spaces(platform)?);
     emit_optional_section(&mut out, emit_processing_elements(platform)?);
     emit_optional_section(&mut out, emit_fabrics(platform)?);
     emit_optional_section(&mut out, emit_caches(platform)?);
@@ -41,6 +44,41 @@ fn emit_memory_maps(
         emit_line(&mut out, "devices:", 2)?;
         for device in &memory_map.devices {
             emit_line(&mut out, format_args!("- {device}"), 3)?;
+        }
+    }
+    Ok(Some(out))
+}
+
+fn emit_address_spaces(
+    platform: &PlatformConfig,
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    if platform.address_spaces.is_empty() {
+        return Ok(None);
+    }
+
+    let mut out = start_section("address_spaces")?;
+
+    for address_space in &platform.address_spaces {
+        emit_line(&mut out, format_args!("- name: {}", address_space.name), 1)?;
+        emit_kv(&mut out, "memory_map", &address_space.memory_map, 2)?;
+        emit_optional_kv(&mut out, "access_bytes", address_space.access_bytes, 2)?;
+        if let Some(regions) = &address_space.address_regions {
+            if regions.is_empty() {
+                emit_line(&mut out, "address_regions: []", 2)?;
+                continue;
+            }
+            emit_line(&mut out, "address_regions:", 2)?;
+            for region in regions {
+                match region {
+                    AddressRegionSection::Striped { devices } => {
+                        emit_line(&mut out, "- policy: striped", 3)?;
+                        emit_line(&mut out, "devices:", 4)?;
+                        for device in devices {
+                            emit_line(&mut out, format_args!("- {device}"), 5)?;
+                        }
+                    }
+                }
+            }
         }
     }
     Ok(Some(out))
@@ -72,13 +110,16 @@ fn emit_processing_elements(
         let anchor = format!("pe_config_{config_idx}");
 
         emit_line(&mut out, format_args!("- name: {}", pe.name), 1)?;
-        emit_line(&mut out, format_args!("memory_map: {}", pe.memory_map), 2)?;
+        emit_line(
+            &mut out,
+            format_args!("address_space: {}", pe.address_space),
+            2,
+        )?;
         if emitted_anchors[config_idx] {
             emit_line(&mut out, format_args!("config: *{anchor}"), 2)?;
         } else {
             emitted_anchors[config_idx] = true;
             if config.num_active_requests.is_none()
-                && config.lsu_access_bytes.is_none()
                 && config.overhead_size_bytes.is_none()
                 && config.sram_bytes.is_none()
                 && config.adds_per_tick.is_none()
@@ -94,7 +135,6 @@ fn emit_processing_elements(
                     config.num_active_requests,
                     3,
                 )?;
-                emit_optional_kv(&mut out, "lsu_access_bytes", config.lsu_access_bytes, 3)?;
                 emit_optional_kv(
                     &mut out,
                     "overhead_size_bytes",
@@ -419,9 +459,10 @@ mod tests {
 
     use super::platform_to_yaml_str;
     use crate::types::{
-        CacheConfigSection, CacheSection, ConnectSection, FabricConfigSection, FabricKind,
-        FabricSection, MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
-        PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
+        AddressRegionSection, AddressSpaceSection, CacheConfigSection, CacheSection,
+        ConnectSection, FabricConfigSection, FabricKind, FabricSection, MemoryConfigSection,
+        MemoryKind, MemoryMapSection, MemorySection, PlatformConfig,
+        ProcessingElementConfigSection, ProcessingElementSection,
     };
 
     #[test]
@@ -429,6 +470,7 @@ mod tests {
         let platform = PlatformConfig {
             coherency_managers: None,
             memory_maps: vec![test_memory_map()],
+            address_spaces: Vec::new(),
             defaults: None,
             processing_elements: None,
             caches: None,
@@ -451,10 +493,57 @@ mod tests {
     }
 
     #[test]
+    fn round_trips_address_space_regions() {
+        for (case, address_regions) in [
+            ("omitted", None),
+            ("empty", Some(Vec::new())),
+            (
+                "striped",
+                Some(vec![
+                    AddressRegionSection::Striped {
+                        devices: vec!["hbm1".to_string(), "hbm0".to_string()],
+                    },
+                    AddressRegionSection::Striped {
+                        devices: vec!["hbm3".to_string(), "hbm2".to_string()],
+                    },
+                ]),
+            ),
+        ] {
+            let platform = PlatformConfig {
+                coherency_managers: None,
+                memory_maps: vec![MemoryMapSection {
+                    name: "memory_map".to_string(),
+                    devices: vec![
+                        "hbm0".to_string(),
+                        "hbm1".to_string(),
+                        "hbm2".to_string(),
+                        "hbm3".to_string(),
+                    ],
+                }],
+                address_spaces: vec![AddressSpaceSection {
+                    address_regions,
+                    ..test_address_space("as0", Some(64))
+                }],
+                defaults: None,
+                processing_elements: None,
+                caches: None,
+                fabrics: None,
+                memories: None,
+                connections: None,
+            };
+
+            let yaml = platform_to_yaml_str(&platform)
+                .unwrap_or_else(|error| panic!("{case}: YAML generation failed: {error}"));
+            let round_trip: PlatformConfig = yaml_serde::from_str(&yaml)
+                .unwrap_or_else(|error| panic!("{case}: YAML deserialization failed: {error}"));
+            assert_eq!(round_trip.address_spaces, platform.address_spaces, "{case}");
+        }
+    }
+
+    #[test]
     fn emits_distinct_pe_config_anchors_for_distinct_configs() {
         let shared_config = ProcessingElementConfigSection {
             num_active_requests: Some(8),
-            lsu_access_bytes: Some(32),
             overhead_size_bytes: None,
             sram_bytes: Some(0x0010_0000),
             adds_per_tick: Some(16.0),
@@ -463,7 +552,6 @@ mod tests {
         };
         let unique_config = ProcessingElementConfigSection {
             num_active_requests: Some(16),
-            lsu_access_bytes: Some(64),
             overhead_size_bytes: Some(12),
             sram_bytes: Some(0x0020_0000),
             adds_per_tick: Some(32.0),
@@ -473,21 +561,25 @@ mod tests {
         let platform = PlatformConfig {
             coherency_managers: None,
             memory_maps: vec![test_memory_map()],
+            address_spaces: vec![
+                test_address_space("shared_space", Some(32)),
+                test_address_space("unique_space", Some(64)),
+            ],
             defaults: None,
             processing_elements: Some(vec![
                 ProcessingElementSection {
                     name: "pe0".to_string(),
-                    memory_map: "memory_map".to_string(),
+                    address_space: "shared_space".to_string(),
                     config: shared_config.clone(),
                 },
                 ProcessingElementSection {
                     name: "pe1".to_string(),
-                    memory_map: "memory_map".to_string(),
+                    address_space: "unique_space".to_string(),
                     config: unique_config.clone(),
                 },
                 ProcessingElementSection {
                     name: "pe2".to_string(),
-                    memory_map: "memory_map".to_string(),
+                    address_space: "shared_space".to_string(),
                     config: shared_config.clone(),
                 },
             ]),
@@ -513,9 +605,18 @@ mod tests {
         assert_eq!(round_trip.memory_maps[0].name, "memory_map");
         assert_eq!(round_trip.memory_maps[0].devices.len(), 1);
         assert_eq!(round_trip.memory_maps[0].devices[0], "hbm0");
-        assert_eq!(pes[0].memory_map, "memory_map");
-        assert_eq!(pes[1].memory_map, "memory_map");
-        assert_eq!(pes[2].memory_map, "memory_map");
+        assert_eq!(round_trip.address_spaces.len(), 2);
+        assert_eq!(
+            round_trip.address_spaces[0],
+            test_address_space("shared_space", Some(32))
+        );
+        assert_eq!(
+            round_trip.address_spaces[1],
+            test_address_space("unique_space", Some(64))
+        );
+        assert_eq!(pes[0].address_space, "shared_space");
+        assert_eq!(pes[1].address_space, "unique_space");
+        assert_eq!(pes[2].address_space, "shared_space");
         assert_eq!(pes[0].config, shared_config);
         assert_eq!(pes[1].config, unique_config);
         assert_eq!(pes[2].config, shared_config);
@@ -525,7 +626,6 @@ mod tests {
     fn emits_empty_pe_and_cache_configs_as_inline_maps() {
         let empty_pe_config = ProcessingElementConfigSection {
             num_active_requests: None,
-            lsu_access_bytes: None,
             overhead_size_bytes: None,
             sram_bytes: None,
             adds_per_tick: None,
@@ -544,10 +644,11 @@ mod tests {
         let platform = PlatformConfig {
             coherency_managers: None,
             memory_maps: vec![test_memory_map()],
+            address_spaces: vec![test_address_space("address_space", None)],
             defaults: None,
             processing_elements: Some(vec![ProcessingElementSection {
                 name: "pe0".to_string(),
-                memory_map: "memory_map".to_string(),
+                address_space: "address_space".to_string(),
                 config: empty_pe_config.clone(),
             }]),
             caches: Some(vec![
@@ -582,7 +683,11 @@ mod tests {
             .expect("processing elements should be present")[0];
         let caches = round_trip.caches.expect("caches should be present");
         assert_eq!(round_trip.memory_maps[0].name, "memory_map");
-        assert_eq!(pe.memory_map, "memory_map");
+        assert_eq!(
+            round_trip.address_spaces[0],
+            test_address_space("address_space", None)
+        );
+        assert_eq!(pe.address_space, "address_space");
         assert_eq!(pe.config, empty_pe_config);
         assert_eq!(caches[0].config, empty_cache_config);
         assert_eq!(caches[1].config, empty_cache_config);
@@ -609,6 +714,7 @@ mod tests {
         let platform = PlatformConfig {
             coherency_managers: None,
             memory_maps: vec![test_memory_map()],
+            address_spaces: Vec::new(),
             defaults: None,
             processing_elements: None,
             caches: None,
@@ -661,6 +767,7 @@ mod tests {
         let platform = PlatformConfig {
             coherency_managers: None,
             memory_maps: vec![test_memory_map()],
+            address_spaces: Vec::new(),
             defaults: None,
             processing_elements: None,
             caches: None,
@@ -704,6 +811,15 @@ mod tests {
         MemoryMapSection {
             name: "memory_map".to_string(),
             devices: vec!["hbm0".to_string()],
+        }
+    }
+
+    fn test_address_space(name: &str, access_bytes: Option<usize>) -> AddressSpaceSection {
+        AddressSpaceSection {
+            name: name.to_string(),
+            memory_map: "memory_map".to_string(),
+            access_bytes,
+            address_regions: None,
         }
     }
 }

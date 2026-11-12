@@ -81,6 +81,9 @@ where
 #[serde(deny_unknown_fields)]
 pub struct PlatformConfig {
     pub memory_maps: Vec<MemoryMapSection>,
+    /// Named virtual address spaces referenced by processing elements.
+    #[serde(default)]
+    pub address_spaces: Vec<AddressSpaceSection>,
     pub defaults: Option<DefaultsSection>,
     pub processing_elements: Option<Vec<ProcessingElementSection>>,
     pub caches: Option<Vec<CacheSection>>,
@@ -104,11 +107,44 @@ pub struct MemoryMapSection {
     pub devices: Vec<String>,
 }
 
+/// An explicit mapping policy for memories in a named address space.
+#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[serde(deny_unknown_fields, tag = "policy", rename_all = "lowercase")]
+pub enum AddressRegionSection {
+    /// Consecutive `access_bytes` chunks rotate over the listed banks.
+    Striped {
+        /// Nonempty list of equal-capacity memories from the selected memory
+        /// map. Banks must be physically contiguous in increasing address
+        /// order. The virtual base is the first bank's physical base; the
+        /// virtual capacity is the sum of the bank capacities.
+        devices: Vec<String>,
+    },
+}
+
+/// A named PE virtual address space backed by a physical memory map.
+#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AddressSpaceSection {
+    /// Name referenced by [`ProcessingElementSection::address_space`].
+    pub name: String,
+    /// Name of the physical memory map supplying this address space's memories.
+    pub memory_map: String,
+    /// PE memory access granularity and stripe width in bytes.
+    /// Defaults to 32 and must be positive.
+    pub access_bytes: Option<usize>,
+    /// Explicit mapping policies. Unclaimed memories use identity passthrough;
+    /// omitting this field or using an empty list makes the whole map
+    /// passthrough. Each memory may appear at most once here, but may be reused
+    /// by other address spaces.
+    pub address_regions: Option<Vec<AddressRegionSection>>,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct ProcessingElementSection {
     pub name: String,
-    pub memory_map: String,
+    /// Name of the virtual address space used for this PE's memory accesses.
+    pub address_space: String,
     pub config: ProcessingElementConfigSection,
 }
 
@@ -116,7 +152,6 @@ pub struct ProcessingElementSection {
 #[serde(deny_unknown_fields)]
 pub struct ProcessingElementConfigSection {
     pub num_active_requests: Option<usize>,
-    pub lsu_access_bytes: Option<usize>,
     pub overhead_size_bytes: Option<usize>,
     #[serde(default, deserialize_with = "parse_optional_u64_byte_str")]
     pub sram_bytes: Option<u64>,

@@ -6,25 +6,26 @@ use std::path::PathBuf;
 use clap::Parser;
 use gwr_models::fabric::node::FabricRoutingAlgorithm;
 use gwr_platform::builder::{
-    DEFAULT_CACHE_LINE_SIZE_BYTES, DEFAULT_FABRIC_PORT_BITS_PER_TICK,
-    DEFAULT_FABRIC_PORTS_PER_NODE, DEFAULT_FABRIC_ROUTING, DEFAULT_FABRIC_RX_BUFFER_BYTES,
-    DEFAULT_FABRIC_TICKS_OVERHEAD, DEFAULT_FABRIC_TICKS_PER_HOP, DEFAULT_FABRIC_TX_BUFFER_BYTES,
-    DEFAULT_HBM_DELAY_TICKS, DEFAULT_HBM_SIZE_BYTES, DEFAULT_PE_ADDS_PER_TICK,
-    DEFAULT_PE_COMPARES_PER_TICK, DEFAULT_PE_LSU_ACCESS_BYTES, DEFAULT_PE_MULS_PER_TICK,
+    DEFAULT_ADDRESS_SPACE_ACCESS_BYTES, DEFAULT_CACHE_LINE_SIZE_BYTES,
+    DEFAULT_FABRIC_PORT_BITS_PER_TICK, DEFAULT_FABRIC_PORTS_PER_NODE, DEFAULT_FABRIC_ROUTING,
+    DEFAULT_FABRIC_RX_BUFFER_BYTES, DEFAULT_FABRIC_TICKS_OVERHEAD, DEFAULT_FABRIC_TICKS_PER_HOP,
+    DEFAULT_FABRIC_TX_BUFFER_BYTES, DEFAULT_HBM_DELAY_TICKS, DEFAULT_HBM_SIZE_BYTES,
+    DEFAULT_PE_ADDS_PER_TICK, DEFAULT_PE_COMPARES_PER_TICK, DEFAULT_PE_MULS_PER_TICK,
     DEFAULT_PE_NUM_ACTIVE_REQUESTS, DEFAULT_PE_OVERHEAD_SIZE_BYTES, DEFAULT_PE_SRAM_BYTES,
 };
 use gwr_platform::connection_id::{
     cache_endpoint_id, fabric_port_endpoint_id, mem_endpoint_id, pe_endpoint_id,
 };
 use gwr_platform::types::{
-    CacheConfigSection, CacheSection, ConnectSection, FabricConfigSection, FabricKind,
-    FabricSection, MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
+    AddressSpaceSection, CacheConfigSection, CacheSection, ConnectSection, FabricConfigSection,
+    FabricKind, FabricSection, MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
     PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
 };
 use gwr_platform::yaml::platform_to_yaml_str;
 
 const FABRIC_NAME: &str = "fabric0";
 const PE_MEMORY_MAP_NAME: &str = "default_memory_map";
+const PE_ADDRESS_SPACE_NAME: &str = "default_address_space";
 
 #[derive(Debug, Parser)]
 #[command(about = "Build a platform file based around a 2D fabric")]
@@ -35,7 +36,7 @@ struct Args {
     #[arg(long, default_value_t = DEFAULT_PE_NUM_ACTIVE_REQUESTS)]
     pe_active_requests: usize,
 
-    #[arg(long, default_value_t = DEFAULT_PE_LSU_ACCESS_BYTES)]
+    #[arg(long, default_value_t = DEFAULT_ADDRESS_SPACE_ACCESS_BYTES)]
     pe_lsu_access_bytes: usize,
 
     #[arg(long, default_value_t = DEFAULT_PE_SRAM_BYTES)]
@@ -226,6 +227,12 @@ fn build_platform(args: &Args) -> Result<PlatformConfig, String> {
             }]
         }),
         memory_maps: vec![memory_map],
+        address_spaces: vec![AddressSpaceSection {
+            name: PE_ADDRESS_SPACE_NAME.to_string(),
+            memory_map: PE_MEMORY_MAP_NAME.to_string(),
+            access_bytes: Some(args.pe_lsu_access_bytes),
+            address_regions: None,
+        }],
         defaults: None,
         processing_elements: Some(build_processing_elements(args, &pe_config)?),
         caches,
@@ -388,7 +395,6 @@ fn build_connections(args: &Args) -> Result<Vec<ConnectSection>, String> {
 fn build_pe_config(args: &Args) -> ProcessingElementConfigSection {
     ProcessingElementConfigSection {
         num_active_requests: Some(args.pe_active_requests),
-        lsu_access_bytes: Some(args.pe_lsu_access_bytes),
         overhead_size_bytes: Some(args.pe_overhead_size_bytes),
         sram_bytes: Some(args.pe_sram_bytes),
         adds_per_tick: Some(args.pe_adds_per_tick),
@@ -408,7 +414,7 @@ fn build_processing_elements(
     Ok(PeIdGen::new(args)?
         .map(|(column, row)| ProcessingElementSection {
             name: create_name("pe", column, row),
-            memory_map: PE_MEMORY_MAP_NAME.to_string(),
+            address_space: PE_ADDRESS_SPACE_NAME.to_string(),
             config: pe_config.clone(),
         })
         .collect())

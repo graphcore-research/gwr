@@ -85,9 +85,12 @@ fn null_cannot_connect_to_a_processing_element() {
 memory_maps:
   - name: mm
     devices: []
+address_spaces:
+  - name: as0
+    memory_map: mm
 processing_elements:
   - name: pe0
-    memory_map: mm
+    address_space: as0
     config: {}
 connections:
   - connect: ['null', pe.pe0]
