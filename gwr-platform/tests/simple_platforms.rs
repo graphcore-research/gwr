@@ -117,12 +117,16 @@ memory_maps:
     devices:
       - hbm0
 
+address_spaces:
+  - name: as0
+    memory_map: mm0
+    access_bytes: 32
+
 processing_elements:
   - name: pe0
-    memory_map: mm0
+    address_space: as0
     config:
       num_active_requests: {}
-      lsu_access_bytes: 32
 
 memories:
   - name: hbm0
@@ -243,6 +247,112 @@ fn simple_pe_fabric_mem_routes_by_device_id() {
 }
 
 #[test]
+fn pe_routes_reads_and_writes_to_striped_banks() {
+    let mut engine = start_test(file!());
+    let clock = engine.default_clock();
+    let platform = Platform::from_string(
+        &engine,
+        &clock,
+        "
+memory_maps:
+  - name: mm0
+    devices:
+      - hbm0
+      - hbm1
+
+address_spaces:
+  - name: as0
+    memory_map: mm0
+    access_bytes: 64
+    address_regions:
+      - policy: striped
+        devices:
+          - hbm0
+          - hbm1
+
+processing_elements:
+  - name: pe0
+    address_space: as0
+    config:
+      num_active_requests: 2
+      sram_bytes: 1024
+
+fabrics:
+  - name: fabric0
+    kind: functional
+    columns: 3
+    rows: 1
+    config:
+      fabric_ports_per_node: 1
+      ticks_per_hop: 1
+      ticks_overhead: 1
+      port_bits_per_tick: 4096
+
+memories:
+  - name: hbm0
+    kind: hbm
+    base_address: 0x8000
+    config:
+      capacity_bytes: 0x1000
+      delay_ticks: 10
+  - name: hbm1
+    kind: hbm
+    base_address: 0x9000
+    config:
+      capacity_bytes: 0x1000
+      delay_ticks: 10
+
+connections:
+  - connect:
+    - pe.pe0
+    - fabric.fabric0@(0,0)
+  - connect:
+    - mem.hbm0
+    - fabric.fabric0@(1,0)
+  - connect:
+    - mem.hbm1
+    - fabric.fabric0@(2,0)
+",
+    )
+    .unwrap();
+
+    let input = TensorView::new_full(Tensor::new(&[192], &DataType::Int8, 0x8000).unwrap());
+    let output = TensorView::new_full(Tensor::new(&[192], &DataType::Int8, 0x80c0).unwrap());
+    let task = Task::ComputeTask {
+        config: ComputeTaskConfig {
+            id: "striped_transfer".to_string(),
+            op: ComputeOp::Custom(OperatorCustom {
+                name: None,
+                machine_ops: MachineOpCounts::default(),
+            }),
+            inputs: vec![Some(input)],
+            outputs: vec![Some(output)],
+        },
+    };
+    let dispatcher = Rc::new(TestDispatcher::new(
+        HashMap::from([(0, task)]),
+        HashMap::from([("pe0".to_string(), VecDeque::from([0]))]),
+    ));
+    let dispatch: Rc<dyn Dispatch> = dispatcher.clone();
+    platform.attach_dispatcher(&dispatch);
+
+    engine.run().unwrap();
+
+    assert!(dispatcher.completed_tasks.borrow().contains(&0));
+    let pe = platform.pe("pe0").unwrap();
+    assert_eq!(pe.bytes_consumed(), 192);
+    assert_eq!(pe.bytes_produced(), 192);
+
+    // Reads visit hbm0, hbm1, hbm0; writes start on the next stripe at hbm1.
+    let hbm0 = platform.memory("hbm0").unwrap();
+    let hbm1 = platform.memory("hbm1").unwrap();
+    assert_eq!(hbm0.bytes_read(), 128);
+    assert_eq!(hbm1.bytes_read(), 64);
+    assert_eq!(hbm0.bytes_written(), 64);
+    assert_eq!(hbm1.bytes_written(), 128);
+}
+
+#[test]
 fn simple_pe_cache_mem() {
     let mut engine = start_test(file!());
     let clock = engine.default_clock();
@@ -255,12 +365,16 @@ memory_maps:
     devices:
       - hbm0
 
+address_spaces:
+  - name: as0
+    memory_map: mm0
+    access_bytes: 32
+
 processing_elements:
   - name: pe0
-    memory_map: mm0
+    address_space: as0
     config:
       num_active_requests: 1
-      lsu_access_bytes: 32
 
 caches:
   - name: c0
@@ -385,12 +499,16 @@ memory_maps:
     devices:
       - hbm0
 
+address_spaces:
+  - name: as0
+    memory_map: mm0
+    access_bytes: 32
+
 processing_elements:
   - name: pe0
-    memory_map: mm0
+    address_space: as0
     config:
       num_active_requests: {num_active_requests}
-      lsu_access_bytes: 32
 
 fabrics:
   - name: fabric0
@@ -491,7 +609,7 @@ fn strided_platform(
     engine: &Engine,
     clock: &Clock,
     sram_bytes: usize,
-    lsu_access_bytes: usize,
+    access_bytes: usize,
 ) -> Platform {
     Platform::from_string(
         engine,
@@ -503,12 +621,16 @@ memory_maps:
     devices:
       - hbm0
 
+address_spaces:
+  - name: as0
+    memory_map: mm0
+    access_bytes: {access_bytes}
+
 processing_elements:
   - name: pe0
-    memory_map: mm0
+    address_space: as0
     config:
       num_active_requests: 8
-      lsu_access_bytes: {lsu_access_bytes}
       sram_bytes: {sram_bytes}
 
 memories:

@@ -8,6 +8,10 @@ ingredients:
     command:
       cargo run --bin validate-platform -p gwr-platform -- --platform
       gwr-platform/examples/simple_pe_cache_mem.yaml
+  - comment: Validate the simple PE platform with two striped memory banks.
+    command:
+      cargo run --bin validate-platform -p gwr-platform -- --platform
+      gwr-platform/examples/simple_pe_striped_mem.yaml
   - comment: Validate the default platform example.
     command:
       cargo run --bin validate-platform -p gwr-platform -- --platform

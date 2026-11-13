@@ -5,6 +5,7 @@ use std::hash::BuildHasher;
 use std::rc::Rc;
 
 use gwr_engine::engine::Engine;
+use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
 use gwr_engine::types::SimError;
 use gwr_models::cache::coherency_manager::{CoherencyManager, CoherencyManagerConfig};
@@ -18,14 +19,15 @@ use gwr_models::fabric::{
 use gwr_models::memory::memory_access::MemoryAccess;
 use gwr_models::memory::memory_map::MemoryMap;
 use gwr_models::memory::{Memory, MemoryConfig};
+use gwr_models::processing_element::address_space::{AddressRegionPolicy, AddressSpace};
 use gwr_models::processing_element::{ProcessingElement, ProcessingElementConfig};
 use gwr_track::entity::{Entity, GetEntity};
 
 use crate::connection_id::{CachePortId, ConnectionEndpointId, parse_connection_endpoint_id};
 use crate::types::{
-    CacheConfigSection, CacheSection, FabricConfigSection, FabricKind, FabricSection,
-    MemoryConfigSection, MemoryMapSection, MemorySection, PlatformConfig,
-    ProcessingElementConfigSection, ProcessingElementSection,
+    AddressRegionSection, AddressSpaceSection, CacheConfigSection, CacheSection,
+    FabricConfigSection, FabricKind, FabricSection, MemoryConfigSection, MemoryMapSection,
+    MemorySection, PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
 };
 use crate::{Caches, DeviceIds, Fabrics, Memories, NameToIdxMap, ProcessingElements};
 
@@ -68,6 +70,134 @@ pub fn build_memory_map(
     Ok(memory_map)
 }
 
+pub fn build_address_spaces<S: BuildHasher>(
+    cfg: &PlatformConfig,
+    memory_maps: &HashMap<String, Rc<MemoryMap>, S>,
+    device_ids: &DeviceIds,
+) -> Result<HashMap<String, Rc<AddressSpace>>, SimError> {
+    let mut address_spaces = HashMap::new();
+    for section in &cfg.address_spaces {
+        let memory_map = memory_maps.get(&section.memory_map).ok_or_else(|| {
+            SimError(format!(
+                "Unknown memory map '{}' for address space '{}'",
+                section.memory_map, section.name
+            ))
+        })?;
+        let built = build_address_space(section, memory_map, device_ids)
+            .map_err(|error| SimError(format!("Address space '{}': {error}", section.name)))?;
+        if address_spaces
+            .insert(section.name.clone(), Rc::new(built))
+            .is_some()
+        {
+            return sim_error!("Duplicate address space name {}", section.name);
+        }
+    }
+    Ok(address_spaces)
+}
+
+pub fn build_address_space(
+    cfg: &AddressSpaceSection,
+    memory_map: &MemoryMap,
+    device_ids: &DeviceIds,
+) -> Result<AddressSpace, SimError> {
+    let mut address_space = AddressSpace::new(cfg.access_size_bytes()?)?;
+
+    let mut owned_devices = HashSet::new();
+
+    for region in cfg.address_regions.iter().flatten() {
+        let AddressRegionSection::Striped { devices } = region;
+        if devices.is_empty() {
+            return sim_error!("Striped region has no banks");
+        }
+
+        let mut banks = Vec::with_capacity(devices.len());
+        let mut device_size_bytes = None;
+        let mut previous_end: Option<u64> = None;
+        for name in devices {
+            let device = *device_ids
+                .get(name)
+                .ok_or_else(|| SimError(format!("Unknown device '{name}'")))?;
+
+            let bank = memory_map
+                .regions()
+                .find(|region| region.device == device)
+                .ok_or_else(|| {
+                    SimError(format!(
+                        "Memory '{name}' in striped region is not in memory map '{}'",
+                        cfg.memory_map
+                    ))
+                })?;
+
+            if !owned_devices.insert(device) {
+                return sim_error!("Memory '{name}' belongs to multiple address regions");
+            }
+
+            let capacity = bank.end - bank.start + 1;
+            if device_size_bytes.is_some_and(|size| size != capacity) {
+                return sim_error!("Striped region has unequal bank capacities");
+            }
+            if previous_end.is_some_and(|end| end.checked_add(1) != Some(bank.start)) {
+                return sim_error!(
+                    "Memory '{name}' in striped region is not contiguous with the previous bank in increasing physical address order"
+                );
+            }
+
+            device_size_bytes = Some(capacity);
+            previous_end = Some(bank.end);
+            banks.push((device, bank.start));
+        }
+
+        let start = banks[0].1;
+        let device_size_bytes = device_size_bytes.expect("striped regions have at least one bank");
+        let bank_count = u64::try_from(banks.len()).map_err(|error| {
+            SimError(format!("bank count cannot be represented as u64: {error}"))
+        })?;
+        let size = device_size_bytes.checked_mul(bank_count).ok_or_else(|| {
+            SimError(format!(
+                "Striped region at {start:#x} capacity overflows u64"
+            ))
+        })?;
+        address_space.insert(
+            start,
+            size,
+            AddressRegionPolicy::Striped {
+                device_size_bytes,
+                banks,
+            },
+        )?;
+    }
+
+    for region in memory_map.regions() {
+        if !owned_devices.contains(&region.device) {
+            address_space.insert(
+                region.start,
+                region.end - region.start + 1,
+                AddressRegionPolicy::Passthrough {
+                    device: region.device,
+                },
+            )?;
+        }
+    }
+
+    Ok(address_space)
+}
+
+pub const DEFAULT_ADDRESS_SPACE_ACCESS_BYTES: usize = 32;
+
+impl AddressSpaceSection {
+    pub(crate) fn access_size_bytes(&self) -> Result<u64, SimError> {
+        let access_size_bytes = u64::try_from(
+            self.access_bytes
+                .unwrap_or(DEFAULT_ADDRESS_SPACE_ACCESS_BYTES),
+        )
+        .map_err(|error| SimError(format!("access size cannot be represented as u64: {error}")))?;
+        if access_size_bytes == 0 {
+            return sim_error!("Invalid access size {access_size_bytes}");
+        }
+        Ok(access_size_bytes)
+    }
+}
+
 pub(crate) struct EffectiveConfigs {
     pub(crate) processing_elements: Vec<ProcessingElementConfig>,
     pub(crate) caches: Vec<CacheConfig>,
@@ -87,7 +217,6 @@ impl EffectiveConfigs {
 }
 
 pub const DEFAULT_PE_NUM_ACTIVE_REQUESTS: usize = 8;
-pub const DEFAULT_PE_LSU_ACCESS_BYTES: usize = 32;
 pub const DEFAULT_PE_SRAM_BYTES: u64 = 1024 * 1024;
 pub const DEFAULT_PE_ADDS_PER_TICK: f64 = 16.0;
 pub const DEFAULT_PE_MULS_PER_TICK: f64 = 4.0;
@@ -105,7 +234,6 @@ impl ProcessingElementConfigSection {
             })?;
         let config = ProcessingElementConfig {
             num_active_requests,
-            lsu_access_bytes: self.lsu_access_bytes.unwrap_or(DEFAULT_PE_LSU_ACCESS_BYTES),
             overhead_size_bytes: self
                 .overhead_size_bytes
                 .unwrap_or(DEFAULT_PE_OVERHEAD_SIZE_BYTES),
@@ -141,7 +269,7 @@ pub fn build_pes<S: BuildHasher>(
     clock: &Clock,
     parent: &Rc<Entity>,
     cfg: &PlatformConfig,
-    memory_maps: &HashMap<String, Rc<MemoryMap>, S>,
+    address_spaces: &HashMap<String, Rc<AddressSpace>, S>,
     device_ids: &DeviceIds,
 ) -> Result<(ProcessingElements, NameToIdxMap), SimError> {
     let configs = processing_element_configs(cfg)?;
@@ -151,7 +279,7 @@ pub fn build_pes<S: BuildHasher>(
         parent,
         cfg,
         &configs,
-        memory_maps,
+        address_spaces,
         device_ids,
     )
 }
@@ -173,16 +301,19 @@ pub(crate) fn build_pes_from_configs<S: BuildHasher>(
     parent: &Rc<Entity>,
     cfg: &PlatformConfig,
     configs: &[ProcessingElementConfig],
-    memory_maps: &HashMap<String, Rc<MemoryMap>, S>,
+    address_spaces: &HashMap<String, Rc<AddressSpace>, S>,
     device_ids: &DeviceIds,
 ) -> Result<(ProcessingElements, NameToIdxMap), SimError> {
     let mut processing_elements = Vec::new();
     if let Some(pes) = &cfg.processing_elements {
         for (pe_section, pe_config) in pes.iter().zip(configs) {
-            let memory_map = memory_maps
-                .get(pe_section.memory_map.as_str())
+            let address_space = address_spaces
+                .get(&pe_section.address_space)
                 .ok_or_else(|| {
-                    SimError(format!("Unknown memory map '{}'", pe_section.memory_map))
+                    SimError(format!(
+                        "Unknown address space '{}'",
+                        pe_section.address_space
+                    ))
                 })?;
             let device_id = *device_ids
                 .get(&pe_section.name)
@@ -192,7 +323,7 @@ pub(crate) fn build_pes_from_configs<S: BuildHasher>(
                 clock,
                 parent,
                 pe_section.name.as_str(),
-                memory_map,
+                address_space,
                 pe_config,
                 device_id,
             )?);
@@ -852,11 +983,15 @@ pub(crate) fn build_coherency_managers(
 mod tests {
     use gwr_engine::test_helpers::start_test;
     use gwr_engine::types::DeviceId;
+    use gwr_models::memory::memory_map::MemoryMap;
 
-    use super::{build_fabric_destination_port_maps, build_memories, build_memory_maps};
+    use super::{
+        build_address_space, build_fabric_destination_port_maps, build_memories, build_memory_maps,
+    };
     use crate::DeviceIds;
     use crate::types::{
-        MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection, PlatformConfig,
+        AddressRegionSection, AddressSpaceSection, MemoryConfigSection, MemoryKind,
+        MemoryMapSection, MemorySection, PlatformConfig,
     };
 
     #[test]
@@ -865,6 +1000,7 @@ mod tests {
         let clock = engine.default_clock();
         let cfg = PlatformConfig {
             coherency_managers: None,
+            address_spaces: Vec::new(),
             memory_maps: vec![MemoryMapSection {
                 name: "mm0".to_string(),
                 devices: vec!["hbm0".to_string()],
@@ -900,6 +1036,101 @@ mod tests {
     }
 
     #[test]
+    fn builds_striped_address_space_with_passthrough_memory() {
+        let (cfg, memory_map, device_ids) = striped_address_space_fixture();
+        let address_space = build_address_space(&cfg, &memory_map, &device_ids)
+            .expect("address space should build");
+
+        for (address, device, physical_address) in [
+            (0x8000, DeviceId(7), 0x8000),
+            (0x8040, DeviceId(11), 0x9000),
+            (0x8080, DeviceId(7), 0x8040),
+            (0x80C0, DeviceId(11), 0x9040),
+            (0x9000, DeviceId(7), 0x8800),
+            (0x9F80, DeviceId(7), 0x8FC0),
+            (0x9FC0, DeviceId(11), 0x9FC0),
+            (0xC000, DeviceId(13), 0xC000),
+            (0xC040, DeviceId(13), 0xC040),
+            (0xCFC0, DeviceId(13), 0xCFC0),
+        ] {
+            assert_eq!(
+                address_space.resolve(address),
+                Some((device, physical_address)),
+                "{address:#x}"
+            );
+        }
+        for address in [0x7FC0, 0xA000, 0xBFC0, 0xD000] {
+            assert_eq!(address_space.resolve(address), None, "{address:#x}");
+        }
+    }
+
+    #[test]
+    fn rejects_striped_banks_with_unequal_capacities() {
+        let (cfg, mut memory_map, device_ids) = striped_address_space_fixture();
+        let bank = memory_map.unmap(0x9000).unwrap();
+        memory_map.insert(bank.start, 0x2000, bank.device).unwrap();
+
+        let error = build_address_space(&cfg, &memory_map, &device_ids)
+            .err()
+            .expect("unequal bank capacities should be rejected");
+        assert!(
+            error.to_string().contains("unequal bank capacities"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_non_contiguous_striped_banks() {
+        let (cfg, mut memory_map, device_ids) = striped_address_space_fixture();
+        let bank = memory_map.unmap(0x9000).unwrap();
+        memory_map.insert(0xA000, 0x1000, bank.device).unwrap();
+
+        let error = build_address_space(&cfg, &memory_map, &device_ids)
+            .err()
+            .expect("non-contiguous banks should be rejected");
+        assert!(error.to_string().contains("not contiguous"), "{error}");
+    }
+
+    #[test]
+    fn rejects_striped_banks_in_reverse_address_order() {
+        let (mut cfg, memory_map, device_ids) = striped_address_space_fixture();
+        let AddressRegionSection::Striped { devices } =
+            &mut cfg.address_regions.as_mut().unwrap()[0];
+        devices.reverse();
+
+        let error = build_address_space(&cfg, &memory_map, &device_ids)
+            .err()
+            .expect("reversed bank order should be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("increasing physical address order"),
+            "{error}"
+        );
+    }
+
+    fn striped_address_space_fixture() -> (AddressSpaceSection, MemoryMap, DeviceIds) {
+        let cfg = AddressSpaceSection {
+            name: "as0".to_string(),
+            memory_map: "mm0".to_string(),
+            access_bytes: Some(64),
+            address_regions: Some(vec![AddressRegionSection::Striped {
+                devices: vec!["hbm0".to_string(), "hbm1".to_string()],
+            }]),
+        };
+        let device_ids = DeviceIds::from([
+            ("hbm0".to_string(), DeviceId(7)),
+            ("hbm1".to_string(), DeviceId(11)),
+            ("hbm2".to_string(), DeviceId(13)),
+        ]);
+        let mut memory_map = MemoryMap::new();
+        memory_map.insert(0x8000, 0x1000, DeviceId(7)).unwrap();
+        memory_map.insert(0x9000, 0x1000, DeviceId(11)).unwrap();
+        memory_map.insert(0xC000, 0x1000, DeviceId(13)).unwrap();
+        (cfg, memory_map, device_ids)
+    }
+
+    #[test]
     fn derives_fabric_port_maps_from_direct_connections() {
         let cfg: PlatformConfig = yaml_serde::from_str(
             "
@@ -907,9 +1138,12 @@ memory_maps:
   - name: mm0
     devices:
       - hbm0
+address_spaces:
+  - name: as0
+    memory_map: mm0
 processing_elements:
   - name: pe0
-    memory_map: mm0
+    address_space: as0
     config: {}
 fabrics:
   - name: fabric0
@@ -954,9 +1188,12 @@ memory_maps:
   - name: mm0
     devices:
       - hbm0
+address_spaces:
+  - name: as0
+    memory_map: mm0
 processing_elements:
   - name: pe0
-    memory_map: mm0
+    address_space: as0
     config: {}
 caches:
   - name: l1
@@ -1046,12 +1283,15 @@ connections:
 memory_maps:
   - name: mm0
     devices: []
+address_spaces:
+  - name: as0
+    memory_map: mm0
 processing_elements:
   - name: pe0
-    memory_map: mm0
+    address_space: as0
     config: {}
   - name: pe1
-    memory_map: mm0
+    address_space: as0
     config: {}
 fabrics:
   - name: fabric0
@@ -1100,12 +1340,15 @@ connections:
 memory_maps:
   - name: mm0
     devices: []
+address_spaces:
+  - name: as0
+    memory_map: mm0
 processing_elements:
   - name: pe0
-    memory_map: mm0
+    address_space: as0
     config: {}
   - name: pe1
-    memory_map: mm0
+    address_space: as0
     config: {}
 fabrics:
   - name: fabric0
@@ -1157,9 +1400,12 @@ connections:
 memory_maps:
   - name: mm0
     devices: []
+address_spaces:
+  - name: as0
+    memory_map: mm0
 processing_elements:
   - name: pe1
-    memory_map: mm0
+    address_space: as0
     config: {}
 fabrics:
   - name: fabric0

@@ -26,8 +26,8 @@ use gwr_models::processing_element::{
 use gwr_track::entity::{Entity, GetEntity};
 
 use crate::builder::{
-    build_caches_from_configs, build_fabric_destination_port_maps, build_memories_from_configs,
-    build_memory_maps, build_pes_from_configs,
+    build_address_spaces, build_caches_from_configs, build_fabric_destination_port_maps,
+    build_memories_from_configs, build_memory_maps, build_pes_from_configs,
 };
 use crate::connect::connect_ports;
 use crate::connection_id::fabric_port_endpoint_id;
@@ -105,13 +105,14 @@ impl Platform {
         let (memories, memories_idx_by_id) =
             build_memories_from_configs(engine, clock, top, cfg, &effective.memories)?;
         let memory_maps = build_memory_maps(cfg, &memories, &memories_idx_by_id, &device_ids)?;
+        let address_spaces = build_address_spaces(cfg, &memory_maps, &device_ids)?;
         let (processing_elements, pes_idx_by_id) = build_pes_from_configs(
             engine,
             clock,
             top,
             cfg,
             &effective.processing_elements,
-            &memory_maps,
+            &address_spaces,
             &device_ids,
         )?;
         let (caches, caches_idx_by_id) = build_caches_from_configs(

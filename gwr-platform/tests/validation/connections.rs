@@ -32,7 +32,8 @@ fn rejects_a_connection_with_three_endpoints() {
 fn rejects_an_unknown_connection_endpoint() {
     let mut config = platform();
     config.memory_maps = vec![memory_map("mm0", &[])];
-    config.processing_elements = Some(vec![processing_element("pe0", "mm0")]);
+    config.address_spaces = vec![address_space("as0", "mm0")];
+    config.processing_elements = Some(vec![processing_element("pe0", "as0")]);
     config.connections = Some(vec![connection("pe.pe0", "mem.missing")]);
 
     assert_eq!(
@@ -45,9 +46,10 @@ fn rejects_an_unknown_connection_endpoint() {
 fn rejects_a_direct_connection_between_processing_elements() {
     let mut config = platform();
     config.memory_maps = vec![memory_map("mm0", &[])];
+    config.address_spaces = vec![address_space("as0", "mm0")];
     config.processing_elements = Some(vec![
-        processing_element("pe0", "mm0"),
-        processing_element("pe1", "mm0"),
+        processing_element("pe0", "as0"),
+        processing_element("pe1", "as0"),
     ]);
     config.connections = Some(vec![connection("pe.pe0", "pe.pe1")]);
 
@@ -61,7 +63,8 @@ fn rejects_a_direct_connection_between_processing_elements() {
 fn rejects_a_port_used_by_two_connections() {
     let mut config = platform();
     config.memory_maps = vec![memory_map("mm0", &["hbm0", "hbm1"])];
-    config.processing_elements = Some(vec![processing_element("pe0", "mm0")]);
+    config.address_spaces = vec![address_space("as0", "mm0")];
+    config.processing_elements = Some(vec![processing_element("pe0", "as0")]);
     config.memories = Some(vec![memory("hbm0", 0, 1024), memory("hbm1", 1024, 1024)]);
     config.connections = Some(vec![
         connection("pe.pe0", "mem.hbm0"),
