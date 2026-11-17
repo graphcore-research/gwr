@@ -11,7 +11,7 @@
 //!
 //! # Ports
 //!
-//! Each point in the fabric grid has a configurable numbe
+//! Each point in the fabric grid has a configurable number
 //!  - N [input ports](gwr_engine::port::InPort): `rx[row][column][0, N-1]`
 //!  - N [output ports](gwr_engine::port::OutPort): `tx[row][column][0, N-1]`
 //!

@@ -205,7 +205,7 @@ pub trait TraceVisitor {
         let _ = name;
     }
 
-    /// The specivied activity has ended.
+    /// The specified activity has ended.
     ///
     /// # Arguments
     ///

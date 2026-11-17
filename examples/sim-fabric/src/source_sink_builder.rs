@@ -49,7 +49,7 @@ pub fn build_source_sinks(
         .take(num_active_sources)
         .collect();
 
-    // Create an random set of initial assigments
+    // Create an random set of initial assignments
     let mut dest_indices = config.port_indices().to_vec();
     dest_indices.shuffle(&mut rng);
 

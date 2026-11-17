@@ -230,7 +230,7 @@ impl<T> Runnable for Flaky<T>
 where
     T: SimObject,
 {
-    /// Implement the active aspect of thie component
+    /// Implement the active aspect of the component
     ///
     /// The `run()` function launches any sub-components and then performs the
     /// functionality of this component.

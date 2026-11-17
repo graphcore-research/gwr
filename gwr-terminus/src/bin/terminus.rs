@@ -102,7 +102,7 @@ enum CommandArg {
     },
 }
 
-/// Configure the logger level and formating string.
+/// Configure the logger level and formatting string.
 fn setup_logger(debug: bool) {
     let level = if debug {
         LevelFilter::Debug

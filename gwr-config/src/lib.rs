@@ -48,7 +48,7 @@ mod multi_source_config;
 ///
 /// ## Crates
 ///
-/// Applications using ths macro must add `gwr-config`, `clap` (with the
+/// Applications using this macro must add `gwr-config`, `clap` (with the
 /// `derive` feature enabled), `figment` (with the `env` and `toml` features
 /// enabled), and `serde` (with the `derive` feature enabled), to the
 /// `dependencies` table of their Cargo.toml, for example:
@@ -86,7 +86,7 @@ mod multi_source_config;
 /// from [clap_derive] and [Figment] without [clap_derive] requiring that
 /// default value attributes be defined on each field.
 ///
-/// See [Default values](#default-values) for futher details.
+/// See [Default values](#default-values) for further details.
 ///
 /// # Command-line interface
 ///
@@ -307,10 +307,10 @@ mod multi_source_config;
 /// How a missing configuration file is handled depends on whether it is a path
 /// set at compile-time or run-time.
 ///
-/// No error will be raised when a compile-time configuartion file is missing,
+/// No error will be raised when a compile-time configuration file is missing,
 /// with the parse and merge of this source being silently skipped. In contrast
 /// to this, when `parse_extra_conf_file()` is called with a missing or invalid
-/// file path an IO error will be returned and the configuartion update process
+/// file path an IO error will be returned and the configuration update process
 /// aborted.
 ///
 /// Empty paths (`""`) will be treated as valid, and therefore no error will be
