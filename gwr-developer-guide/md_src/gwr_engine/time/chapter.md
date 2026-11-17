@@ -6,8 +6,8 @@ GWR-based simulations can be run as purely event driven (where one event
 triggers one or more other events) or the use of [clocks] can be introduced to
 model time. The combination of both is the most common.
 
-A purely event driven simulation must still define a default clock for
-convention.
+A purely event driven simulation will still contain a default clock for
+convention, and a platform must define a default clock frequency.
 
 The [engine] manages the [clocks]. A simple example of a component that uses the
 clock is the [`rate_limiter`] which models the amount of time it takes for

@@ -11,10 +11,10 @@ files.
 ## Entities
 
 `gwr_track` provides the `Entity` struct. It is designed to represent a unique
-simulation `Entity`/[component] which exists within the simulation hierarchy.
+instance of a [component] in the simulation hierarchy.
 
-An `Entity` will have a unique location within the simulation hierarchy and are
-each assigned a unique [`Id`]. For example:
+An `Entity` will have a unique location within the simulation hierarchy and is
+assigned a unique [`Id`]. For example:
 
 ```bash
 top::processor0::cpu102::memory
@@ -28,21 +28,19 @@ expressions matching entity names.
 The `EntityMonitor` allows the user to create helper structs that can monitor an
 `Entity` and emit useful statistics through `track_value()` calls.
 
-## Objects
+## Packet
 
-For short-lived parts of the simulations (like an Ethernet frame or a memory
-access) the user can create a track object. These are given unique `Id`s like
-`Entities` and `Entities` so that their lifecycle can be tracked across the
-simulation.
+Packets are given unique `Id`s like `Entities` so that their lifecycle can be
+tracked across the simulation.
 
 ## IDs
 
 Each [`Entity`] will have a unique 64-bit [`Id`]. This ID is used throughout the
 log/bin files in order to identify the originator of messages.
 
-`Id`s are also assigned to track `Objects`. `Objects` do not contain an
-[`Entity`] because they flow through the simulation and so their location within
-the simulation changes. However, the logging of packets is controlled by the
+`Id`s are also assigned to track packets. Packets do not contain an [`Entity`]
+because they flow through the simulation and so their location within the
+simulation changes. However, the logging of packets is controlled by the
 [`Entity`] that creates the object.
 
 ## Macros
