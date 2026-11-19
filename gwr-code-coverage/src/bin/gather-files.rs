@@ -5,17 +5,20 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::{error, fs};
 
-use clap::Parser;
 use gwr_code_coverage::{CoverageReport, common_directory_prefix, sanitized_components};
+use gwr_config::multi_source_config;
 use serde::Serialize;
 
-#[derive(Debug, Parser)]
+#[multi_source_config]
+#[derive(Debug)]
 #[command(about = "Snapshot source files referenced by an llvm-cov JSON report")]
 struct Args {
     /// llvm-cov JSON report to read. This can be summary.json or details.json.
+    #[arg(long)]
     report: PathBuf,
 
     /// Directory to copy the source files into.
+    #[arg(long)]
     output_dir: PathBuf,
 }
 
@@ -34,15 +37,17 @@ struct ManifestFile {
 }
 
 fn main() -> Result<(), Box<dyn error::Error>> {
-    let args = Args::parse();
-    let report = CoverageReport::from_path(&args.report)?;
+    let args = Args::parse_all_sources();
+    let report_path = args.report;
+    let output_dir = args.output_dir;
+    let report = CoverageReport::from_path(&report_path)?;
     let filenames = report.filenames().map(ToString::to_string).collect();
-    let manifest = gather_files(&args.report, &args.output_dir, filenames)?;
+    let manifest = gather_files(&report_path, &output_dir, filenames)?;
 
     println!(
         "Copied {} source files into {}",
         manifest.files.len(),
-        args.output_dir.display()
+        output_dir.display()
     );
     if !manifest.missing.is_empty() {
         println!(
@@ -123,6 +128,11 @@ mod tests {
 
     use super::{common_directory_prefix, gather_files, snapshot_relative_path};
 
+    fn write_source(path: &Path, contents: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, contents).unwrap();
+    }
+
     #[test]
     fn gather_files_copies_sources_after_stripping_common_prefix() {
         let temp_dir = tempfile::TempDir::new().unwrap();
@@ -197,10 +207,5 @@ mod tests {
             snapshot_relative_path(Path::new("../src/lib.rs"), &common_prefix),
             Some(PathBuf::from("src/lib.rs"))
         );
-    }
-
-    fn write_source(path: &Path, contents: &str) {
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, contents).unwrap();
     }
 }

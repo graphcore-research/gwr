@@ -4,11 +4,12 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-use clap::Parser;
+use gwr_config::multi_source_config;
 use gwr_timetable::mermaid::render_mermaid;
 use gwr_timetable::timetable_file::TimetableFile;
 
-#[derive(Debug, Clone, Parser)]
+#[multi_source_config]
+#[derive(Debug, Clone)]
 #[command(about = "Convert a GWR Timetable to a Mermaid diagram")]
 struct Cli {
     #[arg(long)]
@@ -22,9 +23,12 @@ struct Cli {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = Cli::parse();
-    let input = args.timetable;
-    let output = args.mermaid;
+    let Cli {
+        timetable: input,
+        platform,
+        mermaid: output,
+    } = Cli::parse_all_sources();
+    drop(platform);
 
     let yaml = fs::read_to_string(&input)?;
     let timetable: TimetableFile = yaml_serde::from_str(&yaml)?;

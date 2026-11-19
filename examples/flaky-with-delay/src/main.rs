@@ -18,38 +18,43 @@
 
 use std::process::exit;
 
-use clap::Parser;
 use flaky_with_delay::{Config, Flaky};
 use gwr_components::sink::Sink;
 use gwr_components::source::Source;
 use gwr_components::{connect_port, option_box_repeat};
+use gwr_config::multi_source_config;
 use gwr_engine::engine::Engine;
 use gwr_engine::run_simulation;
 use gwr_engine::types::SimResult;
 
+const DEFAULT_SEED: u64 = 123;
+const DEFAULT_DROP: f64 = 0.2;
+const DEFAULT_NUM_PACKETS: usize = 100;
+const DEFAULT_DELAY: usize = 10;
+
 /// Command-line arguments.
-#[derive(Parser)]
+#[multi_source_config]
 #[command(about = "Example application using the Flaky component with delay")]
 struct Cli {
     /// Set the random seed
-    #[arg(long, default_value = "123")]
+    #[arg(long, default_value_t = DEFAULT_SEED)]
     seed: u64,
 
     /// The ratio of data to be dropped (should be in the range [0, 1])
-    #[arg(long, default_value = "0.2")]
+    #[arg(long, default_value_t = DEFAULT_DROP)]
     drop: f64,
 
     /// The number of packets to send through the component
-    #[arg(long, default_value = "100")]
+    #[arg(long, default_value_t = DEFAULT_NUM_PACKETS)]
     num_packets: usize,
 
     /// The delay through the flaky component
-    #[arg(long, default_value = "10")]
+    #[arg(long, default_value_t = DEFAULT_DELAY)]
     delay: usize,
 }
 
 fn main() -> SimResult {
-    let args = Cli::parse();
+    let args = Cli::parse_all_sources();
 
     let mut engine = Engine::default();
     let clock = engine.default_clock();
@@ -60,11 +65,12 @@ fn main() -> SimResult {
     let source =
         Source::new_and_register(&engine, top, "source", option_box_repeat!(0x123 ; num_puts));
 
-    if !(0.0..=1.0).contains(&args.drop) {
+    let drop = args.drop;
+    if !(0.0..=1.0).contains(&drop) {
         println!("ERROR: --drop ratio outside valid range [0, 1]");
         exit(1);
     }
-    let config = Config::new(args.drop, args.seed, args.delay);
+    let config = Config::new(drop, args.seed, args.delay);
     let flaky = Flaky::new_and_register(&engine, &clock, top, "flaky", &config)?;
     let sink = Sink::new_and_register(&engine, &clock, top, "sink");
 

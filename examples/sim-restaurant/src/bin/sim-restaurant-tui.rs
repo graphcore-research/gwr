@@ -4,24 +4,32 @@
 //!
 //! See `sim-restaurant/src/lib.rs` for details.
 
-use clap::Parser;
+use gwr_config::multi_source_config;
 use gwr_engine::types::SimError;
-use sim_restaurant::config::{RestaurantArgs, RestaurantConfig};
+use sim_restaurant::config::{RestaurantArgs, RestaurantArgsPartial, RestaurantConfig};
 use sim_restaurant::sim::run_recorded_scenario;
 use sim_restaurant::{Staffing, tui};
 
-#[derive(Parser, Debug, Clone)]
+const DEFAULT_TILL_STAFF: usize = 2;
+const DEFAULT_KITCHEN_STAFF: usize = 4;
+
+#[multi_source_config(
+    default_conf_file = "sim-restaurant-tui.toml",
+    conf_file_flag = "conf-file"
+)]
+#[derive(Debug, Clone, PartialEq)]
 #[command(about = "Replay a fast food restaurant scenario in a Ratatui TUI")]
 struct TuiCli {
     /// Number of till workers in the replayed scenario.
-    #[arg(long, default_value = "2")]
+    #[arg(long, default_value_t = DEFAULT_TILL_STAFF)]
     till_staff: usize,
 
     /// Number of kitchen workers in the replayed scenario.
-    #[arg(long, default_value = "4")]
+    #[arg(long, default_value_t = DEFAULT_KITCHEN_STAFF)]
     kitchen_staff: usize,
 
     #[command(flatten)]
+    #[serde(flatten)]
     sim: RestaurantArgs,
 }
 
@@ -43,7 +51,7 @@ impl TuiCli {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cli = TuiCli::parse();
+    let cli = TuiCli::parse_all_sources();
     cli.validate()?;
 
     let recording = run_recorded_scenario(&cli.sim_config(), cli.staffing())?;
