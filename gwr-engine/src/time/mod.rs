@@ -72,10 +72,22 @@ println!("Time now {:.2}", clock.time_now_ns());
 # }
 ```
 
+## Simulation Time Precision
+
+Absolute simulation time is represented as `f64` nanoseconds. To keep adjacent
+ticks distinguishable, the engine conservatively limits elapsed time to the
+converted timestamp of tick `2^51 - 1` on every registered clock, including
+idle clocks. This is about 2.61 simulated days at 10GHz, or 26.1 days at 1GHz.
+The engine panics before advancing past this limit. Registering an unsupported
+frequency or a clock whose limit is already behind the current time also panics.
+The bound protects against large-tick aliasing within each clock; comparisons
+between nearly coincident edges on different clocks can still incur rounding
+errors.
+
 ## Clock Phases
 
-Clock time is represented using the `ClockTick` type, made up of a tick count and a phase
-within that tick. Phases provide deterministic ordering inside a tick.
+`ClockTick` records a tick count and a [`Phase`](clock::Phase), which orders
+events within the tick.
 
 The two standard phases are:
 
@@ -85,10 +97,13 @@ The two standard phases are:
   need all same-tick releases or bookkeeping to happen before starting new
   activity.
 
-Custom `u32` phase values can be used between `phase::BEGIN` and `phase::END`
-when a model needs additional deterministic ordering points. A task can use
-`wait_phase(phase)` to move later within the current tick, or
+Every `u32` value is a valid user phase. Use `wait_phase(phase)` to move later
+within the current tick, or
 `next_tick_and_phase(phase)` to wait until a specific phase in the next tick.
+
+Pending updates resolve after `phase::END`. Phase waits started between ticks
+target the next tick; on a tick, the current phase completes immediately and
+an earlier phase returns an error.
 
 For example, certain models use `phase::END` before starting new activities
 in order to guarantee that any completing activities have been processed first:
@@ -101,7 +116,7 @@ in order to guarantee that any completing activities have been processed first:
 let clock = engine.clock_ghz(1.0);
 # let spawner = engine.spawner();
 # spawner.spawn(async move {
-clock.wait_phase(phase::END).await;
+clock.wait_phase(phase::END)?.await;
 // Begin activity that should be ordered after same-tick completions.
 # Ok(())
 # });
@@ -143,7 +158,7 @@ spawner.spawn(async move {
 use byte_unit::{AdjustedByte, Byte, UnitType};
 
 pub mod clock;
-pub mod simtime;
+pub(crate) mod simtime;
 
 // Convert a number of bytes to a binary-only unit (KiB, MiB, etc)
 #[must_use]
