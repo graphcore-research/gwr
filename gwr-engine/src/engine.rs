@@ -64,7 +64,7 @@ impl Registry {
 /// trace [`Entity`], the shared [`Tracker`], and the registry of components
 /// that should begin running when simulation starts.
 pub struct Engine {
-    pub executor: Executor,
+    executor: Executor,
     spawner: Spawner,
     toplevel: Rc<Entity>,
     tracker: Tracker,
@@ -192,6 +192,7 @@ impl Default for Engine {
 
 impl Drop for Engine {
     fn drop(&mut self) {
+        self.executor.shutdown();
         // The tracker can be using a buffered writer and so it needs to be shut
         // down cleanly to ensure that it is flushed properly.
         self.tracker.shutdown();
