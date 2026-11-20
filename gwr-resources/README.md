@@ -7,6 +7,9 @@
 `Resource`s are available to model shared resources that have a limited
 capacity.
 
+They contain a `capacity` limiting the number of concurrent requests, a `count`
+that can reach up to the capacity, and a `queue` of ordered requests.
+
 The `gwr_resources` library provides a collection of shared resource primitives
 to be used when building simulations.
 

@@ -7,3 +7,4 @@
 The [Flaky component] also provides an example of a custom component.
 
 [Flaky component]: ../components/writing_a_component.md
+[platforms]: ../gwr_platform/chapter.md

@@ -6,7 +6,7 @@ Modules that model time within the simulations.
 <!-- ANCHOR: clock_overview -->
 
 Clocks are used to control time within a GWR simulation. The [engine] supports any
-number of clocks running at different frequencies.
+non-zero number of clocks running at different frequencies.
 
 Each clock represents a clock domain. This lets one simulation contain blocks
 that operate at different frequencies without converting everything into one

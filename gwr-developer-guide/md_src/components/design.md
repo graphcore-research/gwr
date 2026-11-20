@@ -7,3 +7,4 @@
 [ports]: ../components/ports.md
 [`run()`]: ../components/custom_functionality.md
 [spawned]: ../gwr_engine/chapter.md#spawner
+[made accessible via defined methods]: ../components/ports.md

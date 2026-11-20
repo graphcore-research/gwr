@@ -48,7 +48,7 @@ This model uses the same building blocks as a silicon simulation:
 - Customers are modelled as async tasks that trigger time-based events.
 - Till workers and kitchen workers are concurrent async tasks.
 - Queues are explicit shared state.
-- Service completion is modeled through events.
+- Service completion is modelled through events.
 - Profitability is derived from measurable end-of-run metrics.
 
 ## Explore The Problem Space

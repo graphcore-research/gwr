@@ -153,7 +153,7 @@ We are currently unable to accept unsolicited pull requests.
          ```
 
          1. If the change applied to multiple, but not all packages, the names
-            should be comma seperated. For example:
+            should be comma separated. For example:
 
          ```text
          feat(gwr-track,gwr-spotter): capnp binary file support

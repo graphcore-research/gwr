@@ -667,7 +667,7 @@ fn ranges_overlap<T: Ord>(first: &Range<T>, second: &Range<T>) -> bool {
 
 // A finite arithmetic progression containing every possible start byte for
 // one range. It may contain unreachable starts: that can only prevent the
-// disjointness shortcut from succeeding, after which the exact ranges are
+// disjointedness shortcut from succeeding, after which the exact ranges are
 // compared.
 #[derive(Clone, Copy, Debug)]
 struct ByteStartProgression {

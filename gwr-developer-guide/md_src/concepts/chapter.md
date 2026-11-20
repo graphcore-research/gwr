@@ -5,24 +5,20 @@
 At the core, GWR lets you describe:
 
 - Tasks that model independent activities.
-- Data objects that represent information or physical items moving between
+- Data "packets" that represent information or physical items moving between
   tasks.
-- Events that wake tasks up.
-- Clocks that advance simulated time.
+- Events that wake components up.
+- Clocks that synchronise components.
 - State such as queues and data stores that create contention.
 - Metrics and traces that give visibility of what happens in the model.
 
 ## Core Building Blocks
 
-### Tasks
+### Components
 
-Tasks are the concurrent parts of the model implemented as async functions. They
-wait for data, time, or a signal, then perform some action or update state which
-may trigger other tasks.
-
-### Data
-
-Simulation objects model data that is acted on by tasks.
+Components are the concurrent parts of the model, with their behaviour
+implemented as async functions. They wait for a packet, time, or a signal, then
+perform some action or update state which may trigger other components.
 
 ### Events
 
@@ -32,13 +28,29 @@ is available".
 
 ### Clocks
 
-Clocks make modelling time explicit as tasks choose when they want to wait for
-time to advance a number of clock ticks to represent actions that take time.
+Clocks allow synchronisation between components. A component can hold a
+reference to a clock, and use it to wait a specified number of ticks before
+being automatically woken to continue running. Any number of components can hold
+references to the same clock, and any number of clocks can be defined in a
+single engine.
 
-### State
+### Models
 
-Queues and data stores are examples of state that handle data that the tasks act
-on.
+Models are combinations of components connected together to form a simulation of
+the behaviour of an electronic system, such as a ring of ethernet switches or a
+data cache.
+
+### Platforms
+
+GWR is often used to model machine learning training and inference systems.
+Since these uses have high complexity and size, the process of constructing
+simulations of systems to run ML workloads is abstracted by platforms, allowing
+the definition and validation of complex systems via .yaml files.
+
+### Timetables
+
+Timetables allow a user to define ML workloads. These can then be simulated on
+platforms.
 
 ### Metrics
 

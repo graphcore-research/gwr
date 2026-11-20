@@ -36,8 +36,8 @@ object enters it until it is then sent on.
 
 ## Rate Limiters
 
-The `Limiter` component models how long it takes for objects to travel through
-them and ensure their bandwidth limits are respected.
+The `Limiter` component measures how long it takes for objects to travel through
+it and ensures their bandwidth limits are respected.
 
 **Interfaces:** `rx`: [input port], `tx`: [output port].
 
@@ -56,7 +56,7 @@ between its inputs if more than one of them is ready.
 
 **Interfaces:** `rx(i)`: [input ports], `tx`: [output port].
 
-## Arbiteration Policies
+## Arbitration Policies
 
 An `Arbiter` needs to be created with an arbitration policy in order to make the
 arbitration decisions. A number of arbitration policies are provided in the

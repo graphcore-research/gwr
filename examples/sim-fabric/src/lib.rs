@@ -27,8 +27,8 @@
 //! cargo run --bin sim-fabric --release -- --port-bits-per-tick 128 --frame-overhead-bytes 20 --frame-payload-bytes 1484 --bytes-to-send 1MiB --stdout
 //! ```
 //!
-//! This achieves the peak bandwith at one port of 14.9 GiB/s and if run with
-//! a balanced communcation pattern it can achieve that at each port (357.6
+//! This achieves the peak bandwidth at one port of 14.9 GiB/s and if run with
+//! a balanced communication pattern it can achieve that at each port (357.6
 //! GiB/s for the default 24-port fabric):
 //!
 //! Note: A throughput of 342.70 GiB/s or less may be observed because the

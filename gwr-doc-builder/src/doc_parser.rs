@@ -41,7 +41,7 @@ pub struct DocParser {
     /// Regex used to determine if `self` is in a path name
     self_regex: Regex,
 
-    /// Registery of all modules parsed in the parsed document.
+    /// Registry of all modules parsed in the parsed document.
     doc_elements: HashMap<String, Rc<RefCell<DocNodeCommon>>>,
 
     /// Pre-processor used to create AsciiDoctor output

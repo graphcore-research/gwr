@@ -29,7 +29,7 @@
 //!
 //! # Example:
 //!
-//! An event being created to co-ordinate between two tasks.
+//! An event being created to coordinate between two tasks.
 //!
 //! ```rust
 //! # use gwr_engine::engine::Engine;

@@ -8,7 +8,7 @@ Here is a collection of examples written using GWR.
 
 ### Flaky Component
 
-This shows a minimal runnable simulation with custom [component] behavior.
+This shows a minimal runnable simulation with custom [component] behaviour.
 
 How to run it:
 

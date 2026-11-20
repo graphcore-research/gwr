@@ -34,7 +34,7 @@ pub enum Permission {
     /// Writes of `0b1` initiate background operation. Reads return 0.
     WriteOneCommits,
 
-    /// Writes value commited to state. Reads not possible. There is no
+    /// Writes value committed to state. Reads not possible. There is no
     /// mechanism available to directly read this state. It may be possible
     /// to read the state indirectly.
     WriteOnly,

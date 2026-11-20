@@ -4,7 +4,7 @@
 
 <!-- ANCHOR: overview -->
 
-Models are the constructed from [components] and [resources] and run by the
+Models are constructed from [components] and [resources] and run by the
 [`gwr_engine`].
 
 The `gwr_models` library provides a collection of connectable models to be used
@@ -115,7 +115,7 @@ A model of a two-dimensional interconnect fabric. It is provided in both
 functional and routed implementations that provide the same interfaces but trade
 off model accuracy vs run-time performance.
 
-**Interfaces:**gwr-
+**Interfaces:**
 
 - `rx(i)`: [input port] for data ingress into the fabric
 - `tx(i)`: [output port] for data egress from the fabric

@@ -39,7 +39,19 @@ be used to drop a random number of objects that pass through it.
 <!-- ANCHOR: design_the_component -->
 
 There are a number of things to consider when designing a new simulation
-component. The two main aspects are
+component.
+
+Concretely, a component implements the `Runnable` and `GetEntity` traits.
+`Runnable` provides the `run` function, which takes the state of the component
+struct (including the state of the ports) and mutates it. The `GetEntity` trait
+provides the `entity` function, which returns a reference to a unique `Entity`
+for tracking purposes.
+
+Components also must provide a `new_and_register` function to allow an Engine to
+construct an instance of the component. Additionally, all ports must be [made
+accessible via defined methods].
+
+The two main aspects are
 
 1. [What are the interfaces to other components](#component-interfaces)
 1. [What functionality will it have internally](#component-functionality)
@@ -114,13 +126,13 @@ components.
 
 ### Output / Input
 
-Ports can either be "output" or "input". A connection must always be made
-between one output and one input port.
-
-### Data Types
-
-The type of the port is specialised by the data type that it carries. Ports have
-to be of the same type to be connected together.
+Ports can either be "output" or "input", given by types `OutPort<T>` or
+`InPort<T>` respectively, where `T: SimObject` is the type of packet the port
+receives/transmits. A connection must always be made between one output and one
+input port, and connected ports must be generic over the same packet type. If
+these conditions are not met a compilation error will occur. In the case of
+[platforms], a `SimError` will be thrown if invalid port connections are defined
+in the `.yaml` file.
 
 ### Component Ports
 
@@ -134,9 +146,9 @@ Ports are commonly stored as `RefCell<Option<InPort<T>>>` or
 component through `&self` and connect the port state. When the component's
 `run()` task starts, it takes the port out of the `Option` and owns it for the
 life of that task. Connectivity is checked separately when the task first uses
-the port. If the `Option` is already empty, the port has previously been taken,
-usually because `run()` was invoked more than once or ownership was transferred
-too early.
+the port, creating a `SimError` if an unconnected port is used. If the `Option`
+is already empty, the port has previously been taken, usually because `run()`
+was invoked more than once or ownership was transferred too early.
 
 There are two forms of port connections: those that name a single port and those
 that take an index into a port array. Each function has a unique name based on
@@ -242,7 +254,7 @@ connect_port!(source, tx => sink, rx)
 ### Errors
 
 If attempting to connect ports that don't exist on the source/dest components
-then there will be a compile error.
+then there will be a build error.
 
 ```rust,compile_fail
 # use gwr_components::sink::Sink;
@@ -304,7 +316,7 @@ required.
 #[async_trait(?Send)]
 impl<T> Runnable for MyComponent<T> where T: SimObject {
     async fn run(&self) -> SimResult {
-        // Implement custom-functionality
+        // Implement custom functionality
 
         // Return result - Ok unless there is an error to raise
         Ok(())
@@ -419,7 +431,7 @@ Use `run_steps([Step<...>])` for fixed test sequences and
 `run_step_generator(iterator)` for stateful generators that yield steps as the
 test progresses.
 
-Use `script!` for behavior that depends on received values or needs async Rust
+Use `script!` for behaviour that depends on received values or needs async Rust
 control flow. Declare the ports it uses, then write an ordinary async block:
 
 ```rust,ignore
@@ -466,7 +478,10 @@ transferred port will fail.
 [Design the component]: #design-the-component
 [Entity]: ../gwr-track/README.md#entities
 [Implement any custom functionality]: #implement-custom-functionality
+[made accessible via defined methods]: #ports
 [ports]: #ports
 [spawned]: ../gwr-engine/README.md#spawner
 [`run()`]: #implement-custom-functionality
 [`ports`]: #ports
+[platforms]: ../gwr-platform/README.md#gwr-platform
+[made accessible via defined methods]: #ports

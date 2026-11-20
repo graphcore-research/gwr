@@ -9,7 +9,7 @@ models of asynchronous simulation [components].
 
 The engine can run purely event-driven models, clocked models, or simulations
 that combine both styles. Components are registered with the engine before
-execution, ports are connected before a run starts, and clocks provide modeled
+execution, ports are connected before a run starts, and clocks provide modelled
 time for tasks that need deterministic delays.
 
 ## Features
@@ -78,8 +78,10 @@ fn main() {
 <!-- prettier-ignore-start -->
 
 > [!Note]
-> The `Engine` makes no guarantees about the order in which tasks are
-> evaluated within the same clock tick.
+> Events occurring on the same clock tick or simultaneous clock ticks
+> are ordered by their `Phase` values, to allow user-defined ordering within
+> a tick. The `Engine` makes no ordering guarantees for simultaneous events
+> with the same phase.
 
 <!-- prettier-ignore-end -->
 

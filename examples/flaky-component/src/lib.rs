@@ -40,7 +40,7 @@ use rand::{Rng, SeedableRng};
 
 // ANCHOR: struct
 
-/// The overall structure for this compoment.
+/// The overall structure for this component.
 ///
 /// Note that in this example it is a *Generic* type in that it can be used in
 /// a simulation of any type - as long as that type implements the `SimObject`
