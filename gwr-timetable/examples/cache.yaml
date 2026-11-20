@@ -11,12 +11,20 @@ nodes:
   - id: add
     kind: compute
     pe: pe0
-    op: add
-    input_views:
-      -
-      -
-    output_views:
-      -
+    program:
+      inputs: [A, B]
+      outputs: [Y]
+      assignments:
+        - output: Y
+          axes: [i]
+          expr:
+            {
+              add:
+                [
+                  { read: { tensor: A, indices: [i] } },
+                  { read: { tensor: B, indices: [i] } },
+                ],
+            }
 
   - id: tensor_C
     kind: tensor
@@ -27,13 +35,13 @@ nodes:
 
 edges:
   - from: tensor_A
-    to: add.0
+    to: add.A
     kind: data
 
   - from: tensor_A
-    to: add.1
+    to: add.B
     kind: data
 
-  - from: add
+  - from: add.Y
     to: tensor_C
     kind: data

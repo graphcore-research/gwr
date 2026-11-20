@@ -1,10 +1,11 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
 #![doc(test(attr(deny(unused_must_use))))]
-#![doc = std::include_str!(concat!(env!("OUT_DIR"), "/crate-docs.md"))]
+#![doc = include_str!(concat!(env!("OUT_DIR"), "/crate-docs.md"))]
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
+use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
 
 use async_trait::async_trait;
@@ -15,12 +16,12 @@ use gwr_engine::types::{SimError, SimResult};
 use gwr_model_builder::EntityGet;
 use gwr_models::processing_element::MachineOpCounts;
 use gwr_models::processing_element::dispatch::Dispatch;
-use gwr_models::processing_element::operators::TensorView;
-use gwr_models::processing_element::task::{ComputeOp, ComputeTaskConfig, Task};
+use gwr_models::processing_element::task::{PreparedTask, Task};
 use gwr_platform::Platform;
 use gwr_track::entity::Entity;
 use gwr_track::{debug, info, trace};
 
+mod explain;
 pub mod graph;
 pub mod mermaid;
 pub mod timetable_file;
@@ -35,14 +36,15 @@ use crate::mermaid::{MermaidNodeStatus, render_mermaid};
 /// A validated workload graph that can dispatch tasks onto a [`Platform`].
 ///
 /// `Timetable` owns workload structure, task dependencies, tensor views, and PE
-/// placement. It accepts a graph whose file sections have already been
-/// validated and checks PE placement before tasks are dispatched, so topology
-/// and reference errors are reported before the simulation relies on them.
+/// placement. It accepts a validated graph and checks PE placement, compute
+/// capabilities, tile SRAM requirements, and memory mappings before simulation
+/// starts.
 pub struct Timetable {
     entity: Rc<Entity>,
     platform: Rc<Platform>,
     graph: TimetableGraph,
     node_pe_indices: Vec<Option<usize>>,
+    prepared_tasks: HashMap<usize, Rc<PreparedTask>>,
     completed_node_indices: RefCell<HashSet<usize>>,
     completed_workload: Cell<Option<Workload>>,
     active_node_indices: RefCell<HashSet<usize>>,
@@ -53,19 +55,6 @@ pub struct Timetable {
     remaining_nodes_per_pe: RefCell<HashMap<usize, usize>>,
     unresolved_input_counts: RefCell<Vec<usize>>,
     ready_nodes_changed: Repeated<()>,
-}
-
-/// Graph nodes and their associated memory and compute work.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct Workload {
-    /// Number of graph nodes in the timetable.
-    pub nodes: usize,
-    /// Bytes requested by compute-node inputs.
-    pub read_bytes: usize,
-    /// Bytes requested by compute-node outputs.
-    pub written_bytes: usize,
-    /// Machine operations requested by compute nodes.
-    pub machine_operations: usize,
 }
 
 impl Timetable {
@@ -98,10 +87,27 @@ impl Timetable {
             node_pe_indices.push(pe_idx);
         }
 
+        let mut prepared_tasks = HashMap::new();
+        for (node_index, node) in graph.nodes().iter().enumerate() {
+            if let Some(program) = node.program() {
+                let pe_name = node
+                    .pe()
+                    .ok_or_else(|| SimError(format!("Task '{}' has no PE placement", node.id())))?;
+                let task = platform
+                    .pe(pe_name)?
+                    .prepare_program(node.id().to_owned(), program.clone())
+                    .map_err(|error| {
+                        SimError(format!("Node '{}' on PE '{pe_name}': {error}", node.id()))
+                    })?;
+                prepared_tasks.insert(node_index, task);
+            }
+        }
+
         let timetable = Self {
             entity,
             graph,
             node_pe_indices,
+            prepared_tasks,
             platform: platform.clone(),
             completed_node_indices: RefCell::new(HashSet::new()),
             completed_workload: Cell::new(None),
@@ -123,25 +129,21 @@ impl Timetable {
         self.graph.nodes().len()
     }
 
-    /// Calculate the expected memory and compute work described by this
+    /// Calculate the planned boundary traffic and node count for this
     /// timetable.
     pub fn workload_totals(&self) -> Result<Workload, SimError> {
-        calculate_workload(&self.graph, 0..self.graph.nodes().len())
+        self.calculate_workload(0..self.graph.nodes().len())
     }
 
-    /// Enable tracking the memory and compute work for completed graph nodes.
-    /// Nodes completed before this call are included in the initial value.
+    /// Start tracking completed workload, including nodes already complete.
     pub fn enable_completed_workload_tracking(&self) -> SimResult {
-        let workload = calculate_workload(
-            &self.graph,
-            self.completed_node_indices.borrow().iter().copied(),
-        )?;
+        let workload =
+            self.calculate_workload(self.completed_node_indices.borrow().iter().copied())?;
         self.completed_workload.set(Some(workload));
         Ok(())
     }
 
-    /// Return the cached work for completed graph nodes, if tracking is
-    /// enabled.
+    /// Return completed workload when tracking is enabled.
     #[must_use]
     pub fn completed_workload(&self) -> Option<Workload> {
         self.completed_workload.get()
@@ -176,41 +178,59 @@ impl Timetable {
     }
 
     pub fn dump_stats(&self) -> SimResult {
-        let workload = self.workload_totals()?;
+        let mut total_load_bytes = 0usize;
+        let mut total_store_bytes = 0usize;
+        let mut planned_load_bytes = 0usize;
+        let mut planned_store_bytes = 0usize;
         let mut machine_ops = MachineOpCounts::default();
+        let mut peak_pe_sram_bytes = 0usize;
+        let mut pe_names = BTreeSet::new();
         let mut num_compute_nodes = 0;
         let mut num_tensor_nodes = 0;
-        for (idx, node) in self.graph.nodes().iter().enumerate() {
-            match node.operation() {
-                Some(op) => {
-                    let views = self.compute_views(idx)?;
-                    machine_ops = machine_ops
-                        .checked_add(op.compute_machine_ops(views.inputs(), views.outputs())?)
-                        .map_err(|error| SimError(format!("{}: {error}", node.id())))?;
-                    num_compute_nodes += 1;
+        for (index, node) in self.graph.nodes().iter().enumerate() {
+            if node.is_compute() {
+                {
+                    let (read, written) = self.prepared_tasks[&index].planned_traffic_bytes();
+                    add_to_byte_total(&mut planned_load_bytes, read, "planned load")?;
+                    add_to_byte_total(&mut planned_store_bytes, written, "planned store")?;
                 }
-                None => num_tensor_nodes += 1,
+                if let Some(pe) = node.pe() {
+                    pe_names.insert(pe);
+                }
+                num_compute_nodes += 1;
+            } else {
+                num_tensor_nodes += 1;
             }
+        }
+        for pe in pe_names {
+            let element = self.platform.pe(pe)?;
+            machine_ops = machine_ops.checked_add(element.machine_ops())?;
+            let (read, written) = element.memory_traffic_bytes();
+            add_to_byte_total(&mut total_load_bytes, read, "load")?;
+            add_to_byte_total(&mut total_store_bytes, written, "store")?;
+            peak_pe_sram_bytes = peak_pe_sram_bytes.max(element.peak_sram_bytes());
         }
 
         info!(self.entity ; "Timetable:");
         info!(self.entity ;
             "  {num_compute_nodes} compute nodes, {num_tensor_nodes} tensor nodes"
         );
+        info!(self.entity ; "  planned loads {planned_load_bytes} bytes, stores {planned_store_bytes} bytes");
+        info!(self.entity ; "  actual loads {total_load_bytes} bytes, stores {total_store_bytes} bytes");
+        info!(self.entity ; "  peak PE SRAM {peak_pe_sram_bytes} bytes");
         info!(self.entity ;
-            "  loads {} bytes, stores {} bytes",
-            workload.read_bytes,
-            workload.written_bytes
-        );
-        info!(self.entity ;
-            "  machine ops {} total, {} add, {} mul, {} compare",
-            machine_ops.checked_total()?,
-            machine_ops.adds,
-            machine_ops.muls,
-            machine_ops.compares
+            "  machine ops {:?}, {} FLOP-equivalents",
+            machine_ops.by_operation,
+            machine_ops.flop_equivalents(),
         );
 
         Ok(())
+    }
+
+    /// Render a mermaid of the current status of the Timetable
+    #[must_use]
+    pub fn render_mermaid(&self) -> String {
+        render_mermaid(&self.graph, &self.mermaid_node_statuses())
     }
 
     /// Create map of node ID to status for rendering
@@ -236,10 +256,164 @@ impl Timetable {
             .collect()
     }
 
-    /// Render a mermaid of the current status of the Timetable
-    #[must_use]
-    pub fn render_mermaid(&self) -> String {
-        render_mermaid(&self.graph, &self.mermaid_node_statuses())
+    /// Machine operations completed by the PEs used by this timetable.
+    pub fn machine_operations_executed(&self) -> Result<usize, SimError> {
+        let pe_names: BTreeSet<_> = self
+            .graph
+            .nodes()
+            .iter()
+            .filter_map(|node| node.pe())
+            .collect();
+        pe_names.into_iter().try_fold(0usize, |total, name| {
+            let ops = self
+                .platform
+                .pe(name)?
+                .machine_ops()
+                .checked_operation_total()?;
+            total
+                .checked_add(ops)
+                .ok_or_else(|| SimError("Timetable machine operation total overflows".into()))
+        })
+    }
+}
+
+#[async_trait(?Send)]
+impl Dispatch for Timetable {
+    fn task_by_id(&self, task_idx: usize) -> Result<Task, SimError> {
+        Ok(Task::PreparedProgram {
+            task: self.prepared_task(task_idx)?.clone(),
+        })
+    }
+
+    fn set_task_active(&self, node_idx: usize) -> SimResult {
+        self.prepared_task(node_idx)?;
+        debug!(self.entity; "task{node_idx}: active");
+        if let Some(pe_idx) = self.node_pe_indices[node_idx] {
+            self.ready_nodes_per_pe
+                .borrow_mut()
+                .entry(pe_idx)
+                .or_default()
+                .remove(&node_idx);
+        }
+        self.active_node_indices.borrow_mut().insert(node_idx);
+        self.ready_nodes_changed.notify();
+        Ok(())
+    }
+
+    fn set_task_completed(&self, node_idx: usize) -> SimResult {
+        self.prepared_task(node_idx)?;
+        debug!(self.entity; "task{node_idx}: completed");
+
+        if self.completed_node_indices.borrow().contains(&node_idx) {
+            return Ok(());
+        }
+
+        let completed_workload = if let Some(mut workload) = self.completed_workload.get() {
+            self.add_node_workload(node_idx, &mut workload)?;
+            Some(workload)
+        } else {
+            None
+        };
+        let node = &self.graph.nodes()[node_idx];
+        if let Some(pe_idx) = self.node_pe_indices[node_idx] {
+            self.ready_nodes_per_pe
+                .borrow_mut()
+                .entry(pe_idx)
+                .or_default()
+                .remove(&node_idx);
+
+            let mut remaining_nodes_per_pe = self.remaining_nodes_per_pe.borrow_mut();
+            let remaining_nodes = remaining_nodes_per_pe.get_mut(&pe_idx).ok_or_else(|| {
+                SimError(format!("No remaining node count for PE index {pe_idx}"))
+            })?;
+            if *remaining_nodes == 0 {
+                return sim_error!("PE remaining node count underflow for task {node_idx}");
+            }
+            *remaining_nodes -= 1;
+        }
+        self.active_node_indices.borrow_mut().remove(&node_idx);
+        self.completed_node_indices.borrow_mut().insert(node_idx);
+        if let Some(completed_workload) = completed_workload {
+            self.completed_workload.set(Some(completed_workload));
+        }
+        self.mark_successors_updated(node_idx);
+
+        for tensor_node_idx in node.successors() {
+            if self.graph.nodes()[*tensor_node_idx].tensor().is_some()
+                && self.update_complete_tensor(*tensor_node_idx)
+            {
+                self.mark_successors_updated(*tensor_node_idx);
+            }
+        }
+
+        self.ready_nodes_changed.notify();
+        Ok(())
+    }
+
+    fn ready_task_indices(&self, pe_id: &str) -> Result<(bool, Vec<usize>), SimError> {
+        trace!(self.entity ; "ready_node_indices for {pe_id}");
+        let pe_idx = self.platform.pe_idx_from_name(pe_id)?;
+        let pe_done = self
+            .remaining_nodes_per_pe
+            .borrow()
+            .get(&pe_idx)
+            .copied()
+            .unwrap_or_default()
+            == 0;
+        let ready_node_indices = self
+            .ready_nodes_per_pe
+            .borrow()
+            .get(&pe_idx)
+            .map(|nodes| nodes.iter().copied().collect())
+            .unwrap_or_default();
+
+        debug!(self.entity; "PE {pe_id}: done: {pe_done}, ready indices: {ready_node_indices:?}");
+        Ok((pe_done, ready_node_indices))
+    }
+
+    async fn wait_for_change(&self) {
+        self.ready_nodes_changed.listen().await;
+    }
+
+    fn total_tasks_for_pe(&self, pe_name: &str) -> usize {
+        let Ok(pe_idx) = self.platform.pe_idx_from_name(pe_name) else {
+            return 0;
+        };
+        self.nodes_per_pe
+            .get(&pe_idx)
+            .map(BTreeSet::len)
+            .unwrap_or_default()
+    }
+}
+
+impl Timetable {
+    fn prepared_task(&self, node_idx: usize) -> Result<&Rc<PreparedTask>, SimError> {
+        self.prepared_tasks.get(&node_idx).ok_or_else(|| {
+            SimError(format!(
+                "Task Index {node_idx} does not refer to a compute node"
+            ))
+        })
+    }
+
+    fn calculate_workload(
+        &self,
+        node_indices: impl IntoIterator<Item = usize>,
+    ) -> Result<Workload, SimError> {
+        let mut workload = Workload::default();
+        for node_idx in node_indices {
+            self.add_node_workload(node_idx, &mut workload)?;
+        }
+        Ok(workload)
+    }
+
+    fn add_node_workload(&self, node_idx: usize, workload: &mut Workload) -> SimResult {
+        workload.nodes += 1;
+        if let Some(task) = self.prepared_tasks.get(&node_idx) {
+            let (read, written) = task.planned_traffic_bytes();
+            add_to_byte_total(&mut workload.read_bytes, read, "planned load")?;
+            add_to_byte_total(&mut workload.written_bytes, written, "planned store")?;
+        }
+        Ok(())
     }
 
     /// Iterate across all active tensors and move those that are now complete
@@ -343,202 +517,25 @@ impl Timetable {
                 .insert(node_idx);
         }
     }
-
-    fn compute_views(&self, node_idx: usize) -> Result<ComputeTensorViews, SimError> {
-        self.graph.compute_views(node_idx).ok_or_else(|| {
-            SimError(format!(
-                "node {} is not a compute node",
-                self.graph.nodes()[node_idx].id()
-            ))
-        })
-    }
 }
 
-#[async_trait(?Send)]
-impl Dispatch for Timetable {
-    fn task_by_id(&self, task_idx: usize) -> Result<Task, SimError> {
-        let node = &self.graph.nodes()[task_idx];
-        let Some(operation) = node.operation() else {
-            return sim_error!("Task Index {task_idx} refers to a Tensor node");
-        };
-        let (inputs, outputs) = self.compute_views(task_idx)?.into_parts();
-        Ok(build_compute_task(
-            node.id(),
-            operation.clone(),
-            inputs,
-            outputs,
-        ))
-    }
-
-    fn set_task_active(&self, node_idx: usize) -> SimResult {
-        debug!(self.entity; "task{node_idx}: active");
-        if let Some(pe_idx) = self.node_pe_indices[node_idx] {
-            self.ready_nodes_per_pe
-                .borrow_mut()
-                .entry(pe_idx)
-                .or_default()
-                .remove(&node_idx);
-        }
-        self.active_node_indices.borrow_mut().insert(node_idx);
-        self.ready_nodes_changed.notify();
-        Ok(())
-    }
-
-    fn set_task_completed(&self, node_idx: usize) -> SimResult {
-        debug!(self.entity; "task{node_idx}: completed");
-
-        if self.completed_node_indices.borrow().contains(&node_idx) {
-            return Ok(());
-        }
-
-        let completed_workload = if let Some(mut workload) = self.completed_workload.get() {
-            add_node_workload(&self.graph, node_idx, &mut workload)?;
-            Some(workload)
-        } else {
-            None
-        };
-        let node = &self.graph.nodes()[node_idx];
-        if let Some(pe_idx) = self.node_pe_indices[node_idx] {
-            self.ready_nodes_per_pe
-                .borrow_mut()
-                .entry(pe_idx)
-                .or_default()
-                .remove(&node_idx);
-
-            let mut remaining_nodes_per_pe = self.remaining_nodes_per_pe.borrow_mut();
-            let remaining_nodes = remaining_nodes_per_pe.get_mut(&pe_idx).ok_or_else(|| {
-                SimError(format!("No remaining node count for PE index {pe_idx}"))
-            })?;
-            if *remaining_nodes == 0 {
-                return sim_error!("PE remaining node count underflow for task {node_idx}");
-            }
-            *remaining_nodes -= 1;
-        }
-        self.active_node_indices.borrow_mut().remove(&node_idx);
-        self.completed_node_indices.borrow_mut().insert(node_idx);
-        if let Some(completed_workload) = completed_workload {
-            self.completed_workload.set(Some(completed_workload));
-        }
-        self.mark_successors_updated(node_idx);
-
-        for tensor_node_idx in node.successors() {
-            if self.graph.nodes()[*tensor_node_idx].tensor().is_some()
-                && self.update_complete_tensor(*tensor_node_idx)
-            {
-                self.mark_successors_updated(*tensor_node_idx);
-            }
-        }
-
-        self.ready_nodes_changed.notify();
-        Ok(())
-    }
-
-    fn ready_task_indices(&self, pe_id: &str) -> Result<(bool, Vec<usize>), SimError> {
-        trace!(self.entity ; "ready_node_indices for {pe_id}");
-        let pe_idx = self.platform.pe_idx_from_name(pe_id)?;
-        let pe_done = self
-            .remaining_nodes_per_pe
-            .borrow()
-            .get(&pe_idx)
-            .copied()
-            .unwrap_or_default()
-            == 0;
-        let ready_node_indices = self
-            .ready_nodes_per_pe
-            .borrow()
-            .get(&pe_idx)
-            .map(|nodes| nodes.iter().copied().collect())
-            .unwrap_or_default();
-
-        debug!(self.entity; "PE {pe_id}: done: {pe_done}, ready indices: {ready_node_indices:?}");
-        Ok((pe_done, ready_node_indices))
-    }
-
-    async fn wait_for_change(&self) {
-        self.ready_nodes_changed.listen().await;
-    }
-
-    fn total_tasks_for_pe(&self, pe_name: &str) -> usize {
-        let Ok(pe_idx) = self.platform.pe_idx_from_name(pe_name) else {
-            return 0;
-        };
-        self.nodes_per_pe
-            .get(&pe_idx)
-            .map(BTreeSet::len)
-            .unwrap_or_default()
-    }
-}
-impl fmt::Debug for Timetable {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Debug for Timetable {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("Timetable")
             .field("entity", &self.entity)
             .finish()
     }
 }
 
-fn build_compute_task(
-    id: &str,
-    op: ComputeOp,
-    inputs: Vec<Option<TensorView>>,
-    outputs: Vec<Option<TensorView>>,
-) -> Task {
-    Task::ComputeTask {
-        config: ComputeTaskConfig {
-            id: id.to_string(),
-            op,
-            inputs,
-            outputs,
-        },
-    }
-}
-
-fn calculate_workload(
-    graph: &TimetableGraph,
-    node_indices: impl IntoIterator<Item = usize>,
-) -> Result<Workload, SimError> {
-    let mut workload = Workload::default();
-    for node_idx in node_indices {
-        add_node_workload(graph, node_idx, &mut workload)?;
-    }
-    Ok(workload)
-}
-
-fn add_node_workload(
-    graph: &TimetableGraph,
-    node_idx: usize,
-    workload: &mut Workload,
-) -> SimResult {
-    workload.nodes += 1;
-    let node = &graph.nodes()[node_idx];
-    let Some(operation) = node.operation() else {
-        return Ok(());
-    };
-    let views = graph
-        .compute_views(node_idx)
-        .ok_or_else(|| SimError(format!("node {} is not a compute node", node.id())))?;
-
-    for input_view in views.inputs().iter().flatten() {
-        add_to_byte_total(
-            &mut workload.read_bytes,
-            input_view.layout().num_access_bytes(),
-            "load",
-        )?;
-    }
-    for output_view in views.outputs().iter().flatten() {
-        add_to_byte_total(
-            &mut workload.written_bytes,
-            output_view.layout().num_access_bytes(),
-            "store",
-        )?;
-    }
-    let machine_operations = operation
-        .compute_machine_ops(views.inputs(), views.outputs())?
-        .checked_total()?;
-    workload.machine_operations = workload
-        .machine_operations
-        .checked_add(machine_operations)
-        .ok_or_else(|| SimError("Timetable machine operation total overflows".to_string()))?;
-    Ok(())
+/// Graph nodes and the boundary traffic planned for their program tasks.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct Workload {
+    /// Number of graph nodes in the timetable.
+    pub nodes: usize,
+    /// Bytes planned for program input reads.
+    pub read_bytes: usize,
+    /// Bytes planned for program output writes.
+    pub written_bytes: usize,
 }
 
 fn add_to_byte_total(total: &mut usize, num_bytes: usize, kind: &str) -> SimResult {

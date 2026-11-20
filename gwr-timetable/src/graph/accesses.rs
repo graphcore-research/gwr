@@ -3,17 +3,21 @@
 use std::cmp::Reverse;
 use std::collections::{BTreeSet, BinaryHeap, HashSet};
 use std::fmt;
+use std::fmt::{Display, Formatter};
 use std::ops::Range;
 
 use gwr_engine::sim_error;
 use gwr_engine::types::SimResult;
-use gwr_models::processing_element::operators::TensorView;
+use gwr_models::processing_element::tensors::TensorView;
 
-use super::{ComputeTensorDirection, TimetableEdge, TimetableGraph};
+use super::{ComputeTensorDirection, NodeDraft, TimetableEdge};
 
-pub(super) fn validate(graph: &TimetableGraph) -> SimResult {
-    let mut accesses = graph
-        .edges()
+pub(super) fn validate(
+    nodes: &[NodeDraft],
+    edges: &[TimetableEdge],
+    topological_positions: &[usize],
+) -> SimResult {
+    let mut accesses = edges
         .iter()
         .filter_map(TimetableEdge::tensor_connection)
         .map(|connection| TensorAccess {
@@ -28,7 +32,7 @@ pub(super) fn validate(graph: &TimetableGraph) -> SimResult {
         .collect::<Vec<_>>();
     accesses.sort_by_key(|access| access.view.address_bounds().start);
 
-    let mut dependencies = DependencyOrder::new(graph);
+    let mut dependencies = DependencyOrder::new(nodes, topological_positions);
     let mut active_reads = BTreeSet::new();
     let mut active_writes = BTreeSet::new();
     let mut ending = BinaryHeap::new();
@@ -59,7 +63,7 @@ pub(super) fn validate(graph: &TimetableGraph) -> SimResult {
                     second: current,
                     ranges,
                 }
-                .into_error(graph);
+                .into_error(nodes);
             }
         }
 
@@ -81,29 +85,6 @@ fn conflict_candidates<'a>(
     writes.iter().chain(reads.into_iter().flatten())
 }
 
-#[derive(Clone, Copy, Eq, Hash, PartialEq)]
-enum AccessKind {
-    Read,
-    Write,
-}
-
-impl fmt::Display for AccessKind {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Read => formatter.write_str("reads"),
-            Self::Write => formatter.write_str("writes"),
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct TensorAccess<'a> {
-    node: usize,
-    tensor: usize,
-    kind: AccessKind,
-    view: &'a TensorView,
-}
-
 struct AccessConflict<'a> {
     first: TensorAccess<'a>,
     second: TensorAccess<'a>,
@@ -111,11 +92,11 @@ struct AccessConflict<'a> {
 }
 
 impl AccessConflict<'_> {
-    fn into_error(self, graph: &TimetableGraph) -> SimResult {
-        let first_node = graph.nodes()[self.first.node].id();
-        let second_node = graph.nodes()[self.second.node].id();
-        let first_tensor = graph.nodes()[self.first.tensor].id();
-        let second_tensor = graph.nodes()[self.second.tensor].id();
+    fn into_error(self, nodes: &[NodeDraft]) -> SimResult {
+        let first_node = nodes[self.first.node].id();
+        let second_node = nodes[self.second.node].id();
+        let first_tensor = nodes[self.first.tensor].id();
+        let second_tensor = nodes[self.second.tensor].id();
         let (first_range, second_range) = self.ranges;
 
         match (self.first.kind, self.second.kind) {
@@ -181,17 +162,42 @@ impl AccessConflict<'_> {
     }
 }
 
+#[derive(Clone, Copy)]
+struct TensorAccess<'a> {
+    node: usize,
+    tensor: usize,
+    kind: AccessKind,
+    view: &'a TensorView,
+}
+
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+enum AccessKind {
+    Read,
+    Write,
+}
+
+impl Display for AccessKind {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Read => formatter.write_str("reads"),
+            Self::Write => formatter.write_str("writes"),
+        }
+    }
+}
+
 struct DependencyOrder<'a> {
-    graph: &'a TimetableGraph,
+    nodes: &'a [NodeDraft],
+    topological_positions: &'a [usize],
     current: Option<usize>,
     ancestors: ReachabilitySearch,
     descendants: ReachabilitySearch,
 }
 
 impl<'a> DependencyOrder<'a> {
-    fn new(graph: &'a TimetableGraph) -> Self {
+    fn new(nodes: &'a [NodeDraft], topological_positions: &'a [usize]) -> Self {
         Self {
-            graph,
+            nodes,
+            topological_positions,
             current: None,
             ancestors: ReachabilitySearch::default(),
             descendants: ReachabilitySearch::default(),
@@ -208,12 +214,12 @@ impl<'a> DependencyOrder<'a> {
             self.descendants.clear();
         }
 
-        if self.graph.topological_position(other) < self.graph.topological_position(current) {
+        if self.topological_positions[other] < self.topological_positions[current] {
             self.ancestors
-                .contains(self.graph, current, other, SearchDirection::Ancestors)
+                .contains(self.nodes, current, other, SearchDirection::Ancestors)
         } else {
             self.descendants
-                .contains(self.graph, current, other, SearchDirection::Descendants)
+                .contains(self.nodes, current, other, SearchDirection::Descendants)
         }
     }
 }
@@ -232,7 +238,7 @@ impl ReachabilitySearch {
 
     fn contains(
         &mut self,
-        graph: &TimetableGraph,
+        nodes: &[NodeDraft],
         start: usize,
         target: usize,
         direction: SearchDirection,
@@ -247,8 +253,8 @@ impl ReachabilitySearch {
                 return false;
             };
             let adjacent = match direction {
-                SearchDirection::Ancestors => graph.nodes()[node].predecessors(),
-                SearchDirection::Descendants => graph.nodes()[node].successors(),
+                SearchDirection::Ancestors => &nodes[node].predecessors,
+                SearchDirection::Descendants => &nodes[node].successors,
             };
             for adjacent in adjacent {
                 if self.reached.insert(*adjacent) {
@@ -273,45 +279,88 @@ mod tests {
 
     #[test]
     fn searches_dependencies_lazily_in_each_direction() {
-        let graph = TimetableFile::from_string(
+        let file = TimetableFile::from_string(
             r"
 nodes:
-  - { id: compute0, kind: compute, op: { custom: { machine_ops: {} } }, input_views: [], output_views: [~] }
+  - { id: initial, kind: tensor, config: { addr: 10, dtype: int8, shape: [1] } }
+  - id: compute0
+    kind: compute
+    program:
+      inputs: [A]
+      outputs: [Y]
+      assignments:
+        - output: Y
+          axes: [i]
+          expr:
+            identity:
+              - read: { tensor: A, indices: [i] }
   - { id: tensor0, kind: tensor, config: { addr: 0, dtype: int8, shape: [1] } }
-  - { id: compute1, kind: compute, op: { custom: { machine_ops: {} } }, input_views: [~], output_views: [~] }
+  - id: compute1
+    kind: compute
+    program:
+      inputs: [A]
+      outputs: [Y]
+      assignments:
+        - output: Y
+          axes: [i]
+          expr:
+            identity:
+              - read: { tensor: A, indices: [i] }
   - { id: tensor1, kind: tensor, config: { addr: 1, dtype: int8, shape: [1] } }
-  - { id: compute2, kind: compute, op: { custom: { machine_ops: {} } }, input_views: [~], output_views: [] }
+  - id: compute2
+    kind: compute
+    program:
+      inputs: [A]
+      outputs: []
+      assignments: []
 edges:
-  - { from: compute0, to: tensor0, kind: data }
-  - { from: tensor0, to: compute1, kind: data }
-  - { from: compute1, to: tensor1, kind: data }
-  - { from: tensor1, to: compute2, kind: data }
+  - { from: initial, to: compute0.A, kind: data }
+  - { from: compute0.Y, to: tensor0, kind: data }
+  - { from: tensor0, to: compute1.A, kind: data }
+  - { from: compute1.Y, to: tensor1, kind: data }
+  - { from: tensor1, to: compute2.A, kind: data }
 ",
         )
-        .unwrap()
-        .into_graph()
         .unwrap();
-        let mut dependencies = DependencyOrder::new(&graph);
+        let mut nodes = file
+            .nodes
+            .into_iter()
+            .map(|node| NodeDraft::new(node).unwrap().0)
+            .collect::<Vec<_>>();
+        for edge in file.edges {
+            let from = nodes
+                .iter()
+                .position(|node| node.id() == edge.from_node_id())
+                .unwrap();
+            let to = nodes
+                .iter()
+                .position(|node| node.id() == edge.to_node_id())
+                .unwrap();
+            nodes[from].successors.push(to);
+            nodes[to].predecessors.push(from);
+        }
+        let topological_positions = (0..nodes.len()).collect::<Vec<_>>();
+        let mut dependencies = DependencyOrder::new(&nodes, &topological_positions);
 
         assert_eq!(dependencies.current, None);
         assert!(dependencies.ancestors.reached.is_empty());
         assert!(dependencies.descendants.reached.is_empty());
 
-        assert!(dependencies.are_ordered(2, 0));
-        assert_eq!(dependencies.current, Some(2));
-        assert!(dependencies.ancestors.reached.contains(&0));
+        assert!(dependencies.are_ordered(3, 1));
+        assert_eq!(dependencies.current, Some(3));
+        assert!(dependencies.ancestors.reached.contains(&1));
         assert!(dependencies.descendants.reached.is_empty());
 
         let num_ancestors_reached = dependencies.ancestors.reached.len();
-        assert!(dependencies.are_ordered(2, 1));
+        assert!(dependencies.are_ordered(3, 2));
         assert_eq!(dependencies.ancestors.reached.len(), num_ancestors_reached);
 
-        assert!(dependencies.are_ordered(2, 4));
-        assert!(dependencies.descendants.reached.contains(&4));
+        assert!(dependencies.are_ordered(3, 5));
+        assert!(dependencies.descendants.reached.contains(&5));
 
-        assert!(dependencies.are_ordered(0, 4));
-        assert_eq!(dependencies.current, Some(0));
+        assert!(dependencies.are_ordered(1, 5));
+        assert_eq!(dependencies.current, Some(1));
         assert!(dependencies.ancestors.reached.is_empty());
-        assert!(dependencies.descendants.reached.contains(&4));
+        assert!(dependencies.descendants.reached.contains(&5));
     }
 }

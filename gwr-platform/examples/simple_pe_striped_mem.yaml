@@ -21,11 +21,18 @@ address_spaces:
       - policy: striped
         devices: [hbm0, hbm1]
 
+operation_classes:
+  add: { operations: [add], arity: 2 }
+
 processing_elements:
   - name: pe0
     address_space: striped_space
     config:
       num_active_requests: 2
+      compute:
+        execution_units:
+          vector:
+            capabilities: [{ class: add, ops_per_tick: 256 }]
 
 fabrics:
   - name: fabric0
