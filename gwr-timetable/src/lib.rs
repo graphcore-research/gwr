@@ -302,58 +302,58 @@ impl Dispatch for TimetableDispatcher {
         })
     }
 
-    fn set_task_active(&self, node_idx: usize) -> SimResult {
-        self.prepared_task(node_idx)?;
-        debug!(self.entity; "task{node_idx}: active");
-        if let Some(pe_idx) = self.node_pe_indices[node_idx] {
+    fn set_task_active(&self, task_idx: usize) -> SimResult {
+        self.prepared_task(task_idx)?;
+        debug!(self.entity; "task{task_idx}: active");
+        if let Some(pe_idx) = self.node_pe_indices[task_idx] {
             self.ready_nodes_per_pe
                 .borrow_mut()
                 .entry(pe_idx)
                 .or_default()
-                .remove(&node_idx);
+                .remove(&task_idx);
         }
-        self.active_node_indices.borrow_mut().insert(node_idx);
+        self.active_node_indices.borrow_mut().insert(task_idx);
         self.ready_nodes_changed.notify();
         Ok(())
     }
 
-    fn set_task_completed(&self, node_idx: usize) -> SimResult {
-        self.prepared_task(node_idx)?;
-        debug!(self.entity; "task{node_idx}: completed");
+    fn set_task_completed(&self, task_idx: usize) -> SimResult {
+        self.prepared_task(task_idx)?;
+        debug!(self.entity; "task{task_idx}: completed");
 
-        if self.completed_node_indices.borrow().contains(&node_idx) {
+        if self.completed_node_indices.borrow().contains(&task_idx) {
             return Ok(());
         }
 
         let completed_workload = if let Some(mut workload) = self.completed_workload.get() {
-            self.add_node_workload(node_idx, &mut workload)?;
+            self.add_node_workload(task_idx, &mut workload)?;
             Some(workload)
         } else {
             None
         };
-        let node = &self.graph.nodes()[node_idx];
-        if let Some(pe_idx) = self.node_pe_indices[node_idx] {
+        let node = &self.graph.nodes()[task_idx];
+        if let Some(pe_idx) = self.node_pe_indices[task_idx] {
             self.ready_nodes_per_pe
                 .borrow_mut()
                 .entry(pe_idx)
                 .or_default()
-                .remove(&node_idx);
+                .remove(&task_idx);
 
             let mut remaining_nodes_per_pe = self.remaining_nodes_per_pe.borrow_mut();
             let remaining_nodes = remaining_nodes_per_pe.get_mut(&pe_idx).ok_or_else(|| {
                 SimError(format!("No remaining node count for PE index {pe_idx}"))
             })?;
             if *remaining_nodes == 0 {
-                return sim_error!("PE remaining node count underflow for task {node_idx}");
+                return sim_error!("PE remaining node count underflow for task {task_idx}");
             }
             *remaining_nodes -= 1;
         }
-        self.active_node_indices.borrow_mut().remove(&node_idx);
-        self.completed_node_indices.borrow_mut().insert(node_idx);
+        self.active_node_indices.borrow_mut().remove(&task_idx);
+        self.completed_node_indices.borrow_mut().insert(task_idx);
         if let Some(completed_workload) = completed_workload {
             self.completed_workload.set(Some(completed_workload));
         }
-        self.mark_successors_updated(node_idx);
+        self.mark_successors_updated(task_idx);
 
         for tensor_node_idx in node.successors() {
             if self.graph.nodes()[*tensor_node_idx].tensor().is_some()
@@ -367,10 +367,10 @@ impl Dispatch for TimetableDispatcher {
         Ok(())
     }
 
-    fn ready_task_indices(&self, pe_id: &str) -> Result<(bool, Vec<usize>), SimError> {
-        trace!(self.entity ; "ready_node_indices for {pe_id}");
-        let Some(&pe_idx) = self.pe_indices.get(pe_id) else {
-            return sim_error!("No PE '{pe_id}'");
+    fn ready_task_indices(&self, pe_name: &str) -> Result<(bool, Vec<usize>), SimError> {
+        trace!(self.entity ; "ready_node_indices for {pe_name}");
+        let Some(&pe_idx) = self.pe_indices.get(pe_name) else {
+            return sim_error!("No PE '{pe_name}'");
         };
         let pe_done = self
             .remaining_nodes_per_pe
@@ -386,7 +386,7 @@ impl Dispatch for TimetableDispatcher {
             .map(|nodes| nodes.iter().copied().collect())
             .unwrap_or_default();
 
-        debug!(self.entity; "PE {pe_id}: done: {pe_done}, ready indices: {ready_node_indices:?}");
+        debug!(self.entity; "PE {pe_name}: done: {pe_done}, ready indices: {ready_node_indices:?}");
         Ok((pe_done, ready_node_indices))
     }
 
@@ -394,14 +394,16 @@ impl Dispatch for TimetableDispatcher {
         self.ready_nodes_changed.listen().await;
     }
 
-    fn total_tasks_for_pe(&self, pe_name: &str) -> usize {
+    fn total_tasks_for_pe(&self, pe_name: &str) -> Result<usize, SimError> {
         let Some(&pe_idx) = self.pe_indices.get(pe_name) else {
-            return 0;
+            return sim_error!("No PE '{pe_name}'");
         };
-        self.nodes_per_pe
+        let count = self
+            .nodes_per_pe
             .get(&pe_idx)
             .map(BTreeSet::len)
-            .unwrap_or_default()
+            .unwrap_or_default();
+        Ok(count)
     }
 }
 

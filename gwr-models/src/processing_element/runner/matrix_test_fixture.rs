@@ -62,7 +62,7 @@ impl Dispatch for Completed {
         pending::<()>().await;
     }
 
-    fn total_tasks_for_pe(&self, _: &str) -> usize {
-        0
+    fn total_tasks_for_pe(&self, _: &str) -> Result<usize, SimError> {
+        Ok(0)
     }
 }

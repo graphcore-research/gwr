@@ -12,5 +12,6 @@ pub trait Dispatch {
     fn set_task_completed(&self, task_idx: usize) -> SimResult;
     fn ready_task_indices(&self, pe_name: &str) -> Result<(bool, Vec<usize>), SimError>;
     async fn wait_for_change(&self);
-    fn total_tasks_for_pe(&self, pe_name: &str) -> usize;
+    /// Returns the task count for the named PE, or an error if it is unknown.
+    fn total_tasks_for_pe(&self, pe_name: &str) -> Result<usize, SimError>;
 }

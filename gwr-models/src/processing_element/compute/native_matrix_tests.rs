@@ -117,8 +117,8 @@ impl Dispatch for OneTask {
         pending::<()>().await;
     }
 
-    fn total_tasks_for_pe(&self, _: &str) -> usize {
-        1
+    fn total_tasks_for_pe(&self, _: &str) -> Result<usize, SimError> {
+        Ok(1)
     }
 }
 

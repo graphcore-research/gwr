@@ -91,12 +91,12 @@ impl Dispatch for TestDispatcher {
         Ok(task.clone())
     }
 
-    fn total_tasks_for_pe(&self, pe_name: &str) -> usize {
-        let mut handle = self.tasks_by_pe.borrow_mut();
-        match handle.get_mut(pe_name) {
-            None => 0,
-            Some(v) => v.len(),
-        }
+    fn total_tasks_for_pe(&self, pe_name: &str) -> Result<usize, SimError> {
+        self.tasks_by_pe
+            .borrow()
+            .get(pe_name)
+            .map(VecDeque::len)
+            .ok_or_else(|| SimError(format!("No PE '{pe_name}'")))
     }
 
     async fn wait_for_change(&self) {

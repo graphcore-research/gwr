@@ -252,8 +252,11 @@ impl Dispatch for SingleTask {
         self.changed.listen().await;
     }
 
-    fn total_tasks_for_pe(&self, _: &str) -> usize {
-        self.repeats
+    fn total_tasks_for_pe(&self, pe_name: &str) -> Result<usize, SimError> {
+        if pe_name != "pe0" {
+            return Err(SimError(format!("No PE '{pe_name}'")));
+        }
+        Ok(self.repeats)
     }
 }
 
