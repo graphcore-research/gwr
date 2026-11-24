@@ -35,6 +35,31 @@ pub struct ComputeModel {
 }
 
 impl ComputeModel {
+    /// Dense matrix modes available for the ordered operands. An absent mode
+    /// represents a capability whose accumulator follows the output dtype.
+    #[must_use]
+    pub fn matrix_execution_modes(&self, operands: [DataType; 2]) -> Vec<Option<ExecutionMode>> {
+        self.capabilities
+            .get("matrix_mac")
+            .into_iter()
+            .flatten()
+            .filter(|candidate| {
+                candidate.arity == operands.len()
+                    && candidate
+                        .inputs
+                        .as_deref()
+                        .is_none_or(|types| types == operands)
+                    && candidate
+                        .execution
+                        .as_ref()
+                        .is_none_or(|mode| mode.sparsity == Sparsity::Dense)
+            })
+            .map(|candidate| candidate.execution.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
     /// Validate and expand hardware declarations once, with stable name
     /// ordering.
     #[expect(
@@ -220,7 +245,7 @@ impl ComputeModel {
 #[serde(deny_unknown_fields)]
 pub struct ComputeConfig {
     /// Named independent engines.
-    #[serde(deserialize_with = "unique_map")]
+    #[serde(alias = "execution_units", deserialize_with = "unique_map")]
     pub engines: BTreeMap<String, EngineConfig>,
 }
 
@@ -248,7 +273,7 @@ pub struct EngineConfig {
 
 /// A compact declaration of typed operations sharing one throughput rate.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "CapabilityDeclaration")]
 pub struct CapabilityConfig {
     /// Platform-wide operation class.
     pub class: String,
@@ -264,6 +289,31 @@ pub struct CapabilityConfig {
     /// Caller matrix macro shape used only for charged service work.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub matrix_service_tile: Option<MatrixServiceTile>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CapabilityDeclaration {
+    class: String,
+    input_dtypes: Option<Vec<Vec<DataType>>>,
+    ops_per_tick: f64,
+    execution: Option<ExecutionMode>,
+    accumulator: Option<DataType>,
+    matrix_service_tile: Option<MatrixServiceTile>,
+}
+
+impl TryFrom<CapabilityDeclaration> for CapabilityConfig {
+    type Error = SimError;
+
+    fn try_from(declaration: CapabilityDeclaration) -> Result<Self, Self::Error> {
+        Ok(Self {
+            class: declaration.class,
+            input_dtypes: declaration.input_dtypes,
+            ops_per_tick: declaration.ops_per_tick,
+            execution: ExecutionMode::resolve(declaration.execution, declaration.accumulator)?,
+            matrix_service_tile: declaration.matrix_service_tile,
+        })
+    }
 }
 
 impl CapabilityConfig {
@@ -378,6 +428,24 @@ pub struct ExecutionMode {
     /// Required operand sparsity; sparse attention does not imply sparse GEMM.
     #[serde(default)]
     pub sparsity: Sparsity,
+}
+
+impl ExecutionMode {
+    /// Normalize a flat accumulator declaration into a dense instruction.
+    pub(in crate::processing_element) fn resolve(
+        execution: Option<Self>,
+        accumulator: Option<DataType>,
+    ) -> Result<Option<Self>, SimError> {
+        match (execution, accumulator) {
+            (Some(_), Some(_)) => sim_error!("specify either execution or accumulator"),
+            (None, Some(accumulator)) => Ok(Some(Self {
+                instruction: "matrix_mac".into(),
+                accumulator,
+                sparsity: Sparsity::Dense,
+            })),
+            (execution, None) => Ok(execution),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]

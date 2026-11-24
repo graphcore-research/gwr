@@ -77,6 +77,15 @@ impl fmt::Debug for LoadStoreUnit {
 }
 
 impl LoadStoreUnit {
+    pub(super) fn configuration_description(&self) -> String {
+        format!(
+            "LSU access: {} bytes; request slots: {}; protocol overhead: {} bytes",
+            self.max_access_size_bytes,
+            self.state.active_request_slots.borrow().len(),
+            self.state.overhead_size_bytes,
+        )
+    }
+
     pub fn new_and_register(
         engine: &Engine,
         clock: &Clock,
@@ -941,5 +950,5 @@ impl LoadStoreUnit {
 }
 
 #[cfg(test)]
-#[path = "load_store_unit_tests.rs"]
+#[path = "../load_store_unit_tests.rs"]
 mod custody_tests;

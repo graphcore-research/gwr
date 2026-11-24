@@ -2,18 +2,268 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::process::Command;
+use std::path::PathBuf;
+use std::process::{Command, Output};
 use std::rc::Rc;
 
 use gwr_engine::test_helpers::start_test;
 use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::program::syntax::{ExprSpec, IndexSpec, ReductionOp};
+use gwr_models::processing_element::tensors::HasShape;
 use gwr_models::processing_element::tensors::dtype::DataType;
 use gwr_platform::Platform;
 use gwr_timetable::Timetable;
 use gwr_timetable::timetable_file::{
-    NodeSection, ProgramSection, TensorConfigSection, TimetableFile,
+    NodeSection, ProgramDefinition, ProgramSection, TensorConfigSection, TensorViewSection,
+    TensorViewSections, TimetableFile,
 };
+
+#[test]
+fn generator_ignores_unreachable_addresses_in_the_first_pe_map() {
+    let fixture = GeneratorFixture::new(
+        r"
+memory_maps:
+  - { name: unreachable, devices: [hidden] }
+  - { name: mapped, devices: [mem] }
+operation_classes:
+  add: { operations: [add], arity: 2 }
+processing_elements:
+  - name: pe_unmapped
+    memory_map: unreachable
+    config: &pe_config
+      compute:
+        engines:
+          vector:
+            capabilities: [{ class: add, ops_per_tick: 256 }]
+  - name: pe0
+    memory_map: mapped
+    config: *pe_config
+memories:
+  - { name: hidden, kind: hbm, base_address: 0, config: { capacity_bytes: 4096 } }
+  - { name: mem, kind: hbm, base_address: 4096, config: { capacity_bytes: 4096 } }
+  - { name: unmapped, kind: hbm, base_address: 8192, config: { capacity_bytes: 4096 } }
+fabrics:
+  - { name: isolated, kind: functional, columns: 2, rows: 1, config: { routing: column-first } }
+connections:
+  - connect: [pe.pe_unmapped, mem.unmapped]
+  - connect: [mem.hidden, 'fabric.isolated@(0,0)']
+  - connect: ['fabric.isolated@(1,0)', 'null']
+  - connect: [pe.pe0, mem.mem]
+",
+    );
+    let file = fixture.generate(SMALL_ADD_ARGS);
+    assert_eq!(compute_program(&file).0, "pe0");
+    assert_eq!(tensor_addresses(&file), [4096, 4128, 4160]);
+    fixture.run_to_completion(file);
+}
+
+#[test]
+fn generator_checks_the_last_reachable_allocation_byte() {
+    for (capacity, succeeds) in [(79, false), (80, true)] {
+        let yaml = PLATFORM_YAML
+            .replace(
+                "capacity_bytes: 0x1000_0000",
+                &format!("capacity_bytes: {capacity}"),
+            )
+            .replace(
+                "      compute:",
+                "      lsu_access_bytes: 1\n      compute:",
+            );
+        let fixture = GeneratorFixture::new(&yaml);
+        if succeeds {
+            let file = fixture.generate(SMALL_ADD_ARGS);
+            assert_eq!(tensor_addresses(&file), [0, 32, 64]);
+            fixture.run_to_completion(file);
+        } else {
+            fs::write(&fixture.timetable_path, b"existing output").unwrap();
+            assert_generation_failed(&fixture.run_generator(SMALL_ADD_ARGS), "placement");
+            assert_eq!(
+                fs::read(&fixture.timetable_path).unwrap(),
+                b"existing output"
+            );
+        }
+    }
+}
+
+#[test]
+fn generator_relocates_a_shared_rhs_into_memory_mapped_by_both_pes() {
+    let fixture = GeneratorFixture::new(
+        r"
+memory_maps:
+  - { name: first, devices: [a, shared] }
+  - { name: second, devices: [b, shared] }
+operation_classes:
+  matrix: { operations: [matrix_mac], arity: 2, flops_per_op: 2 }
+processing_elements:
+  - name: pe0
+    memory_map: first
+    config: &matrix_config
+      compute:
+        engines:
+          matrix:
+            capabilities: [{ class: matrix, ops_per_tick: 256 }]
+  - name: pe1
+    memory_map: second
+    config: *matrix_config
+fabrics:
+  - { name: mesh, kind: functional, columns: 5, rows: 1, config: { routing: column-first } }
+memories:
+  - { name: a, kind: hbm, base_address: 0, config: { capacity_bytes: 4096 } }
+  - { name: b, kind: hbm, base_address: 4096, config: { capacity_bytes: 4096 } }
+  - { name: shared, kind: hbm, base_address: 8192, config: { capacity_bytes: 4096 } }
+connections:
+  - connect: [pe.pe0, 'fabric.mesh@(0,0)']
+  - connect: [pe.pe1, 'fabric.mesh@(1,0)']
+  - connect: [mem.a, 'fabric.mesh@(2,0)']
+  - connect: [mem.b, 'fabric.mesh@(3,0)']
+  - connect: [mem.shared, 'fabric.mesh@(4,0)']
+",
+    );
+    let file = fixture.generate(&[
+        ("--depth", "1"),
+        ("--max-compute-nodes", "2"),
+        ("--partition-size", "2"),
+        ("--weight-add", "0"),
+        ("--weight-gemm", "1"),
+        ("--weight-reduce-max", "0"),
+        ("--init-rank-min", "2"),
+        ("--init-rank-max", "2"),
+        ("--init-dim-min", "4"),
+        ("--init-dim-max", "4"),
+        ("--expand-ratio", "1"),
+    ]);
+    let graph = file.clone().into_graph().unwrap();
+    let mut tasks = graph
+        .nodes()
+        .iter()
+        .enumerate()
+        .filter(|(_, node)| node.is_compute());
+    let (first, pe0) = tasks.next().unwrap();
+    let (second, pe1) = tasks.next().unwrap();
+    assert!(tasks.next().is_none());
+    assert_eq!([pe0.pe(), pe1.pe()], [Some("pe0"), Some("pe1")]);
+
+    let first_views = graph.compute_views(first).unwrap();
+    let second_views = graph.compute_views(second).unwrap();
+    let first_rhs = first_views.inputs()[1].as_ref().unwrap();
+    let second_rhs = second_views.inputs()[1].as_ref().unwrap();
+    assert_eq!(first_rhs.tensor().id(), second_rhs.tensor().id());
+    for rhs in [first_rhs, second_rhs] {
+        assert_eq!(rhs.shape().dims(), &[4, 4]);
+        assert_eq!(rhs.offsets(), &[0, 0]);
+        assert!((8192..=12_224).contains(&rhs.tensor().addr()));
+    }
+    fixture.run_to_completion(file);
+}
+
+#[test]
+fn generator_selects_wide_matrix_accumulation_and_executes_conversion() {
+    let fixture = GeneratorFixture::new(BF16_MATRIX_PLATFORM);
+    let file = fixture.generate(BF16_MATRIX_ARGS);
+    assert_matrix_mode(&file, "pe0", "tensor", DataType::Fp32);
+    let platform = fixture.run_to_completion(file);
+    let ops = platform.pe("pe0").unwrap().machine_ops();
+    assert_eq!(ops.by_operation.get("matrix_mac"), Some(&8));
+    assert_eq!(ops.by_operation.get("convert"), Some(&4));
+}
+
+#[test]
+fn generator_rejects_matrix_mode_without_output_conversion() {
+    let yaml = BF16_MATRIX_PLATFORM.replace("input_dtypes: [[fp32]]", "input_dtypes: [[fp16]]");
+    let fixture = GeneratorFixture::new(&yaml);
+    assert_generation_failed(
+        &fixture.run_generator(BF16_MATRIX_ARGS),
+        "no supported compute templates",
+    );
+    assert!(!fixture.timetable_path.exists());
+}
+
+#[test]
+fn generator_tries_other_accumulators_when_preferred_accumulator_cannot_fit() {
+    let yaml = BF16_MATRIX_PLATFORM.replace(
+        "          matrix:",
+        "          narrow:
+            matrix_accumulator_capacity_bytes: 1
+            capabilities:
+              - class: matrix
+                input_dtypes: [[bf16, bf16]]
+                execution: { instruction: narrow, accumulator: bf16 }
+                ops_per_tick: 128
+          matrix:",
+    );
+    let fixture = GeneratorFixture::new(&yaml);
+    let file = fixture.generate(BF16_MATRIX_ARGS);
+    assert_matrix_mode(&file, "pe0", "tensor", DataType::Fp32);
+    fixture.run_to_completion(file);
+}
+
+#[test]
+fn generator_prefers_destination_accumulation_when_supported() {
+    let yaml = BF16_MATRIX_PLATFORM.replace(
+        "          vector:",
+        "          narrow:
+            capabilities:
+              - class: matrix
+                input_dtypes: [[bf16, bf16]]
+                execution: { instruction: narrow, accumulator: bf16 }
+                ops_per_tick: 128
+          vector:",
+    );
+    let fixture = GeneratorFixture::new(&yaml);
+    let file = fixture.generate(BF16_MATRIX_ARGS);
+    assert_matrix_mode(&file, "pe0", "narrow", DataType::Bf16);
+    let platform = fixture.run_to_completion(file);
+    assert!(
+        !platform
+            .pe("pe0")
+            .unwrap()
+            .machine_ops()
+            .by_operation
+            .contains_key("convert")
+    );
+}
+
+#[test]
+fn generator_rebuilds_the_matrix_program_for_a_pe_that_can_fit_it() {
+    let yaml = BF16_MATRIX_PLATFORM
+        .replace(
+            "  - name: pe0",
+            "  - name: pe_small
+    memory_map: mm
+    config:
+      sram_bytes: 1
+      compute:
+        engines:
+          matrix:
+            capabilities:
+              - class: matrix
+                input_dtypes: [[bf16, bf16]]
+                execution: { instruction: small, accumulator: fp16 }
+                ops_per_tick: 128
+          vector:
+            capabilities: [{ class: conversion, input_dtypes: [[fp16]], ops_per_tick: 32 }]
+  - name: pe0",
+        )
+        .replace(
+            "connections: [{ connect: [pe.pe0, mem.mem] }]",
+            "fabrics: [{ name: mesh, kind: functional, columns: 3, rows: 1, config: { routing: column-first } }]
+connections:
+  - { connect: [pe.pe_small, 'fabric.mesh@(0,0)'] }
+  - { connect: [pe.pe0, 'fabric.mesh@(1,0)'] }
+  - { connect: [mem.mem, 'fabric.mesh@(2,0)'] }",
+        );
+    let fixture = GeneratorFixture::new(&yaml);
+    let file = fixture.generate(BF16_MATRIX_ARGS);
+    assert_matrix_mode(&file, "pe0", "tensor", DataType::Fp32);
+    fixture.run_to_completion(file);
+}
+
+fn positional_views(views: &Option<TensorViewSections>) -> &[Option<TensorViewSection>] {
+    let Some(TensorViewSections::Positional(views)) = views else {
+        panic!("expected positional views in the generated timetable");
+    };
+    views
+}
 
 #[test]
 #[expect(
@@ -88,8 +338,8 @@ fn generator_partitions_add_across_pes_with_disjoint_views() {
             assert!(matches!(program, ProgramSection::Named(_)));
             pes.insert(pe.as_deref().unwrap().to_owned());
             pe_sequence.push(pe.as_deref().unwrap().to_owned());
-            let input_views = input_views.as_ref().unwrap();
-            let output_view = output_views.as_ref().unwrap()[0].as_ref().unwrap();
+            let input_views = positional_views(input_views);
+            let output_view = positional_views(output_views)[0].as_ref().unwrap();
             assert_eq!(
                 input_views[0].as_ref().unwrap().offsets[0],
                 output_view.offsets[0]
@@ -171,8 +421,8 @@ fn generator_partitions_gemm_without_slicing_shared_rhs() {
             ..
         } = node
         {
-            let inputs = input_views.as_ref().unwrap();
-            let output = output_views.as_ref().unwrap()[0].as_ref().unwrap();
+            let inputs = positional_views(input_views);
+            let output = positional_views(output_views)[0].as_ref().unwrap();
             let lhs = inputs[0].as_ref().unwrap();
             let rhs = inputs[1].as_ref().unwrap();
             assert_eq!(
@@ -588,7 +838,7 @@ fn generator_emits_multi_output_reduce_max() {
                     .find(|edge| edge.to == format!("{id}.0"))
                     .unwrap_or_else(|| panic!("missing input edge for {id}"));
                 let input = tensor_config(&timetable_file, &input_edge.from);
-                let output_views = output_views.as_ref().unwrap();
+                let output_views = positional_views(output_views);
                 assert!((1..=2).contains(&output_views.len()));
                 assert_eq!(program.outputs.len(), output_views.len());
 
@@ -764,3 +1014,158 @@ memories:
 connections:
   - connect: [pe.pe0, mem.hbm0]
 ";
+
+const BF16_MATRIX_PLATFORM: &str = "
+memory_maps: [{ name: mm, devices: [mem] }]
+operation_classes:
+  matrix: { operations: [matrix_mac], arity: 2, flops_per_op: 2 }
+  conversion: { operations: [convert], arity: 1 }
+processing_elements:
+  - name: pe0
+    memory_map: mm
+    config:
+      sram_bytes: 1MiB
+      compute:
+        engines:
+          matrix:
+            capabilities:
+              - class: matrix
+                input_dtypes: [[bf16, bf16]]
+                execution: { instruction: tensor, accumulator: fp32 }
+                ops_per_tick: 128
+          vector:
+            capabilities:
+              - { class: conversion, input_dtypes: [[fp32]], ops_per_tick: 32 }
+memories:
+  - { name: mem, kind: hbm, base_address: 0, config: { capacity_bytes: 1MiB } }
+connections: [{ connect: [pe.pe0, mem.mem] }]
+";
+
+const SMALL_ADD_ARGS: &[(&str, &str)] = &[
+    ("--depth", "1"),
+    ("--max-compute-nodes", "1"),
+    ("--weight-add", "1"),
+    ("--weight-gemm", "0"),
+    ("--weight-reduce-max", "0"),
+    ("--init-rank-min", "2"),
+    ("--init-rank-max", "2"),
+    ("--init-dim-min", "2"),
+    ("--init-dim-max", "2"),
+    ("--tensor-align-bytes", "32"),
+];
+
+const BF16_MATRIX_ARGS: &[(&str, &str)] = &[
+    ("--init-dtype", "bf16"),
+    ("--depth", "1"),
+    ("--max-compute-nodes", "1"),
+    ("--weight-add", "0"),
+    ("--weight-gemm", "1"),
+    ("--weight-reduce-max", "0"),
+    ("--init-rank-min", "2"),
+    ("--init-rank-max", "2"),
+    ("--init-dim-min", "2"),
+    ("--init-dim-max", "2"),
+    ("--expand-ratio", "1"),
+];
+
+struct GeneratorFixture {
+    _directory: tempfile::TempDir,
+    platform_path: PathBuf,
+    timetable_path: PathBuf,
+}
+
+impl GeneratorFixture {
+    fn new(platform_yaml: &str) -> Self {
+        let directory = tempfile::tempdir().unwrap();
+        let platform_path = directory.path().join("platform.yaml");
+        let timetable_path = directory.path().join("timetable.yaml");
+        fs::write(&platform_path, platform_yaml).unwrap();
+        Self {
+            _directory: directory,
+            platform_path,
+            timetable_path,
+        }
+    }
+
+    fn generate(&self, args: &[(&str, &str)]) -> TimetableFile {
+        let output = self.run_generator(args);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        TimetableFile::from_file(&self.timetable_path).unwrap()
+    }
+
+    fn run_generator(&self, args: &[(&str, &str)]) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_gen-timetable"))
+            .arg("--platform")
+            .arg(&self.platform_path)
+            .arg("--out")
+            .arg(&self.timetable_path)
+            .args(args.iter().flat_map(|&(flag, value)| [flag, value]))
+            .output()
+            .unwrap()
+    }
+
+    fn run_to_completion(&self, file: TimetableFile) -> Rc<Platform> {
+        let mut engine = start_test(file!());
+        let clock = engine.default_clock();
+        let platform = Rc::new(Platform::from_file(&engine, &clock, &self.platform_path).unwrap());
+        let timetable =
+            Rc::new(Timetable::new(engine.top(), file.into_graph().unwrap(), &platform).unwrap());
+        timetable.preflight().unwrap();
+        let dispatcher: Rc<dyn Dispatch> = timetable.clone();
+        platform.attach_dispatcher(&dispatcher);
+        engine.run().unwrap();
+        timetable.check_tasks_complete().unwrap();
+        platform
+    }
+}
+
+fn assert_generation_failed(output: &Output, message: &str) {
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(message), "{stderr}");
+}
+
+fn compute_program(file: &TimetableFile) -> (&str, &ProgramDefinition) {
+    let mut computes = file.nodes.iter().filter_map(|node| match node {
+        NodeSection::Compute { pe, program, .. } => Some((pe.as_deref().unwrap(), program)),
+        _ => None,
+    });
+    let (pe, program) = computes.next().unwrap();
+    assert!(computes.next().is_none());
+    let definition = match program {
+        ProgramSection::Named(name) => &file.programs[name],
+        ProgramSection::Inline(definition) => definition,
+    };
+    (pe, definition)
+}
+
+fn assert_matrix_mode(file: &TimetableFile, pe: &str, instruction: &str, accumulator: DataType) {
+    let (assigned_pe, program) = compute_program(file);
+    assert_eq!(assigned_pe, pe);
+    let ExprSpec::MatrixMac {
+        execution: Some(mode),
+        ..
+    } = &program.assignments[0].expr
+    else {
+        panic!("expected a declared matrix execution mode");
+    };
+    assert_eq!(mode.instruction, instruction);
+    assert_eq!(mode.accumulator, accumulator);
+}
+
+fn tensor_addresses(file: &TimetableFile) -> Vec<u64> {
+    let mut addresses = file
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            NodeSection::Tensor { config, .. } => Some(config.addr),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    addresses.sort_unstable();
+    addresses
+}

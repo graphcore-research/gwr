@@ -499,8 +499,7 @@ impl RooflineAnalyzer {
                 .as_ref()
                 .and_then(|pes| pes.iter().find(|pe| pe.name == activity.pe_name))
                 .ok_or_else(|| SimError(format!("Missing platform PE '{}'", activity.pe_name)))?;
-            let pe_config = pe_section
-                .effective_config(&platform.operation_classes, &platform.compute_profiles)?;
+            let pe_config = platform.effective_processing_element_config(pe_section)?;
             let task_started = Instant::now();
             let signature = compute_signature(activity)?;
             let (compute_ticks, engine_work) =
@@ -524,7 +523,7 @@ impl RooflineAnalyzer {
                     compute_tick_cache.len()
                 );
             }
-            let memory_map = prepared.memory_map(&pe_section.memory_map)?;
+            let memory_map = prepared.pe_memory_map(pe_section)?;
             let views: Vec<(&TensorView, Operation)> = if let Some(task) = &activity.task {
                 task.inputs
                     .iter()

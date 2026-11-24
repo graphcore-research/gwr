@@ -20,33 +20,49 @@
 //! element. The new tensors are added as possible expansion points. The
 //! generator iterates until the compute-node budget is exhausted.
 
-use std::collections::{BTreeMap, HashSet};
-use std::fmt::Display;
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::error::Error;
+use std::fmt::{Display, Formatter};
+use std::fs::write;
+use std::iter::once;
+use std::ops::Range;
 use std::path::PathBuf;
-use std::{fs, io};
+use std::rc::Rc;
+use std::result::Result as StdResult;
+use std::{fmt, io};
 
 use byte_unit::{Byte, UnitType};
 use clap::Parser;
-use gwr_models::processing_element::compute::{ComputeModel, ComputeWork};
-use gwr_models::processing_element::estimate_peak_tile_sram;
+use gwr_engine::engine::Engine;
+use gwr_engine::types::SimError;
+use gwr_models::processing_element::compute::{ComputeWork, ExecutionMode};
 use gwr_models::processing_element::program::syntax::{ProgramSpec, TileSpec};
 use gwr_models::processing_element::program::validate::{RegionBindings, validate_program};
+use gwr_models::processing_element::task::ProgramTaskConfig;
 use gwr_models::processing_element::tensors::dtype::DataType;
 use gwr_models::processing_element::tensors::{HasShape, Shape, Tensor, TensorView};
+use gwr_models::processing_element::{ProcessingElement, estimate_peak_tile_sram};
 use gwr_platform::types::PlatformConfig;
+use gwr_platform::{Platform, PreparedPlatform};
 use gwr_timetable::timetable_file::{
     EdgeKind, EdgeSection, NodeSection, ProgramDefinition, ProgramSection, TensorConfigSection,
     TensorViewSection, TimetableFile,
 };
-use log::{LevelFilter, Metadata, Record, debug, info};
+use gwr_track::tracker::{DevNullTracker, Tracker};
+use log::{LevelFilter, Log, Metadata, Record, debug, info, max_level, set_logger, set_max_level};
 use rand::prelude::{RngExt, SeedableRng};
 use rand::rngs::StdRng;
+use yaml_serde::{from_str, to_string};
 
 #[path = "gen-timetable/programs.rs"]
 mod programs;
+
 #[path = "gen-timetable/templates.rs"]
 mod templates;
 use templates::{ExpansionDirection, ProgramTemplate};
+
+type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 fn main() -> Result<()> {
     let args = Cli::parse();
@@ -55,9 +71,8 @@ fn main() -> Result<()> {
     let platform_yaml = gwr_platform::catalog::load_yaml_with_includes(
         &args.platform,
         gwr_platform::catalog::CatalogTarget::Platform,
-    )
-    .map_err(boxed_error)?;
-    let platform: PlatformConfig = yaml_serde::from_str(&platform_yaml).map_err(|e| {
+    )?;
+    let platform: PlatformConfig = from_str(&platform_yaml).map_err(|e| {
         error_from_str(format!(
             "failed to parse platform YAML using gwr_platform::types::PlatformConfig: {e}"
         ))
@@ -66,12 +81,41 @@ fn main() -> Result<()> {
     let out_path = args.out.clone();
     let generator = Generator::new(args, &platform)?;
     let timetable = generate(generator)?;
-    let yaml = yaml_serde::to_string(&timetable)
+    let yaml = to_string(&timetable)
         .map_err(|e| error_from_str(format!("failed to serialise timetable YAML: {e}")))?;
-    fs::write(&out_path, yaml)
+    write(&out_path, yaml)
         .map_err(|e| error_from_str(format!("failed to write {}: {e}", out_path.display())))?;
     info!("Wrote graph to {}", out_path.display());
     Ok(())
+}
+
+static LOGGER: SimpleLogger = SimpleLogger;
+
+fn init_logging(debug_enabled: bool) {
+    let level = if debug_enabled {
+        LevelFilter::Debug
+    } else {
+        LevelFilter::Info
+    };
+
+    let _ = set_logger(&LOGGER);
+    set_max_level(level);
+}
+
+struct SimpleLogger;
+
+impl Log for SimpleLogger {
+    fn log(&self, record: &Record<'_>) {
+        if self.enabled(record.metadata()) {
+            eprintln!("{}", record.args());
+        }
+    }
+
+    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+        metadata.level() <= max_level()
+    }
+
+    fn flush(&self) {}
 }
 
 fn generate(mut generator: Generator) -> Result<TimetableFile> {
@@ -104,6 +148,16 @@ fn generate(mut generator: Generator) -> Result<TimetableFile> {
     }
 
     generator.print_summary()?;
+    for tensor in &generator.tensors {
+        generator.nodes.push(NodeSection::Tensor {
+            id: tensor_id(tensor).to_string(),
+            config: TensorConfigSection {
+                addr: tensor.addr(),
+                dtype: *tensor.dtype(),
+                shape: tensor.shape().dims().to_vec(),
+            },
+        });
+    }
 
     let timetable = TimetableFile {
         atomic_effects: None,
@@ -115,42 +169,18 @@ fn generate(mut generator: Generator) -> Result<TimetableFile> {
     Ok(timetable)
 }
 
-fn init_logging(debug_enabled: bool) {
-    let level = if debug_enabled {
-        LevelFilter::Debug
-    } else {
-        LevelFilter::Info
-    };
-
-    let _ = log::set_logger(&LOGGER);
-    log::set_max_level(level);
-}
-
-static LOGGER: SimpleLogger = SimpleLogger;
-
-struct SimpleLogger;
-
-impl log::Log for SimpleLogger {
-    fn log(&self, record: &Record<'_>) {
-        if self.enabled(record.metadata()) {
-            eprintln!("{}", record.args());
-        }
-    }
-    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
-        metadata.level() <= log::max_level()
-    }
-
-    fn flush(&self) {}
-}
-
 struct Generator {
     args: Cli,
     rng: StdRng,
-    pe_names: Vec<String>,
-    pe_models: Vec<ComputeModel>,
-    pe_sram_bytes: Vec<usize>,
-    allocator: AddrAllocator,
+    _engine: Engine,
+    _platform: Platform,
+    pes: Vec<GeneratorPe>,
+    virtual_ranges: Vec<Range<u128>>,
+    selected: Vec<SelectedCompute>,
     tensors: Vec<Tensor>,
+    // Successfully allocated tensors are a prefix; registration appends new
+    // ones.
+    allocated_tensors: usize,
     nodes: Vec<NodeSection>,
     programs: BTreeMap<String, ProgramDefinition>,
     edges: Vec<EdgeSection>,
@@ -165,52 +195,64 @@ impl Generator {
     fn new(args: Cli, platform: &PlatformConfig) -> Result<Self> {
         validate_args(&args)?;
 
-        let pe_names = platform
+        let tracker: Tracker = Rc::new(DevNullTracker);
+        let mut engine = Engine::new(&tracker);
+        let clock = engine.default_clock();
+        let prepared = PreparedPlatform::new(platform)?;
+        prepared.validate_shared_address_mappings()?;
+        let pes = platform
             .processing_elements
-            .as_ref()
-            .ok_or_else(|| error_from_str("platform contains no processing_elements"))?
             .iter()
-            .map(|pe| pe.name.clone())
-            .collect::<Vec<_>>();
-        if pe_names.is_empty() {
+            .flatten()
+            .map(|section| {
+                let reachable = prepared.reachable_memories(&section.name)?;
+                let memory_ranges = coalesce(
+                    prepared
+                        .pe_memory_map(section)?
+                        .reachable_ranges(&reachable)
+                        .collect(),
+                );
+                Ok((section.name.clone(), memory_ranges))
+            })
+            .collect::<StdResult<Vec<_>, SimError>>()?;
+        let runtime = prepared.build(&engine, &clock)?;
+        let pes = pes
+            .into_iter()
+            .map(|(name, memory_ranges)| {
+                Ok(GeneratorPe {
+                    model: runtime.pe(&name)?.clone(),
+                    name,
+                    memory_ranges,
+                })
+            })
+            .collect::<StdResult<Vec<_>, SimError>>()?;
+        if pes.is_empty() {
             return Err(error_from_str("platform contains zero processing elements"));
         }
-        let pe_resources = platform
-            .processing_elements
-            .as_ref()
-            .expect("checked processing elements")
-            .iter()
-            .map(|pe| {
-                let config =
-                    pe.effective_config(&platform.operation_classes, &platform.compute_profiles)?;
-                Ok::<_, gwr_engine::types::SimError>((
-                    ComputeModel::new(&config.compute, &platform.operation_classes)?,
-                    config.sram_bytes,
-                ))
-            })
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(boxed_error)?;
-        let (pe_models, pe_sram_bytes) = pe_resources.into_iter().unzip();
-
-        let base_addr = platform
-            .memories
-            .as_ref()
-            .and_then(|mems| mems.first())
-            .map(|m| m.base_address)
-            .ok_or_else(|| error_from_str("platform contains no memories"))?;
+        let virtual_ranges = coalesce(
+            pes.iter()
+                .flat_map(|pe| pe.memory_ranges.iter().cloned())
+                .collect(),
+        );
+        if virtual_ranges.is_empty() {
+            return Err(error_from_str(
+                "platform contains no reachable mapped memories",
+            ));
+        }
 
         let seed = args.seed;
         let target_depth = args.depth;
         let remaining_compute_nodes = args.max_compute_nodes;
-        let tensor_align_bytes = args.tensor_align_bytes;
         Ok(Self {
             args,
             rng: StdRng::seed_from_u64(seed),
-            pe_names,
-            pe_models,
-            pe_sram_bytes,
-            allocator: AddrAllocator::new(base_addr, tensor_align_bytes),
+            _engine: engine,
+            _platform: runtime,
+            pes,
+            virtual_ranges,
+            selected: Vec::new(),
             tensors: Vec::new(),
+            allocated_tensors: 0,
             nodes: Vec::new(),
             programs: BTreeMap::new(),
             edges: Vec::new(),
@@ -280,9 +322,8 @@ impl Generator {
             }
         }
 
-        let boundary = full_boundary(&input_tensors, &output_tensors);
+        let boundary = build_full_tensor_boundary(&input_tensors, &output_tensors);
 
-        validate_generated_node(template, &input_tensors, &output_tensors)?;
         let created = self.create_partitioned_compute(
             &compute_id,
             template,
@@ -433,89 +474,231 @@ impl Generator {
                 template_name(template)
             )));
         }
-        let requested_size = self
-            .args
-            .partition_size
-            .unwrap_or_else(|| extent.div_ceil(eligible.len()));
-        let count = extent
-            .div_ceil(requested_size)
-            .min(self.remaining_compute_nodes);
-        let program = program_for_boundary(template, boundary)?;
-        let program_section = if count == 1 {
-            ProgramSection::from(program.clone())
-        } else {
-            let name = format!("{compute_id}_program");
-            self.programs.insert(name.clone(), program.clone().into());
-            ProgramSection::Named(name)
-        };
+        let count = self.partition_count(extent, eligible.len());
+        let first_partition = self.nodes.len();
         let base = extent / count;
         let extra = extent % count;
         let mut offset = 0;
-        let mut tilings = BTreeMap::<(usize, usize, usize), TileSpec>::new();
         for part in 0..count {
             let length = base + usize::from(part < extra);
-            let mut inputs = boundary.inputs.clone();
-            for (view, dim) in inputs.iter_mut().zip(input_dims) {
-                if let (Some(view), Some(dim)) = (view, dim) {
-                    *view = slice_view(view, *dim, offset, length)?;
-                }
-            }
-            let mut outputs = boundary.outputs.clone();
-            for view in outputs.iter_mut().flatten() {
-                *view = slice_view(view, output_dim, offset, length)?;
-            }
-            let part_boundary = GenerationBoundary { inputs, outputs };
-            template
-                .validate(&part_boundary.inputs, &part_boundary.outputs)
-                .map_err(boxed_error)?;
+            let part_boundary = boundary.partition(input_dims, output_dim, offset, length)?;
             let part_id = if count == 1 {
                 compute_id.to_string()
             } else {
                 format!("{compute_id}_part{part}")
             };
-            let pe_idx = self.next_pe_idx(&eligible);
-            let sram_bytes = self.pe_sram_bytes[pe_idx];
-            // Packed views may occupy different physical bytes when the
-            // partition starts at a different element alignment.
-            let packed = part_boundary
-                .inputs
-                .iter()
-                .chain(&part_boundary.outputs)
-                .flatten()
-                .any(|view| view.dtype().num_bits() < 8);
-            let cache_key = (sram_bytes, length, if packed { offset } else { 0 });
-            let tiling = if let Some(cached) = tilings.get(&cache_key) {
-                cached.clone()
-            } else {
-                let planned =
-                    tiling_that_fits(&part_id, &program, &part_boundary, axis, sram_bytes)?;
-                tilings.insert(cache_key, planned.clone());
-                planned
-            };
-            self.create_compute(
-                &part_id,
-                &part_boundary,
-                input_tensors,
-                output_tensors,
-                ComputeMapping {
-                    pe_idx,
-                    program: program_section.clone(),
-                    tiling,
-                },
-            )?;
+            let plan = self.plan_partition(&part_id, template, &part_boundary, axis, &eligible)?;
+            self.commit_placement(&part_id, part_boundary, input_tensors, output_tensors, plan);
             offset += length;
+        }
+        if count > 1 {
+            self.share_partition_programs(compute_id, first_partition);
         }
         Ok(count)
     }
 
-    fn next_pe_idx(&mut self, eligible: &[usize]) -> usize {
-        let pe_idx = eligible
+    fn share_partition_programs(&mut self, compute_id: &str, first_partition: usize) {
+        let mut names: Vec<String> = Vec::new();
+        for node in &mut self.nodes[first_partition..] {
+            let NodeSection::Compute { program, .. } = node else {
+                unreachable!("only compute nodes are inserted here");
+            };
+            let ProgramSection::Inline(definition) = program else {
+                unreachable!("partitions are installed as inline programs");
+            };
+            let name = names
+                .iter()
+                .find(|name| self.programs[*name] == **definition)
+                .cloned()
+                .unwrap_or_else(|| {
+                    let name = if names.is_empty() {
+                        format!("{compute_id}_program")
+                    } else {
+                        format!("{compute_id}_program_{}", names.len())
+                    };
+                    self.programs.insert(name.clone(), (**definition).clone());
+                    names.push(name.clone());
+                    name
+                });
+            *program = ProgramSection::Named(name);
+        }
+    }
+
+    fn plan_partition(
+        &self,
+        id: &str,
+        template: &ProgramTemplate,
+        boundary: &GenerationBoundary,
+        axis: &str,
+        eligible: &[usize],
+    ) -> Result<PlacementPlan> {
+        let mut failures = Vec::new();
+        for candidate in self.compute_candidates(template, boundary, eligible) {
+            let pe_index = candidate.0;
+            match self.try_placement(id, template, boundary, axis, candidate) {
+                Ok(plan) => return Ok(plan),
+                Err(error) => failures.push(format!("{}: {error}", self.pes[pe_index].name)),
+            }
+        }
+        Err(error_from_str(format!(
+            "no feasible placement found for this generated mapping ({id}): {}",
+            failures.join("; ")
+        )))
+    }
+
+    fn try_placement(
+        &self,
+        id: &str,
+        template: &ProgramTemplate,
+        boundary: &GenerationBoundary,
+        axis: &str,
+        (pe_idx, execution): (usize, Option<ExecutionMode>),
+    ) -> Result<PlacementPlan> {
+        let program = build_program_for_boundary(template, boundary, execution)?;
+        let tensors = self.allocate_tensors(pe_idx, boundary)?;
+        let relocated = relocate_boundary(boundary, &tensors)?;
+        let (tiling, prepared) =
+            find_tiling_for_pe(id, &program, &relocated, axis, &self.pes[pe_idx].model)?;
+        let affected_tasks = self.prepare_affected(&tensors)?;
+        Ok(PlacementPlan {
+            pe_idx,
+            program,
+            tensors,
+            tiling,
+            prepared,
+            affected_tasks,
+        })
+    }
+
+    fn commit_placement(
+        &mut self,
+        id: &str,
+        boundary: GenerationBoundary,
+        input_tensors: &[Option<Tensor>],
+        output_tensors: &[Option<Tensor>],
+        plan: PlacementPlan,
+    ) {
+        let PlacementPlan {
+            pe_idx,
+            program,
+            tensors,
+            tiling,
+            prepared,
+            affected_tasks,
+        } = plan;
+        // All allocation, binding and preparation can fail only during the
+        // immutable attempt. Installation below has no fallible steps.
+        self.tensors = tensors;
+        self.allocated_tensors = self.tensors.len();
+        for (index, prepared) in affected_tasks {
+            self.selected[index].prepared = prepared;
+        }
+        self.create_compute(
+            id,
+            &boundary,
+            input_tensors,
+            output_tensors,
+            ComputeMapping {
+                pe_idx,
+                program,
+                tiling,
+            },
+        );
+        self.selected.push(SelectedCompute {
+            pe: pe_idx,
+            boundary,
+            prepared,
+        });
+        self.last_pe_idx = (pe_idx + 1) % self.pes.len();
+    }
+
+    fn compute_candidates(
+        &self,
+        template: &ProgramTemplate,
+        boundary: &GenerationBoundary,
+        eligible: &[usize],
+    ) -> Vec<(usize, Option<ExecutionMode>)> {
+        let output_dtype = *boundary.outputs[0]
+            .as_ref()
+            .expect("generated output")
+            .dtype();
+        let mut candidates = eligible.to_vec();
+        candidates
+            .sort_by_key(|index| (index + self.pes.len() - self.last_pe_idx) % self.pes.len());
+        candidates
+            .into_iter()
+            .flat_map(|pe_idx| {
+                let mut modes = if matches!(template, ProgramTemplate::Gemm) {
+                    let inputs = [&boundary.inputs[0], &boundary.inputs[1]]
+                        .map(|view| *view.as_ref().expect("generated matrix operand").dtype());
+                    self.pes[pe_idx]
+                        .model
+                        .compute_model()
+                        .matrix_execution_modes(inputs)
+                } else {
+                    vec![None]
+                };
+                // Prefer destination precision when feasible, then try other
+                // declared precisions deterministically.
+                modes.sort_by_key(|mode| {
+                    let accumulator = mode.as_ref().map_or(output_dtype, |mode| mode.accumulator);
+                    (accumulator != output_dtype, accumulator)
+                });
+                modes.into_iter().map(move |mode| (pe_idx, mode))
+            })
+            .collect()
+    }
+
+    fn partition_count(&self, extent: usize, eligible_count: usize) -> usize {
+        let requested_size = self
+            .args
+            .partition_size
+            .unwrap_or_else(|| extent.div_ceil(eligible_count));
+        extent
+            .div_ceil(requested_size)
+            .min(self.remaining_compute_nodes)
+    }
+
+    fn prepare_affected(&self, tensors: &[Tensor]) -> Result<Vec<(usize, Rc<ProgramTaskConfig>)>> {
+        let current: BTreeMap<_, _> = self.tensors.iter().map(|t| (tensor_id(t), t)).collect();
+        let changed: BTreeSet<_> = tensors
             .iter()
-            .copied()
-            .find(|index| *index >= self.last_pe_idx)
-            .unwrap_or(eligible[0]);
-        self.last_pe_idx = (pe_idx + 1) % self.pe_names.len();
-        pe_idx
+            .filter_map(|proposed| {
+                let previous = current[tensor_id(proposed)];
+                (previous.addr() != proposed.addr()
+                    || previous.dtype() != proposed.dtype()
+                    || previous.shape() != proposed.shape())
+                .then_some(tensor_id(proposed))
+            })
+            .collect();
+        self.selected
+            .iter()
+            .enumerate()
+            .filter(|(_, selected)| {
+                selected
+                    .boundary
+                    .inputs
+                    .iter()
+                    .chain(&selected.boundary.outputs)
+                    .flatten()
+                    .any(|view| changed.contains(tensor_id(view.tensor())))
+            })
+            .map(|(index, selected)| {
+                // Selection fixes the PE instance, serialized program, tiling,
+                // and view shapes/offsets for the rest of generation. Only
+                // tensor storage can change. Compare authoritative locations
+                // above, not the original boundary's unrelocated addresses.
+                let previous = &selected.prepared;
+                let prepared = prepare_boundary(
+                    &self.pes[selected.pe].model,
+                    &previous.id,
+                    &previous.program,
+                    previous.tiling.as_ref(),
+                    &relocate_boundary(&selected.boundary, tensors)?,
+                )?;
+                Ok((index, prepared))
+            })
+            .collect()
     }
 
     fn create_compute(
@@ -525,8 +708,8 @@ impl Generator {
         input_tensors: &[Option<Tensor>],
         output_tensors: &[Option<Tensor>],
         mapping: ComputeMapping,
-    ) -> Result<()> {
-        let pe = self.pe_names[mapping.pe_idx].clone();
+    ) {
+        let pe = self.pes[mapping.pe_idx].name.clone();
         debug!("  Mapping compute node {compute_id} to {pe}");
         let input_views = boundary
             .inputs
@@ -574,13 +757,12 @@ impl Generator {
         self.nodes.push(NodeSection::Compute {
             pipeline: None,
             id: compute_id.to_string(),
-            program: mapping.program,
+            program: mapping.program.into(),
             tiling: Some(mapping.tiling),
             pe: Some(pe),
-            input_views: Some(input_views),
-            output_views: Some(output_views),
+            input_views: Some(input_views.into()),
+            output_views: Some(output_views.into()),
         });
-        Ok(())
     }
 
     fn create_inputs_for_template(
@@ -664,17 +846,6 @@ impl Generator {
             return Ok(());
         }
 
-        let num_bytes = u64::try_from(tensor.num_bytes()).map_err(boxed_error)?;
-        let addr = self.allocator.alloc(num_bytes)?;
-        tensor.set_addr(addr).map_err(boxed_error)?;
-        self.nodes.push(NodeSection::Tensor {
-            id,
-            config: TensorConfigSection {
-                addr,
-                dtype: *tensor.dtype(),
-                shape: tensor.shape().dims().to_vec(),
-            },
-        });
         self.tensors.push(tensor.clone());
         Ok(())
     }
@@ -751,24 +922,30 @@ impl Generator {
         dtype: DataType,
         with_bias: bool,
     ) -> Vec<usize> {
-        let operations: &[&str] = match template {
-            ProgramTemplate::Add => &["add"],
-            ProgramTemplate::Gemm if with_bias => &["matrix_mac", "add"],
-            ProgramTemplate::Gemm => &["matrix_mac"],
-            ProgramTemplate::ReduceMax => &["compare"],
-        };
-        self.pe_models
+        self.pes
             .iter()
             .enumerate()
-            .filter_map(|(index, model)| {
-                operations
-                    .iter()
-                    .all(|op| {
+            .filter_map(|(index, pe)| {
+                let model = pe.model.compute_model();
+                let supports =
+                    |op, inputs| model.lower(&ComputeWork::operation(op, inputs, 1)).is_ok();
+                let supported = match template {
+                    ProgramTemplate::Add => supports("add", vec![dtype, dtype]),
+                    ProgramTemplate::Gemm => {
                         model
-                            .lower(&ComputeWork::operation(*op, vec![dtype, dtype], 1))
-                            .is_ok()
-                    })
-                    .then_some(index)
+                            .matrix_execution_modes([dtype, dtype])
+                            .iter()
+                            .any(|mode| {
+                                mode.as_ref().is_none_or(|mode| {
+                                    mode.accumulator == dtype
+                                        || supports("convert", vec![mode.accumulator])
+                                })
+                            })
+                            && (!with_bias || supports("add", vec![dtype, dtype]))
+                    }
+                    ProgramTemplate::ReduceMax => supports("compare", vec![dtype, dtype]),
+                };
+                supported.then_some(index)
             })
             .collect()
     }
@@ -842,11 +1019,13 @@ fn template_name(template: &ProgramTemplate) -> &'static str {
     }
 }
 
-fn program_for_boundary(
-    op: &ProgramTemplate,
+fn build_program_for_boundary(
+    template: &ProgramTemplate,
     boundary: &GenerationBoundary,
+    execution: Option<ExecutionMode>,
 ) -> Result<ProgramSpec> {
-    op.program(&boundary.inputs, &boundary.outputs)
+    template
+        .program_with_execution(&boundary.inputs, &boundary.outputs, execution)
         .map_err(boxed_error)
 }
 
@@ -1009,10 +1188,6 @@ impl Frontier {
         self.points.swap_remove(idx)
     }
 
-    fn iter(&self) -> impl Iterator<Item = &ExpansionPoint> {
-        self.points.iter()
-    }
-
     fn len(&self) -> usize {
         self.points.len()
     }
@@ -1085,10 +1260,10 @@ impl Frontier {
                 && existing.tensor_layer == point.tensor_layer
         })
     }
-}
 
-fn tensor_id(tensor: &Tensor) -> &str {
-    tensor.id().expect("generated tensors must have ids")
+    fn iter(&self) -> impl Iterator<Item = &ExpansionPoint> {
+        self.points.iter()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1108,7 +1283,7 @@ impl ExpansionPoint {
 }
 
 impl Display for ExpansionPoint {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "{}: layer {}, direction: {:?}",
@@ -1151,63 +1326,22 @@ impl LayerBounds {
     }
 }
 
-#[derive(Debug)]
-struct AddrAllocator {
-    next_addr: u128,
-    align_bytes: u128,
-}
-
-impl AddrAllocator {
-    fn new(base_addr: u64, align_bytes: u64) -> Self {
-        debug_assert!(align_bytes > 0);
-        Self {
-            next_addr: u128::from(base_addr),
-            align_bytes: u128::from(align_bytes),
-        }
-    }
-
-    fn alloc(&mut self, num_bytes: u64) -> Result<u64> {
-        let rem = self.next_addr % self.align_bytes;
-        if rem != 0 {
-            self.next_addr += self.align_bytes - rem;
-        }
-        let out = self.next_addr;
-        self.next_addr = self
-            .next_addr
-            .checked_add(u128::from(num_bytes))
-            .ok_or_else(|| error_from_str("tensor address allocation overflows"))?;
-        if self.next_addr > u128::from(u64::MAX) + 1 {
-            return Err(error_from_str("tensor address allocation exceeds u64"));
-        }
-        u64::try_from(out).map_err(boxed_error)
-    }
-}
-
-fn validate_generated_node(
-    template: &ProgramTemplate,
-    inputs: &[Option<Tensor>],
-    outputs: &[Option<Tensor>],
-) -> Result<()> {
-    let inputs = inputs
-        .iter()
-        .cloned()
-        .map(|tensor| tensor.map(TensorView::new_full))
-        .collect::<Vec<_>>();
-    let outputs = outputs
-        .iter()
-        .cloned()
-        .map(|tensor| tensor.map(TensorView::new_full))
-        .collect::<Vec<_>>();
-    template.validate(&inputs, &outputs).map_err(boxed_error)
+struct PlacementPlan {
+    pe_idx: usize,
+    program: ProgramSpec,
+    tensors: Vec<Tensor>,
+    tiling: TileSpec,
+    prepared: Rc<ProgramTaskConfig>,
+    affected_tasks: Vec<(usize, Rc<ProgramTaskConfig>)>,
 }
 
 struct ComputeMapping {
     pe_idx: usize,
-    program: ProgramSection,
+    program: ProgramSpec,
     tiling: TileSpec,
 }
 
-fn full_boundary(
+fn build_full_tensor_boundary(
     input_tensors: &[Option<Tensor>],
     output_tensors: &[Option<Tensor>],
 ) -> GenerationBoundary {
@@ -1225,41 +1359,22 @@ fn full_boundary(
     }
 }
 
-fn slice_view(view: &TensorView, dim: usize, offset: usize, length: usize) -> Result<TensorView> {
-    let mut shape = view.shape().dims().to_vec();
-    let mut offsets = view.offsets().to_vec();
-    shape[dim] = length;
-    offsets[dim] += offset;
-    TensorView::new(view.tensor().clone(), &shape, &offsets).map_err(boxed_error)
-}
-
-fn tiling_that_fits(
+fn find_tiling_for_pe(
     compute_id: &str,
     program: &ProgramSpec,
     boundary: &GenerationBoundary,
     outer_axis: &str,
-    sram_bytes: usize,
-) -> Result<TileSpec> {
-    let inputs = boundary
-        .inputs
-        .iter()
-        .cloned()
-        .collect::<Option<Vec<_>>>()
-        .ok_or_else(|| error_from_str("generated program has an unbound input"))?;
-    let outputs = boundary
-        .outputs
-        .iter()
-        .cloned()
-        .collect::<Option<Vec<_>>>()
-        .ok_or_else(|| error_from_str("generated program has an unbound output"))?;
+    pe: &ProcessingElement,
+) -> Result<(TileSpec, Rc<ProgramTaskConfig>)> {
+    let inputs = bind_views(&boundary.inputs)?;
+    let outputs = bind_views(&boundary.outputs)?;
     let region = validate_program(
         program,
         &RegionBindings {
             inputs: inputs.clone(),
             outputs: outputs.clone(),
         },
-    )
-    .map_err(boxed_error)?;
+    )?;
     let mut tiling = TileSpec {
         sizes: BTreeMap::from([(
             outer_axis.to_string(),
@@ -1267,11 +1382,10 @@ fn tiling_that_fits(
         )]),
     };
     loop {
-        let required =
-            estimate_peak_tile_sram(program, &inputs, &outputs, &tiling).map_err(boxed_error)?;
-        if required <= sram_bytes {
-            return Ok(tiling);
-        }
+        let error = match prepare_boundary(pe, compute_id, program, Some(&tiling), boundary) {
+            Ok(prepared) => return Ok((tiling, prepared)),
+            Err(error) => error,
+        };
         let mut best: Option<(usize, TileSpec)> = None;
         for (axis, extent) in &region.extents {
             let current = tiling.sizes.get(axis).copied().unwrap_or(*extent);
@@ -1280,8 +1394,7 @@ fn tiling_that_fits(
             }
             let mut candidate = tiling.clone();
             candidate.sizes.insert(axis.clone(), current.div_ceil(2));
-            let bytes = estimate_peak_tile_sram(program, &inputs, &outputs, &candidate)
-                .map_err(boxed_error)?;
+            let bytes = estimate_peak_tile_sram(program, &inputs, &outputs, &candidate)?;
             if best
                 .as_ref()
                 .is_none_or(|(best_bytes, _)| bytes < *best_bytes)
@@ -1291,21 +1404,235 @@ fn tiling_that_fits(
         }
         let Some((_, smaller)) = best else {
             return Err(error_from_str(format!(
-                "{compute_id} minimum tile requires {required} SRAM bytes, available {sram_bytes}"
+                "{compute_id} minimum tile requires feasible mapped resources and SRAM: {error}"
             )));
         };
         tiling = smaller;
     }
 }
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-
-fn error_from_str(message: impl Into<String>) -> Box<dyn std::error::Error> {
-    boxed_error(io::Error::other(message.into()))
+fn prepare_boundary(
+    pe: &ProcessingElement,
+    id: &str,
+    program: &ProgramSpec,
+    tiling: Option<&TileSpec>,
+    boundary: &GenerationBoundary,
+) -> Result<Rc<ProgramTaskConfig>> {
+    let config = Rc::new(ProgramTaskConfig {
+        id: id.into(),
+        program: program.clone(),
+        tiling: tiling.cloned(),
+        pipeline: None,
+        inputs: bind_views(&boundary.inputs)?,
+        outputs: bind_views(&boundary.outputs)?,
+    });
+    pe.preflight_program_task(&config)?;
+    Ok(config)
 }
 
-fn boxed_error(error: impl std::error::Error + 'static) -> Box<dyn std::error::Error> {
-    Box::new(error)
+struct GeneratorPe {
+    name: String,
+    model: Rc<ProcessingElement>,
+    memory_ranges: Vec<Range<u128>>,
+}
+
+struct SelectedCompute {
+    pe: usize,
+    boundary: GenerationBoundary,
+    prepared: Rc<ProgramTaskConfig>,
+}
+
+fn relocate_boundary(
+    boundary: &GenerationBoundary,
+    tensors: &[Tensor],
+) -> Result<GenerationBoundary> {
+    let relocate = |views: &[Option<TensorView>]| {
+        views
+            .iter()
+            .map(|view| {
+                view.as_ref()
+                    .map(|view| {
+                        let tensor = tensors
+                            .iter()
+                            .find(|tensor| tensor.id() == view.tensor().id())
+                            .expect("registered tensor");
+                        TensorView::new(tensor.clone(), view.shape().dims(), view.offsets())
+                            .map_err(boxed_error)
+                    })
+                    .transpose()
+            })
+            .collect::<Result<Vec<_>>>()
+    };
+    Ok(GenerationBoundary {
+        inputs: relocate(&boundary.inputs)?,
+        outputs: relocate(&boundary.outputs)?,
+    })
+}
+
+fn coalesce(mut ranges: Vec<Range<u128>>) -> Vec<Range<u128>> {
+    ranges.sort_by_key(|range| range.start);
+    let mut result: Vec<Range<u128>> = Vec::new();
+    for range in ranges {
+        if let Some(last) = result.last_mut()
+            && range.start <= last.end
+        {
+            last.end = last.end.max(range.end);
+        } else {
+            result.push(range);
+        }
+    }
+    result
+}
+
+impl Generator {
+    fn allocate_tensors(
+        &self,
+        proposed_pe: usize,
+        proposed: &GenerationBoundary,
+    ) -> Result<Vec<Tensor>> {
+        let mut users: BTreeMap<&str, Vec<(usize, &TensorView)>> = BTreeMap::new();
+        for (pe, boundary) in self
+            .selected
+            .iter()
+            .map(|selected| (selected.pe, &selected.boundary))
+            .chain(once((proposed_pe, proposed)))
+        {
+            for view in boundary.inputs.iter().chain(&boundary.outputs).flatten() {
+                users
+                    .entry(tensor_id(view.tensor()))
+                    .or_default()
+                    .push((pe, view));
+            }
+        }
+        self.place_tensors(&users)
+    }
+
+    fn place_tensors(
+        &self,
+        users: &BTreeMap<&str, Vec<(usize, &TensorView)>>,
+    ) -> Result<Vec<Tensor>> {
+        if self.allocated_tensors > 0
+            && let Ok(tensors) = self.place_tensors_preserving(users, self.allocated_tensors)
+        {
+            return Ok(tensors);
+        }
+        self.place_tensors_preserving(users, 0)
+    }
+
+    fn place_tensors_preserving(
+        &self,
+        users: &BTreeMap<&str, Vec<(usize, &TensorView)>>,
+        keep: usize,
+    ) -> Result<Vec<Tensor>> {
+        let mut tensors = self.tensors.clone();
+        // Keep the committed prefix in place; order only tensors needing
+        // allocation.
+        tensors[keep..].sort_by_key(|tensor| {
+            (
+                !users.contains_key(tensor_id(tensor)),
+                Reverse(tensor.num_bytes()),
+                tensor_id(tensor).to_string(),
+            )
+        });
+        let mut free = self.virtual_ranges.clone();
+        let alignment = u128::from(self.args.tensor_align_bytes);
+        for (index, tensor) in tensors.iter_mut().enumerate() {
+            let uses = users.get(tensor_id(tensor)).map_or(&[][..], Vec::as_slice);
+            let placed = if index < keep {
+                self.reserve_tensor(tensor, uses, &mut free)
+            } else {
+                let fallback = uses.iter().flat_map(|(pe, view)| {
+                    view.address_ranges().flat_map(move |range| {
+                        let offset = range.start - u128::from(view.tensor().addr());
+                        self.pes[*pe].memory_ranges.iter().map(move |region| {
+                            region.start.saturating_sub(offset).div_ceil(alignment) * alignment
+                        })
+                    })
+                });
+                self.place_tensor(tensor, uses, &mut free, fallback)
+            };
+            if !placed {
+                return Err(error_from_str(format!(
+                    "tensor '{}' has no mapped placement within physical capacity ({} bytes, {} users)",
+                    tensor_id(tensor),
+                    tensor.num_bytes(),
+                    uses.len()
+                )));
+            }
+        }
+        Ok(tensors)
+    }
+
+    fn place_tensor(
+        &self,
+        tensor: &mut Tensor,
+        uses: &[(usize, &TensorView)],
+        free: &mut Vec<Range<u128>>,
+        fallback: impl Iterator<Item = u128>,
+    ) -> bool {
+        let alignment = u128::from(self.args.tensor_align_bytes);
+        let starts = free
+            .iter()
+            .map(|range| range.start.div_ceil(alignment) * alignment)
+            .collect::<Vec<_>>();
+        let mut tried = BTreeSet::new();
+        // Chaining leaves even the first fragmented fallback run untouched
+        // until every cheap free-interval start has failed.
+        for base in starts.into_iter().chain(fallback) {
+            if !tried.insert(base) {
+                continue;
+            }
+            let Ok(address) = u64::try_from(base) else {
+                continue;
+            };
+            if tensor.set_addr(address).is_ok() && self.reserve_tensor(tensor, uses, free) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn reserve_tensor(
+        &self,
+        tensor: &Tensor,
+        uses: &[(usize, &TensorView)],
+        free: &mut Vec<Range<u128>>,
+    ) -> bool {
+        let base = u128::from(tensor.addr());
+        let end = base + tensor.num_bytes() as u128;
+        let Some(index) = free
+            .iter()
+            .position(|range| range.start <= base && end <= range.end)
+        else {
+            return false;
+        };
+        if !tensor.addr().is_multiple_of(self.args.tensor_align_bytes)
+            || !uses.iter().all(|(pe, view)| {
+                TensorView::new(tensor.clone(), view.shape().dims(), view.offsets()).is_ok_and(
+                    |view| {
+                        self.pes[*pe].model.validate_mapped_view(&view).is_ok()
+                            && self.pes[*pe]
+                                .memory_ranges
+                                .iter()
+                                .map(|range| view.num_access_bytes_in(range.clone()))
+                                .sum::<usize>()
+                                == view.layout().num_access_bytes()
+                    },
+                )
+            })
+        {
+            return false;
+        }
+        let interval = free.remove(index);
+        if interval.start < base {
+            free.push(interval.start..base);
+        }
+        if end < interval.end {
+            free.push(end..interval.end);
+        }
+        free.sort_by_key(|range| range.start);
+        true
+    }
 }
 
 struct GenerationBoundary {
@@ -1313,18 +1640,564 @@ struct GenerationBoundary {
     outputs: Vec<Option<TensorView>>,
 }
 
+impl GenerationBoundary {
+    fn partition(
+        &self,
+        input_dims: &[Option<usize>],
+        output_dim: usize,
+        offset: usize,
+        length: usize,
+    ) -> Result<Self> {
+        let mut inputs = self.inputs.clone();
+        for (view, dim) in inputs.iter_mut().zip(input_dims) {
+            if let (Some(view), Some(dim)) = (view, dim) {
+                *view = slice_view(view, *dim, offset, length)?;
+            }
+        }
+        let mut outputs = self.outputs.clone();
+        for view in outputs.iter_mut().flatten() {
+            *view = slice_view(view, output_dim, offset, length)?;
+        }
+        Ok(Self { inputs, outputs })
+    }
+}
+
 type TemplateIo = (Vec<Option<Tensor>>, Vec<Option<Tensor>>);
+
+fn tensor_id(tensor: &Tensor) -> &str {
+    tensor.id().expect("generated tensors must have ids")
+}
+
+fn slice_view(view: &TensorView, dim: usize, offset: usize, length: usize) -> Result<TensorView> {
+    let mut shape = view.shape().dims().to_vec();
+    let mut offsets = view.offsets().to_vec();
+    shape[dim] = length;
+    offsets[dim] += offset;
+    TensorView::new(view.tensor().clone(), &shape, &offsets).map_err(boxed_error)
+}
+
+fn bind_views(views: &[Option<TensorView>]) -> Result<Vec<TensorView>> {
+    views
+        .iter()
+        .cloned()
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| error_from_str("generated program has an unbound port"))
+}
+
+fn error_from_str(message: impl Into<String>) -> Box<dyn Error> {
+    boxed_error(io::Error::other(message.into()))
+}
+
+fn boxed_error(error: impl Error + 'static) -> Box<dyn Error> {
+    Box::new(error)
+}
 
 #[cfg(test)]
 mod tests {
+    use std::iter::once;
     use std::path::PathBuf;
 
     use gwr_models::processing_element::tensors::Tensor;
     use gwr_models::processing_element::tensors::dtype::DataType;
-    use gwr_platform::types::PlatformConfig;
+    use gwr_platform::types::{AddressRegionSection, PlatformConfig};
+    use yaml_serde::from_str;
 
     use super::templates::ExpansionDirection;
     use super::{Cli, ExpansionPoint, Frontier, Generator, generate, validate_args};
+
+    fn valid_args() -> Cli {
+        Cli {
+            platform: PathBuf::from("platform.yaml"),
+            out: PathBuf::from("timetable.yaml"),
+            debug: false,
+            depth: 1,
+            max_compute_nodes: 1,
+            partition_size: None,
+            expand_ratio: 0.6,
+            weight_add: 1.0,
+            weight_gemm: 1.0,
+            weight_reduce_max: 1.0,
+            init_dtype: DataType::Fp32,
+            seed: 0,
+            init_rank_min: 3,
+            init_rank_max: 4,
+            init_dim_min: 2,
+            init_dim_max: 4,
+            tensor_align_bytes: 256,
+        }
+    }
+
+    fn args_with_weights(weights: [f64; 3]) -> Cli {
+        let mut args = valid_args();
+        [args.weight_add, args.weight_gemm, args.weight_reduce_max] = weights;
+        args
+    }
+
+    fn generator_platform() -> PlatformConfig {
+        from_str(
+            r"
+memory_maps:
+  - name: default
+    devices: [hbm0]
+address_spaces:
+  - name: default
+    memory_map: default
+    access_bytes: 32
+
+operation_classes:
+  add: { operations: [add], arity: 2 }
+  compare: { operations: [compare], arity: 2 }
+  matrix: { operations: [matrix_mac], arity: 2, flops_per_op: 2 }
+processing_elements:
+  - name: pe0
+    address_space: default
+    config:
+      compute:
+        execution_units:
+          vector:
+            capabilities:
+              - { class: add, ops_per_tick: 16 }
+              - { class: compare, ops_per_tick: 16 }
+          matrix:
+            capabilities: [{ class: matrix, accumulator: fp32, ops_per_tick: 256 }]
+memories:
+  - name: hbm0
+    kind: hbm
+    base_address: 0
+    config:
+      capacity_bytes: 16GiB
+connections:
+  - connect: [pe.pe0, mem.hbm0]
+",
+        )
+        .unwrap()
+    }
+
+    fn placement_platform(first: &str, second: &str, bytes: usize) -> PlatformConfig {
+        let yaml = format!(
+            r"
+operation_classes:
+  add: {{ operations: [add], arity: 2 }}
+memory_maps:
+  - {{ name: first, devices: [{first}] }}
+  - {{ name: second, devices: [{second}] }}
+  - {{ name: unused, devices: [d] }}
+address_spaces:
+  - {{ name: first, memory_map: first, access_bytes: 1 }}
+  - {{ name: second, memory_map: second, access_bytes: 1 }}
+  - {{ name: unused, memory_map: unused, access_bytes: 1 }}
+processing_elements:
+  - name: pe0
+    address_space: first
+    config: &pe
+      compute:
+        execution_units:
+          vector:
+            capabilities: [{{ class: add, ops_per_tick: 1 }}]
+  - {{ name: pe1, address_space: second, config: *pe }}
+  - {{ name: unused, address_space: unused, config: *pe }}
+memories:
+  - {{ name: a, kind: hbm, base_address: 0, config: {{ capacity_bytes: {bytes} }} }}
+  - {{ name: b, kind: hbm, base_address: {bytes}, config: {{ capacity_bytes: {bytes} }} }}
+  - {{ name: c, kind: hbm, base_address: {twice}, config: {{ capacity_bytes: {bytes} }} }}
+  - {{ name: d, kind: hbm, base_address: {thrice}, config: {{ capacity_bytes: {bytes} }} }}
+fabrics:
+  - {{ name: fabric, kind: functional, columns: 7, rows: 1, config: {{}} }}
+connections:
+  - connect: [pe.pe0, 'fabric.fabric@(0,0)']
+  - connect: [pe.pe1, 'fabric.fabric@(1,0)']
+  - connect: [pe.unused, 'fabric.fabric@(2,0)']
+  - connect: [mem.a, 'fabric.fabric@(3,0)']
+  - connect: [mem.b, 'fabric.fabric@(4,0)']
+  - connect: [mem.c, 'fabric.fabric@(5,0)']
+  - connect: [mem.d, 'fabric.fabric@(6,0)']
+",
+            twice = bytes * 2,
+            thrice = bytes * 3
+        );
+        from_str(&yaml).unwrap()
+    }
+
+    fn placement_generator(first: &str, second: &str, bytes: usize) -> Generator {
+        let mut args = valid_args();
+        args.tensor_align_bytes = 1;
+        Generator::new(args, &placement_platform(first, second, bytes)).unwrap()
+    }
+
+    fn striped_placement_platform() -> PlatformConfig {
+        let mut platform = placement_platform("a, b", "a, b", 64);
+        for space in &mut platform.address_spaces[..2] {
+            space.address_regions = Some(vec![AddressRegionSection::Striped {
+                devices: vec!["a".to_string(), "b".to_string()],
+            }]);
+        }
+        platform
+    }
+
+    #[test]
+    fn placement_accepts_identical_striped_mappings() {
+        let generator = Generator::new(valid_args(), &striped_placement_platform()).unwrap();
+        let expected: Vec<_> = std::iter::once(0..128).collect();
+        assert_eq!(generator.pes[0].memory_ranges, expected);
+        assert_eq!(generator.pes[1].memory_ranges, expected);
+    }
+
+    #[test]
+    fn placement_rejects_incompatible_striped_mappings() {
+        for passthrough in [true, false] {
+            let mut platform = striped_placement_platform();
+            if passthrough {
+                platform.address_spaces[1].address_regions = None;
+            } else {
+                platform.address_spaces[1].access_bytes = Some(2);
+            }
+            let error = Generator::new(valid_args(), &platform).err().unwrap();
+            assert!(
+                error.to_string().contains("incompatible address mappings"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn placement_excludes_stripes_with_unreachable_banks() {
+        let mut platform = striped_placement_platform();
+        platform.connections.as_mut().unwrap().retain(|connection| {
+            !connection
+                .connect
+                .iter()
+                .any(|endpoint| endpoint == "mem.b")
+        });
+        let generator = Generator::new(valid_args(), &platform).unwrap();
+        assert!(generator.pes[0].memory_ranges.is_empty());
+        assert!(generator.pes[1].memory_ranges.is_empty());
+        let expected: Vec<_> = std::iter::once(192..256).collect();
+        assert_eq!(generator.virtual_ranges, expected);
+    }
+
+    fn add_selection(generator: &mut Generator, id: &str, input: &Tensor, output: &Tensor) {
+        use super::*;
+        let inputs = [Some(input.clone()), Some(input.clone())];
+        let outputs = [Some(output.clone())];
+        generator
+            .create_partitioned_compute(
+                id,
+                &ProgramTemplate::Add,
+                &build_full_tensor_boundary(&inputs, &outputs),
+                &inputs,
+                &outputs,
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn placement_attempt_reuses_unchanged_preparation_after_prior_relocation() {
+        use super::*;
+        let mut generator = placement_generator("a, c", "b, c", 16);
+        let x = Tensor::new(&[1], &DataType::Fp32, 0).unwrap().with_id("x");
+        let y = x.clone().with_id("y");
+        let z = x.clone().with_id("z");
+        let w = x.clone().with_id("w");
+        generator.tensors = vec![x.clone(), y.clone()];
+        add_selection(&mut generator, "first", &x, &y);
+        generator.tensors.push(z.clone());
+        add_selection(&mut generator, "relocating", &x, &z);
+        assert_eq!(
+            generator
+                .tensors
+                .iter()
+                .find(|t| t.id() == Some("x"))
+                .unwrap()
+                .addr(),
+            32
+        );
+        let first = generator.selected[0].prepared.clone();
+        let second = generator.selected[1].prepared.clone();
+        generator.tensors.push(w.clone());
+        add_selection(&mut generator, "unchanged", &x, &w);
+        assert!(
+            Rc::ptr_eq(&first, &generator.selected[0].prepared),
+            "unchanged actual bindings must retain their preparation"
+        );
+        assert!(Rc::ptr_eq(&second, &generator.selected[1].prepared));
+    }
+
+    #[test]
+    fn placement_attempt_replaces_preparation_when_shared_binding_moves() {
+        use super::*;
+        let mut generator = placement_generator("a, c", "b, c", 16);
+        let x = Tensor::new(&[1], &DataType::Fp32, 0).unwrap().with_id("x");
+        let y = x.clone().with_id("y");
+        let z = x.clone().with_id("z");
+        generator.tensors = vec![x.clone(), y.clone()];
+        add_selection(&mut generator, "first", &x, &y);
+        let first = generator.selected[0].prepared.clone();
+        assert_eq!(
+            generator
+                .tensors
+                .iter()
+                .find(|t| t.id() == Some("x"))
+                .unwrap()
+                .addr(),
+            0
+        );
+        generator.tensors.push(z.clone());
+        add_selection(&mut generator, "relocating", &x, &z);
+        assert_eq!(
+            generator
+                .tensors
+                .iter()
+                .find(|t| t.id() == Some("x"))
+                .unwrap()
+                .addr(),
+            32
+        );
+        assert!(!Rc::ptr_eq(&first, &generator.selected[0].prepared));
+        assert_eq!(generator.selected[0].prepared.id, "first");
+        assert_eq!(
+            generator.selected[0]
+                .prepared
+                .planned_traffic_bytes()
+                .unwrap(),
+            (8, 4)
+        );
+    }
+
+    #[test]
+    fn placement_attempt_rejection_preserves_committed_state() {
+        use super::*;
+        let mut generator = placement_generator("a", "b", 8);
+        let x = Tensor::new(&[1], &DataType::Fp32, 0).unwrap().with_id("x");
+        let y = x.clone().with_id("y");
+        let z = x.clone().with_id("z");
+        generator.tensors = vec![x.clone(), y.clone()];
+        add_selection(&mut generator, "first", &x, &y);
+        generator.tensors.push(z.clone());
+        let prepared = generator.selected[0].prepared.clone();
+        let tensors = format!("{:?}", generator.tensors);
+        let nodes = yaml_serde::to_string(&generator.nodes).unwrap();
+        let edges = yaml_serde::to_string(&generator.edges).unwrap();
+        let last_pe = generator.last_pe_idx;
+        let inputs = [Some(x.clone()), Some(x)];
+        let outputs = [Some(z)];
+        let error = generator
+            .create_partitioned_compute(
+                "rejected",
+                &ProgramTemplate::Add,
+                &build_full_tensor_boundary(&inputs, &outputs),
+                &inputs,
+                &outputs,
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("no feasible placement"));
+        assert_eq!(format!("{:?}", generator.tensors), tensors);
+        assert_eq!(yaml_serde::to_string(&generator.nodes).unwrap(), nodes);
+        assert_eq!(yaml_serde::to_string(&generator.edges).unwrap(), edges);
+        assert_eq!(generator.allocated_tensors, 2);
+        assert_eq!(generator.last_pe_idx, last_pe);
+        assert_eq!(generator.selected.len(), 1);
+        assert!(Rc::ptr_eq(&prepared, &generator.selected[0].prepared));
+    }
+
+    #[test]
+    fn placement_free_start_skips_million_fragmented_fallback_runs() {
+        use std::cell::Cell;
+
+        use super::*;
+        let generator = placement_generator("a", "b", 16_777_216);
+        let mut tensor = Tensor::new(&[1_000_000, 2], &DataType::Fp32, 0)
+            .unwrap()
+            .with_id("fragmented");
+        let view = TensorView::new(tensor.clone(), &[1_000_000, 1], &[0, 0]).unwrap();
+        let visited = Cell::new(0);
+        let fallback = view
+            .address_ranges()
+            .inspect(|_| {
+                visited.set(visited.get() + 1);
+                assert!(
+                    visited.get() <= 100,
+                    "free-start placement traversed fragmented fallback runs"
+                );
+            })
+            .map(|range| 0u128.saturating_sub(range.start));
+        let mut free = generator.virtual_ranges.clone();
+        assert!(generator.place_tensor(&mut tensor, &[(0, &view)], &mut free, fallback));
+        assert_eq!(visited.get(), 0);
+        assert_eq!(tensor.addr(), 0);
+        assert_eq!(tensor.num_bytes(), 8_000_000);
+        assert_eq!(free[0].start, 8_000_000);
+    }
+
+    #[test]
+    fn placement_reuses_existing_fragmented_tensor_before_new_allocations() {
+        use super::*;
+        let mut generator = placement_generator("a", "b", 32_000_000);
+        let kept = Tensor::new(&[1_000_000, 2], &DataType::Fp32, 16_000_000)
+            .unwrap()
+            .with_id("kept");
+        let new = Tensor::new(&[1], &DataType::Fp32, 0)
+            .unwrap()
+            .with_id("new");
+        let kept_view = TensorView::new(kept.clone(), &[1_000_000, 1], &[0, 0]).unwrap();
+        let new_view = TensorView::new_full(new.clone());
+        generator.tensors = vec![kept, new];
+        generator.allocated_tensors = 1;
+        let users = BTreeMap::from([
+            ("kept", vec![(0, &kept_view)]),
+            ("new", vec![(0, &new_view)]),
+        ]);
+        let placed = generator.place_tensors(&users).unwrap();
+        assert_eq!(
+            placed
+                .iter()
+                .find(|tensor| tensor.id() == Some("kept"))
+                .unwrap()
+                .addr(),
+            16_000_000
+        );
+        assert_eq!(
+            placed
+                .iter()
+                .find(|tensor| tensor.id() == Some("new"))
+                .unwrap()
+                .addr(),
+            0
+        );
+    }
+
+    #[test]
+    fn placement_replays_when_preserving_existing_storage_blocks_new_tensor() {
+        use super::*;
+        let mut generator = placement_generator("a, c", "a, b", 16);
+        let kept = Tensor::new(&[4], &DataType::Fp32, 0)
+            .unwrap()
+            .with_id("kept");
+        let new = Tensor::new(&[8], &DataType::Fp32, 0)
+            .unwrap()
+            .with_id("new");
+        let kept_view = TensorView::new_full(kept.clone());
+        let new_view = TensorView::new_full(new.clone());
+        generator.tensors = vec![kept, new];
+        generator.allocated_tensors = 1;
+        let users = BTreeMap::from([
+            ("kept", vec![(0, &kept_view)]),
+            ("new", vec![(1, &new_view)]),
+        ]);
+        assert!(generator.place_tensors_preserving(&users, 1).is_err());
+        let placed = generator.place_tensors(&users).unwrap();
+        assert_eq!(
+            placed
+                .iter()
+                .find(|tensor| tensor.id() == Some("kept"))
+                .unwrap()
+                .addr(),
+            32
+        );
+        assert_eq!(
+            placed
+                .iter()
+                .find(|tensor| tensor.id() == Some("new"))
+                .unwrap()
+                .addr(),
+            0
+        );
+        assert_eq!(
+            generator.tensors[0].addr(),
+            0,
+            "tentative replay must not mutate committed storage"
+        );
+        assert_eq!(generator.allocated_tensors, 1);
+    }
+
+    #[test]
+    fn placement_shared_full_view_uses_only_actual_users() {
+        use super::*;
+        let mut generator = placement_generator("a, c", "b, c", 16);
+        let tensor = Tensor::new(&[4], &DataType::Fp32, 0)
+            .unwrap()
+            .with_id("shared");
+        generator.tensors.push(tensor.clone());
+        let view = TensorView::new_full(tensor);
+        let users = BTreeMap::from([("shared", vec![(0, &view), (1, &view)])]);
+        let placed = generator.place_tensors(&users).unwrap();
+        assert_eq!(placed.len(), 1);
+        assert_eq!(placed[0].id(), Some("shared"));
+        assert_eq!(placed[0].addr(), 32);
+        assert_eq!(placed[0].num_bytes(), 16);
+        // A later consumer may move an existing tensor without changing its ID.
+        let first = generator
+            .place_tensors(&BTreeMap::from([("shared", vec![(0, &view)])]))
+            .unwrap();
+        assert_eq!(first[0].addr(), 0);
+        generator.tensors = first;
+        generator.allocated_tensors = 1;
+        assert_eq!(generator.place_tensors(&users).unwrap()[0].addr(), 32);
+    }
+
+    #[test]
+    fn placement_disjoint_views_span_adjacent_devices() {
+        use super::*;
+        let mut generator = placement_generator("a", "b", 16);
+        let tensor = Tensor::new(&[8], &DataType::Fp32, 0)
+            .unwrap()
+            .with_id("shared");
+        generator.tensors.push(tensor.clone());
+        let prefix = TensorView::new(tensor.clone(), &[4], &[0]).unwrap();
+        let suffix = TensorView::new(tensor.clone(), &[4], &[4]).unwrap();
+        let users = BTreeMap::from([("shared", vec![(0, &prefix), (1, &suffix)])]);
+        let placed = generator.place_tensors(&users).unwrap();
+        assert_eq!(placed.len(), 1);
+        assert_eq!(placed[0].addr(), 0);
+        assert_eq!(placed[0].num_bytes(), 32);
+        let full = TensorView::new_full(tensor);
+        let error = generator
+            .place_tensors(&BTreeMap::from([("shared", vec![(0, &full), (1, &full)])]))
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("no mapped placement within physical capacity")
+        );
+    }
+
+    #[test]
+    fn placement_packed_views_require_shared_byte_addressability() {
+        use super::*;
+        let mut generator = placement_generator("a", "b", 1);
+        let tensor = Tensor::new(&[4], &DataType::Fp4, 0)
+            .unwrap()
+            .with_id("packed");
+        generator.tensors.push(tensor.clone());
+        let prefix = TensorView::new(tensor.clone(), &[2], &[0]).unwrap();
+        let suffix = TensorView::new(tensor.clone(), &[2], &[2]).unwrap();
+        let placed = generator
+            .place_tensors(&BTreeMap::from([(
+                "packed",
+                vec![(0, &prefix), (1, &suffix)],
+            )]))
+            .unwrap();
+        assert_eq!(placed[0].addr(), 0);
+        assert_eq!(placed[0].num_bytes(), 2);
+        let crossing = TensorView::new(tensor, &[3], &[1]).unwrap();
+        assert!(
+            generator
+                .place_tensors(&BTreeMap::from([(
+                    "packed",
+                    vec![(0, &prefix), (1, &crossing)]
+                )]))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn validate_args_rejects_zero_partition_size() {
+        let mut args = valid_args();
+        args.partition_size = Some(0);
+
+        let err = validate_args(&args).unwrap_err();
+
+        assert!(format!("{err}").contains("--partition-size"));
+    }
 
     #[test]
     fn validate_args_rejects_zero_depth() {
@@ -1347,23 +2220,108 @@ mod tests {
     }
 
     #[test]
-    fn validate_args_rejects_zero_partition_size() {
-        let mut args = valid_args();
-        args.partition_size = Some(0);
-
-        let err = validate_args(&args).unwrap_err();
-
-        assert!(format!("{err}").contains("--partition-size"));
+    fn validate_args_rejects_invalid_expand_ratio() {
+        for ratio in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut args = valid_args();
+            args.expand_ratio = ratio;
+            let error = validate_args(&args).unwrap_err();
+            assert!(
+                error.to_string().contains("--expand-ratio"),
+                "{ratio}: {error}"
+            );
+        }
     }
 
     #[test]
-    fn validate_args_rejects_invalid_expand_ratio() {
+    fn validate_args_rejects_nonfinite_or_negative_template_weights() {
+        for (index, name) in [
+            (0, "--weight-add"),
+            (1, "--weight-gemm"),
+            (2, "--weight-reduce-max"),
+        ] {
+            for weight in [-1.0, f64::NAN, f64::INFINITY] {
+                let mut weights = [1.0; 3];
+                weights[index] = weight;
+                let error = validate_args(&args_with_weights(weights)).unwrap_err();
+                assert!(error.to_string().contains(name), "{name}={weight}: {error}");
+            }
+        }
+    }
+
+    #[test]
+    fn validate_args_requires_a_nonzero_template_weight() {
+        let error = validate_args(&args_with_weights([0.0; 3])).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("at least one template weight must be non-zero"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn validate_args_rejects_invalid_initial_rank_ranges() {
+        for (minimum, maximum) in [(0, 4), (4, 3)] {
+            let mut args = valid_args();
+            args.init_rank_min = minimum;
+            args.init_rank_max = maximum;
+            let error = validate_args(&args).unwrap_err();
+            assert!(
+                error.to_string().contains("invalid initial rank range"),
+                "{minimum}..={maximum}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_args_rejects_invalid_initial_dimension_ranges() {
+        for (minimum, maximum) in [(0, 4), (4, 3)] {
+            let mut args = valid_args();
+            args.init_dim_min = minimum;
+            args.init_dim_max = maximum;
+            let error = validate_args(&args).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("invalid initial dimension range"),
+                "{minimum}..={maximum}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_args_rejects_zero_tensor_alignment() {
         let mut args = valid_args();
-        args.expand_ratio = 0.0;
+        args.tensor_align_bytes = 0;
+        let error = validate_args(&args).unwrap_err();
+        assert!(
+            error.to_string().contains("--tensor-align-bytes"),
+            "{error}"
+        );
+    }
 
-        let err = validate_args(&args).unwrap_err();
+    #[test]
+    fn validate_args_requires_rank_two_for_enabled_matrix_and_reduction_templates() {
+        for (weights, name) in [
+            ([0.0, 1.0, 0.0], "--weight-gemm"),
+            ([0.0, 0.0, 1.0], "--weight-reduce-max"),
+        ] {
+            let mut args = args_with_weights(weights);
+            args.init_rank_min = 1;
+            args.init_rank_max = 1;
+            let error = validate_args(&args).unwrap_err();
+            assert!(error.to_string().contains(name), "{error}");
+            args.init_rank_max = 2;
+            validate_args(&args).unwrap();
+        }
+    }
 
-        assert!(format!("{err}").contains("--expand-ratio"));
+    #[test]
+    fn validate_args_accepts_rank_one_for_add_only_generation() {
+        let mut args = args_with_weights([1.0, 0.0, 0.0]);
+        args.init_rank_min = 1;
+        args.init_rank_max = 1;
+        validate_args(&args).unwrap();
     }
 
     #[test]
@@ -1404,7 +2362,7 @@ mod tests {
     #[test]
     fn default_and_sampled_seeds_generate_valid_timetables() {
         let platform = generator_platform();
-        for seed in std::iter::once(0x5eed_1234).chain(0..20) {
+        for seed in once(0x5eed_1234).chain(0..20) {
             let mut args = valid_args();
             args.depth = 4;
             args.max_compute_nodes = 10;
@@ -1414,59 +2372,5 @@ mod tests {
             let timetable = generate(Generator::new(args, &platform).unwrap()).unwrap();
             timetable.validate().unwrap();
         }
-    }
-    fn valid_args() -> Cli {
-        Cli {
-            platform: PathBuf::from("platform.yaml"),
-            out: PathBuf::from("timetable.yaml"),
-            debug: false,
-            depth: 1,
-            max_compute_nodes: 1,
-            partition_size: None,
-            expand_ratio: 0.6,
-            weight_add: 1.0,
-            weight_gemm: 1.0,
-            weight_reduce_max: 1.0,
-            init_dtype: DataType::Fp32,
-            seed: 0,
-            init_rank_min: 3,
-            init_rank_max: 4,
-            init_dim_min: 2,
-            init_dim_max: 4,
-            tensor_align_bytes: 256,
-        }
-    }
-
-    fn generator_platform() -> PlatformConfig {
-        yaml_serde::from_str(
-            r"
-memory_maps:
-  - name: default
-    devices: [hbm0]
-operation_classes:
-  add: { operations: [add], arity: 2 }
-  compare: { operations: [compare], arity: 2 }
-  matrix: { operations: [matrix_mac], arity: 2, flops_per_op: 2 }
-processing_elements:
-  - name: pe0
-    memory_map: default
-    config:
-      compute:
-        engines:
-          vector:
-            capabilities:
-              - { class: add, ops_per_tick: 16 }
-              - { class: compare, ops_per_tick: 16 }
-          matrix:
-            capabilities: [{ class: matrix, ops_per_tick: 256 }]
-memories:
-  - name: hbm0
-    kind: hbm
-    base_address: 0
-    config:
-      capacity_bytes: 16GiB
-",
-        )
-        .unwrap()
     }
 }

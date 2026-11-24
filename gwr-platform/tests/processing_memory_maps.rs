@@ -323,6 +323,23 @@ fn contiguous_view_crossing_devices_requires_region_bounded_requests() {
     assert_eq!(platform.memory("m1").unwrap().bytes_read(), 2);
 }
 
+#[test]
+fn named_virtual_stripes_route_aligned_packets_to_distinct_banks() {
+    let source = source(32, 32, 32)
+        .replace(
+            "operation_classes:",
+            "address_spaces: [{name: striped, memory_map: local, access_bytes: 16, address_regions: [{policy: striped, devices: [m0, m1]}]}]\noperation_classes:",
+        )
+        .replace("memory_map: local\n   config:", "address_space: striped\n   config:")
+        .replace("    lsu_access_bytes: 1\n", "")
+        .replace("capacity_bytes: 16, delay_ticks", "capacity_bytes: 32, delay_ticks");
+    let input = TensorView::new_full(Tensor::new(&[32], &DataType::Int8, 0).unwrap());
+    let output = TensorView::new_full(Tensor::new(&[32], &DataType::Int8, 64).unwrap());
+    let platform = execute(&source, copy(input, output, "[i]"), Some((32, 32)));
+    assert_eq!(platform.memory("m0").unwrap().bytes_read(), 16);
+    assert_eq!(platform.memory("m1").unwrap().bytes_read(), 16);
+}
+
 fn separate_dma_source() -> String {
     source(2, 2, 2)
         .replace(
@@ -470,4 +487,28 @@ fn independent_dma_map_is_an_optional_strict_named_selector() {
             .unwrap()
             .contains("dma_memory_map")
     );
+}
+
+#[test]
+fn cache_lines_can_be_larger_than_named_virtual_stripes() {
+    let source = source(128, 128, 128)
+        .replace(
+            "base_address: 64, config: {capacity_bytes: 16",
+            "base_address: 256, config: {capacity_bytes: 32",
+        )
+        .replace("   memory_map: local\n", "   address_space: striped\n")
+        .replace("    lsu_access_bytes: 1\n", "")
+        + "address_spaces:\n - name: striped\n   memory_map: local\n   access_bytes: 16\n   address_regions: [{policy: striped, devices: [m0, m1]}]\n";
+    let input = TensorView::new_full(Tensor::new(&[32], &DataType::Int8, 0).unwrap());
+    let output = TensorView::new_full(Tensor::new(&[32], &DataType::Int8, 256).unwrap());
+    let platform = execute(
+        &cached(&source, 32),
+        copy(input, output, "[i]"),
+        Some((32, 32)),
+    );
+
+    // The cache receives the translated addresses and fills a whole physical
+    // line on each bank, even though the PE reads a 16-byte stripe from each.
+    assert_eq!(platform.memory("m0").unwrap().bytes_read(), 32);
+    assert_eq!(platform.memory("m1").unwrap().bytes_read(), 32);
 }

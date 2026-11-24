@@ -20,9 +20,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &examples.join("compute_region_platform.yaml"),
     )?);
     let graph = TimetableFile::from_file(&examples.join("add_mul.yaml"))?.into_graph()?;
-    // This prepares every compute node against its assigned PE before
-    // execution.
     let timetable = Rc::new(Timetable::new(engine.top(), graph, &platform)?);
+    timetable.preflight()?;
     let dispatcher: Rc<dyn Dispatch> = timetable.clone();
     platform.attach_dispatcher(&dispatcher);
     engine.run()?;

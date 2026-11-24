@@ -12,8 +12,7 @@ use gwr_engine::traits::Event;
 use gwr_engine::types::{SimError, SimResult};
 use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::program::syntax::ProgramSpec;
-use gwr_models::processing_element::program::{PreparedProgram, ProgramBindings, TensorSpec};
-use gwr_models::processing_element::task::Task;
+use gwr_models::processing_element::task::{ProgramTaskConfig, Task};
 use gwr_models::processing_element::tensors::dtype::DataType;
 use gwr_models::processing_element::tensors::{Tensor, TensorView};
 use gwr_platform::Platform;
@@ -73,22 +72,20 @@ assignments:
 ",
     )?;
     let view = |addr| Tensor::new(&[8], &DataType::Fp32, addr).map(TensorView::new_full);
-    // Stage 1 owns views in the order of spec.inputs and spec.outputs.
-    let program = Rc::new(PreparedProgram::new(
-        &spec,
-        ProgramBindings {
-            inputs: vec![view(0x1000)?, view(0x2000)?],
-            outputs: vec![view(0x3000)?],
-        },
-        None,
-    )?);
-    let result: &TensorSpec = program.value("Y").expect("declared output");
-    assert_eq!(result.shape, [8]);
-    // Stage 2 checks capabilities, mapped addresses, and SRAM for this exact
-    // PE.
-    let task = platform.pe("pe0")?.prepare_program("add".into(), program)?;
+    // Bind views in the order of the program's declared inputs and outputs.
+    let config = ProgramTaskConfig {
+        id: "add".into(),
+        program: spec,
+        tiling: None,
+        pipeline: None,
+        inputs: vec![view(0x1000)?, view(0x2000)?],
+        outputs: vec![view(0x3000)?],
+    };
+    platform.pe("pe0")?.preflight_program_task(&config)?;
     let dispatcher = Rc::new(OneTask {
-        task: Task::PreparedProgram { task },
+        task: Task::ProgramTask {
+            config: Box::new(config),
+        },
         active: Cell::new(false),
         completed: Cell::new(false),
         changed: Repeated::new(()),

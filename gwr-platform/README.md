@@ -520,6 +520,30 @@ must select equivalent mappings. Direct atomics in actively striped windows are
 currently rejected during preflight; contiguous and ungrouped atomics retain
 their existing behavior. Striping changes placement, not configured bandwidth.
 
+### Named virtual address spaces
+
+A PE selects either an `address_space` or a `memory_map`. Each named address
+space references a backing memory map and sets the PE's LSU packet width with
+`access_bytes`, which defaults to 32. Multiple address spaces can use the same
+backing memories and define different placements.
+
+```yaml
+address_spaces:
+  - name: striped
+    memory_map: local
+    access_bytes: 64
+    address_regions:
+      - policy: striped
+        devices: [hbm0, hbm1]
+```
+
+A striped region rotates access-sized chunks over equal-capacity banks in
+increasing, contiguous physical address order. Its virtual range spans those
+banks. Unclaimed memories keep their physical addresses. A connected DMA issuer
+inherits the PE's mapping unless it selects a separate `dma_memory_map`.
+
+See the [striped address-space example](examples/simple_pe_striped_mem.yaml).
+
 ## Named platform composition
 
 A platform file can instantiate other platform files. Use `includes` for shared

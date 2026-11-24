@@ -48,11 +48,12 @@ impl RooflineRoutes<'_> {
             .memories
             .get(memory)
             .ok_or_else(|| SimError(format!("Unknown memory '{memory}'")))?;
+        let map_name = self.cfg.pe_backing_map_name(source, false)?;
         if !self
             .cfg
             .memory_maps
             .iter()
-            .any(|m| m.name == source.memory_map && m.devices.iter().any(|d| d == memory))
+            .any(|m| m.name == map_name && m.devices.iter().any(|d| d == memory))
         {
             return Err(SimError("Invalid roofline cache path mapping".into()));
         }

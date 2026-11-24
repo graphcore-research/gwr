@@ -16,6 +16,7 @@ pub(crate) fn platform() -> PlatformConfig {
         coherency_managers: None,
         compute_profiles: std::collections::BTreeMap::default(),
         operation_classes: basic_classes(),
+        address_spaces: Vec::new(),
         memory_maps: Vec::new(),
         defaults: None,
         processing_elements: None,
@@ -61,6 +62,7 @@ pub(crate) fn processing_element(name: &str, memory_map: &str) -> ProcessingElem
     ProcessingElementSection {
         name: name.to_string(),
         memory_map: memory_map.to_string(),
+        address_space: None,
         dma_memory_map: None,
         config: ProcessingElementConfigSection {
             block_execution: None,
@@ -95,6 +97,24 @@ pub(crate) fn basic_compute() -> ComputeConfig {
                     .collect(),
             },
         )]),
+    }
+}
+
+pub(crate) fn processing_element_in_space(name: &str, space: &str) -> ProcessingElementSection {
+    let mut pe = processing_element(name, "");
+    pe.address_space = Some(space.into());
+    pe
+}
+
+pub(crate) fn address_space(
+    name: &str,
+    memory_map: &str,
+) -> gwr_platform::types::AddressSpaceSection {
+    gwr_platform::types::AddressSpaceSection {
+        name: name.into(),
+        memory_map: memory_map.into(),
+        access_bytes: None,
+        address_regions: None,
     }
 }
 

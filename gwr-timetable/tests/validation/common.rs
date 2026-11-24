@@ -177,8 +177,8 @@ pub(crate) fn compute_with_program(
         program: program.into(),
         tiling: None,
         pe: None,
-        input_views: Some(input_views),
-        output_views: Some(output_views),
+        input_views: Some(input_views.into()),
+        output_views: Some(output_views.into()),
     }
 }
 

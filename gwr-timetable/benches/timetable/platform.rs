@@ -3,15 +3,16 @@
 use std::collections::BTreeMap;
 
 use gwr_models::fabric::node::FabricRoutingAlgorithm;
+use gwr_models::fabric::paths::FabricPathConfig;
 use gwr_models::processing_element::compute::{
-    CapabilityConfig, CapabilityKind, ComputeConfig, ExecutionUnitConfig, OperationClass,
+    CapabilityConfig, ComputeConfig, EngineConfig, OperationClass,
 };
 use gwr_models::processing_element::tensors::dtype::DataType;
 use gwr_platform::types::{
     AddressSpaceSection, CacheConfigSection, CacheSection, CoherencyManagerConfigSection,
-    CoherencyManagerSection, ConnectSection, FabricConfigSection, FabricKind, FabricSection,
-    MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection, PlatformConfig,
-    ProcessingElementConfigSection, ProcessingElementSection,
+    CoherencyManagerSection, ComputeSelection, ConnectSection, FabricConfigSection, FabricKind,
+    FabricSection, MemoryConfigSection, MemoryKind, MemoryMapSection, MemorySection,
+    PlatformConfig, ProcessingElementConfigSection, ProcessingElementSection,
 };
 
 pub(super) const PES: usize = 60;
@@ -31,9 +32,13 @@ pub(super) fn bank_base(bank: usize) -> u64 {
 pub(super) fn config() -> PlatformConfig {
     let pe_config = ProcessingElementConfigSection {
         num_active_requests: Some(8),
+        lsu_access_bytes: None,
         sram_bytes: Some(64 * 1024),
         overhead_size_bytes: Some(8),
-        compute: Some(compute_config()),
+        compute: Some(ComputeSelection::Inline(compute_config())),
+        boundary_payload_service: None,
+        local_payload_service: None,
+        block_execution: None,
     };
     // 32 sets * 4 ways * 256-byte lines = 32KiB, private and coherent.
     let cache_config = CacheConfigSection {
@@ -46,6 +51,7 @@ pub(super) fn config() -> PlatformConfig {
         max_inflight_fills: Some(64),
     };
     PlatformConfig {
+        compute_profiles: BTreeMap::new(),
         operation_classes: BTreeMap::from([
             (
                 "add".to_owned(),
@@ -76,7 +82,9 @@ pub(super) fn config() -> PlatformConfig {
             (0..PES)
                 .map(|index| ProcessingElementSection {
                     name: endpoint_name("pe", index),
-                    address_space: "default".to_owned(),
+                    memory_map: String::new(),
+                    address_space: Some("default".to_owned()),
+                    dma_memory_map: None,
                     config: pe_config.clone(),
                 })
                 .collect(),
@@ -104,8 +112,12 @@ pub(super) fn config() -> PlatformConfig {
                 ticks_overhead: Some(10),
                 rx_buffer_bytes: Some(512),
                 tx_buffer_bytes: Some(512),
-                port_bits_per_tick: Some(1024),
-                internal_link_bits_per_tick: Some(1024),
+                port_bits_per_tick: None,
+                paths: Some(FabricPathConfig {
+                    bw_bits_per_tick: 1024,
+                    queue_bytes: 512,
+                    ..FabricPathConfig::default()
+                }),
             },
         }]),
         memories: Some(
@@ -118,6 +130,8 @@ pub(super) fn config() -> PlatformConfig {
                         capacity_bytes: BANK_CAPACITY,
                         bw_bytes_per_tick: Some(128),
                         delay_ticks: Some(10),
+                        arrival_aware_service: None,
+                        atomic_service: None,
                     },
                 })
                 .collect(),
@@ -127,33 +141,29 @@ pub(super) fn config() -> PlatformConfig {
 }
 
 fn compute_config() -> ComputeConfig {
-    let scalar = ExecutionUnitConfig {
+    let scalar = EngineConfig {
         matrix_accumulator_capacity_bytes: None,
         capabilities: vec![CapabilityConfig {
             class: "add".to_owned(),
             input_dtypes: Some(vec![vec![DataType::Fp32; 2]]),
             ops_per_tick: 16.0,
-            kind: CapabilityKind::Scalar,
+            execution: None,
+            matrix_service_tile: None,
         }],
     };
-    let matrix = ExecutionUnitConfig {
+    let matrix = EngineConfig {
         matrix_accumulator_capacity_bytes: None,
         capabilities: vec![CapabilityConfig {
             class: "matrix".to_owned(),
             input_dtypes: Some(vec![vec![DataType::Fp32; 2]]),
             // A MAC costs one multiply at 4/tick and one add at 16/tick.
             ops_per_tick: 1.0 / (1.0 / 4.0 + 1.0 / 16.0),
-            kind: CapabilityKind::Matrix {
-                accumulator: DataType::Fp32,
-                matrix_service_tile: None,
-            },
+            execution: None,
+            matrix_service_tile: None,
         }],
     };
     ComputeConfig {
-        execution_units: BTreeMap::from([
-            ("scalar".to_owned(), scalar),
-            ("matrix".to_owned(), matrix),
-        ]),
+        engines: BTreeMap::from([("scalar".to_owned(), scalar), ("matrix".to_owned(), matrix)]),
     }
 }
 
@@ -161,10 +171,12 @@ fn memory_maps() -> Vec<MemoryMapSection> {
     let mut maps = vec![MemoryMapSection {
         name: "default".to_owned(),
         devices: (0..BANKS).map(|bank| format!("hbm{bank}")).collect(),
+        address_mapping: None,
     }];
     maps.extend((0..BANKS).map(|bank| MemoryMapSection {
         name: format!("coherent_bank{bank}"),
         devices: vec![format!("hbm{bank}")],
+        address_mapping: None,
     }));
     maps
 }

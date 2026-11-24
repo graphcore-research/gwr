@@ -3,7 +3,6 @@
 use std::collections::BTreeMap;
 
 use gwr_models::processing_element::estimate_peak_tile_sram;
-use gwr_models::processing_element::program::SRAM_SLOT_ALIGNMENT_BYTES;
 use gwr_models::processing_element::program::syntax::{ProgramSpec, TileSpec};
 use gwr_models::processing_element::task::ProgramTaskConfig;
 use gwr_models::processing_element::tensors::dtype::DataType;
@@ -13,6 +12,7 @@ use yaml_serde::from_str;
 const ELEMENTS: usize = 9;
 const CHUNK: usize = 4;
 const FP32_BYTES: usize = 4;
+const SRAM_SLOT_ALIGNMENT_BYTES: usize = 8;
 const SCALAR_SLOT_BYTES: usize = FP32_BYTES.next_multiple_of(SRAM_SLOT_ALIGNMENT_BYTES);
 const ROW_SLOT_BYTES: usize = (ELEMENTS * FP32_BYTES).next_multiple_of(SRAM_SLOT_ALIGNMENT_BYTES);
 
@@ -32,6 +32,7 @@ assignments:
     };
     ProgramTaskConfig {
         id: "automatic_phases".into(),
+        pipeline: None,
         program,
         tiling: Some(TileSpec {
             sizes: BTreeMap::from([("i".into(), CHUNK)]),
@@ -52,7 +53,7 @@ fn estimated_peak_sram_bytes(task: &ProgramTaskConfig) -> usize {
 }
 
 #[test]
-fn broadcast_after_reduction_plans_two_input_passes_and_a_retained_scalar() {
+fn broadcast_after_reduction_recomputes_the_scalar_for_each_output_chunk() {
     let task = reduction_pipeline_task(
         r"
  - output: T
@@ -74,12 +75,15 @@ fn broadcast_after_reduction_plans_two_input_passes_and_a_retained_scalar() {
     );
     assert_eq!(
         task.planned_traffic_bytes().unwrap(),
-        (ELEMENTS * FP32_BYTES * 2, ELEMENTS * FP32_BYTES)
+        (
+            ELEMENTS * FP32_BYTES * (1 + ELEMENTS.div_ceil(CHUNK)),
+            ELEMENTS * FP32_BYTES,
+        )
     );
-    // The output phase retains the scalar alongside one input/output chunk.
+    // One reduction input chunk, one reread chunk, the output and the scalar.
     assert_eq!(
         estimated_peak_sram_bytes(&task),
-        CHUNK * FP32_BYTES * 2 + SCALAR_SLOT_BYTES
+        CHUNK * FP32_BYTES * 3 + SCALAR_SLOT_BYTES
     );
 }
 
@@ -107,10 +111,10 @@ fn reduction_of_a_local_tensor_reserves_the_complete_producer() {
         task.planned_traffic_bytes().unwrap(),
         (ELEMENTS * FP32_BYTES, FP32_BYTES)
     );
-    // Nine FP32 values reserve 40 aligned bytes, plus the producer input chunk.
+    // Both complete rows reserve 40 aligned bytes, with one reduction slot.
     assert_eq!(
         estimated_peak_sram_bytes(&task),
-        ROW_SLOT_BYTES + CHUNK * FP32_BYTES
+        ROW_SLOT_BYTES * 2 + SCALAR_SLOT_BYTES
     );
 }
 
@@ -142,7 +146,7 @@ fn matching_free_axes_keep_one_pass_and_chunk_storage() {
 }
 
 #[test]
-fn independent_reduction_preserves_chunk_sized_pipeline_storage() {
+fn ordinary_tiles_require_the_outer_axis_in_each_assignment_output() {
     let program: ProgramSpec = from_str(
         r"
 inputs: [A, B]
@@ -174,13 +178,16 @@ assignments:
     let tiling = TileSpec {
         sizes: BTreeMap::from([("i".into(), 64)]),
     };
-    let bytes = estimate_peak_tile_sram(
+    let error = estimate_peak_tile_sram(
         &program,
         &[view(&[1025], 0), view(&[4], 8192)],
         &[view(&[], 12288), view(&[1025], 16384)],
         &tiling,
     )
-    .unwrap();
-    // The input, temporary and output each occupy one 64-element chunk.
-    assert_eq!(bytes, 768);
+    .unwrap_err();
+    assert!(
+        error
+            .0
+            .contains("tile axis i must occur in every assignment output")
+    );
 }

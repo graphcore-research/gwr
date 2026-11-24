@@ -1621,3 +1621,58 @@ edges:
             .any(|event| event.contains("MemoryAccess:"))
     );
 }
+
+#[test]
+fn preflight_rejects_intrinsic_serial_duration_for_the_whole_tile() {
+    let mut engine = Engine::default();
+    let clock = engine.default_clock();
+    let platform = Rc::new(
+        Platform::from_string(
+            &engine,
+            &clock,
+            r"
+memory_maps: [{name: ram, devices: [mem]}]
+memories: [{name: mem, kind: hbm, base_address: 0, config: {capacity_bytes: 4096}}]
+operation_classes:
+  exp: {operations: [exp], arity: 1}
+processing_elements:
+  - name: pe0
+    memory_map: ram
+    config:
+      compute:
+        engines:
+          slow:
+            capabilities: [{class: exp, ops_per_tick: 2e-19}]
+connections: [{connect: [pe.pe0, mem.mem]}]
+",
+        )
+        .unwrap(),
+    );
+    let graph = TimetableFile::from_string(
+        r"
+nodes:
+  - {id: A, kind: tensor, config: {addr: 0, dtype: fp32, shape: [2]}}
+  - {id: Y, kind: tensor, config: {addr: 32, dtype: fp32, shape: [2]}}
+  - id: nested
+    kind: compute
+    pe: pe0
+    program:
+      inputs: [A]
+      outputs: [Y]
+      assignments:
+        - output: Y
+          axes: [i]
+          expr: {exp: [{exp: [{read: {tensor: A, indices: [i]}}]}]}
+edges:
+  - {from: A, to: nested.0, kind: data}
+  - {from: nested, to: Y, kind: data}
+",
+    )
+    .unwrap()
+    .into_graph()
+    .unwrap();
+    let timetable = Timetable::new(engine.top(), graph, &platform).unwrap();
+    let error = timetable.preflight().unwrap_err();
+    assert!(error.0.contains("intrinsic compute duration"), "{error}");
+    assert_eq!(clock.tick_now().tick(), 0);
+}

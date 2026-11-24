@@ -48,6 +48,7 @@ use crate::processing_element::flop_monitor::FlopMonitor;
 use crate::processing_element::load_store_unit::LoadStoreUnit;
 
 mod activity;
+pub mod address_space;
 use activity::{ActivityLanes, ProcessingElementActivityLanes};
 pub mod block_execution;
 mod block_runtime;
@@ -410,6 +411,17 @@ impl ProcessingElement {
         self.compute_model.engine_names()
     }
 
+    /// Describe the effective SRAM capacity, LSU settings, and compute engines.
+    #[must_use]
+    pub fn configuration_description(&self) -> String {
+        format!(
+            "SRAM capacity: {} bytes; {}; execution units: {}",
+            self.sram_bytes,
+            self.lsu.configuration_description(),
+            self.compute_engine_names().join(", "),
+        )
+    }
+
     /// Completed typed compute service counters, available without tracing.
     pub fn compute_action_snapshot(&self) -> Vec<compute::ComputeCounterSnapshot> {
         self.stats
@@ -527,6 +539,18 @@ impl ProcessingElement {
             &self.compute_model,
             self.block_execution.as_ref().map(|r| &r.config),
         )
+    }
+
+    /// Typed capabilities of this processing element.
+    #[must_use]
+    pub fn compute_model(&self) -> &ComputeModel {
+        &self.compute_model
+    }
+
+    /// Validate that the PE can access the bytes touched by a view without
+    /// issuing memory requests.
+    pub fn validate_mapped_view(&self, view: &tensors::TensorView) -> SimResult {
+        self.lsu.validate_mapped_view(view)
     }
 
     pub fn peak_sram_bytes(&self) -> usize {

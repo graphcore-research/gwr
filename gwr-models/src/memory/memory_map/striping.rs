@@ -45,12 +45,22 @@ impl Striping {
         }
         let start = ordered[0].start;
         let end = ordered.last().unwrap().end;
-        Ok(Self {
+        Ok(Self::virtual_region(members, stripe, start, end))
+    }
+
+    // The address-space builder already validated bank and region geometry.
+    pub(super) fn virtual_region(
+        members: Vec<MemoryRegion>,
+        stripe: u64,
+        start: u64,
+        end: u64,
+    ) -> Self {
+        Self {
             members,
             stripe,
             start,
             end,
-        })
+        }
     }
     pub(super) fn members(&self) -> &[MemoryRegion] {
         &self.members

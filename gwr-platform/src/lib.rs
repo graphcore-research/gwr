@@ -95,10 +95,15 @@ impl Platform {
         catalog::reject_string_includes(platform_config)?;
         let cfg: PlatformConfig = yaml_serde::from_str(platform_config)
             .map_err(|e| SimError(format!("yaml_serde::from_str failed: {e}")))?;
-        Platform::build(engine, clock, &cfg)
+        Platform::from_config(engine, clock, &cfg)
     }
 
-    fn build(engine: &Engine, clock: &Clock, cfg: &PlatformConfig) -> Result<Self, SimError> {
+    /// Validate and build a platform from an already parsed configuration.
+    pub fn from_config(
+        engine: &Engine,
+        clock: &Clock,
+        cfg: &PlatformConfig,
+    ) -> Result<Self, SimError> {
         PreparedPlatform::new(cfg)?.build(engine, clock)
     }
 

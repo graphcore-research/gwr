@@ -54,10 +54,18 @@ fn named_bindings_and_sparse_views_follow_declaration_identity() {
     for (inputs, expected) in [("[A, B]", [2, 0]), ("[B, A]", [0, 2])] {
         let graph = named_graph(inputs);
         let views = graph.compute_views(3).unwrap();
-        assert_eq!(views.inputs()[0].offsets(), &[expected[0]]);
-        assert_eq!(views.inputs()[1].offsets(), &[expected[1]]);
-        assert_eq!(views.outputs()[0].offsets(), &[4]);
-        assert_eq!(views.inputs()[0].shape().dims(), &[4]);
+        assert_eq!(
+            views.inputs()[0].as_ref().unwrap().offsets(),
+            &[expected[0]]
+        );
+        assert_eq!(
+            views.inputs()[1].as_ref().unwrap().offsets(),
+            &[expected[1]]
+        );
+        assert_eq!(views.outputs()[0].as_ref().unwrap().offsets(), &[4]);
+        assert_eq!(views.inputs()[0].as_ref().unwrap().shape().dims(), &[4]);
+        assert_eq!(graph.edges()[0].to_port_name(&graph), Some("B"));
+        assert_eq!(graph.edges()[1].from_port_name(&graph), Some("Y"));
         assert_eq!(graph.nodes()[3].predecessors(), &[1, 0]);
         assert_eq!(graph.nodes()[3].successors(), &[2]);
     }
@@ -71,21 +79,6 @@ fn mermaid_labels_preserve_named_sparse_views() {
         assert!(mermaid.contains("A: 4 @ 2"), "{mermaid}");
         assert!(mermaid.contains("Y: 4 @ 4"), "{mermaid}");
     }
-}
-
-#[test]
-fn named_endpoint_helpers_return_port_names() {
-    let file = TimetableFile::from_string(NAMED).unwrap();
-    assert_eq!(
-        file.edges[0].to_node_and_port().unwrap(),
-        ("add", Some("B"))
-    );
-    let graph = file.clone().into_graph().unwrap();
-    assert_eq!(graph.edges()[0].to_port_name(&graph), Some("B"));
-    assert_eq!(graph.edges()[0].from_port_name(&graph), None);
-    assert_eq!(graph.edges()[1].from_port_name(&graph), Some("Y"));
-    assert_eq!(graph.edges()[1].to_port_name(&graph), None);
-    assert_eq!(file.edges[1].from_node_id(), "add");
 }
 
 #[test]
@@ -109,9 +102,13 @@ fn unknown_wrong_direction_missing_and_duplicate_bindings_are_diagnosed() {
         (
             "inputs: [A, B]",
             "inputs: [A, A]",
-            "duplicate program port 'A'",
+            "duplicate or empty program value name 'A'",
         ),
-        ("outputs: [Y]", "outputs: [A]", "duplicate program port 'A'"),
+        (
+            "outputs: [Y]",
+            "outputs: [A]",
+            "duplicate or empty program value name 'A'",
+        ),
     ] {
         let actual = error(&NAMED.replace(old, new));
         assert!(actual.contains(expected), "{expected}: {actual}");
@@ -139,7 +136,7 @@ fn unknown_wrong_direction_and_duplicate_views_are_diagnosed() {
         (
             "A: { offsets: [2], shape: [4] }",
             "A: { offsets: [2], shape: [4] }\n      A: { offsets: [0], shape: [4] }",
-            "duplicate view port 'A'",
+            "duplicate entry with key \"A\"",
         ),
     ] {
         let actual = error(&NAMED.replace(old, new));
@@ -148,9 +145,8 @@ fn unknown_wrong_direction_and_duplicate_views_are_diagnosed() {
 }
 
 #[test]
-fn identifiers_reject_empty_names_and_ambiguous_node_delimiters() {
+fn identifiers_reject_empty_names_and_ports() {
     for (old, new) in [
-        ("id: add", "id: 'add.part'"),
         ("id: add", "id: ''"),
         ("inputs: [A, B]", "inputs: ['', B]"),
         ("to: add.B", "to: add."),
@@ -158,7 +154,7 @@ fn identifiers_reject_empty_names_and_ambiguous_node_delimiters() {
     ] {
         let actual = error(&NAMED.replace(old, new));
         assert!(
-            actual.contains("identifier") || actual.contains("endpoint"),
+            actual.contains("identifier") || actual.contains("empty program value name"),
             "{actual}"
         );
     }
@@ -194,8 +190,15 @@ fn scalar_named_views_keep_empty_shape_and_offsets() {
         .into_graph()
         .unwrap();
     let views = graph.compute_views(3).unwrap();
-    assert!(views.inputs()[0].shape().dims().is_empty());
-    assert!(views.outputs()[0].offsets().is_empty());
+    assert!(
+        views.inputs()[0]
+            .as_ref()
+            .unwrap()
+            .shape()
+            .dims()
+            .is_empty()
+    );
+    assert!(views.outputs()[0].as_ref().unwrap().offsets().is_empty());
 }
 
 #[test]
@@ -232,9 +235,15 @@ edges:
         .into_graph()
         .unwrap();
     let views = graph.compute_views(3).unwrap();
-    assert_eq!(views.outputs()[0].dtype(), &DataType::Int64);
-    assert_eq!(views.outputs()[1].dtype(), &DataType::Fp32);
-    assert_eq!(graph.nodes()[3].output_edges(), &[2, 1]);
+    assert_eq!(
+        views.outputs()[0].as_ref().unwrap().dtype(),
+        &DataType::Int64
+    );
+    assert_eq!(
+        views.outputs()[1].as_ref().unwrap().dtype(),
+        &DataType::Fp32
+    );
+    assert_eq!(graph.nodes()[3].output_edges(), &[Some(2), Some(1)]);
 }
 
 #[test]
@@ -242,7 +251,7 @@ fn quoted_numeric_unicode_nodes_and_dotted_ports_bind_by_exact_name() {
     let source = NAMED
         .replace("id: left", "id: '123'")
         .replace("from: left", "from: '123'")
-        .replace("id: add", "id: Δ")
+        .replace("id: add", "id: layer.0.Δ")
         .replace("[A, B]", "[A.part, '0']")
         .replace("[Y]", "[Y.Ω]")
         .replace("output: Y", "output: Y.Ω")
@@ -250,18 +259,13 @@ fn quoted_numeric_unicode_nodes_and_dotted_ports_bind_by_exact_name() {
         .replace("tensor: B,", "tensor: '0',")
         .replace("A: {", "A.part: {")
         .replace("Y: {", "Y.Ω: {")
-        .replace("add.A", "Δ.A.part")
-        .replace("add.B", "Δ.0")
-        .replace("add.Y", "Δ.Y.Ω");
+        .replace("add.A", "layer.0.Δ.A.part")
+        .replace("add.B", "layer.0.Δ.0")
+        .replace("add.Y", "layer.0.Δ.Y.Ω");
     let file = TimetableFile::from_string(&source).unwrap();
-    assert_eq!(file.edges[0].to_node_and_port().unwrap(), ("Δ", Some("0")));
-    assert_eq!(
-        file.edges[1].from_node_and_port().unwrap(),
-        ("Δ", Some("Y.Ω"))
-    );
     let graph = file.into_graph().unwrap();
     let views = graph.compute_views(3).unwrap();
-    assert_eq!(views.inputs()[0].offsets(), &[2]);
-    assert_eq!(views.inputs()[1].offsets(), &[0]);
-    assert_eq!(views.outputs()[0].offsets(), &[4]);
+    assert_eq!(views.inputs()[0].as_ref().unwrap().offsets(), &[2]);
+    assert_eq!(views.inputs()[1].as_ref().unwrap().offsets(), &[0]);
+    assert_eq!(views.outputs()[0].as_ref().unwrap().offsets(), &[4]);
 }

@@ -362,6 +362,7 @@ impl SourceGraph {
             "fabrics",
             "memories",
             "memory_maps",
+            "address_spaces",
             "connections",
         ] {
             let n = d
@@ -529,7 +530,7 @@ impl SourceGraph {
                             }
                         }
                         if section == "processing_elements" {
-                            for key in ["memory_map", "dma_memory_map"] {
+                            for key in ["memory_map", "dma_memory_map", "address_space"] {
                                 if let Some(v) = item.get_mut(key)
                                     && !v.is_null()
                                 {
@@ -557,10 +558,11 @@ impl SourceGraph {
                         }
                         item.insert(Value::String("config".into()), Value::Mapping(config));
                     }
-                    "coherency_managers" => {
+                    "coherency_managers" | "address_spaces" => {
                         if let Some(map) = item.get_mut("memory_map") {
                             *map = Value::String(qualify(scope, string(map)?));
                         }
+                        scope_devices(&mut item, scope)?;
                     }
                     "memory_maps" => scope_devices(&mut item, scope)?,
                     "memories" => {
@@ -656,16 +658,14 @@ impl Expansion {
             self.native
                 .insert(Value::String("processing_elements".into()), pes);
         }
-        let mut managers = self.native.remove("coherency_managers");
-        if let Some(managers) = managers.as_mut() {
-            for manager in managers.as_sequence_mut().unwrap() {
-                let map = string(&manager["memory_map"])?;
-                manager["memory_map"] = Value::String(self.bound_map(map)?);
+        for section in ["coherency_managers", "address_spaces"] {
+            if let Some(mut entries) = self.native.remove(section) {
+                for entry in entries.as_sequence_mut().unwrap() {
+                    let map = string(&entry["memory_map"])?;
+                    entry["memory_map"] = Value::String(self.bound_map(map)?);
+                }
+                self.native.insert(Value::String(section.into()), entries);
             }
-        }
-        if let Some(managers) = managers {
-            self.native
-                .insert(Value::String("coherency_managers".into()), managers);
         }
         let mut connections = vec![];
         for (scope, endpoints) in &self.connections {
@@ -811,6 +811,17 @@ fn scope_devices(item: &mut Mapping, scope: &str) -> Result<(), SimError> {
             )?;
         }
     }
+    if let Some(regions) = item
+        .get_mut("address_regions")
+        .and_then(Value::as_sequence_mut)
+    {
+        for region in regions {
+            devices(
+                region.as_mapping_mut().and_then(|m| m.get_mut("devices")),
+                scope,
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -856,7 +867,10 @@ fn validate_request_paths(cfg: &PlatformConfig) -> Result<(), SimError> {
     let graph = crate::memory_mapping::request_graph(cfg)?;
     for pe in cfg.processing_elements.iter().flatten() {
         for (endpoint, map) in [
-            (format!("pe.{}", pe.name), Some(pe.memory_map.as_str())),
+            (
+                format!("pe.{}", pe.name),
+                Some(cfg.pe_backing_map_name(pe, false)?),
+            ),
             (format!("pe.{}.dma", pe.name), pe.dma_memory_map.as_deref()),
         ] {
             let Some(map) = map else { continue };

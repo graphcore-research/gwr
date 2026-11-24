@@ -88,6 +88,9 @@ pub struct PlatformConfig {
     #[serde(default)]
     pub compute_profiles: BTreeMap<String, ComputeConfig>,
     pub memory_maps: Vec<MemoryMapSection>,
+    /// Named virtual address spaces referenced by processing elements.
+    #[serde(default)]
+    pub address_spaces: Vec<AddressSpaceSection>,
     pub defaults: Option<DefaultsSection>,
     pub processing_elements: Option<Vec<ProcessingElementSection>>,
     pub caches: Option<Vec<CacheSection>>,
@@ -139,11 +142,39 @@ pub struct MemoryStripeGroupSection {
     pub devices: Vec<String>,
 }
 
+/// A named PE virtual address space backed by a physical memory map.
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AddressSpaceSection {
+    pub name: String,
+    /// Physical map supplying this address space's memories.
+    pub memory_map: String,
+    /// LSU packet width and virtual stripe width in bytes. Defaults to 32.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access_bytes: Option<usize>,
+    /// Unclaimed memories use their physical addresses directly.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address_regions: Option<Vec<AddressRegionSection>>,
+}
+
+/// A mapping policy over memories in a named address space.
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[serde(deny_unknown_fields, tag = "policy", rename_all = "lowercase")]
+pub enum AddressRegionSection {
+    /// Rotate access-sized chunks over equal-capacity banks in increasing,
+    /// contiguous physical address order.
+    Striped { devices: Vec<String> },
+}
+
 #[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct ProcessingElementSection {
     pub name: String,
+    /// Legacy memory map selector. Empty when `address_space` is supplied.
+    #[serde(default)]
     pub memory_map: String,
+    /// Named virtual address space for this processing element.
+    pub address_space: Option<String>,
     /// Optional memory map for a connected independent `.dma` issuer.
     /// Omission makes DMA use the compute memory map.
     #[serde(default, deserialize_with = "parse_optional_map_name")]

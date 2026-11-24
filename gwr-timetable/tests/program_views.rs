@@ -63,6 +63,7 @@ fn omitted_view_maps_cover_every_resolved_program_port() {
         assert_eq!(views.inputs().len(), 2);
         assert_eq!(views.outputs().len(), 1);
         for view in views.inputs().iter().chain(views.outputs()) {
+            let view = view.as_ref().unwrap();
             assert_eq!(view.shape().dims(), &[shape]);
             assert_eq!(view.offsets(), &[0]);
         }
@@ -107,6 +108,6 @@ fn explicitly_empty_view_map_selects_full_views() {
         .into_graph()
         .unwrap();
     let views = graph.compute_views(3).unwrap();
-    assert_eq!(views.inputs()[0].shape().dims(), &[4]);
-    assert_eq!(views.inputs()[1].shape().dims(), &[4]);
+    assert_eq!(views.inputs()[0].as_ref().unwrap().shape().dims(), &[4]);
+    assert_eq!(views.inputs()[1].as_ref().unwrap().shape().dims(), &[4]);
 }

@@ -5,15 +5,14 @@
 //! Regions map aligned virtual addresses to destination devices and absolute
 //! physical addresses.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::ops::Range;
-use std::option::Option;
-use std::vec::Vec;
 
 use gwr_engine::sim_error;
 use gwr_engine::types::{DeviceId, SimError};
 
 use crate::memory::checked_last_address;
+use crate::memory::memory_map::{MemoryMap, MemoryRegion};
 
 /// How accesses to a virtual region select their device and physical address.
 pub enum AddressRegionPolicy {
@@ -32,17 +31,10 @@ pub enum AddressRegionPolicy {
     },
 }
 
-/// A virtual region with inclusive start and end addresses.
-struct AddressRegion {
-    pub start: u64,
-    pub end: u64,
-    pub policy: AddressRegionPolicy,
-}
-
 /// Nonoverlapping virtual regions sharing one fixed, nonzero access width.
 pub struct AddressSpace {
     access_size_bytes: u64,
-    regions: BTreeMap<u64, AddressRegion>,
+    memory_map: MemoryMap,
 }
 
 impl AddressSpace {
@@ -56,7 +48,7 @@ impl AddressSpace {
 
         Ok(Self {
             access_size_bytes,
-            regions: BTreeMap::new(),
+            memory_map: MemoryMap::new(),
         })
     }
 
@@ -88,7 +80,7 @@ impl AddressSpace {
         let access_size_bytes = self.access_size_bytes;
         if !start.is_multiple_of(access_size_bytes) {
             return sim_error!(
-                "Region start {start} not aliged to access size {access_size_bytes}"
+                "Region start {start} not aligned to access size {access_size_bytes}"
             );
         }
         if !size.is_multiple_of(access_size_bytes) {
@@ -102,22 +94,10 @@ impl AddressSpace {
             ))
         })?;
 
-        // Check overlap with previous region (if any)
-        if let Some((_, prev)) = self.regions.range(..=start).next_back()
-            && prev.end >= start
-        {
-            return sim_error!("Region overlap at {start}");
-        }
-
-        // Check overlap with next region (if any)
-        if let Some((_, next)) = self.regions.range(start..).next()
-            && next.start <= end
-        {
-            return sim_error!("Region overlap at {end}");
-        }
-
-        match &policy {
-            AddressRegionPolicy::Passthrough { .. } => (),
+        match policy {
+            AddressRegionPolicy::Passthrough { device } => {
+                self.memory_map.insert(start, size, device)
+            }
 
             AddressRegionPolicy::Striped {
                 device_size_bytes,
@@ -129,7 +109,7 @@ impl AddressSpace {
                     );
                 }
 
-                for (_, addr) in banks {
+                for (_, addr) in &banks {
                     if !addr.is_multiple_of(access_size_bytes) {
                         return sim_error!(
                             "Striped region bank address {addr} not aligned to access size {access_size_bytes}"
@@ -141,34 +121,33 @@ impl AddressSpace {
                     SimError(format!("bank count cannot be represented as u64: {error}"))
                 })?;
                 let spanned_bytes = bank_count
-                    .checked_mul(*device_size_bytes)
+                    .checked_mul(device_size_bytes)
                     .ok_or_else(|| SimError("Striped region capacity overflows u64".to_owned()))?;
                 if spanned_bytes != size {
                     return sim_error!("Striped region banks span {spanned_bytes} of {size} bytes");
                 }
 
-                for (_, addr) in banks {
-                    if checked_last_address(*addr, *device_size_bytes).is_none() {
-                        return sim_error!(
-                            "Striped region bank at {addr} with size {device_size_bytes} overflows the address space"
-                        );
-                    }
-                }
+                let members = banks
+                    .into_iter()
+                    .map(|(device, start)| {
+                        let end = checked_last_address(start, device_size_bytes).ok_or_else(|| {
+                            SimError(format!(
+                                "Striped region bank at {start} with size {device_size_bytes} overflows the address space"
+                            ))
+                        })?;
+                        Ok(MemoryRegion { start, end, device })
+                    })
+                    .collect::<Result<_, SimError>>()?;
+                self.memory_map
+                    .insert_virtual_striped(members, access_size_bytes, start, end)
             }
         }
-
-        let region = AddressRegion { start, end, policy };
-        self.regions.insert(start, region);
-
-        Ok(())
     }
 
-    /// Return the mapped virtual ranges, with exclusive ends represented in
-    /// `u128` so a region may include `u64::MAX`.
-    pub(crate) fn logical_ranges(&self) -> impl Iterator<Item = Range<u128>> + '_ {
-        self.regions
-            .values()
-            .map(|region| u128::from(region.start)..u128::from(region.end) + 1)
+    /// Use this space's mapping for arbitrary byte ranges or packet routing.
+    #[must_use]
+    pub fn into_memory_map(self) -> MemoryMap {
+        self.memory_map
     }
 
     /// Return virtual ranges whose destination devices are all reachable.
@@ -179,15 +158,7 @@ impl AddressSpace {
         &'a self,
         reachable_devices: &'a HashSet<DeviceId>,
     ) -> impl Iterator<Item = Range<u128>> + 'a {
-        self.regions
-            .values()
-            .filter(move |region| match &region.policy {
-                AddressRegionPolicy::Passthrough { device } => reachable_devices.contains(device),
-                AddressRegionPolicy::Striped { banks, .. } => banks
-                    .iter()
-                    .all(|(device, _)| reachable_devices.contains(device)),
-            })
-            .map(|region| u128::from(region.start)..u128::from(region.end) + 1)
+        self.memory_map.reachable_ranges(reachable_devices)
     }
 
     /// Resolve an aligned virtual address to its destination device and
@@ -202,28 +173,9 @@ impl AddressSpace {
             return None;
         }
 
-        // Find region with greatest start <= addr
-        let (_, region) = self.regions.range(..=virtual_addr).next_back()?;
-        if virtual_addr > region.end {
-            return None;
-        }
-
-        let offset_in_region = virtual_addr - region.start;
-
-        match &region.policy {
-            AddressRegionPolicy::Passthrough { device } => Some((*device, virtual_addr)),
-            AddressRegionPolicy::Striped {
-                banks,
-                device_size_bytes: _,
-            } => {
-                let stripe_index = offset_in_region / self.access_size_bytes;
-                let bank_index = stripe_index as usize % banks.len();
-                let offset_in_bank = (stripe_index / banks.len() as u64) * self.access_size_bytes;
-
-                let (device, physical_base) = banks[bank_index];
-                Some((device, physical_base + offset_in_bank))
-            }
-        }
+        self.memory_map
+            .resolve(virtual_addr)
+            .map(|address| (address.device, address.physical_address))
     }
 }
 
@@ -253,7 +205,7 @@ mod tests {
     #[test]
     fn insert_successfully() {
         let address_space = setup_space();
-        assert_eq!(address_space.regions.len(), 3);
+        assert_eq!(address_space.memory_map.num_regions(), 3);
     }
 
     #[test]
@@ -263,7 +215,7 @@ mod tests {
             address_space
                 .insert(0x0000_3000, 0x1000, policy(DeviceId(4), 0x1000))
                 .unwrap();
-            assert_eq!(address_space.regions.len(), 4, "{name}");
+            assert_eq!(address_space.memory_map.num_regions(), 4, "{name}");
         }
     }
 
@@ -318,7 +270,11 @@ mod tests {
             address_space
                 .insert(start, 64, policy(DeviceId(4), 64))
                 .unwrap();
-            assert_eq!(address_space.regions[&start].end, u64::MAX, "{name}");
+            assert_eq!(
+                address_space.memory_map.regions().next().unwrap().end,
+                u64::MAX,
+                "{name}"
+            );
             assert!(address_space.resolve(u64::MAX - 31).is_some(), "{name}");
         }
     }

@@ -11,39 +11,22 @@ use gwr_track::Tracker;
 use gwr_track::log::Level;
 use gwr_track::test_helpers::TestTracker;
 
-pub struct Simulation {
-    pub platform: Rc<Platform>,
-    pub tracker: Rc<TestTracker>,
-    pub clock: Clock,
-    pub timetable: Rc<Timetable>,
-}
-
-pub fn run_timetable(platform_source: &str, file: TimetableFile) -> Simulation {
+pub fn run_timetable(platform_source: &str, file: TimetableFile) -> (Rc<Platform>, Vec<String>) {
     let (mut engine, clock, platform, tracker) = fixture(platform_source);
     let timetable =
         Rc::new(Timetable::new(engine.top(), file.into_graph().unwrap(), &platform).unwrap());
     let dispatcher: Rc<dyn Dispatch> = timetable.clone();
     platform.attach_dispatcher(&dispatcher);
     engine.run().unwrap();
-    let simulation = Simulation {
-        platform,
-        tracker,
-        clock,
-        timetable,
-    };
-    simulation.timetable.check_tasks_complete().unwrap();
-    let planned = simulation.timetable.workload_totals().unwrap();
+    timetable.check_tasks_complete().unwrap();
+    let planned = timetable.workload_totals().unwrap();
     assert_eq!(
-        simulation
-            .platform
-            .pe("pe0")
-            .unwrap()
-            .memory_traffic_bytes(),
+        platform.pe("pe0").unwrap().memory_traffic_bytes(),
         (planned.read_bytes, planned.written_bytes),
         "planned boundary traffic must match completed execution at tick {}",
-        simulation.clock.tick_now().tick(),
+        clock.tick_now().tick(),
     );
-    simulation
+    (platform, tracker.events())
 }
 
 pub fn assert_rejected_before_loading(
@@ -52,9 +35,11 @@ pub fn assert_rejected_before_loading(
     expected: &[&str],
 ) {
     let (engine, clock, platform, tracker) = fixture(platform_source);
-    let error = Timetable::new(engine.top(), file.into_graph().unwrap(), &platform)
-        .err()
-        .unwrap();
+    let error = file
+        .into_graph()
+        .and_then(|graph| Timetable::new(engine.top(), graph, &platform))
+        .and_then(|timetable| timetable.preflight())
+        .unwrap_err();
     for expected in expected {
         assert!(error.0.contains(expected), "{error:?}");
     }

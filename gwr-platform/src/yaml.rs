@@ -21,6 +21,13 @@ pub fn platform_to_yaml_str(
     emit_optional_section(&mut out, emit_operation_classes(platform)?);
     emit_optional_section(&mut out, emit_compute_profiles(platform)?);
     emit_optional_section(&mut out, emit_memory_maps(platform)?);
+    if !platform.address_spaces.is_empty() {
+        let mut spaces = start_section("address_spaces")?;
+        for line in yaml_serde::to_string(&platform.address_spaces)?.lines() {
+            emit_line(&mut spaces, line, 1)?;
+        }
+        emit_optional_section(&mut out, Some(spaces));
+    }
     emit_optional_section(&mut out, emit_processing_elements(platform)?);
     emit_optional_section(&mut out, emit_fabrics(platform)?);
     emit_optional_section(&mut out, emit_caches(platform)?);
@@ -112,7 +119,12 @@ fn emit_processing_elements(
         let anchor = format!("pe_config_{config_idx}");
 
         emit_line(&mut out, format_args!("- name: {}", pe.name), 1)?;
-        emit_line(&mut out, format_args!("memory_map: {}", pe.memory_map), 2)?;
+        if let Some(space) = &pe.address_space {
+            emit_kv(&mut out, "address_space", serde_json::to_string(space)?, 2)?;
+        }
+        if !pe.memory_map.is_empty() {
+            emit_kv(&mut out, "memory_map", &pe.memory_map, 2)?;
+        }
         if let Some(map) = &pe.dma_memory_map {
             emit_line(&mut out, format_args!("dma_memory_map: {map}"), 2)?;
         }
@@ -522,6 +534,7 @@ mod tests {
             coherency_managers: None,
             compute_profiles: std::collections::BTreeMap::default(),
             operation_classes: BTreeMap::new(),
+            address_spaces: Vec::new(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: None,
@@ -570,24 +583,28 @@ mod tests {
             coherency_managers: None,
             compute_profiles: std::collections::BTreeMap::default(),
             operation_classes: BTreeMap::new(),
+            address_spaces: Vec::new(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: Some(vec![
                 ProcessingElementSection {
                     name: "pe0".to_string(),
                     memory_map: "memory_map".to_string(),
+                    address_space: None,
                     dma_memory_map: None,
                     config: shared_config.clone(),
                 },
                 ProcessingElementSection {
                     name: "pe1".to_string(),
                     memory_map: "memory_map".to_string(),
+                    address_space: None,
                     dma_memory_map: None,
                     config: unique_config.clone(),
                 },
                 ProcessingElementSection {
                     name: "pe2".to_string(),
                     memory_map: "memory_map".to_string(),
+                    address_space: None,
                     dma_memory_map: None,
                     config: shared_config.clone(),
                 },
@@ -675,11 +692,13 @@ mod tests {
             coherency_managers: None,
             compute_profiles: std::collections::BTreeMap::default(),
             operation_classes: BTreeMap::new(),
+            address_spaces: Vec::new(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: Some(vec![ProcessingElementSection {
                 name: "pe0".to_string(),
                 memory_map: "memory_map".to_string(),
+                address_space: None,
                 dma_memory_map: None,
                 config: empty_pe_config.clone(),
             }]),
@@ -745,6 +764,7 @@ mod tests {
             coherency_managers: None,
             compute_profiles: std::collections::BTreeMap::default(),
             operation_classes: BTreeMap::new(),
+            address_spaces: Vec::new(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: None,
@@ -799,6 +819,7 @@ mod tests {
             coherency_managers: None,
             compute_profiles: std::collections::BTreeMap::default(),
             operation_classes: BTreeMap::new(),
+            address_spaces: Vec::new(),
             memory_maps: vec![test_memory_map()],
             defaults: None,
             processing_elements: None,

@@ -18,6 +18,7 @@ impl ComputeModel {
                 .map(|stage| self.lower_stage(stage))
                 .collect::<Result<_, _>>()?,
         };
+        plan.duration_lower_bound_ticks()?;
         // Validate total accounting across independent engines and stage
         // barriers.
         plan.stages
@@ -96,19 +97,22 @@ impl ComputeModel {
             }
             if candidates.len() > 1 {
                 let flops_per_op = candidates[0].flops_per_op;
-                let mut options = candidates
-                    .into_iter()
-                    .map(|candidate| {
-                        timed_batch(
+                let mut options = Vec::new();
+                for candidate in candidates {
+                    let service = service_count(work, candidate.matrix_service_tile)?;
+                    if let Some(ticks) = duration_in_ticks(service as f64 / candidate.rate) {
+                        options.push(engine_batch(
                             candidate.engine,
-                            service_count(work, candidate.matrix_service_tile)? as f64
-                                / candidate.rate,
+                            ticks,
                             work.machine_ops(flops_per_op)?,
                             matrix_accumulator_bytes,
                             vec![action(work, candidate.matrix_service_tile)?],
-                        )
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
+                        ));
+                    }
+                }
+                if options.is_empty() {
+                    return sim_error!("compute duration cannot be represented in ticks");
+                }
                 options.sort_by_key(|batch| (batch.ticks, batch.engine));
                 let mut batch = options.remove(0);
                 for option in options {
@@ -130,34 +134,40 @@ impl ComputeModel {
         let mut fixed = batches
             .into_iter()
             .map(|(engine, (time, counts, bytes, actions))| {
-                timed_batch(engine, time, counts, bytes, actions)
+                let ticks = duration_in_ticks(time).ok_or_else(|| {
+                    SimError("compute duration cannot be represented in ticks".into())
+                })?;
+                Ok(engine_batch(engine, ticks, counts, bytes, actions))
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, SimError>>()?;
         fixed.extend(flexible);
         Ok(fixed)
     }
 }
 
-fn timed_batch(
+fn engine_batch(
     engine: EngineId,
-    time: f64,
+    ticks: u64,
     machine_ops: MachineOpCounts,
     matrix_accumulator_bytes: u64,
     actions: Vec<super::ComputeAction>,
-) -> Result<EngineBatch, SimError> {
-    let ticks = time.ceil();
-    // u64::MAX rounds to 2^64 in f64: equality is out of range too.
-    if !ticks.is_finite() || ticks >= u64::MAX as f64 || ticks < 1.0 {
-        return sim_error!("compute duration cannot be represented in ticks");
-    }
-    Ok(EngineBatch {
+) -> EngineBatch {
+    EngineBatch {
         actions: BTreeMap::from([(engine, actions)]),
         matrix_accumulator_bytes,
         engine,
-        alternatives: vec![(engine, ticks as u64)],
-        ticks: ticks as u64,
+        alternatives: vec![(engine, ticks)],
+        ticks,
         machine_ops,
-    })
+    }
+}
+
+fn duration_in_ticks(time: f64) -> Option<u64> {
+    let ticks = time.ceil();
+    // u64::MAX rounds to 2^64 in f64: equality is out of range too.
+    (1.0..u64::MAX as f64)
+        .contains(&ticks)
+        .then_some(ticks as u64)
 }
 
 fn service_count(

@@ -120,6 +120,7 @@ fn build_platform(args: &Args) -> Result<PlatformConfig, String> {
         }),
         operation_classes: std::collections::BTreeMap::default(),
         compute_profiles: std::collections::BTreeMap::default(),
+        address_spaces: Vec::new(),
         memory_maps: vec![memory_map],
         defaults: None,
         processing_elements: Some(build_processing_elements(args, &pe_config)?),
@@ -155,6 +156,7 @@ fn build_processing_elements(
         .map(|(column, row)| ProcessingElementSection {
             name: create_name("pe", column, row),
             memory_map: PE_MEMORY_MAP_NAME.to_string(),
+            address_space: None,
             dma_memory_map: None,
             config: pe_config.clone(),
         })

@@ -345,6 +345,10 @@ pub(super) fn preflight_program(
     region: &ValidatedRegion,
     schedule: &crate::processing_element::program::tile::TileSchedule,
 ) -> SimResult {
+    let first = schedule
+        .tiles()
+        .next()
+        .ok_or_else(|| SimError("program has no tiles".into()))?;
     for index in &region.assignment_order {
         let assignment = &region.program.assignments[*index];
         let dtype = |expr: &ExprSpec| -> Result<_, SimError> {
@@ -363,7 +367,7 @@ pub(super) fn preflight_program(
                     &assignment.expr,
                     region,
                     region.value(&assignment.primary_result()).unwrap().dtype,
-                    1,
+                    helpers::tile_output_count(&assignment.axes, &first, region)?,
                 )?
                 .0
             }
@@ -373,10 +377,6 @@ pub(super) fn preflight_program(
                 over,
                 ..
             } => {
-                let first = schedule
-                    .tiles()
-                    .next()
-                    .ok_or_else(|| SimError("program has no tiles".into()))?;
                 let mut intervals = first.output_intervals.clone();
                 let chunk = first
                     .reduction_chunks_for(over)

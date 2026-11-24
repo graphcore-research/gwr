@@ -44,6 +44,116 @@ fn preflight_rejects_invalid_references_before_building() {
 }
 
 #[test]
+fn builds_the_named_striped_address_space_example() {
+    let source = include_str!("../examples/simple_pe_striped_mem.yaml");
+    let cfg: PlatformConfig = yaml_serde::from_str(source).unwrap();
+    let pe = &cfg.processing_elements.as_ref().unwrap()[0];
+    let prepared = PreparedPlatform::new(&cfg).unwrap();
+    let map = prepared.pe_memory_map(pe).unwrap();
+    let physical = prepared.memory_map("pe_memory_map").unwrap();
+    assert_eq!(
+        cfg.effective_processing_element_config(pe)
+            .unwrap()
+            .lsu_access_bytes,
+        64
+    );
+    assert_eq!(physical.resolve(0x8040).unwrap().physical_address, 0x8040);
+    let packet = map.resolve_access(0x8050, 16).unwrap();
+    assert_eq!(packet.device, prepared.device_id("hbm1").unwrap());
+    assert_eq!(packet.physical_address, 0x9010);
+    assert!(map.resolve_access(0x8078, 16).is_err());
+
+    let yaml = gwr_platform::yaml::platform_to_yaml_str(&cfg).unwrap();
+    let round_trip: PlatformConfig = yaml_serde::from_str(&yaml).unwrap();
+    assert_eq!(round_trip.address_spaces, cfg.address_spaces);
+
+    let mut engine = Engine::new(&dev_null_tracker());
+    let clock = engine.default_clock();
+    gwr_platform::Platform::from_string(&engine, &clock, &yaml).unwrap();
+}
+
+#[test]
+fn rejects_invalid_named_space_selections_and_stripe_banks() {
+    let source = include_str!("../examples/simple_pe_striped_mem.yaml");
+    for (old, new, expected) in [
+        (
+            "address_space: striped_space",
+            "address_space: unknown",
+            "Unknown address space",
+        ),
+        (
+            "memory_map: pe_memory_map",
+            "memory_map: unknown",
+            "Unknown memory map",
+        ),
+        (
+            "address_space: striped_space",
+            "address_space: striped_space\n    memory_map: pe_memory_map",
+            "exactly one",
+        ),
+        (
+            "[hbm0, hbm1]",
+            "[hbm1, hbm0]",
+            "increasing physical address order",
+        ),
+        ("[hbm0, hbm1]", "[hbm0, hbm0]", "Duplicate memory"),
+        ("[hbm0, hbm1]", "[hbm0, external]", "not in memory map"),
+    ] {
+        let cfg: PlatformConfig = yaml_serde::from_str(&source.replace(old, new)).unwrap();
+        let error = cfg.validate().unwrap_err().to_string();
+        assert!(error.contains(expected), "{error}");
+    }
+}
+
+#[test]
+fn shared_mappings_and_reachability_follow_resolved_stripes() {
+    let mut cfg: PlatformConfig =
+        yaml_serde::from_str(include_str!("../examples/simple_pe_striped_mem.yaml")).unwrap();
+    let primary = cfg.processing_elements.as_ref().unwrap()[0].clone();
+    let mut other = primary.clone();
+    other.name = "other".into();
+    cfg.processing_elements
+        .as_mut()
+        .unwrap()
+        .push(other.clone());
+    let prepared = PreparedPlatform::new(&cfg).unwrap();
+    prepared.validate_shared_address_mappings().unwrap();
+    let reachable = prepared.reachable_memories(&primary.name).unwrap();
+    assert_eq!(reachable.len(), 2);
+    assert_eq!(
+        prepared
+            .pe_memory_map(&primary)
+            .unwrap()
+            .reachable_ranges(&reachable)
+            .next(),
+        Some(0x8000..0xa000),
+    );
+
+    cfg.connections.as_mut().unwrap().pop();
+    let prepared = PreparedPlatform::new(&cfg).unwrap();
+    let reachable = prepared.reachable_memories(&primary.name).unwrap();
+    assert_eq!(reachable.len(), 1);
+    assert!(
+        prepared
+            .pe_memory_map(&primary)
+            .unwrap()
+            .reachable_ranges(&reachable)
+            .next()
+            .is_none()
+    );
+
+    other.address_space = None;
+    other.memory_map = "pe_memory_map".into();
+    cfg.processing_elements.as_mut().unwrap()[1] = other;
+    let prepared = PreparedPlatform::new(&cfg).unwrap();
+    let error = prepared
+        .validate_shared_address_mappings()
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("incompatible address mappings"), "{error}");
+}
+
+#[test]
 fn preflight_preserves_the_last_physical_byte_in_address_maps() {
     let mut cfg = config();
     let memories = cfg.memories.as_mut().unwrap();

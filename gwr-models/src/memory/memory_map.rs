@@ -1,6 +1,6 @@
 // Copyright (c) 2023 Graphcore Ltd. All rights reserved.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::ops::Range;
 
 use gwr_engine::sim_error;
@@ -11,11 +11,22 @@ mod striping;
 use striping::Striping;
 
 /// One physical memory's inclusive address window.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MemoryRegion {
     pub start: u64,
     pub end: u64,
     pub device: DeviceId,
+}
+
+/// The complete placement policy shared by the physical banks of a stripe.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StripedPlacement<'a> {
+    /// First virtual byte of the striped region.
+    pub logical_base: u64,
+    /// Number of consecutive bytes assigned to each bank per stripe.
+    pub stripe_bytes: u64,
+    /// Banks in stripe selection order.
+    pub banks: &'a [MemoryRegion],
 }
 
 /// A logical address resolved into a unique physical memory location.
@@ -45,15 +56,21 @@ impl MemoryMap {
     /// Striped groups expose their members, never their synthetic logical
     /// region.
     pub fn physical_regions(&self) -> impl Iterator<Item = &MemoryRegion> {
-        self.windows.values().flat_map(|window| {
-            window
-                .striping
-                .as_ref()
-                .map_or_else(
-                    || std::slice::from_ref(&window.region),
-                    |striping| striping.members(),
-                )
-                .iter()
+        self.physical_mappings().map(|(region, _)| region)
+    }
+
+    /// Iterate over physical regions and their stripe placement, if any.
+    pub fn physical_mappings(
+        &self,
+    ) -> impl Iterator<Item = (&MemoryRegion, Option<StripedPlacement<'_>>)> {
+        self.logical_windows().flat_map(|(region, striping)| {
+            let placement = striping.map(|(banks, stripe_bytes)| StripedPlacement {
+                logical_base: region.start,
+                stripe_bytes,
+                banks,
+            });
+            let members = placement.map_or(std::slice::from_ref(region), |p| p.banks);
+            members.iter().map(move |member| (member, placement))
         })
     }
 
@@ -104,6 +121,20 @@ impl MemoryMap {
         stripe_bytes: u64,
     ) -> Result<(), SimError> {
         let striping = Striping::new(members, stripe_bytes)?;
+        self.insert_striping(striping)
+    }
+
+    pub(crate) fn insert_virtual_striped(
+        &mut self,
+        members: Vec<MemoryRegion>,
+        stripe_bytes: u64,
+        start: u64,
+        end: u64,
+    ) -> Result<(), SimError> {
+        self.insert_striping(Striping::virtual_region(members, stripe_bytes, start, end))
+    }
+
+    fn insert_striping(&mut self, striping: Striping) -> Result<(), SimError> {
         let region = striping.logical_region();
         self.insert_window(Window {
             region,
@@ -221,6 +252,21 @@ impl MemoryMap {
         self.windows
             .values()
             .map(|w| u128::from(w.region.start)..u128::from(w.region.end) + 1)
+    }
+
+    /// Iterate virtual ranges that only route to devices in `reachable`.
+    /// A striped range requires every bank to be reachable. Range ends are
+    /// exclusive.
+    pub fn reachable_ranges<'a>(
+        &'a self,
+        reachable: &'a HashSet<DeviceId>,
+    ) -> impl Iterator<Item = Range<u128>> + 'a {
+        self.logical_windows()
+            .filter(move |(region, striping)| match striping {
+                None => reachable.contains(&region.device),
+                Some((banks, _)) => banks.iter().all(|bank| reachable.contains(&bank.device)),
+            })
+            .map(|(region, _)| u128::from(region.start)..u128::from(region.end) + 1)
     }
 }
 

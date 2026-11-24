@@ -222,3 +222,61 @@ fn model(
     };
     ComputeModel::new(&config, &classes).unwrap()
 }
+
+#[test]
+fn serial_stages_reject_an_unrepresentable_intrinsic_duration() {
+    let classes = BTreeMap::from([("math".into(), class(&["sin"], 1, 1))]);
+    let model = model(
+        classes,
+        &[("vector", vec![capability("math", None, 1e-19)])],
+    );
+    let mut work = ComputeWork::operation("sin", vec![DataType::Fp32], 1);
+    work.stages.extend(work.stages.clone());
+    let error = model.lower(&work).unwrap_err();
+    assert!(error.to_string().contains("intrinsic compute duration"));
+}
+
+#[test]
+fn flat_matrix_accumulator_declarations_bind_in_programs_and_compute_configs() {
+    let config: ComputeConfig = yaml_serde::from_str(
+        r"
+execution_units:
+  matrix:
+    capabilities:
+      - class: matrix
+        input_dtypes: [[fp16, fp16]]
+        ops_per_tick: 4
+        accumulator: fp32
+",
+    )
+    .unwrap();
+    let classes = BTreeMap::from([("matrix".into(), class(&["matrix_mac"], 2, 2))]);
+    let model = ComputeModel::new(&config, &classes).unwrap();
+    let expr: gwr_models::processing_element::program::syntax::ExprSpec =
+        yaml_serde::from_str("matrix_mac: {accumulator: fp32, over: [k], args: []}").unwrap();
+    let gwr_models::processing_element::program::syntax::ExprSpec::MatrixMac { execution, .. } =
+        expr
+    else {
+        panic!("expected matrix MAC");
+    };
+    assert_eq!(execution.as_ref().unwrap().accumulator, DataType::Fp32);
+    let work =
+        ComputeWork::operation("matrix_mac", vec![DataType::Fp16; 2], 8).with_execution(execution);
+    assert_eq!(model.lower(&work).unwrap().service_ticks().unwrap(), 2);
+}
+
+#[test]
+fn representable_compute_alternative_survives_an_out_of_range_duration() {
+    let classes = BTreeMap::from([("math".into(), class(&["sin"], 1, 1))]);
+    let model = model(
+        classes,
+        &[
+            ("fast", vec![capability("math", None, 2.0)]),
+            ("slow", vec![capability("math", None, 1e-20)]),
+        ],
+    );
+    let plan = model
+        .lower(&ComputeWork::operation("sin", vec![DataType::Fp32], 4))
+        .unwrap();
+    assert_eq!(plan.service_ticks().unwrap(), 2);
+}

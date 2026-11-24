@@ -217,8 +217,11 @@ impl GraphBuilder {
     ) {
         self.file.nodes.push(NodeSection::Compute {
             id: id.to_owned(),
-            program: Box::new(ProgramSpec {
+            program: ProgramSpec {
                 inputs: vec!["A".to_owned(), "B".to_owned()],
+                metadata_inputs: vec![],
+                indexed_metadata_inputs: vec![],
+                local_round_policy: None,
                 outputs: vec!["Y".to_owned()],
                 temporaries: BTreeMap::new(),
                 assignments: vec![AssignmentSpec {
@@ -228,11 +231,13 @@ impl GraphBuilder {
                     expr,
                 }],
                 extents: BTreeMap::new(),
-            }),
+            }
+            .into(),
             tiling,
+            pipeline: None,
             pe: Some(endpoint_name("pe", pe)),
-            input_views,
-            output_views,
+            input_views: Some(input_views.into()),
+            output_views: Some(output_views.into()),
         });
     }
 }
@@ -258,6 +263,8 @@ fn read(tensor: &str, axes: [&str; 2]) -> ExprSpec {
 fn timetable_file() -> TimetableFile {
     let mut builder = GraphBuilder {
         file: TimetableFile {
+            atomic_effects: None,
+            programs: BTreeMap::new(),
             nodes: Vec::new(),
             edges: Vec::new(),
         },
@@ -305,7 +312,8 @@ fn timetable_file() -> TimetableFile {
                 builder.compute(
                     &gemm,
                     ExprSpec::MatrixMac {
-                        accumulator: DataType::Fp32,
+                        execution: None,
+                        quantization: None,
                         args: vec![read("A", ["m", "k"]), read("B", ["k", "n"])],
                         over: vec!["k".to_owned()],
                     },
@@ -329,6 +337,7 @@ fn timetable_file() -> TimetableFile {
                 ExprSpec::Call {
                     op: "add".to_owned(),
                     args: vec![read("A", ["m", "n"]), read("B", ["m", "n"])],
+                    attrs: BTreeMap::new(),
                 },
                 2 * lane + block % 2,
                 tiling.clone(),

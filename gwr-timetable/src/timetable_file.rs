@@ -3,6 +3,7 @@
 //! Types that map directly to the YAML file contents
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::path::Path;
 
 use gwr_engine::types::{SimError, SimResult};
@@ -10,6 +11,7 @@ use gwr_models::processing_element::program::syntax::{
     AssignmentSpec, ProgramSpec, TemporarySpec, TileSpec,
 };
 use gwr_models::processing_element::tensors::dtype::DataType;
+use serde::de::{Error as _, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 
 use crate::graph::TimetableGraph;
@@ -80,10 +82,14 @@ pub enum NodeSection {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pipeline: Option<gwr_models::processing_element::program::pipeline::BlockPipelineSpec>,
         pe: Option<String>,
+        /// Optional input views keyed by port name or listed in declaration
+        /// order.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        input_views: Option<Vec<Option<TensorViewSection>>>,
+        input_views: Option<TensorViewSections>,
+        /// Optional output views keyed by port name or listed in declaration
+        /// order.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        output_views: Option<Vec<Option<TensorViewSection>>>,
+        output_views: Option<TensorViewSections>,
     },
     /// A bounded, byte-preserving copy through the issuing PE's memory path.
     #[serde(rename = "transfer")]
@@ -137,7 +143,7 @@ impl From<ProgramSpec> for ProgramSection {
 }
 
 /// A reusable program, optionally assembled from other named programs.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProgramDefinition {
     pub inputs: Vec<String>,
@@ -185,7 +191,7 @@ impl From<ProgramSpec> for ProgramDefinition {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProgramCall {
     pub program: String,
@@ -202,6 +208,68 @@ pub struct TensorViewSection {
     pub shape: Vec<usize>,
 }
 
+/// Explicit views for one direction of a compute node.
+#[derive(Clone, Debug, Serialize)]
+#[serde(untagged)]
+pub enum TensorViewSections {
+    /// Sparse map from declared port names to views. Missing entries use full
+    /// views.
+    Named(BTreeMap<String, TensorViewSection>),
+    /// Views in declaration order. An empty slot uses the full tensor view.
+    Positional(Vec<Option<TensorViewSection>>),
+}
+
+impl From<Vec<Option<TensorViewSection>>> for TensorViewSections {
+    fn from(views: Vec<Option<TensorViewSection>>) -> Self {
+        Self::Positional(views)
+    }
+}
+
+impl From<BTreeMap<String, TensorViewSection>> for TensorViewSections {
+    fn from(views: BTreeMap<String, TensorViewSection>) -> Self {
+        Self::Named(views)
+    }
+}
+
+impl<'de> Deserialize<'de> for TensorViewSections {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Views;
+
+        impl<'de> Visitor<'de> for Views {
+            type Value = TensorViewSections;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter
+                    .write_str("a map of program port names to tensor views or a sequence of views")
+            }
+
+            fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<Self::Value, M::Error> {
+                let mut views = BTreeMap::new();
+                while let Some((name, view)) = map.next_entry::<String, TensorViewSection>()? {
+                    if views.contains_key(&name) {
+                        return Err(M::Error::custom(format!("duplicate view port '{name}'")));
+                    }
+                    views.insert(name, view);
+                }
+                Ok(TensorViewSections::Named(views))
+            }
+
+            fn visit_seq<S: SeqAccess<'de>>(
+                self,
+                mut sequence: S,
+            ) -> Result<Self::Value, S::Error> {
+                let mut views = Vec::new();
+                while let Some(view) = sequence.next_element()? {
+                    views.push(view);
+                }
+                Ok(TensorViewSections::Positional(views))
+            }
+        }
+
+        deserializer.deserialize_any(Views)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TensorConfigSection {
@@ -211,6 +279,11 @@ pub struct TensorConfigSection {
     pub shape: Vec<usize>,
 }
 
+/// Serialized data, control, or dependency edge.
+///
+/// Compute ports accept `node.port`. Legacy numeric suffixes still select
+/// positional slots when they do not match a declared port name. The graph
+/// resolves dotted node IDs and port names against the declarations.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct EdgeSection {
@@ -220,16 +293,17 @@ pub struct EdgeSection {
 }
 
 impl EdgeSection {
-    /// Return the node ID in the edge from end
+    /// Return the source node ID of a positional endpoint.
     ///
     /// Endpoint IDs are `<node_id>[.<edge_index>]`. Node IDs may contain dots;
-    /// only a final decimal token is interpreted as a port index.
+    /// only a final decimal token is interpreted as a port index. Use the
+    /// resolved graph to inspect a named endpoint.
     #[must_use]
     pub fn from_node_id(&self) -> &str {
         split_edge_end(&self.from).0
     }
 
-    /// Return the node ID in the edge to end
+    /// Return the destination node ID of a positional endpoint.
     ///
     /// See `from_node_id` for more details.
     #[must_use]
@@ -237,10 +311,14 @@ impl EdgeSection {
         split_edge_end(&self.to).0
     }
 
+    /// Parse the source of a positional edge into its node ID and optional
+    /// slot.
     pub fn from_node_and_edge(&self) -> Result<(&str, Option<usize>), SimError> {
         parse_edge_end(&self.from)
     }
 
+    /// Parse the destination of a positional edge into its node ID and optional
+    /// slot.
     pub fn to_node_and_edge(&self) -> Result<(&str, Option<usize>), SimError> {
         parse_edge_end(&self.to)
     }
@@ -264,7 +342,7 @@ pub enum EdgeKind {
 ///   gemm_0.1
 /// will find the node named `gemm_0` defined in `node_idx_by_id` and return
 /// Some(1) as the edge index into that node.
-pub(crate) fn parse_edge_end(id: &str) -> Result<(&str, Option<usize>), SimError> {
+fn parse_edge_end(id: &str) -> Result<(&str, Option<usize>), SimError> {
     let (node_id, suffix) = split_edge_end(id);
     let index = suffix
         .map(|index| {
@@ -278,7 +356,7 @@ pub(crate) fn parse_edge_end(id: &str) -> Result<(&str, Option<usize>), SimError
 
 // Dots are permitted in logical node IDs. Only a final unsigned decimal token
 // denotes a tensor port index; all other suffixes remain part of the node ID.
-fn split_edge_end(id: &str) -> (&str, Option<&str>) {
+pub(crate) fn split_edge_end(id: &str) -> (&str, Option<&str>) {
     match id.rsplit_once('.') {
         Some((node, suffix))
             if !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit()) =>

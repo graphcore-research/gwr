@@ -96,13 +96,16 @@ fn compute_input_view_outside_tensor() {
     let NodeSection::Compute { input_views, .. } = &mut timetable_file.nodes[2] else {
         panic!("expected compute node");
     };
-    *input_views = Some(vec![
-        Some(TensorViewSection {
-            shape: vec![3, 10, 10],
-            offsets: vec![1, 1, 1],
-        }),
-        None,
-    ]);
+    *input_views = Some(
+        vec![
+            Some(TensorViewSection {
+                shape: vec![3, 10, 10],
+                offsets: vec![1, 1, 1],
+            }),
+            None,
+        ]
+        .into(),
+    );
 
     let err = build_timetable(&top, timetable_file, &platform).unwrap_err();
     assert!(format!("{err}").contains(
@@ -116,10 +119,13 @@ fn compute_output_view_outside_tensor() {
     let NodeSection::Compute { output_views, .. } = &mut timetable_file.nodes[2] else {
         panic!("expected compute node");
     };
-    *output_views = Some(vec![Some(TensorViewSection {
-        shape: vec![3, 10, 100],
-        offsets: vec![0, 0, 0],
-    })]);
+    *output_views = Some(
+        vec![Some(TensorViewSection {
+            shape: vec![3, 10, 100],
+            offsets: vec![0, 0, 0],
+        })]
+        .into(),
+    );
 
     let err = build_timetable(&top, timetable_file, &platform).unwrap_err();
     assert!(format!("{err}").contains(

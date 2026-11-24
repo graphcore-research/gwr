@@ -20,6 +20,8 @@ fn cli(platform: &str, timetable: &str, flags: &[&str]) -> Output {
         .arg(platform_path)
         .arg("--timetable")
         .arg(timetable_path)
+        .arg("--error-mermaid")
+        .arg(dir.path().join("error.mmd"))
         .args(flags)
         .output()
         .unwrap()
@@ -104,19 +106,10 @@ fn check_and_explain_preserve_constructor_errors() {
             TIMETABLE.replace("add.A", "add.missing"),
         ),
         (
-            PLATFORM.replace("sram_bytes: 256", "sram_bytes: 40"),
-            TIMETABLE.to_owned(),
-        ),
-        (
-            PLATFORM.to_owned(),
-            TIMETABLE.replace("add:", "unknown_op:"),
-        ),
-        (
-            PLATFORM.replace("capacity_bytes: 1MiB", "capacity_bytes: 4KiB"),
-            TIMETABLE.to_owned(),
-        ),
-        (
-            PLATFORM.replace("access_bytes: 32", "access_bytes: 0"),
+            PLATFORM.replace(
+                "sram_bytes: 256",
+                "sram_bytes: 256\n      lsu_access_bytes: 0",
+            ),
             TIMETABLE.to_owned(),
         ),
     ] {
@@ -127,9 +120,76 @@ fn check_and_explain_preserve_constructor_errors() {
         );
         for flag in ["--check", "--explain"] {
             let checked = cli(&platform, &timetable, &[flag]);
-            assert_eq!(normal.status.success(), checked.status.success());
-            assert_eq!(normal.stderr, checked.stderr);
+            assert_eq!(normal.status.code(), checked.status.code());
+            assert_eq!(
+                String::from_utf8_lossy(&normal.stderr),
+                String::from_utf8_lossy(&checked.stderr)
+            );
         }
+    }
+}
+
+#[test]
+fn check_and_explain_validate_task_admission_before_execution() {
+    for (platform, timetable, expected) in [
+        (
+            PLATFORM.to_owned(),
+            TIMETABLE.replace("add:", "unknown_op:"),
+            "unsupported capability",
+        ),
+        (
+            PLATFORM.replace("sram_bytes: 256", "sram_bytes: 40"),
+            TIMETABLE.to_owned(),
+            "requires 48 SRAM bytes, available 40",
+        ),
+        (
+            PLATFORM.replace("capacity_bytes: 1MiB", "capacity_bytes: 4KiB"),
+            TIMETABLE.to_owned(),
+            "unmapped touched bytes",
+        ),
+    ] {
+        for flag in ["--check", "--explain"] {
+            let checked = cli(&platform, &timetable, &[flag]);
+            assert!(!checked.status.success());
+            let error = String::from_utf8_lossy(&checked.stderr);
+            assert!(error.contains("Node 'add' on PE 'pe0'"), "{error}");
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+}
+
+#[test]
+fn ordinary_cli_validates_later_tasks_before_issuing_memory_requests() {
+    let timetable = TIMETABLE.replace("mul:", "unknown_op:");
+    let output = cli(PLATFORM, &timetable, &["--stdout-level", "trace"]);
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("Node 'multiply' on PE 'pe0'"), "{error}");
+    assert!(error.contains("unsupported capability"), "{error}");
+    let log = String::from_utf8_lossy(&output.stdout);
+    assert!(!log.contains("MemoryAccess:"), "{log}");
+}
+
+#[test]
+fn preparation_modes_skip_activity_export() {
+    let dir = tempdir().unwrap();
+    let activity = dir.path().join("activity.json");
+    let path = activity.to_str().unwrap();
+    for flag in ["--check", "--explain"] {
+        success(&cli(PLATFORM, TIMETABLE, &[flag, "--activity-out", path]));
+        assert!(!activity.exists());
+    }
+    success(&cli(PLATFORM, TIMETABLE, &["--activity-out", path]));
+    assert!(activity.is_file());
+}
+
+#[test]
+fn preparation_modes_conflict_with_roofline_analysis() {
+    for flag in ["--check", "--explain"] {
+        let output = cli(PLATFORM, TIMETABLE, &[flag, "--roofline-analyze"]);
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("cannot be used with"), "{error}");
     }
 }
 
@@ -156,8 +216,9 @@ fn explanation_does_not_execute_or_change_prepared_state() {
         .unwrap();
     let timetable = Rc::new(Timetable::new(engine.top(), graph, &platform).unwrap());
     let before = tracker.events();
-    let summary = timetable.preparation_description();
-    assert_eq!(summary, timetable.preparation_description());
+    timetable.preflight().unwrap();
+    let summary = timetable.preparation_description().unwrap();
+    assert_eq!(summary, timetable.preparation_description().unwrap());
     assert_eq!(before, tracker.events());
     assert_eq!(clock.tick_now().tick(), 0);
     assert_eq!(timetable.num_graph_nodes_active(), 0);
@@ -167,7 +228,7 @@ fn explanation_does_not_execute_or_change_prepared_state() {
     assert_eq!(pe.machine_ops().checked_operation_total().unwrap(), 0);
     let mem = platform.memory("mem").unwrap();
     assert_eq!((mem.bytes_read(), mem.bytes_written()), (0, 0));
-    // Explaining must leave the prepared handles ready for normal dispatch.
+    // The timetable can still be dispatched after preflight and explanation.
     let dispatcher: Rc<dyn Dispatch> = timetable.clone();
     platform.attach_dispatcher(&dispatcher);
     engine.run().unwrap();
@@ -200,12 +261,10 @@ fn explanation_size_is_independent_of_tile_count() {
 
 #[test]
 fn explain_uses_named_views_and_effective_hardware_overrides() {
-    let platform = PLATFORM
-        .replace(
-            "sram_bytes: 256",
-            "sram_bytes: 512\n      num_active_requests: 3\n      overhead_size_bytes: 9",
-        )
-        .replace("access_bytes: 32", "access_bytes: 16");
+    let platform = PLATFORM.replace(
+        "sram_bytes: 256",
+        "sram_bytes: 512\n      num_active_requests: 3\n      overhead_size_bytes: 9\n      lsu_access_bytes: 16",
+    );
     let timetable = TIMETABLE.replace(
         "    tiling: { sizes: { i: 4 } }",
         "    input_views:\n      A: { offsets: [2], shape: [4] }\n      B: { offsets: [1], shape: [4] }\n    output_views:\n      T: { offsets: [3], shape: [4] }\n    tiling: { sizes: { i: 3 } }",
@@ -216,9 +275,7 @@ fn explain_uses_named_views_and_effective_hardware_overrides() {
     file.nodes
         .retain(|node| node.id() != "multiply" && node.id() != "Y" && node.id() != "C");
     file.edges.retain(|edge| {
-        edge.from_node_id() != "C"
-            && edge.to_node_id() != "multiply"
-            && edge.from_node_id() != "multiply"
+        edge.from != "C" && !edge.to.starts_with("multiply.") && !edge.from.starts_with("multiply.")
     });
     let summary = success(&cli(
         &platform,

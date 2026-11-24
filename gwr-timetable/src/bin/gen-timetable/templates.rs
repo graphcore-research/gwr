@@ -5,10 +5,9 @@
 
 use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
+use gwr_models::processing_element::compute::ExecutionMode;
 use gwr_models::processing_element::program::syntax::ProgramSpec;
-use gwr_models::processing_element::program::validate::{
-    RegionBindings, TensorSpec, validate_program,
-};
+use gwr_models::processing_element::program::validate::TensorSpec;
 use gwr_models::processing_element::tensors::dtype::DataType;
 use gwr_models::processing_element::tensors::{HasShape, Shape, Tensor, TensorView};
 use rand::RngExt;
@@ -30,30 +29,11 @@ pub enum ProgramTemplate {
 }
 
 impl ProgramTemplate {
-    pub fn validate(
+    pub fn program_with_execution(
         &self,
         inputs: &[Option<TensorView>],
         outputs: &[Option<TensorView>],
-    ) -> Result<(), SimError> {
-        let program = self.program(inputs, outputs)?;
-        let bindings = RegionBindings {
-            inputs: inputs
-                .iter()
-                .cloned()
-                .collect::<Option<Vec<_>>>()
-                .ok_or_else(|| SimError("generated program has an unbound input".into()))?,
-            outputs: outputs
-                .iter()
-                .cloned()
-                .collect::<Option<Vec<_>>>()
-                .ok_or_else(|| SimError("generated program has an unbound output".into()))?,
-        };
-        validate_program(&program, &bindings).map(drop)
-    }
-    pub fn program(
-        &self,
-        inputs: &[Option<TensorView>],
-        outputs: &[Option<TensorView>],
+        execution: Option<ExecutionMode>,
     ) -> Result<ProgramSpec, SimError> {
         let input_specs = inputs.iter().flatten().map(tensor_spec).collect::<Vec<_>>();
         let output_specs = outputs
@@ -66,7 +46,7 @@ impl ProgramTemplate {
             .ok_or_else(|| SimError("generated program has no output".into()))?;
         match self {
             Self::Add => add_program(&input_specs, output),
-            Self::Gemm => gemm_program(&input_specs, output),
+            Self::Gemm => gemm_program(&input_specs, output, execution),
             Self::ReduceMax => {
                 let input = input_specs
                     .first()

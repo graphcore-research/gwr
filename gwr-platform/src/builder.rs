@@ -7,7 +7,7 @@ use std::rc::Rc;
 use gwr_engine::engine::Engine;
 use gwr_engine::sim_error;
 use gwr_engine::time::clock::Clock;
-use gwr_engine::types::SimError;
+use gwr_engine::types::{SimError, SimResult};
 use gwr_models::cache::coherency_manager::{CoherencyManager, CoherencyManagerConfig};
 use gwr_models::cache::{Cache, CacheConfig, CoherenceConfig};
 use gwr_models::fabric::functional::FunctionalFabric;
@@ -95,6 +95,20 @@ impl EffectiveConfigs {
             memories: memory_configs(platform)?,
         })
     }
+
+    pub(crate) fn install_fabric_routes(
+        &mut self,
+        platform: &PlatformConfig,
+        device_ids: &DeviceIds,
+    ) -> SimResult {
+        let mut destinations = fabric_destination_port_maps(platform, device_ids, &self.fabrics)?;
+        for (section, (config, _)) in platform.fabrics.iter().flatten().zip(&mut self.fabrics) {
+            Rc::get_mut(config)
+                .expect("install routes before sharing fabric configuration")
+                .set_destination_port_map(destinations.remove(&section.name).unwrap_or_default())?;
+        }
+        Ok(())
+    }
 }
 
 pub const DEFAULT_PE_NUM_ACTIVE_REQUESTS: usize = 8;
@@ -111,6 +125,8 @@ pub fn build_pes<S: BuildHasher>(
     device_ids: &DeviceIds,
 ) -> Result<(Vec<Rc<ProcessingElement>>, NameToIdxMap), SimError> {
     let configs = processing_element_configs(cfg)?;
+    let address_spaces =
+        crate::memory_mapping::resolve_address_spaces(cfg, memory_maps, device_ids)?;
     build_pes_from_configs(
         engine,
         clock,
@@ -118,6 +134,7 @@ pub fn build_pes<S: BuildHasher>(
         cfg,
         &configs,
         memory_maps,
+        &address_spaces,
         device_ids,
     )
 }
@@ -129,8 +146,84 @@ fn processing_element_configs(
         .processing_elements
         .iter()
         .flatten()
-        .map(|pe| pe.effective_config(&platform.operation_classes, &platform.compute_profiles))
+        .map(|pe| platform.effective_processing_element_config(pe))
         .collect()
+}
+
+impl PlatformConfig {
+    /// Resolve the PE's compute, storage, and LSU settings against the
+    /// platform.
+    pub fn effective_processing_element_config(
+        &self,
+        pe: &ProcessingElementSection,
+    ) -> Result<ProcessingElementConfig, SimError> {
+        let space = self.pe_address_space(pe)?;
+        let mut config = pe.effective_config(&self.operation_classes, &self.compute_profiles)?;
+        if let Some(space) = space {
+            let width = space.access_size_bytes()?;
+            if pe
+                .config
+                .lsu_access_bytes
+                .is_some_and(|bytes| bytes != width)
+            {
+                return sim_error!(
+                    "Processing element '{}' LSU access size conflicts with address space '{}'",
+                    pe.name,
+                    space.name
+                );
+            }
+            config.lsu_access_bytes = width;
+        }
+        Ok(config)
+    }
+
+    pub(crate) fn pe_address_space(
+        &self,
+        pe: &ProcessingElementSection,
+    ) -> Result<Option<&crate::types::AddressSpaceSection>, SimError> {
+        match (pe.memory_map.is_empty(), pe.address_space.as_deref()) {
+            (false, None) => Ok(None),
+            (true, Some(name)) => self
+                .address_spaces
+                .iter()
+                .find(|space| space.name == name)
+                .map(Some)
+                .ok_or_else(|| {
+                    SimError(format!(
+                        "Unknown address space '{name}' for processing element '{}'",
+                        pe.name
+                    ))
+                }),
+            _ => sim_error!(
+                "Processing element '{}' must select exactly one memory_map or address_space",
+                pe.name
+            ),
+        }
+    }
+
+    /// Name of the backing memory map for the PE's compute or DMA interface.
+    pub fn pe_backing_map_name<'a>(
+        &'a self,
+        pe: &'a ProcessingElementSection,
+        dma: bool,
+    ) -> Result<&'a str, SimError> {
+        if dma && let Some(map) = &pe.dma_memory_map {
+            return Ok(map);
+        }
+        Ok(self
+            .pe_address_space(pe)?
+            .map_or(pe.memory_map.as_str(), |space| &space.memory_map))
+    }
+}
+
+impl crate::types::AddressSpaceSection {
+    pub(crate) fn access_size_bytes(&self) -> Result<usize, SimError> {
+        let width = self.access_bytes.unwrap_or(DEFAULT_PE_LSU_ACCESS_BYTES);
+        if width == 0 {
+            return sim_error!("Address space '{}': Invalid access size 0", self.name);
+        }
+        Ok(width)
+    }
 }
 
 impl ProcessingElementSection {
@@ -205,6 +298,7 @@ impl ProcessingElementConfigSection {
     }
 }
 
+#[expect(clippy::too_many_arguments)]
 pub(crate) fn build_pes_from_configs<S: BuildHasher>(
     engine: &Engine,
     clock: &Clock,
@@ -212,16 +306,14 @@ pub(crate) fn build_pes_from_configs<S: BuildHasher>(
     cfg: &PlatformConfig,
     configs: &[ProcessingElementConfig],
     memory_maps: &HashMap<String, Rc<MemoryMap>, S>,
+    address_spaces: &HashMap<String, Rc<MemoryMap>>,
     device_ids: &DeviceIds,
 ) -> Result<(Vec<Rc<ProcessingElement>>, NameToIdxMap), SimError> {
     let mut processing_elements = Vec::new();
     if let Some(pes) = &cfg.processing_elements {
         for (pe_section, pe_config) in pes.iter().zip(configs) {
-            let memory_map = memory_maps
-                .get(pe_section.memory_map.as_str())
-                .ok_or_else(|| {
-                    SimError(format!("Unknown memory map '{}'", pe_section.memory_map))
-                })?;
+            let memory_map =
+                crate::memory_mapping::pe_map(pe_section, memory_maps, address_spaces)?;
             let device_id = *device_ids
                 .get(&pe_section.name)
                 .ok_or_else(|| SimError(format!("Unknown device '{}'", pe_section.name)))?;
@@ -392,13 +484,21 @@ pub fn build_fabric_destination_port_maps(
     cfg: &PlatformConfig,
     device_ids: &DeviceIds,
 ) -> Result<FabricDestinationPortMaps, SimError> {
-    let topology = FabricTopology::new(cfg)?;
+    fabric_destination_port_maps(cfg, device_ids, &fabric_configs(cfg)?)
+}
+
+fn fabric_destination_port_maps(
+    cfg: &PlatformConfig,
+    device_ids: &DeviceIds,
+    configs: &[(Rc<FabricConfig>, FabricRoutingAlgorithm)],
+) -> Result<FabricDestinationPortMaps, SimError> {
+    let topology = FabricTopology::new(cfg, configs)?;
     let mut maps = FabricDestinationPortMaps::new();
 
     if let Some(fabrics) = &cfg.fabrics {
         for fabric in fabrics {
             let mut destination_port_map: FabricDestinationPortMap = HashMap::new();
-            let Some(config) = topology.fabric_configs.get(&fabric.name) else {
+            let Some(config) = topology.fabric_configs.get(fabric.name.as_str()) else {
                 continue;
             };
 
@@ -604,16 +704,25 @@ pub(crate) fn build_memories_from_configs(
     Ok((memories, memories_idx_by_id))
 }
 
-struct FabricTopology {
+struct FabricTopology<'a> {
     edges: HashMap<ResolvedEndpoint, HashSet<ResolvedEndpoint>>,
-    fabric_configs: HashMap<String, FabricConfig>,
+    fabric_configs: HashMap<&'a str, &'a FabricConfig>,
 }
 
-impl FabricTopology {
-    fn new(cfg: &PlatformConfig) -> Result<Self, SimError> {
+impl<'a> FabricTopology<'a> {
+    fn new(
+        cfg: &'a PlatformConfig,
+        configs: &'a [(Rc<FabricConfig>, FabricRoutingAlgorithm)],
+    ) -> Result<Self, SimError> {
         let mut topology = Self {
             edges: HashMap::new(),
-            fabric_configs: build_empty_fabric_configs(cfg)?,
+            fabric_configs: cfg
+                .fabrics
+                .iter()
+                .flatten()
+                .zip(configs)
+                .map(|(fabric, (config, _))| (fabric.name.as_str(), config.as_ref()))
+                .collect(),
         };
         topology.add_cache_passthroughs(cfg);
         topology.add_connection_edges(cfg)?;
@@ -695,7 +804,7 @@ impl FabricTopology {
 
             if let ResolvedEndpoint::FabricPort { fabric, .. } = &node
                 && fabric != target_fabric
-                && let Some(config) = self.fabric_configs.get(fabric)
+                && let Some(config) = self.fabric_configs.get(fabric.as_str())
                 // Foreign fabrics act as a complete port switch here. The
                 // first dequeued port has the minimum BFS distance, so its
                 // expansion reaches every port at the minimum switch cost;
@@ -809,21 +918,6 @@ enum ResolvedEndpoint {
     Mem(String),
     CoherencyManager(String),
     FabricPort { fabric: String, port_idx: usize },
-}
-
-fn build_empty_fabric_configs(
-    cfg: &PlatformConfig,
-) -> Result<HashMap<String, FabricConfig>, SimError> {
-    // These configs are topology-only: the destination port maps have not been
-    // derived yet, so they are built empty and used only for fabric geometry.
-    let mut fabric_configs = HashMap::new();
-    if let Some(fabrics) = &cfg.fabrics {
-        for fabric in fabrics {
-            let (config, _) = fabric.effective_config(HashMap::new())?;
-            fabric_configs.insert(fabric.name.clone(), config);
-        }
-    }
-    Ok(fabric_configs)
 }
 
 fn fabric_configs(
@@ -975,6 +1069,7 @@ mod tests {
             coherency_managers: None,
             compute_profiles: std::collections::BTreeMap::default(),
             operation_classes: std::collections::BTreeMap::new(),
+            address_spaces: Vec::new(),
             memory_maps: vec![MemoryMapSection {
                 address_mapping: None,
                 name: "mm0".to_string(),

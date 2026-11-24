@@ -3,40 +3,59 @@
 use std::fmt::Write as _;
 
 use clap::ValueEnum;
+use gwr_engine::types::SimError;
+use gwr_models::processing_element::dispatch::Dispatch;
+use gwr_models::processing_element::program::validate::{RegionBindings, validate_program};
+use gwr_models::processing_element::task::Task;
 use gwr_models::processing_element::tensors::{HasShape, TensorView};
 
 use crate::Timetable;
 
 impl Timetable {
-    /// Describe retained preparation facts without running or revisiting tiles.
+    /// Describe program-task bindings, tiling, workspace, and logical traffic
+    /// along with effective PE configuration, without starting simulation.
     ///
-    /// Output is deterministic and proportional to graph metadata,
-    /// independently of the number of tile invocations. Logical boundary bytes
-    /// precede LSU packetization; they are not physical traffic measurements.
-    #[must_use]
-    pub fn preparation_description(&self) -> String {
+    /// Output size is proportional to graph metadata. Computing the planned
+    /// traffic may traverse tiles. Call [`Self::preflight`] first to check task
+    /// admission, including capabilities, SRAM capacity, and memory mappings.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if task metadata cannot be resolved or a workspace or
+    /// traffic estimate fails.
+    pub fn preparation_description(&self) -> Result<String, SimError> {
         let mut out = String::from(
             "Preparation summary (logical planned bytes; physical traffic is not observed):\n",
         );
         let mut pe_names = self.platform.pe_names();
         pe_names.sort();
         for name in pe_names {
-            let pe = self.platform.pe(&name).expect("retained PE name");
+            let pe = self.platform.pe(&name)?;
             writeln!(out, "PE {name}: {}", pe.configuration_description()).unwrap();
         }
         for (index, node) in self.graph.nodes().iter().enumerate() {
-            let Some(task) = self.prepared_tasks.get(&index) else {
+            if node.program().is_none() {
+                continue;
+            }
+            let Task::ProgramTask { config } = self.task_by_id(index)? else {
                 continue;
             };
-            let program = task.program();
-            writeln!(out, "Node {} on PE {}:", node.id(), node.pe().unwrap()).unwrap();
-            let views = self
-                .graph
-                .compute_views(index)
-                .expect("prepared task views");
+            let pe_name = node.pe().expect("program task placement");
+            let pe = self.platform.pe(pe_name)?;
+            let program = &config.program;
+            let region = validate_program(
+                program,
+                &RegionBindings {
+                    inputs: config.inputs.clone(),
+                    outputs: config.outputs.clone(),
+                },
+            )?;
+            let declared = config.tiling.as_ref().map(|tiling| &tiling.sizes);
+
+            writeln!(out, "Node {} on PE {pe_name}:", node.id()).unwrap();
             for (names, bindings, direction, arrow) in [
-                (program.input_names(), views.inputs(), "input", "<-"),
-                (program.output_names(), views.outputs(), "output", "->"),
+                (&program.inputs, &config.inputs, "input", "<-"),
+                (&program.outputs, &config.outputs, "output", "->"),
             ] {
                 for (name, view) in names.iter().zip(bindings) {
                     write!(out, "  {direction} {name} {arrow} ").unwrap();
@@ -47,8 +66,8 @@ impl Timetable {
                 out,
                 "  extents: {}",
                 axis_sizes(
-                    program
-                        .extents()
+                    region
+                        .extents
                         .iter()
                         .map(|(axis, size)| (axis.as_str(), *size))
                 )
@@ -58,9 +77,9 @@ impl Timetable {
                 out,
                 "  declared tile sizes: {}",
                 axis_sizes(
-                    program
-                        .declared_tile_sizes()
-                        .iter()
+                    declared
+                        .into_iter()
+                        .flatten()
                         .map(|(axis, size)| (axis.as_str(), *size))
                 )
             )
@@ -68,18 +87,22 @@ impl Timetable {
             writeln!(
                 out,
                 "  effective tile sizes: {} (maximum; tail tiles may be smaller)",
-                axis_sizes(program.effective_tile_sizes())
+                axis_sizes(region.extents.iter().map(|(axis, &extent)| {
+                    let step = declared.and_then(|sizes| sizes.get(axis)).copied();
+                    (axis.as_str(), step.unwrap_or(extent).min(extent))
+                }))
             )
             .unwrap();
-            writeln!(out, "  peak SRAM: {} bytes", task.peak_sram_bytes()).unwrap();
-            let (read, written) = task.planned_traffic_bytes();
+            let peak = pe.program_workspace_bytes(&config)?;
+            writeln!(out, "  peak SRAM: {peak} bytes").unwrap();
+            let (read, written) = config.planned_traffic_bytes()?;
             writeln!(
                 out,
                 "  logical boundary traffic: read={read} bytes, write={written} bytes"
             )
             .unwrap();
         }
-        out
+        Ok(out)
     }
 }
 

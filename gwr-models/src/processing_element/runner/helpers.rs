@@ -7,6 +7,7 @@ use gwr_engine::types::SimError;
 
 use crate::processing_element::program;
 use crate::processing_element::program::syntax::{ExprSpec, IndexSpec};
+use crate::processing_element::program::tile::RegionTile;
 use crate::processing_element::program::validate::ValidatedRegion;
 use crate::processing_element::tensors::{HasShape, TensorView};
 
@@ -15,6 +16,22 @@ pub(super) fn align8(bytes: usize) -> Result<usize, SimError> {
         .checked_add(7)
         .map(|value| value & !7)
         .ok_or_else(|| SimError("SRAM slot alignment overflows".into()))
+}
+
+pub(super) fn tile_output_count(
+    axes: &[String],
+    tile: &RegionTile,
+    region: &ValidatedRegion,
+) -> Result<usize, SimError> {
+    axes.iter().try_fold(1usize, |count, axis| {
+        count
+            .checked_mul(
+                tile.output_intervals
+                    .get(axis)
+                    .map_or_else(|| region.extent(axis).unwrap(), Range::len),
+            )
+            .ok_or_else(|| SimError("tile operation count overflows".into()))
+    })
 }
 
 pub(super) fn assignment_dependencies(

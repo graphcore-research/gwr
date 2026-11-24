@@ -13,10 +13,13 @@ use gwr_models::processing_element::tensors::{Tensor, TensorView};
 
 use crate::program_compose::ProgramCatalog;
 use crate::timetable_file::{
-    EdgeKind, NodeSection, TensorViewSection, TimetableFile, parse_edge_end,
+    EdgeKind, NodeSection, TensorViewSection, TensorViewSections, TimetableFile,
 };
 
 mod accesses;
+mod ports;
+
+use ports::{resolve_endpoint, resolve_views};
 
 /// A timetable whose nodes, edges, tensors, and views have been resolved and
 /// validated.
@@ -53,17 +56,11 @@ impl TimetableGraph {
 
         for section in file.edges {
             let edge_index = edges.len();
-            let (from_id, requested_from_index) = parse_edge_end(&section.from)?;
-            let (to_id, requested_to_index) = parse_edge_end(&section.to)?;
-            let from_node = node_indices.get(from_id).copied().ok_or_else(|| {
-                SimError(format!(
-                    "Edge contains invalid from Node ID '{}'",
-                    section.from
-                ))
-            })?;
-            let to_node = node_indices.get(to_id).copied().ok_or_else(|| {
-                SimError(format!("Edge contains invalid to Node ID '{}'", section.to))
-            })?;
+            let from =
+                resolve_endpoint(&section.from, &node_indices, &nodes, EdgeDirection::Output)?;
+            let to = resolve_endpoint(&section.to, &node_indices, &nodes, EdgeDirection::Input)?;
+            let from_node = from.node;
+            let to_node = to.node;
 
             if section.kind != EdgeKind::Data {
                 if section.kind == EdgeKind::Dependency {
@@ -72,8 +69,8 @@ impl TimetableGraph {
                 }
                 edges.push(TimetableEdge {
                     kind: section.kind,
-                    from: EdgeEndpoint::new(from_node, requested_from_index),
-                    to: EdgeEndpoint::new(to_node, requested_to_index),
+                    from: EdgeEndpoint::new(from_node, from.index),
+                    to: EdgeEndpoint::new(to_node, to.index),
                     tensor: None,
                 });
                 continue;
@@ -88,13 +85,15 @@ impl TimetableGraph {
             let from_index = resolve_edge_index(
                 &nodes[from_node],
                 EdgeDirection::Output,
-                requested_from_index,
+                from,
+                view_sections[from_node].as_ref(),
                 &mut used_outputs[from_node],
             )?;
             let to_index = resolve_edge_index(
                 &nodes[to_node],
                 EdgeDirection::Input,
-                requested_to_index,
+                to,
+                view_sections[to_node].as_ref(),
                 &mut used_inputs[to_node],
             )?;
 
@@ -218,28 +217,8 @@ impl TimetableGraph {
             };
             if let Some(program) = node.program() {
                 let bindings = RegionBindings {
-                    inputs: views
-                        .inputs()
-                        .iter()
-                        .cloned()
-                        .collect::<Option<Vec<_>>>()
-                        .ok_or_else(|| {
-                            SimError(format!(
-                                "Compute node '{}' has an unbound program input",
-                                node.id()
-                            ))
-                        })?,
-                    outputs: views
-                        .outputs()
-                        .iter()
-                        .cloned()
-                        .collect::<Option<Vec<_>>>()
-                        .ok_or_else(|| {
-                            SimError(format!(
-                                "Compute node '{}' has an unbound program output",
-                                node.id()
-                            ))
-                        })?,
+                    inputs: bound_views(node, EdgeDirection::Input, views.inputs())?,
+                    outputs: bound_views(node, EdgeDirection::Output, views.outputs())?,
                 };
                 let region = validate_program(program, &bindings)
                     .map_err(|error| SimError(format!("Compute node '{}': {error}", node.id())))?;
@@ -386,6 +365,30 @@ impl TimetableEdge {
         self.to
     }
 
+    /// Declared output port of this edge's source compute node, if present.
+    #[must_use]
+    pub fn from_port_name<'a>(&self, graph: &'a TimetableGraph) -> Option<&'a str> {
+        graph
+            .nodes
+            .get(self.from.node)?
+            .program()?
+            .outputs
+            .get(self.from.edge_index?)
+            .map(String::as_str)
+    }
+
+    /// Declared input port of this edge's destination compute node, if present.
+    #[must_use]
+    pub fn to_port_name<'a>(&self, graph: &'a TimetableGraph) -> Option<&'a str> {
+        graph
+            .nodes
+            .get(self.to.node)?
+            .program()?
+            .inputs
+            .get(self.to.edge_index?)
+            .map(String::as_str)
+    }
+
     #[must_use]
     pub fn tensor_connection(&self) -> Option<&TensorConnection> {
         self.tensor.as_ref()
@@ -477,6 +480,9 @@ fn node_indices(nodes: &[NodeSection]) -> Result<HashMap<String, usize>, SimErro
     let mut indices = HashMap::new();
     let mut duplicates = Vec::new();
     for (index, node) in nodes.iter().enumerate() {
+        if node.id().is_empty() {
+            return sim_error!("Invalid timetable node identifier: expected a nonempty name");
+        }
         if indices.insert(node.id().to_string(), index).is_some() {
             duplicates.push(format!("Duplicate Node ID '{}'", node.id()));
         }
@@ -490,10 +496,17 @@ fn node_indices(nodes: &[NodeSection]) -> Result<HashMap<String, usize>, SimErro
 fn resolve_edge_index(
     node: &TimetableNode,
     direction: EdgeDirection,
-    requested_index: Option<usize>,
+    endpoint: ports::ResolvedEndpoint<'_>,
+    views: Option<&ComputeViewSections>,
     used: &mut EdgeIndexUsage,
 ) -> Result<usize, SimError> {
-    used.claim(node, direction, requested_index)
+    if endpoint.index.is_none() && views.is_some_and(|views| views.named) {
+        return sim_error!(
+            "Compute node '{}' requires a named {direction} port",
+            node.id()
+        );
+    }
+    used.claim(node, direction, endpoint.index, endpoint.name)
 }
 
 #[derive(Clone, Default)]
@@ -508,6 +521,7 @@ impl EdgeIndexUsage {
         node: &TimetableNode,
         direction: EdgeDirection,
         requested_index: Option<usize>,
+        requested_name: Option<&str>,
     ) -> Result<usize, SimError> {
         let limit = match direction {
             EdgeDirection::Input => node.is_task().then_some(node.input_edges.len()),
@@ -523,6 +537,12 @@ impl EdgeIndexUsage {
             );
         }
         if !self.occupied_indices.insert(tensor_index) {
+            if let Some(name) = requested_name {
+                return sim_error!(
+                    "Node '{}' {direction} port '{name}' is connected more than once",
+                    node.id()
+                );
+            }
             return sim_error!(
                 "Node '{}' {direction} tensor index {tensor_index} is connected more than once",
                 node.id()
@@ -552,6 +572,15 @@ enum EdgeDirection {
     Output,
 }
 
+impl EdgeDirection {
+    fn names(self, program: &ProgramSpec) -> &[String] {
+        match self {
+            Self::Input => &program.inputs,
+            Self::Output => &program.outputs,
+        }
+    }
+}
+
 impl fmt::Display for EdgeDirection {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -559,6 +588,29 @@ impl fmt::Display for EdgeDirection {
             Self::Output => formatter.write_str("output"),
         }
     }
+}
+
+fn bound_views(
+    node: &TimetableNode,
+    direction: EdgeDirection,
+    views: &[Option<TensorView>],
+) -> Result<Vec<TensorView>, SimError> {
+    views
+        .iter()
+        .enumerate()
+        .map(|(index, view)| {
+            view.clone().ok_or_else(|| {
+                let name = direction
+                    .names(node.program().expect("bound compute program"))
+                    .get(index);
+                let port = name.map_or_else(|| index.to_string(), |name| format!("'{name}'"));
+                SimError(format!(
+                    "Compute node '{}' has an unbound program {direction} {port}",
+                    node.id()
+                ))
+            })
+        })
+        .collect()
 }
 
 fn validate_disconnected_views(
@@ -704,9 +756,12 @@ impl TimetableNode {
                     request.validate()?;
                 }
                 let program = programs.resolve(program, &id)?;
-                let input_views = input_views.unwrap_or_else(|| vec![None; program.inputs.len()]);
+                let named = matches!(input_views, Some(TensorViewSections::Named(_)))
+                    || matches!(output_views, Some(TensorViewSections::Named(_)));
+                let input_views =
+                    resolve_views(&id, EdgeDirection::Input, &program.inputs, input_views)?;
                 let output_views =
-                    output_views.unwrap_or_else(|| vec![None; program.outputs.len()]);
+                    resolve_views(&id, EdgeDirection::Output, &program.outputs, output_views)?;
                 let num_inputs = input_views.len();
                 let num_outputs = output_views.len();
                 (
@@ -718,6 +773,7 @@ impl TimetableNode {
                         pe,
                     },
                     Some(ComputeViewSections {
+                        named,
                         inputs: input_views,
                         outputs: output_views,
                     }),
@@ -742,7 +798,11 @@ impl TimetableNode {
                 (
                     id,
                     TimetableNodeKind::Transfer { pe, buffer_bytes },
-                    Some(ComputeViewSections { inputs, outputs }),
+                    Some(ComputeViewSections {
+                        named: false,
+                        inputs,
+                        outputs,
+                    }),
                     1,
                     1,
                 )
@@ -878,6 +938,7 @@ enum TimetableNodeKind {
 }
 
 struct ComputeViewSections {
+    named: bool,
     inputs: Vec<Option<TensorViewSection>>,
     outputs: Vec<Option<TensorViewSection>>,
 }

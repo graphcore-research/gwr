@@ -10,7 +10,7 @@ use super::{align8, eval_index};
 use crate::processing_element::program::syntax::IndexSpec;
 use crate::processing_element::program::tile::RegionTile;
 use crate::processing_element::program::validate::ValidatedRegion;
-use crate::processing_element::tensors::{HasShape, TensorView};
+use crate::processing_element::tensors::{BITS_PER_BYTE, HasShape, TensorView};
 
 pub(super) fn window_input_view(
     view: &TensorView,
@@ -81,13 +81,12 @@ pub(super) fn max_window_chunk_buffer_bytes(
                 );
             }
         }
-        let (_, bytes) = window_chunk_access_ranges(view, indices, tile, region, &chunk)?;
-        peak = peak.max(align8(bytes)?);
+        let access = plan_window_chunk_access(view, indices, tile, region, &chunk)?;
+        peak = peak.max(align8(access.packed_buffer_bytes)?);
     }
     Ok(peak)
 }
 
-#[expect(clippy::too_many_lines)]
 pub(super) fn window_chunk_access_ranges(
     view: &TensorView,
     indices: &[IndexSpec],
@@ -95,6 +94,25 @@ pub(super) fn window_chunk_access_ranges(
     region: &ValidatedRegion,
     chunk: &BTreeMap<String, Range<usize>>,
 ) -> Result<(Vec<Range<u128>>, usize), SimError> {
+    let access = plan_window_chunk_access(view, indices, tile, region, chunk)?;
+    Ok((access.ranges, access.transfer_bytes))
+}
+
+#[derive(Default)]
+struct WindowAccessPlan {
+    ranges: Vec<Range<u128>>,
+    transfer_bytes: usize,
+    packed_buffer_bytes: usize,
+}
+
+#[expect(clippy::too_many_lines)]
+fn plan_window_chunk_access(
+    view: &TensorView,
+    indices: &[IndexSpec],
+    tile: &RegionTile,
+    region: &ValidatedRegion,
+    chunk: &BTreeMap<String, Range<usize>>,
+) -> Result<WindowAccessPlan, SimError> {
     let dense = indices.iter().all(|index| {
         let IndexSpec::Affine { affine } = index else {
             return true;
@@ -129,10 +147,13 @@ pub(super) fn window_chunk_access_ranges(
     });
     if dense {
         if let Some(hull) = window_input_view_for_chunk(view, indices, tile, region, chunk)? {
-            let bytes = hull.layout().num_access_bytes();
-            return Ok((hull.address_ranges().collect(), bytes));
+            return Ok(WindowAccessPlan {
+                ranges: hull.address_ranges().collect(),
+                transfer_bytes: hull.layout().num_access_bytes(),
+                packed_buffer_bytes: hull.num_packed_bytes(),
+            });
         }
-        return Ok((vec![], 0));
+        return Ok(WindowAccessPlan::default());
     }
     let mut axes = BTreeSet::new();
     for index in indices {
@@ -158,6 +179,9 @@ pub(super) fn window_chunk_access_ranges(
         })
         .collect::<Vec<_>>();
     let mut merged = BTreeMap::<u128, u128>::new();
+    let bits_per_element = view.dtype().num_bits();
+    let packed = !bits_per_element.is_multiple_of(BITS_PER_BYTE);
+    let mut packed_elements = BTreeSet::new();
     let mut coords = BTreeMap::new();
     for_each_coordinate(&ranges, 0, &mut coords, &mut |coords| {
         let mut offsets = view.offsets().to_vec();
@@ -179,6 +203,9 @@ pub(super) fn window_chunk_access_ranges(
                 .ok_or_else(|| SimError("window offset overflows".into()))?;
         }
         let element = TensorView::new(view.tensor().clone(), &vec![1; indices.len()], &offsets)?;
+        if packed {
+            packed_elements.insert(element.layout().first_element());
+        }
         for range in element.address_ranges() {
             let mut start = range.start;
             let mut end = range.end;
@@ -211,7 +238,20 @@ pub(super) fn window_chunk_access_ranges(
             )
             .ok_or_else(|| SimError("window transfer size overflows".into()))
     })?;
-    Ok((ranges, bytes))
+    let packed_buffer_bytes = if packed {
+        packed_elements
+            .len()
+            .checked_mul(bits_per_element)
+            .ok_or_else(|| SimError("window buffer size overflows".into()))?
+            .div_ceil(BITS_PER_BYTE)
+    } else {
+        bytes
+    };
+    Ok(WindowAccessPlan {
+        ranges,
+        transfer_bytes: bytes,
+        packed_buffer_bytes,
+    })
 }
 
 pub(super) fn window_input_view_for_chunk(
@@ -485,11 +525,11 @@ assignments:
                                 .reduction_chunks_for(&over)
                                 .map(|chunk| {
                                     align8(
-                                        window_chunk_access_ranges(
+                                        plan_window_chunk_access(
                                             &input, indices, &tile, &region, &chunk,
                                         )
                                         .unwrap()
-                                        .1,
+                                        .packed_buffer_bytes,
                                     )
                                     .unwrap()
                                 })

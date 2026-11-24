@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 use std::rc::Rc;
 
-use gwr_models::processing_element::program::SRAM_SLOT_ALIGNMENT_BYTES;
 use gwr_platform::Platform;
 use gwr_timetable::timetable_file::TimetableFile;
 
@@ -12,6 +11,7 @@ use common::{assert_rejected_before_loading, run_timetable};
 // assertions.
 const FP16_BYTES: usize = 2;
 const FP32_BYTES: usize = 4;
+const SRAM_SLOT_ALIGNMENT_BYTES: usize = 8;
 const SRAM_BYTES: usize = 2304;
 const MATRIX_ROWS: usize = 2;
 const MATRIX_COLUMNS: usize = 3;
@@ -23,9 +23,9 @@ const LOCAL_ROWS: usize = 3;
 const LOCAL_ELEMENTS: usize = 129;
 const LOCAL_CHUNK: usize = 16;
 const LOCAL_CHUNK_SRAM_BYTES: usize = LOCAL_CHUNK * FP32_BYTES * 3;
-const LOCAL_ROW_SRAM_BYTES: usize = (LOCAL_ELEMENTS * FP32_BYTES)
-    .next_multiple_of(SRAM_SLOT_ALIGNMENT_BYTES)
-    + (LOCAL_CHUNK * FP32_BYTES).next_multiple_of(SRAM_SLOT_ALIGNMENT_BYTES);
+const LOCAL_ROW_SRAM_BYTES: usize = 2
+    * (LOCAL_ELEMENTS * FP32_BYTES).next_multiple_of(SRAM_SLOT_ALIGNMENT_BYTES)
+    + SRAM_SLOT_ALIGNMENT_BYTES;
 const SOFTMAX_CHUNK: usize = 64;
 const ABSMAX_ELEMENTS: usize = 1025;
 const ABSMAX_CHUNK: usize = 128;
@@ -42,11 +42,7 @@ const COMPUTE_OPS_PER_TICK: usize = 8;
 const SLOW_UNARY_OPS_PER_TICK: f64 = 0.01;
 
 fn simulate_timetable(source: &str) -> Rc<Platform> {
-    simulate_timetable_with_events(source).0
-}
-
-fn simulate_timetable_with_events(source: &str) -> (Rc<Platform>, Vec<String>) {
-    simulate_timetable_on_platform_with_events(source, &compute_platform_yaml(SRAM_BYTES))
+    simulate_timetable_on_platform_with_events(source, &compute_platform_yaml(SRAM_BYTES)).0
 }
 
 fn compute_platform_yaml(sram_bytes: usize) -> String {
@@ -95,8 +91,7 @@ fn simulate_timetable_on_platform_with_events(
     source: &str,
     platform_source: &str,
 ) -> (Rc<Platform>, Vec<String>) {
-    let simulation = run_timetable(platform_source, TimetableFile::from_string(source).unwrap());
-    (simulation.platform, simulation.tracker.events())
+    run_timetable(platform_source, TimetableFile::from_string(source).unwrap())
 }
 
 fn matrix_cast_timetable() -> String {
@@ -749,14 +744,17 @@ fn three_node_softmax_computes_each_row_statistic_once() {
 }
 
 #[test]
-fn softmax_computes_statistics_once_and_keeps_them_local() {
+fn tiled_softmax_recomputes_local_statistics_for_each_output_chunk() {
     for rows in [1, SOFTMAX_ROWS] {
         let platform = simulate_timetable(&softmax_timetable(rows));
         let pe = platform.pe("pe0").unwrap();
         let ops = pe.machine_ops();
-        let reduction_ops = rows * (SOFTMAX_ELEMENTS - 1);
+        let chunks = SOFTMAX_ELEMENTS.div_ceil(SOFTMAX_CHUNK);
+        let reduction_ops = rows * (SOFTMAX_ELEMENTS - 1) * chunks;
         let elements = rows * SOFTMAX_ELEMENTS;
-        let sub_exp_ops = elements * 2;
+        // Each chunk recomputes its row's sum. Normalizing reads each element
+        // once.
+        let sub_exp_ops = elements * (chunks + 1);
         let row_bytes = SOFTMAX_ELEMENTS * FP32_BYTES;
         assert_eq!(ops.by_operation.get("compare"), Some(&reduction_ops));
         assert_eq!(ops.by_operation.get("add"), Some(&reduction_ops));
@@ -765,7 +763,7 @@ fn softmax_computes_statistics_once_and_keeps_them_local() {
         assert_eq!(ops.by_operation.get("div"), Some(&elements));
         assert_eq!(
             pe.memory_traffic_bytes(),
-            (rows * row_bytes * 3, rows * row_bytes)
+            (rows * row_bytes * (2 * chunks + 1), rows * row_bytes)
         );
         assert!(row_bytes > SRAM_BYTES);
         assert!(pe.peak_sram_bytes() <= SRAM_BYTES);
@@ -773,7 +771,7 @@ fn softmax_computes_statistics_once_and_keeps_them_local() {
 }
 
 #[test]
-fn inferred_row_statistics_group_overlaps_independent_execution_units() {
+fn row_reductions_overlap_on_independent_execution_units() {
     let platform_source = compute_platform_yaml(SRAM_BYTES)
         .replace("[add, mul, sub, div, compare, maximum]", "[mul, sub, div, maximum]")
         .replace("processing_elements:", " sum: { operations: [add], arity: 2 }\n comparison: { operations: [compare], arity: 2 }\nprocessing_elements:")
@@ -795,15 +793,19 @@ fn inferred_row_statistics_group_overlaps_independent_execution_units() {
     assert!(sum_started < first_finished);
     let pe = platform.pe("pe0").unwrap();
     let elements = LOCAL_ROWS * LOCAL_ELEMENTS;
+    let chunks = LOCAL_ELEMENTS.div_ceil(LOCAL_CHUNK);
     assert_eq!(
         pe.memory_traffic_bytes(),
-        (elements * FP32_BYTES * 2, elements * FP32_BYTES)
+        (elements * FP32_BYTES * 2 * chunks, elements * FP32_BYTES)
     );
 }
 
 #[test]
-fn automatic_schedule_reserves_complete_local_rows_for_downstream_reductions() {
-    let platform = simulate_timetable(&local_temporary_timetable(false));
+fn tiled_program_reserves_complete_local_rows_for_downstream_reductions() {
+    let (platform, _) = simulate_timetable_on_platform_with_events(
+        &local_temporary_timetable(false),
+        &compute_platform_yaml(LOCAL_ROW_SRAM_BYTES),
+    );
     let pe = platform.pe("pe0").unwrap();
     let elements = LOCAL_ROWS * LOCAL_ELEMENTS;
     let additions = LOCAL_ROWS * (LOCAL_ELEMENTS - 1);
@@ -813,13 +815,12 @@ fn automatic_schedule_reserves_complete_local_rows_for_downstream_reductions() {
         pe.memory_traffic_bytes(),
         (elements * FP32_BYTES, LOCAL_ROWS * FP32_BYTES)
     );
-    // T spans a complete row even though its producer streams in chunks.
+    // Each tile holds one input row, one temporary row, and one scalar output.
     assert_eq!(pe.peak_sram_bytes(), LOCAL_ROW_SRAM_BYTES);
-    assert!(pe.peak_sram_bytes() <= SRAM_BYTES);
 }
 
 #[test]
-fn automatic_schedule_reuses_chunk_local_storage_between_pipeline_iterations() {
+fn tiled_program_reuses_local_storage_between_output_chunks() {
     let (platform, _) = simulate_timetable_on_platform_with_events(
         &local_temporary_timetable(true),
         &compute_platform_yaml(LOCAL_CHUNK_SRAM_BYTES),
@@ -832,14 +833,13 @@ fn automatic_schedule_reuses_chunk_local_storage_between_pipeline_iterations() {
         pe.memory_traffic_bytes(),
         (elements * FP32_BYTES, elements * FP32_BYTES)
     );
-    // A full temporary row does not fit this bound, but one pipelined chunk
-    // does.
+    // One chunk fits in SRAM and the full temporary row exceeds its capacity.
     assert!(pe.peak_sram_bytes() <= LOCAL_CHUNK_SRAM_BYTES);
     assert!(pe.peak_sram_bytes() < LOCAL_ELEMENTS * FP32_BYTES);
 }
 
 #[test]
-fn automatic_schedule_retains_a_consumed_boundary_output_in_local_storage() {
+fn tiled_program_retains_a_consumed_boundary_output_in_local_storage() {
     let source = local_temporary_timetable(false)
         .replace(
             " - id: local",
@@ -855,8 +855,12 @@ fn automatic_schedule_retains_a_consumed_boundary_output_in_local_storage() {
         )
         .replace("outputs: [Y]", "outputs: [T,Y]")
         .replace("     temporaries: { T: { dtype: fp32 } }\n", "")
+        .replace(&format!("r: 1, k: {LOCAL_CHUNK}"), "r: 1")
         + " - { from: local.T, to: T, kind: data }\n";
-    let platform = simulate_timetable(&source);
+    let (platform, _) = simulate_timetable_on_platform_with_events(
+        &source,
+        &compute_platform_yaml(LOCAL_ROW_SRAM_BYTES),
+    );
     let pe = platform.pe("pe0").unwrap();
     let elements = LOCAL_ROWS * LOCAL_ELEMENTS;
     let additions = LOCAL_ROWS * (LOCAL_ELEMENTS - 1);
@@ -868,7 +872,6 @@ fn automatic_schedule_retains_a_consumed_boundary_output_in_local_storage() {
         (elements * FP32_BYTES, (elements + LOCAL_ROWS) * FP32_BYTES)
     );
     assert_eq!(pe.peak_sram_bytes(), LOCAL_ROW_SRAM_BYTES);
-    assert!(pe.peak_sram_bytes() <= SRAM_BYTES);
 }
 
 #[test]
@@ -968,80 +971,62 @@ fn nested_absmax_excludes_tail_elements_from_arithmetic_and_comparisons() {
 }
 
 #[test]
-fn forward_reference_producer_preserves_scoped_and_flat_issue_order() {
-    // U and independent Z compete for the unary unit. T consumes U on a
-    // separate binary unit, so issuing U first lets T overlap Z's service.
+fn forward_reference_consumer_waits_for_its_producer() {
+    // U and independent Z share a unary engine. T can start only after U
+    // finishes.
     let platform_source = compute_platform_yaml(SRAM_BYTES).replace(
         &format!("             - {{ class: binary, ops_per_tick: {COMPUTE_OPS_PER_TICK} }}"),
         &format!("         binary:\n           capabilities:\n             - {{ class: binary, ops_per_tick: {COMPUTE_OPS_PER_TICK} }}"),
     );
-    for scoped in [false, true] {
-        let tiling = if scoped {
-            "   tiling: { sizes: { i: 2 } }"
-        } else {
-            ""
-        };
-        let source = format!(
-            r"
+    let source = r"
 nodes:
  - id: A
    kind: tensor
-   config: {{ addr: 0x1000, dtype: fp32, shape: [4] }}
+   config: { addr: 0x1000, dtype: fp32, shape: [4] }
  - id: Y
    kind: tensor
-   config: {{ addr: 0x2000, dtype: fp32, shape: [] }}
+   config: { addr: 0x2000, dtype: fp32, shape: [] }
  - id: Z
    kind: tensor
-   config: {{ addr: 0x3000, dtype: fp32, shape: [4] }}
+   config: { addr: 0x3000, dtype: fp32, shape: [4] }
  - id: forward
    kind: compute
    pe: pe0
    program:
      inputs: [A]
      outputs: [Y, Z]
-     temporaries: {{ T: {{dtype: fp32}}, U: {{dtype: fp32}} }}
+     temporaries: { T: {dtype: fp32}, U: {dtype: fp32} }
      assignments:
       - output: T
         axes: [i]
-        expr: {{ add: [{{read: {{tensor: U, indices: [i]}}}}, {{read: {{tensor: U, indices: [i]}}}}] }}
+        expr: { add: [{read: {tensor: U, indices: [i]}}, {read: {tensor: U, indices: [i]}}] }
       - output: Z
         axes: [i]
-        expr: {{ exp: [{{read: {{tensor: A, indices: [i]}}}}] }}
+        expr: { exp: [{read: {tensor: A, indices: [i]}}] }
       - output: U
         axes: [i]
-        expr: {{ exp: [{{read: {{tensor: A, indices: [i]}}}}] }}
+        expr: { exp: [{read: {tensor: A, indices: [i]}}] }
       - output: Y
         axes: []
-        expr: {{ reduce: {{op: sum, over: [i], value: {{read: {{tensor: T, indices: [i]}}}}}} }}
-{tiling}
+        expr: { reduce: {op: sum, over: [i], value: {read: {tensor: T, indices: [i]}}} }
 edges:
- - {{from: A, to: forward.A, kind: data}}
- - {{from: forward.Y, to: Y, kind: data}}
- - {{from: forward.Z, to: Z, kind: data}}
-"
-        );
-        let (_, events) = simulate_timetable_on_platform_with_events(&source, &platform_source);
-        let position = |marker: &str| {
-            events
-                .iter()
-                .position(|event| event.contains(marker))
-                .unwrap()
-        };
-        let producer_first = position("assignment U begin") < position("assignment Z begin");
-        assert_eq!(
-            producer_first, scoped,
-            "scoped={scoped}: preserve the execution policy's issue order"
-        );
-        let consumer_overlaps = position("assignment T begin") < position("assignment Z end");
-        assert_eq!(
-            consumer_overlaps, scoped,
-            "scoped={scoped}: consumer overlap follows producer admission"
-        );
-    }
+ - {from: A, to: forward.A, kind: data}
+ - {from: forward.Y, to: Y, kind: data}
+ - {from: forward.Z, to: Z, kind: data}
+";
+    let (_, events) = simulate_timetable_on_platform_with_events(source, &platform_source);
+    let position = |marker: &str| {
+        events
+            .iter()
+            .position(|event| event.contains(marker))
+            .unwrap()
+    };
+    assert!(position("assignment Z end") < position("assignment U begin"));
+    assert!(position("assignment U end") < position("assignment T begin"));
 }
 
 #[test]
-fn scoped_and_matrix_preparation_rejections_have_no_side_effects() {
+fn program_and_matrix_preparation_rejections_have_no_side_effects() {
     // Aligned FP16 A 2x2=8, B 2x3=16, Y 2x3=16, FP32 partials 2x3=24: 64 bytes.
     for (name, source, sram_bytes, expected) in [
         (

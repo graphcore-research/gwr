@@ -5,8 +5,10 @@ use std::collections::{HashMap, HashSet};
 use gwr_engine::sim_error;
 use gwr_engine::types::{SimError, SimResult};
 
+use crate::DeviceIds;
 use crate::builder::EffectiveConfigs;
 use crate::connection_id::{CachePortId, ConnectionEndpointId, parse_connection_endpoint_id};
+use crate::memory_mapping::AddressMaps;
 use crate::types::{CacheSection, FabricSection, MemoryMapSection, MemorySection, PlatformConfig};
 
 impl PlatformConfig {
@@ -22,17 +24,18 @@ impl PlatformConfig {
         self.validated().map(drop)
     }
 
-    pub(crate) fn validated(&self) -> Result<EffectiveConfigs, SimError> {
+    pub(crate) fn validated(&self) -> Result<(EffectiveConfigs, DeviceIds, AddressMaps), SimError> {
         let lookup = self.validation_lookup()?;
         let effective = EffectiveConfigs::new(self)?;
         self.validate_memory_ranges(&effective)?;
         self.validate_references(&lookup)?;
+        self.validate_connections(&lookup, &effective)?;
+        let device_ids = crate::assign_device_ids(self)?;
+        let maps = crate::memory_mapping::resolve(self, &effective, &device_ids)?;
         self.validate_memory_fetch_alignment(&effective)?;
         self.validate_coherence(&effective)?;
-        self.validate_connections(&lookup, &effective)?;
-        crate::memory_mapping::validate(self, &effective)?;
         crate::fabric_paths::validate_geometry(self, &effective)?;
-        Ok(effective)
+        Ok((effective, device_ids, maps))
     }
 
     fn validation_lookup(&self) -> Result<PlatformValidationLookup<'_>, SimError> {
@@ -63,6 +66,9 @@ impl PlatformConfig {
             collect_unique_sections("memory map", self.memory_maps.iter(), |memory_map| {
                 memory_map.name.as_str()
             })?;
+        collect_unique_sections("address space", self.address_spaces.iter(), |space| {
+            space.name.as_str()
+        })?;
         let caches = collect_unique_sections("cache", self.caches.iter().flatten(), |cache| {
             cache.name.as_str()
         })?;
@@ -133,7 +139,8 @@ impl PlatformConfig {
                     );
                 }
             }
-            if !lookup.memory_maps.contains_key(pe.memory_map.as_str()) {
+            let map = self.pe_backing_map_name(pe, false)?;
+            if pe.address_space.is_none() && !lookup.memory_maps.contains_key(map) {
                 return sim_error!(
                     "Unknown memory map '{}' for processing element '{}'",
                     pe.memory_map,
@@ -186,8 +193,15 @@ impl PlatformConfig {
                 .map(|(pe, config)| {
                     (
                         format!(
-                            "Processing element '{}', memory map '{}', LSU access size {}",
-                            pe.name, pe.memory_map, config.lsu_access_bytes,
+                            "Processing element '{}', {} '{}', LSU access size {}",
+                            pe.name,
+                            if pe.address_space.is_some() {
+                                "address space"
+                            } else {
+                                "memory map"
+                            },
+                            pe.address_space.as_deref().unwrap_or(&pe.memory_map),
+                            config.lsu_access_bytes,
                         ),
                         config.lsu_access_bytes,
                     )
@@ -727,11 +741,7 @@ impl PlatformConfig {
                                 .flatten()
                                 .find(|pe| pe.name == pe_name)
                                 .ok_or_else(|| SimError(format!("No PE '{name}'")))?;
-                            let map = if name.strip_suffix(".dma").is_some() {
-                                pe.dma_memory_map.as_deref().unwrap_or(&pe.memory_map)
-                            } else {
-                                &pe.memory_map
-                            };
+                            let map = self.pe_backing_map_name(pe, name.ends_with(".dma"))?;
                             for memory in &maps[map].devices {
                                 if !covered.contains(memory.as_str()) {
                                     return sim_error!(

@@ -71,7 +71,7 @@ fn rejects_lsu_mappings_with_unaligned_bases() {
         config.memory_maps = vec![memory_map("mm0", &["hbm0"])];
         config.address_spaces = vec![space];
         config.memories = Some(vec![memory("hbm0", base, capacity)]);
-        config.processing_elements = Some(vec![processing_element("pe0", "as0")]);
+        config.processing_elements = Some(vec![processing_element_in_space("pe0", "as0")]);
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("Address space 'as0'"), "{error}");
@@ -92,7 +92,7 @@ fn rejects_lsu_mappings_with_partial_final_blocks() {
         config.memory_maps = vec![memory_map("mm0", &["hbm0"])];
         config.address_spaces = vec![space];
         config.memories = Some(vec![memory("hbm0", base, capacity)]);
-        config.processing_elements = Some(vec![processing_element("pe0", "as0")]);
+        config.processing_elements = Some(vec![processing_element_in_space("pe0", "as0")]);
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("Address space 'as0'"), "{error}");
@@ -124,7 +124,7 @@ fn accepts_lsu_mappings_containing_whole_blocks() {
         config.memory_maps = vec![memory_map("mm0", &["hbm0"])];
         config.address_spaces = vec![space];
         config.memories = Some(vec![memory("hbm0", base, capacity)]);
-        config.processing_elements = Some(vec![processing_element("pe0", "as0")]);
+        config.processing_elements = Some(vec![processing_element_in_space("pe0", "as0")]);
 
         config.validate().unwrap();
     }
@@ -141,8 +141,8 @@ fn validates_lsu_alignment_for_every_address_space_sharing_a_map() {
     config.address_spaces = vec![small_space, large_space];
     config.memories = Some(vec![memory("hbm0", 16, 48)]);
     config.processing_elements = Some(vec![
-        processing_element("small", "small"),
-        processing_element("large", "large"),
+        processing_element_in_space("small", "small"),
+        processing_element_in_space("large", "large"),
     ]);
 
     let error = config.validate().unwrap_err().to_string();
@@ -160,7 +160,7 @@ fn rejects_unaligned_memories_outside_the_pe_map() {
     ];
     config.memories = Some(vec![memory("hbm0", 0, 64), memory("other", 65, 1)]);
     config.address_spaces = vec![address_space("as0", "mm0")];
-    config.processing_elements = Some(vec![processing_element("pe0", "as0")]);
+    config.processing_elements = Some(vec![processing_element_in_space("pe0", "as0")]);
 
     let error = config.validate().unwrap_err().to_string();
     assert!(error.contains("Memory 'other'"), "{error}");
@@ -187,7 +187,7 @@ fn checks_all_memories_against_effective_lsu_and_cache_sizes() {
     let mut config = platform();
     config.memory_maps = vec![memory_map("mm0", &["used"])];
     config.address_spaces = vec![address_space("as0", "mm0")];
-    config.processing_elements = Some(vec![processing_element("pe0", "as0")]);
+    config.processing_elements = Some(vec![processing_element_in_space("pe0", "as0")]);
     config.memories = Some(vec![memory("used", 0, 256), memory("unused", 257, 32)]);
     assert!(config.validate().is_err());
     config.memories.as_mut().unwrap()[1].base_address = 256;

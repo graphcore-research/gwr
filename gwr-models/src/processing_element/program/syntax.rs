@@ -162,7 +162,11 @@ impl<'de> Deserialize<'de> for ExprSpec {
                 let mac: MatrixMacRepr =
                     yaml_serde::from_value(payload).map_err(D::Error::custom)?;
                 Ok(Self::MatrixMac {
-                    execution: mac.execution,
+                    execution: super::super::compute::ExecutionMode::resolve(
+                        mac.execution,
+                        mac.accumulator,
+                    )
+                    .map_err(D::Error::custom)?,
                     args: mac.args,
                     over: mac.over,
                     quantization: mac.quantization,
@@ -221,6 +225,7 @@ impl Serialize for ExprSpec {
                 "matrix_mac".to_owned(),
                 yaml_serde::to_value(MatrixMacRepr {
                     execution: execution.clone(),
+                    accumulator: None,
                     args: args.clone(),
                     over: over.clone(),
                     quantization: quantization.clone(),
@@ -261,6 +266,8 @@ struct CallRepr {
 struct MatrixMacRepr {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     execution: Option<super::super::compute::ExecutionMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accumulator: Option<DataType>,
     #[serde(default)]
     over: Vec<String>,
     args: Vec<ExprSpec>,

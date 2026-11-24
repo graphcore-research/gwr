@@ -23,6 +23,7 @@ use gwr_track::{debug, info, trace};
 pub mod analysis;
 pub mod atomic;
 pub mod collective;
+mod explain;
 pub mod graph;
 pub mod indexed;
 pub mod mermaid;

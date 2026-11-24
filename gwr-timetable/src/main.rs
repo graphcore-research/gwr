@@ -75,15 +75,7 @@ fn run() -> Result<()> {
             platform_started.elapsed().as_secs_f64()
         );
     }
-    if args.activity_out.is_some() {
-        for name in platform.pe_names() {
-            platform.pe(&name)?.enable_compute_action_counters()?;
-        }
-    }
-
-    if !args.roofline_analyze {
-        println!("Loaded platform:\n{platform}");
-    }
+    println!("Loaded platform:\n{platform}");
 
     let timetable_started = Instant::now();
     let timetable_yaml = gwr_platform::catalog::load_yaml_with_includes(
@@ -95,9 +87,7 @@ fn run() -> Result<()> {
     let num_edges = timetable_file.edges.len();
     let graph = timetable_file.into_graph()?;
 
-    let timetable = Rc::new(Timetable::new(engine.top(), graph, &platform)?);
-    let dispatcher: Rc<dyn Dispatch> = timetable.clone();
-    platform.attach_dispatcher(&dispatcher);
+    let timetable = Timetable::new(engine.top(), graph, &platform)?;
     if std::env::var_os("GWR_ROOFLINE_TIMINGS").is_some() {
         eprintln!(
             "roofline timing: timetable_build={:.3}s",
@@ -106,6 +96,24 @@ fn run() -> Result<()> {
     }
 
     println!("Loaded timetable with {num_nodes} nodes, {num_edges} edges.");
+
+    timetable.preflight()?;
+    if args.check || args.explain {
+        if args.explain {
+            print!("{}", timetable.preparation_description()?);
+        }
+        println!("Preparation successful; simulation was not run.");
+        return Ok(());
+    }
+
+    if args.activity_out.is_some() {
+        for name in platform.pe_names() {
+            platform.pe(&name)?.enable_compute_action_counters()?;
+        }
+    }
+    let timetable = Rc::new(timetable);
+    let dispatcher: Rc<dyn Dispatch> = timetable.clone();
+    platform.attach_dispatcher(&dispatcher);
 
     let progress_log = args.progress && !std::io::stderr().is_terminal();
     let mut progress_bars = None;
@@ -281,6 +289,15 @@ fn refresh_interval(progress_hz: NonZeroU32) -> Duration {
 struct Cli {
     #[command(flatten)]
     tracker: TrackerArgs,
+
+    /// Prepare and validate the platform and timetable without running
+    /// simulation.
+    #[arg(long, conflicts_with = "roofline_analyze")]
+    check: bool,
+
+    /// Check preparation and print a summary without running simulation.
+    #[arg(long, conflicts_with = "roofline_analyze")]
+    explain: bool,
 
     /// Show runtime progress for completed nodes, memory traffic, compute,
     /// active timetable nodes and executor activity. Executor task counts do

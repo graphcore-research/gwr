@@ -151,6 +151,25 @@ activity lanes. Change `pe0` to the PE name in your platform, or omit the filter
 to include all tracked entities. `--perfetto` does not enable console or binary
 trace logging; the runner still prints a short run summary.
 
+## Check preparation without simulation
+
+Add `--check` to validate the platform and timetable, including task
+capabilities, SRAM capacity, and memory mappings. The command exits before
+attaching a dispatcher or advancing simulated time.
+
+Use `--explain` to run the same checks and show each program task's named
+tensor bindings, PE placement, inferred axis extents, declared and effective
+tile sizes, peak SRAM, and planned logical boundary traffic. It also shows
+each PE's effective SRAM and LSU settings and its compute engines. Effective
+tile sizes are maxima, and tail tiles can be smaller. Planned bytes are
+counted before LSU packetization.
+
+```sh
+cargo run --bin gwr-timetable -- \
+  --platform gwr-timetable/examples/compute_region_platform.yaml \
+  --timetable gwr-timetable/examples/add_mul.yaml --explain
+```
+
 ## Compute
 
 Each compute node selects a tensor `program`. The program names its external

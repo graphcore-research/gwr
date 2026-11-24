@@ -204,6 +204,33 @@ fn parent_binds_only_unresolved_child_maps() {
 }
 
 #[test]
+fn composed_address_space_scopes_banks_and_resolves_parent_map_bindings() {
+    let chip = CHIP.replace("memory_map: local", "address_space: space").replace(
+        "processing_elements:",
+        "address_spaces: [{name: space, memory_map: remote, address_regions: [{policy: striped, devices: [ram]}]}]\nprocessing_elements:",
+    );
+    let parent = "level: board\ninstances: [{name: chip, file: chip.yaml, memory_map_bindings: {remote: all}}]\nmemory_maps: [{name: all, devices: ['chip[0]/ram']}]\n";
+    let dir = files(&[("chip.yaml", &chip), ("board.yaml", parent)]);
+    let source = load_source(&dir.path().join("board.yaml")).unwrap();
+    let materialized = source.materialize(100).unwrap();
+    let cfg: gwr_platform::types::PlatformConfig =
+        yaml_serde::from_str(&materialized.resolved_yaml).unwrap();
+    let pe = &cfg.processing_elements.as_ref().unwrap()[0];
+    let prepared = gwr_platform::PreparedPlatform::new(&cfg).unwrap();
+    assert_eq!(pe.address_space.as_deref(), Some("chip[0]/space"));
+    assert_eq!(cfg.address_spaces[0].memory_map, "all");
+    assert_eq!(
+        prepared
+            .pe_memory_map(pe)
+            .unwrap()
+            .resolve(0)
+            .unwrap()
+            .device,
+        prepared.device_id("chip[0]/ram").unwrap(),
+    );
+}
+
+#[test]
 fn huge_instance_counts_stay_compact_and_materialization_is_bounded() {
     let dir = files(&[
         ("chip.yaml", "level: package\n"),

@@ -156,6 +156,21 @@ pub struct ExecutionPlan {
 }
 
 impl ExecutionPlan {
+    /// The fastest mandatory batch in each sequential barrier must fit on
+    /// the clock, even if independent batches run concurrently.
+    pub(in crate::processing_element) fn duration_lower_bound_ticks(
+        &self,
+    ) -> Result<u64, gwr_engine::types::SimError> {
+        self.stages.iter().try_fold(0_u64, |duration, stage| {
+            let stage_ticks = stage.iter().map(|batch| batch.ticks).max().unwrap_or(0);
+            duration.checked_add(stage_ticks).ok_or_else(|| {
+                gwr_engine::types::SimError(
+                    "intrinsic compute duration lower bound overflows".into(),
+                )
+            })
+        })
+    }
+
     /// Uncontended service time; runtime scheduling adds contention.
     pub fn service_ticks(&self) -> Result<u64, gwr_engine::types::SimError> {
         self.stages.iter().try_fold(0_u64, |sum, stage| {

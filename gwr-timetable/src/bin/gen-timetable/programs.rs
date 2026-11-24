@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
+use gwr_models::processing_element::compute::ExecutionMode;
 use gwr_models::processing_element::program::syntax::{
     AssignmentSpec, BoundsMode, ExprSpec, IndexSpec, ProgramSpec, ReductionOp, TemporarySpec,
 };
@@ -111,6 +112,7 @@ pub(super) fn add_program(
 pub(super) fn gemm_program(
     inputs: &[TensorSpec],
     output: &TensorSpec,
+    execution: Option<ExecutionMode>,
 ) -> Result<ProgramSpec, SimError> {
     if !(2..=3).contains(&inputs.len())
         || inputs[0].shape.len() < 2
@@ -170,7 +172,7 @@ pub(super) fn gemm_program(
     let mut rhs_indices = batch_indices(rhs_rank);
     rhs_indices.extend([k_axis.clone(), n_axis.clone()]);
     let product = ExprSpec::MatrixMac {
-        execution: None,
+        execution,
         quantization: None,
         args: vec![read("A", lhs_indices), read("B", rhs_indices)],
         over: vec!["k".into()],
@@ -326,6 +328,7 @@ mod tests {
                 shape: vec![2, 3],
                 dtype: DataType::Fp32,
             },
+            None,
         )
         .unwrap();
         let region = validate_program(
@@ -363,7 +366,7 @@ mod tests {
             shape: vec![2, 4, 3, 7],
             dtype: DataType::Fp32,
         };
-        let program = gemm_program(&inputs, &output).unwrap();
+        let program = gemm_program(&inputs, &output, None).unwrap();
         let region = validate_program(
             &program,
             &RegionBindings {

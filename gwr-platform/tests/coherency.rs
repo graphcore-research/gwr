@@ -139,6 +139,7 @@ fn upstream_pe_memory_map_must_be_covered_by_selected_managers() {
     cfg.processing_elements = Some(vec![gwr_platform::types::ProcessingElementSection {
         name: "pe".into(),
         memory_map: "pe_map".into(),
+        address_space: None,
         dma_memory_map: None,
         config: yaml_serde::from_str(
             "compute: {engines: {vector: {capabilities: [{class: add, ops_per_tick: 256}]}}}",

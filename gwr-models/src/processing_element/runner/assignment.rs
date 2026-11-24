@@ -154,15 +154,7 @@ pub(super) async fn emit_program_assignment(
         return Ok(());
     }
     if let ExprSpec::Call { .. } = &assignment.expr {
-        let count = assignment.axes.iter().try_fold(1usize, |count, axis| {
-            count
-                .checked_mul(
-                    tile.output_intervals
-                        .get(axis)
-                        .map_or(region.extent(axis).unwrap(), Range::len),
-                )
-                .ok_or_else(|| SimError("tile operation count overflows".into()))
-        })?;
+        let count = super::helpers::tile_output_count(&assignment.axes, tile, region)?;
         let dtype = region.value(&assignment.primary_result()).unwrap().dtype;
         let work = super::helpers::expression_work(&assignment.expr, region, dtype, count)?.0;
         let plan = model.lower(&work)?;

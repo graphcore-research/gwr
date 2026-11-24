@@ -122,8 +122,8 @@ fn render_node_label(graph: &TimetableGraph, node_index: usize, node: &Timetable
         .compute_views(node_index)
         .expect("non-tensor node has compute views");
     let pe = node.pe().unwrap_or("?");
-    let input_str = create_view_string("input", views.inputs());
-    let output_str = create_view_string("output", views.outputs());
+    let input_str = create_view_string("input", &program.inputs, views.inputs());
+    let output_str = create_view_string("output", &program.outputs, views.outputs());
     format!(
         "[\"{}\"]",
         escape_mermaid_label(&format!(
@@ -140,17 +140,20 @@ fn escape_mermaid_label(s: &str) -> String {
         .replace('\n', "<br/>")
 }
 
-fn create_view_string(prefix: &str, views: &[Option<TensorView>]) -> String {
+fn create_view_string(prefix: &str, names: &[String], views: &[Option<TensorView>]) -> String {
     let mut result = String::new();
     for (idx, maybe_view) in views.iter().enumerate() {
+        let name = names
+            .get(idx)
+            .map_or_else(|| format!("{prefix}{idx}"), String::clone);
         match maybe_view {
             None => {
-                let _ = writeln!(result, "{prefix}{idx}: None");
+                let _ = writeln!(result, "{name}: None");
             }
             Some(view) => {
                 let _ = writeln!(
                     result,
-                    "{prefix}{idx}: {} @ {}",
+                    "{name}: {} @ {}",
                     shape_string(view.shape().dims()),
                     shape_string(view.offsets())
                 );

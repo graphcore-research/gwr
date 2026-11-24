@@ -343,8 +343,9 @@ impl<'a> RooflineRoutes<'a> {
                 "roofline route has no memory payload resource".into(),
             ));
         }
+        let map_name = self.cfg.pe_backing_map_name(pe, false)?;
         if !self.cfg.memory_maps.iter().any(|map| {
-            map.name == pe.memory_map && map.devices.iter().any(|device| device == memory_name)
+            map.name == map_name && map.devices.iter().any(|device| device == memory_name)
         }) {
             return Err(SimError(format!(
                 "Memory '{memory_name}' is not mapped for PE '{pe_name}'"
@@ -800,11 +801,8 @@ impl OwnedRooflineRoutes {
     /// Validate and retain an owned platform snapshot without activating
     /// models.
     pub fn new(cfg: &PlatformConfig) -> Result<Self, SimError> {
-        let mut effective = cfg.validated()?;
-        let device_ids = crate::assign_device_ids(cfg)?;
-        let destinations = crate::builder::build_fabric_destination_port_maps(cfg, &device_ids)?;
-        effective.fabrics =
-            crate::builder::fabric_configs_with_destination_port_maps(cfg, &destinations)?;
+        let (mut effective, device_ids, _) = cfg.validated()?;
+        effective.install_fabric_routes(cfg, &device_ids)?;
         Self::from_prepared(cfg, &effective, &device_ids)
     }
 
