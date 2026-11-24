@@ -16,34 +16,38 @@
 //! Sink received 4934/10000
 //! ```
 
-use clap::Parser;
 use flaky_component::Flaky;
 use gwr_components::sink::Sink;
 use gwr_components::source::Source;
 use gwr_components::{connect_port, option_box_repeat};
+use gwr_config::multi_source_config;
 use gwr_engine::engine::Engine;
 use gwr_engine::run_simulation;
 use gwr_engine::types::SimResult;
 
+const DEFAULT_SEED: u64 = 123;
+const DEFAULT_DROP: f64 = 0.2;
+const DEFAULT_NUM_PACKETS: usize = 100;
+
 /// Command-line arguments.
-#[derive(Parser)]
+#[multi_source_config]
 #[command(about = "Example application using the Flaky component")]
 struct Cli {
     /// Set the random seed
-    #[arg(long, default_value = "123")]
+    #[arg(long, default_value_t = DEFAULT_SEED)]
     seed: u64,
 
     /// The ratio of data to be dropped (should be in the range [0, 1])
-    #[arg(long, default_value = "0.2")]
+    #[arg(long, default_value_t = DEFAULT_DROP)]
     drop: f64,
 
     /// The number of packets to send through the component
-    #[arg(long, default_value = "100")]
+    #[arg(long, default_value_t = DEFAULT_NUM_PACKETS)]
     num_packets: usize,
 }
 
 fn main() -> SimResult {
-    let args = Cli::parse();
+    let args = Cli::parse_all_sources();
 
     let mut engine = Engine::default();
     let clock = engine.default_clock();

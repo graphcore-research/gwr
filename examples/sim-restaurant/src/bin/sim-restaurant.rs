@@ -4,41 +4,56 @@
 //!
 //! See `lib.rs` for details.
 
-use clap::{CommandFactory, Parser};
+use clap::CommandFactory;
+use gwr_config::multi_source_config;
 use gwr_engine::sim_error;
 use gwr_engine::types::SimError;
-use gwr_track::builder::{TrackerArgs, setup_trackers};
+use gwr_track::builder::{TrackerArgs, TrackerArgsPartial, setup_trackers};
 use gwr_track::tracker::dev_null_tracker;
-use sim_restaurant::config::{RestaurantArgs, RestaurantConfig, long_arg_name};
+use sim_restaurant::config::{
+    RestaurantArgs, RestaurantArgsPartial, RestaurantConfig, long_arg_name,
+};
 use sim_restaurant::sim::{RunSummary, run_sweep};
 
-#[derive(Parser, Debug, Clone)]
+const DEFAULT_MIN_TILL_STAFF: usize = 1;
+const DEFAULT_MAX_TILL_STAFF: usize = 4;
+const DEFAULT_MIN_KITCHEN_STAFF: usize = 1;
+const DEFAULT_MAX_KITCHEN_STAFF: usize = 5;
+const DEFAULT_TOP_RESULTS: usize = 8;
+
+#[multi_source_config(
+    default_conf_file = "sim-restaurant.toml",
+    conf_file_flag = "conf-file"
+)]
+#[derive(Debug, Clone, PartialEq)]
 #[command(about = "Fast food restaurant profitability simulation")]
 pub struct CliArgs {
     /// Minimum number of till workers to evaluate.
-    #[arg(long, default_value = "1")]
+    #[arg(long, default_value_t = DEFAULT_MIN_TILL_STAFF)]
     pub min_till_staff: usize,
 
     /// Maximum number of till workers to evaluate.
-    #[arg(long, default_value = "4")]
+    #[arg(long, default_value_t = DEFAULT_MAX_TILL_STAFF)]
     pub max_till_staff: usize,
 
     /// Minimum number of kitchen workers to evaluate.
-    #[arg(long, default_value = "1")]
+    #[arg(long, default_value_t = DEFAULT_MIN_KITCHEN_STAFF)]
     pub min_kitchen_staff: usize,
 
     /// Maximum number of kitchen workers to evaluate.
-    #[arg(long, default_value = "5")]
+    #[arg(long, default_value_t = DEFAULT_MAX_KITCHEN_STAFF)]
     pub max_kitchen_staff: usize,
 
     /// How many top staffing combinations to print.
-    #[arg(long, default_value = "8")]
+    #[arg(long, default_value_t = DEFAULT_TOP_RESULTS)]
     pub top_results: usize,
 
     #[command(flatten)]
+    #[serde(flatten)]
     pub tracker: TrackerArgs,
 
     #[command(flatten)]
+    #[serde(flatten)]
     pub sim: RestaurantArgs,
 }
 
@@ -79,7 +94,7 @@ impl CliArgs {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cli = CliArgs::parse();
+    let cli = CliArgs::parse_all_sources();
     cli.validate()?;
 
     let config = cli.sim_config();
