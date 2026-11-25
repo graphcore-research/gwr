@@ -3,7 +3,6 @@ use std::rc::Rc;
 
 use gwr_engine::engine::Engine;
 use gwr_engine::time::clock::Clock;
-use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_platform::Platform;
 use gwr_timetable::Timetable;
 use gwr_timetable::timetable_file::TimetableFile;
@@ -15,15 +14,13 @@ pub struct Simulation {
     pub platform: Rc<Platform>,
     pub tracker: Rc<TestTracker>,
     pub clock: Clock,
-    pub timetable: Rc<Timetable>,
+    pub timetable: Timetable,
 }
 
 pub fn run_timetable(platform_source: &str, file: TimetableFile) -> Simulation {
     let (mut engine, clock, platform, tracker) = fixture(platform_source);
-    let timetable =
-        Rc::new(Timetable::new(engine.top(), file.into_graph().unwrap(), &platform).unwrap());
-    let dispatcher: Rc<dyn Dispatch> = timetable.clone();
-    platform.attach_dispatcher(&dispatcher);
+    let timetable = Timetable::new(engine.top(), file.into_graph().unwrap(), &platform).unwrap();
+    platform.attach_dispatcher(&timetable.dispatcher());
     engine.run().unwrap();
     let simulation = Simulation {
         platform,

@@ -1258,7 +1258,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-engine"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1271,6 +1271,7 @@ dependencies = [
  "log",
  "mimalloc",
  "rand 0.10.3",
+ "slab",
 ]
 
 [[package]]
@@ -1419,7 +1420,7 @@ dependencies = [
 
 [[package]]
 name = "gwr-timetable"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "byte-unit",

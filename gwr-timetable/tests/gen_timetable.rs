@@ -6,7 +6,6 @@ use std::process::{Command, Output};
 use std::rc::Rc;
 
 use gwr_engine::test_helpers::start_test;
-use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::program::syntax::{ExprSpec, IndexSpec, ReductionOp};
 use gwr_models::processing_element::tensors::dtype::DataType;
 use gwr_platform::Platform;
@@ -66,9 +65,8 @@ impl GeneratorFixture {
         let clock = engine.default_clock();
         let platform = Rc::new(Platform::from_file(&engine, &clock, &self.platform_path).unwrap());
         let timetable =
-            Rc::new(Timetable::new(engine.top(), file.into_graph().unwrap(), &platform).unwrap());
-        let dispatcher: Rc<dyn Dispatch> = timetable.clone();
-        platform.attach_dispatcher(&dispatcher);
+            Timetable::new(engine.top(), file.into_graph().unwrap(), &platform).unwrap();
+        platform.attach_dispatcher(&timetable.dispatcher());
         engine.run().unwrap();
         timetable.check_tasks_complete().unwrap();
         platform

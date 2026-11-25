@@ -138,7 +138,6 @@ fn explanation_does_not_execute_or_change_prepared_state() {
     use std::rc::Rc;
 
     use gwr_engine::engine::Engine;
-    use gwr_models::processing_element::dispatch::Dispatch;
     use gwr_platform::Platform;
     use gwr_timetable::Timetable;
     use gwr_track::Tracker;
@@ -154,7 +153,7 @@ fn explanation_does_not_execute_or_change_prepared_state() {
         .unwrap()
         .into_graph()
         .unwrap();
-    let timetable = Rc::new(Timetable::new(engine.top(), graph, &platform).unwrap());
+    let timetable = Timetable::new(engine.top(), graph, &platform).unwrap();
     let before = tracker.events();
     let summary = timetable.preparation_description();
     assert_eq!(summary, timetable.preparation_description());
@@ -168,8 +167,7 @@ fn explanation_does_not_execute_or_change_prepared_state() {
     let mem = platform.memory("mem").unwrap();
     assert_eq!((mem.bytes_read(), mem.bytes_written()), (0, 0));
     // Explaining must leave the prepared handles ready for normal dispatch.
-    let dispatcher: Rc<dyn Dispatch> = timetable.clone();
-    platform.attach_dispatcher(&dispatcher);
+    platform.attach_dispatcher(&timetable.dispatcher());
     engine.run().unwrap();
     timetable.check_tasks_complete().unwrap();
     assert_eq!(pe.memory_traffic_bytes(), (128, 64));

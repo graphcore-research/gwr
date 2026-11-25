@@ -3,7 +3,6 @@
 use std::rc::Rc;
 
 use gwr_engine::engine::Engine;
-use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::program::SRAM_SLOT_ALIGNMENT_BYTES;
 use gwr_models::processing_element::task::Task;
 use gwr_platform::Platform;
@@ -757,11 +756,13 @@ fn fanout_timetable(same_pe: bool) -> (Timetable, [usize; 3]) {
 }
 
 fn assert_compute_ready(timetable: &Timetable, pe: &str, node: usize) {
-    assert!(timetable.ready_task_indices(pe).unwrap().1.contains(&node));
+    let (_, ready) = timetable.dispatcher().ready_task_indices(pe).unwrap();
+    assert!(ready.contains(&node));
 }
 
 fn assert_compute_not_ready(timetable: &Timetable, pe: &str, node: usize) {
-    assert!(!timetable.ready_task_indices(pe).unwrap().1.contains(&node));
+    let (_, ready) = timetable.dispatcher().ready_task_indices(pe).unwrap();
+    assert!(!ready.contains(&node));
 }
 
 fn fanout_platform() -> String {
@@ -998,7 +999,7 @@ fn dispatch_snapshot(simulation: &Simulation) -> DispatchSnapshot {
         completed_nodes: timetable.num_graph_nodes_completed(),
         active_nodes: timetable.num_graph_nodes_active(),
         completed_workload: timetable.completed_workload(),
-        ready_tasks: timetable.ready_task_indices("pe0").unwrap(),
+        ready_tasks: timetable.dispatcher().ready_task_indices("pe0").unwrap(),
         tick: simulation.clock.tick_now().tick(),
         memory_traffic: pe.memory_traffic_bytes(),
         peak_sram_bytes: pe.peak_sram_bytes(),
@@ -1310,14 +1311,15 @@ fn materialized_intermediate_waits_for_all_tiles_and_finishes_later() {
 fn materialized_fanout_waits_for_tensor_completion_on_same_or_other_pes() {
     for same_pe in [false, true] {
         let (timetable, [producer, first, second]) = fanout_timetable(same_pe);
+        let dispatcher = timetable.dispatcher();
         let first_pe = if same_pe { "pe0" } else { "pe1" };
         let second_pe = if same_pe { "pe0" } else { "pe2" };
 
         assert_compute_not_ready(&timetable, first_pe, first);
         assert_compute_not_ready(&timetable, second_pe, second);
-        timetable.set_task_active(producer).unwrap();
+        dispatcher.set_task_active(producer).unwrap();
         assert_compute_not_ready(&timetable, first_pe, first);
-        timetable.set_task_completed(producer).unwrap();
+        dispatcher.set_task_completed(producer).unwrap();
         assert_compute_ready(&timetable, first_pe, first);
         assert_compute_ready(&timetable, second_pe, second);
     }
@@ -1411,9 +1413,8 @@ fn compute_completion_tick_overflow_is_an_error() {
         .unwrap()
         .into_graph()
         .unwrap();
-    let timetable = Rc::new(Timetable::new(engine.top(), graph, &platform).unwrap());
-    let dispatcher: Rc<dyn Dispatch> = timetable.clone();
-    platform.attach_dispatcher(&dispatcher);
+    let timetable = Timetable::new(engine.top(), graph, &platform).unwrap();
+    platform.attach_dispatcher(&timetable.dispatcher());
     let error = engine.run().unwrap_err();
     assert!(
         error.0.contains("compute completion tick overflows"),
@@ -1558,11 +1559,10 @@ edges:
                 .unwrap()
                 .into_graph()
                 .unwrap();
-            let timetable = Rc::new(Timetable::new(engine.top(), graph, &platform).unwrap());
+            let timetable = Timetable::new(engine.top(), graph, &platform).unwrap();
             let written_bytes = if second_index.is_some() { 32 } else { 16 };
             assert_eq!(timetable.workload_totals().unwrap().read_bytes, read_bytes);
-            let dispatcher: Rc<dyn Dispatch> = timetable.clone();
-            platform.attach_dispatcher(&dispatcher);
+            platform.attach_dispatcher(&timetable.dispatcher());
             engine.run().unwrap();
             timetable.check_tasks_complete().unwrap();
             let pe = platform.pe("pe0").unwrap();
@@ -1624,9 +1624,8 @@ edges:
                 let error = timetable.err().unwrap();
                 assert!(error.0.contains("tile requires 40 SRAM bytes"), "{error}");
             } else {
-                let timetable = Rc::new(timetable.unwrap());
-                let dispatcher: Rc<dyn Dispatch> = timetable.clone();
-                platform.attach_dispatcher(&dispatcher);
+                let timetable = timetable.unwrap();
+                platform.attach_dispatcher(&timetable.dispatcher());
                 engine.run().unwrap();
                 timetable.check_tasks_complete().unwrap();
                 let pe = platform.pe("pe0").unwrap();
@@ -1699,13 +1698,8 @@ connections:
         );
         let platform = Rc::new(Platform::from_string(&engine, &clock, &platform_yaml).unwrap());
         let file = TimetableFile::from_string(source).unwrap();
-        let timetable = Rc::new(Timetable::new(
-            engine.top(),
-            file.into_graph().unwrap(),
-            &platform,
-        )?);
-        let dispatcher: Rc<dyn Dispatch> = timetable.clone();
-        platform.attach_dispatcher(&dispatcher);
+        let timetable = Timetable::new(engine.top(), file.into_graph().unwrap(), &platform)?;
+        platform.attach_dispatcher(&timetable.dispatcher());
         engine.run()
     };
     let error = run(16).unwrap_err();
@@ -1737,7 +1731,8 @@ fn dilated_window_transfers_only_accessed_elements() {
         })
         .sum::<usize>();
     assert_eq!(read_bytes, 96);
-    let Task::PreparedProgram { task } = simulation.timetable.task_by_id(1).unwrap() else {
+    let dispatcher = simulation.timetable.dispatcher();
+    let Task::PreparedProgram { task } = dispatcher.task_by_id(1).unwrap() else {
         panic!("expected program task")
     };
     assert_eq!(task.planned_traffic_bytes(), (12, 4));
@@ -1809,10 +1804,11 @@ fn dispatch_retains_prepared_handles() {
         include_str!("../examples/compute_region_platform.yaml"),
         affine_sum_window_timetable(),
     );
-    let Task::PreparedProgram { task: first } = simulation.timetable.task_by_id(2).unwrap() else {
+    let dispatcher = simulation.timetable.dispatcher();
+    let Task::PreparedProgram { task: first } = dispatcher.task_by_id(2).unwrap() else {
         panic!("timetable must return a retained prepared task")
     };
-    let Task::PreparedProgram { task: second } = simulation.timetable.task_by_id(2).unwrap() else {
+    let Task::PreparedProgram { task: second } = dispatcher.task_by_id(2).unwrap() else {
         panic!("timetable must return a retained prepared task")
     };
     assert!(Rc::ptr_eq(&first, &second));
@@ -1821,16 +1817,16 @@ fn dispatch_retains_prepared_handles() {
 #[test]
 fn dispatch_rejects_noncompute_and_invalid_indices() {
     let simulation = completed_dispatch_simulation();
-    let timetable = &simulation.timetable;
+    let dispatcher = simulation.timetable.dispatcher();
     let before = dispatch_snapshot(&simulation);
     for (case, index) in [("tensor", 0), ("outside graph", usize::MAX)] {
-        assert!(timetable.task_by_id(index).is_err(), "{case}: lookup");
+        assert!(dispatcher.task_by_id(index).is_err(), "{case}: lookup");
         assert!(
-            timetable.set_task_active(index).is_err(),
+            dispatcher.set_task_active(index).is_err(),
             "{case}: activate"
         );
         assert!(
-            timetable.set_task_completed(index).is_err(),
+            dispatcher.set_task_completed(index).is_err(),
             "{case}: complete"
         );
     }
@@ -1841,7 +1837,8 @@ fn dispatch_rejects_noncompute_and_invalid_indices() {
 fn repeated_completion_preserves_dispatch_and_accounting_state() {
     let simulation = completed_dispatch_simulation();
     let before = dispatch_snapshot(&simulation);
-    simulation.timetable.set_task_completed(2).unwrap();
+    let dispatcher = simulation.timetable.dispatcher();
+    dispatcher.set_task_completed(2).unwrap();
     assert_eq!(dispatch_snapshot(&simulation), before);
 }
 

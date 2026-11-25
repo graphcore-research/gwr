@@ -1,6 +1,5 @@
 // Copyright (c) 2026 Graphcore Ltd. All rights reserved.
 
-use gwr_models::processing_element::dispatch::Dispatch;
 use gwr_models::processing_element::tensors::dtype::DataType;
 use gwr_timetable::timetable_file::{EdgeKind, EdgeSection, NodeSection, TensorConfigSection};
 
@@ -25,13 +24,14 @@ fn validates_without_a_platform() {
 fn reports_active_node_count() {
     let (top, platform, timetable_file) = create_default_timetable_file();
     let timetable = build_timetable(&top, timetable_file, &platform).unwrap();
+    let dispatcher = timetable.dispatcher();
 
     assert_eq!(timetable.num_graph_nodes_active(), 0);
 
-    timetable.set_task_active(2).unwrap();
+    dispatcher.set_task_active(2).unwrap();
     assert_eq!(timetable.num_graph_nodes_active(), 1);
 
-    timetable.set_task_completed(2).unwrap();
+    dispatcher.set_task_completed(2).unwrap();
     assert_eq!(timetable.num_graph_nodes_active(), 0);
 }
 
@@ -46,10 +46,11 @@ fn control_edges_are_ignored_by_scheduler() {
 
     timetable_file.validate().unwrap();
     let timetable = build_timetable(&top, timetable_file, &platform).unwrap();
-    assert_eq!(timetable.ready_task_indices("pe0").unwrap().1, vec![2]);
+    let dispatcher = timetable.dispatcher();
+    assert_eq!(dispatcher.ready_task_indices("pe0").unwrap().1, vec![2]);
 
-    timetable.set_task_completed(2).unwrap();
-    assert!(timetable.ready_task_indices("pe0").unwrap().1.is_empty());
+    dispatcher.set_task_completed(2).unwrap();
+    assert!(dispatcher.ready_task_indices("pe0").unwrap().1.is_empty());
 }
 
 #[test]
@@ -89,10 +90,11 @@ fn control_edges_through_tensors_are_ignored_by_scheduler() {
     ]);
 
     let timetable = build_timetable(&top, timetable_file, &platform).unwrap();
-    assert_eq!(timetable.ready_task_indices("pe0").unwrap().1, vec![2]);
+    let dispatcher = timetable.dispatcher();
+    assert_eq!(dispatcher.ready_task_indices("pe0").unwrap().1, vec![2]);
 
-    timetable.set_task_completed(2).unwrap();
-    assert!(timetable.ready_task_indices("pe0").unwrap().1.is_empty());
+    dispatcher.set_task_completed(2).unwrap();
+    assert!(dispatcher.ready_task_indices("pe0").unwrap().1.is_empty());
 }
 
 #[test]
