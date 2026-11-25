@@ -256,10 +256,9 @@ impl ProcessingElement {
         self.lsu.port_rx()
     }
 
-    #[must_use]
-    pub fn total_graph_nodes(&self) -> usize {
+    pub fn total_graph_nodes(&self) -> Result<usize, SimError> {
         match self.dispatcher.borrow().as_ref() {
-            None => 0,
+            None => Ok(0),
             Some(dispatcher) => dispatcher.total_tasks_for_pe(self.entity.name.as_str()),
         }
     }

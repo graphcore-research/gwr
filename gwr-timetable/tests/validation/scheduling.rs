@@ -15,6 +15,22 @@ fn builds_a_valid_timetable() {
 }
 
 #[test]
+fn task_count_distinguishes_idle_and_unknown_pes() {
+    let (top, platform, _) = create_default_timetable_file();
+    let timetable = build_timetable(&top, timetable(vec![], vec![]), &platform).unwrap();
+
+    let dispatcher = timetable.dispatcher();
+    let count = dispatcher
+        .total_tasks_for_pe("pe0")
+        .expect("known PE pe0 should have a task count");
+    assert_eq!(count, 0, "idle PE pe0 should have zero tasks");
+
+    dispatcher
+        .total_tasks_for_pe("unknown")
+        .expect_err("unknown PE should be rejected");
+}
+
+#[test]
 fn validates_without_a_platform() {
     let (_, _, timetable_file) = create_default_timetable_file();
     timetable_file.validate().unwrap();

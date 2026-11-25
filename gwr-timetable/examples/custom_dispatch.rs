@@ -20,6 +20,7 @@ use gwr_platform::Platform;
 
 // A single task for the platform's only PE. Wake it when completion changes.
 struct OneTask {
+    pe_name: &'static str,
     task: Task,
     active: Cell<bool>,
     completed: Cell<bool>,
@@ -47,8 +48,11 @@ impl Dispatch for OneTask {
     async fn wait_for_change(&self) {
         self.changed.listen().await;
     }
-    fn total_tasks_for_pe(&self, _pe: &str) -> usize {
-        1
+    fn total_tasks_for_pe(&self, pe_name: &str) -> Result<usize, SimError> {
+        if pe_name != self.pe_name {
+            return Err(SimError(format!("No PE '{pe_name}'")));
+        }
+        Ok(1)
     }
 }
 
@@ -86,8 +90,12 @@ assignments:
     assert_eq!(result.shape, [8]);
     // Stage 2 checks capabilities, mapped addresses, and SRAM for this exact
     // PE.
-    let task = platform.pe("pe0")?.prepare_program("add".into(), program)?;
+    let pe_name = "pe0";
+    let task = platform
+        .pe(pe_name)?
+        .prepare_program("add".into(), program)?;
     let dispatcher = Rc::new(OneTask {
+        pe_name,
         task: Task::PreparedProgram { task },
         active: Cell::new(false),
         completed: Cell::new(false),

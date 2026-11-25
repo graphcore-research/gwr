@@ -92,7 +92,7 @@ fn validate(simulation: &Simulation) {
         let operations = blocks * m * n * (2 * n) + (blocks / 2) * m * n;
 
         assert_eq!(
-            pe.total_graph_nodes(),
+            pe.total_graph_nodes().unwrap(),
             blocks + blocks / 2,
             "{name}: {pe_name}"
         );
