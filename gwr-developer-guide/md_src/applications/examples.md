@@ -120,4 +120,21 @@ ticks per hop:
 cargo run --release --bin terminus -- run --recipe examples/sim-fabric/recipes/explore_ticks_per_hop.yaml
 ```
 
+### GWR Timetable
+
+`gwr-timetable` runs a workload defined as a graph of tensors and compute tasks
+on the processing elements and memory described by a platform file. From the GWR
+repository root, run the example that adds two tensors and multiplies the result
+by a third.
+
+```bash
+cargo run --release --bin gwr-timetable -- \
+  --platform gwr-timetable/examples/compute_region_platform.yaml \
+  --timetable gwr-timetable/examples/add_mul.yaml --stdout
+```
+
+Add `--check` to validate the workload without running it. Use `--explain` to
+also see tensor bindings, PE placement, tile sizes, SRAM requirements, and
+planned memory traffic.
+
 [component]: ../components/chapter.md
